@@ -15,11 +15,6 @@ body,
   background: transparent !important;
 }
 
-/* Mica 미지원 시 JS가 이 변수를 설정해 fallback 배경을 적용 */
-html {
-  background: var(--shell-fallback-bg) !important;
-}
-
 body {
   background: transparent !important;
   font-family: var(--editor-font-family);

@@ -36,7 +36,6 @@ const useStyles = makeStyles({
     inset: "0",
     pointerEvents: "none",
     zIndex: 1,
-    background: "rgba(0, 0, 0, 0.78)",
     opacity: 0,
     transitionProperty: "opacity",
     transitionDuration: "0.4s",
@@ -138,20 +137,13 @@ function App() {
     setActiveDocIndex,
   );
 
-  // OS Mica 효과: 마운트 시 1회
+  // OS Mica 효과
+  const [micaSupported, setMicaSupported] = useState(true);
   useEffect(() => {
     getCurrentWindow()
       .setEffects({ effects: [Effect.Mica] })
-      .catch(() => {});
+      .catch(() => setMicaSupported(false));
   }, []);
-
-  // Mica 미지원 시 fallback 배경
-  useEffect(() => {
-    document.documentElement.style.setProperty(
-      "--shell-fallback-bg",
-      isDarkMode ? "#2a2a28" : "#f0ece4",
-    );
-  }, [isDarkMode]);
 
   // TiptapEditor ref → editorRef 연결 (editor 변경 시만)
   const syncEditorRef = useCallback(() => {
@@ -227,10 +219,21 @@ function App() {
       data-theme={isDarkMode ? "dark" : "light"}
     >
       <div className={styles.root}>
-        <div className={mergeClasses(
-          styles.micaOverlay,
-          isDarkMode && styles.micaOverlayActive,
-        )} />
+        <div
+          className={mergeClasses(
+            styles.micaOverlay,
+            (isDarkMode || !micaSupported) && styles.micaOverlayActive,
+          )}
+          style={{
+            background: isDarkMode
+              ? micaSupported
+                ? "rgba(0, 0, 0, 0.75)"  // Mica 위 반투명 다크 오버레이
+                : "#2a2a28"               // Mica 미지원 fallback
+              : micaSupported
+                ? "transparent"
+                : "#f0ece4",              // 라이트 fallback
+          }}
+        />
 
         <TitleBar
           filePath={state.filePath}

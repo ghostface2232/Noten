@@ -64,8 +64,6 @@
   /* ─── 셸 레이아웃 ─── */
   --shell-sidebar-width: 260px;
   --shell-card-gap: 6px;
-  /* Mica 미지원 시 JS가 설정하는 fallback 배경 (기본값: 투명) */
-  --shell-fallback-bg: transparent;
 
   /* ─── 폰트 ─── */
   --editor-font-family-sans: "SF Pro KR", system-ui, sans-serif;
