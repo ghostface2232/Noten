@@ -27,14 +27,20 @@ let notesDirCache: string | null = null;
 
 export function sortNotes(docs: NoteDoc[], order: NotesSortOrder): NoteDoc[] {
   const sorted = [...docs];
-  const direction = order === "recent-first" ? -1 : 1;
+  const desc = order.endsWith("-desc");
+  const direction = desc ? -1 : 1;
+  const byCreated = order.startsWith("created");
 
   sorted.sort((a, b) => {
-    const updatedDiff = a.updatedAt - b.updatedAt;
-    if (updatedDiff !== 0) return updatedDiff * direction;
+    const primaryDiff = byCreated
+      ? a.createdAt - b.createdAt
+      : a.updatedAt - b.updatedAt;
+    if (primaryDiff !== 0) return primaryDiff * direction;
 
-    const createdDiff = a.createdAt - b.createdAt;
-    if (createdDiff !== 0) return createdDiff * direction;
+    const secondaryDiff = byCreated
+      ? a.updatedAt - b.updatedAt
+      : a.createdAt - b.createdAt;
+    if (secondaryDiff !== 0) return secondaryDiff * direction;
 
     return a.fileName.localeCompare(b.fileName);
   });
@@ -45,7 +51,8 @@ export function sortNotes(docs: NoteDoc[], order: NotesSortOrder): NoteDoc[] {
 export async function getNotesDir(): Promise<string> {
   if (notesDirCache) return notesDirCache;
   const base = await appDataDir();
-  notesDirCache = `${base}notes`;
+  const sep = base.endsWith("/") || base.endsWith("\\") ? "" : "/";
+  notesDirCache = `${base}${sep}notes`;
   return notesDirCache;
 }
 

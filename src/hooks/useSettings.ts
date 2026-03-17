@@ -5,7 +5,7 @@ import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 export type Locale = "en" | "ko";
 export type ThemeMode = "light" | "dark";
 export type StartupMode = "read" | "edit";
-export type NotesSortOrder = "recent-first" | "recent-last";
+export type NotesSortOrder = "updated-desc" | "updated-asc" | "created-desc" | "created-asc";
 export type WordWrap = "word" | "char";
 export type ParagraphSpacing = 0 | 10 | 20 | 30 | 40 | 50;
 
@@ -24,7 +24,7 @@ const DEFAULTS: Settings = {
   locale: "ko",
   themeMode: "light",
   startupMode: "read",
-  notesSortOrder: "recent-first",
+  notesSortOrder: "updated-desc",
   wordWrap: "word",
   paragraphSpacing: 30,
   keepFormatOnPaste: true,
@@ -46,22 +46,35 @@ async function ensureSettingsDir(): Promise<string> {
 
 async function getSettingsPath(): Promise<string> {
   if (!settingsPathPromise) {
-    settingsPathPromise = ensureSettingsDir().then((dir) => `${dir}settings.json`);
+    settingsPathPromise = ensureSettingsDir().then((dir) => {
+      const sep = dir.endsWith("/") || dir.endsWith("\\") ? "" : "/";
+      return `${dir}${sep}settings.json`;
+    });
   }
   return settingsPathPromise;
+}
+
+function migrateSortOrder(order: string): NotesSortOrder {
+  if (order === "recent-first") return "updated-desc";
+  if (order === "recent-last") return "updated-asc";
+  const valid: NotesSortOrder[] = ["updated-desc", "updated-asc", "created-desc", "created-asc"];
+  return valid.includes(order as NotesSortOrder) ? (order as NotesSortOrder) : DEFAULTS.notesSortOrder;
 }
 
 function parseSettings(raw: string | null): Settings {
   if (!raw) return DEFAULTS;
 
   try {
-    return { ...DEFAULTS, ...JSON.parse(raw) };
+    const parsed = { ...DEFAULTS, ...JSON.parse(raw) };
+    parsed.notesSortOrder = migrateSortOrder(parsed.notesSortOrder);
+    return parsed;
   } catch {
     return DEFAULTS;
   }
 }
 
 async function persistSettings(settings: Settings) {
+  await ensureSettingsDir();
   const path = await getSettingsPath();
   await writeTextFile(path, JSON.stringify(settings, null, 2));
 }

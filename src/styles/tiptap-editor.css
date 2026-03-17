@@ -235,6 +235,10 @@
 /* 읽기 모드에서 체크박스 비활성 */
 .tiptap-readonly ul[data-type="taskList"] li > label input[type="checkbox"] {
   pointer-events: none;
+  opacity: 0.6;
+}
+.tiptap-readonly ul[data-type="taskList"] li > label {
+  pointer-events: none;
 }
 
 .ProseMirror ul[data-type="taskList"] li > div {

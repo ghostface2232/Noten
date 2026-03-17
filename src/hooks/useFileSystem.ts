@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { mkdir, readTextFile, writeTextFile, remove, rename } from "@tauri-apps/plugin-fs";
 import {
   getNotesDir,
   saveManifest,
@@ -74,6 +74,11 @@ export interface FileSystemActions {
   saveFileAs: () => Promise<void>;
   newNote: () => Promise<void>;
   switchDocument: (index: number) => void;
+  deleteNote: (index: number) => Promise<void>;
+  closeNote: (index: number) => void;
+  duplicateNote: (index: number) => Promise<void>;
+  exportNote: (index: number) => Promise<void>;
+  renameNote: (index: number, newName: string) => void;
 }
 
 export function useFileSystem(
@@ -104,8 +109,8 @@ export function useFileSystem(
     const markdown = getCurrentMarkdown(state, tiptapRef);
 
     let targetPath = doc.filePath;
-    if (doc.isExternal && !targetPath) {
-      const selected = await save({ filters: MD_FILTERS, defaultPath: "untitled.md" });
+    if (!targetPath) {
+      const selected = await save({ filters: MD_FILTERS, defaultPath: `${doc.fileName}.md` });
       if (!selected) return;
       targetPath = selected;
     }
@@ -202,7 +207,7 @@ export function useFileSystem(
     const newDoc: NoteDoc = {
       id,
       filePath,
-      fileName: getDefaultDocumentTitle(locale),
+      fileName: getDefaultDocumentTitle(locale, docs.map((d) => d.fileName)),
       isExternal: false,
       isDirty: false,
       content: "",
@@ -238,5 +243,208 @@ export function useFileSystem(
     void saveManifest(docs, target.id).catch(() => {});
   }, [activeIndex, cacheCurrentContent, docs, setActiveIndex, state, tiptapRef]);
 
-  return { openFile, saveFile, saveFileAs, newNote, switchDocument };
+  const deleteNote = useCallback(async (index: number) => {
+    const doc = docs[index];
+    if (!doc) return;
+
+    // Remove the file from disk
+    if (doc.filePath) {
+      try {
+        await remove(doc.filePath);
+      } catch {
+        console.warn("Failed to delete note file:", doc.filePath);
+      }
+    }
+
+    const nextDocs = docs.filter((_, i) => i !== index);
+
+    // If we deleted the last doc, create a fresh one
+    if (nextDocs.length === 0) {
+      const id = crypto.randomUUID();
+      const timestamp = Date.now();
+      let filePath = "";
+      try {
+        const notesDir = await getNotesDir();
+        filePath = `${notesDir}/${id}.md`;
+        await writeTextFile(filePath, "");
+      } catch { /* ignore */ }
+
+      const newDoc: NoteDoc = {
+        id,
+        filePath,
+        fileName: getDefaultDocumentTitle(locale),
+        isExternal: false,
+        isDirty: false,
+        content: "",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+
+      setDocs([newDoc]);
+      setActiveIndex(0);
+      loadIntoEditor(tiptapRef, "");
+      resetDocState(state, filePath, "");
+      void saveManifest([newDoc], newDoc.id).catch(() => {});
+      return;
+    }
+
+    // Determine the next active document
+    const wasActive = index === activeIndex;
+    let nextActiveId: string;
+
+    if (wasActive) {
+      const target = nextDocs[Math.min(index, nextDocs.length - 1)];
+      nextActiveId = target.id;
+      loadIntoEditor(tiptapRef, target.content);
+      resetDocState(state, target.filePath, target.content);
+    } else {
+      nextActiveId = docs[activeIndex].id;
+    }
+
+    sortAndPersistDocs(nextDocs, nextActiveId, notesSortOrder, setDocs, setActiveIndex);
+  }, [activeIndex, docs, locale, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
+
+  const closeNote = useCallback((index: number) => {
+    const doc = docs[index];
+    if (!doc) return;
+
+    const nextDocs = docs.filter((_, i) => i !== index);
+
+    if (nextDocs.length === 0) {
+      // Fall through to newNote-like behavior handled by deleteNote
+      // but since closeNote is only for external docs, just create a fresh internal note
+      void (async () => {
+        const id = crypto.randomUUID();
+        const timestamp = Date.now();
+        let filePath = "";
+        try {
+          const notesDir = await getNotesDir();
+          filePath = `${notesDir}/${id}.md`;
+          await writeTextFile(filePath, "");
+        } catch { /* ignore */ }
+
+        const newDoc: NoteDoc = {
+          id, filePath,
+          fileName: getDefaultDocumentTitle(locale),
+          isExternal: false, isDirty: false, content: "",
+          createdAt: timestamp, updatedAt: timestamp,
+        };
+
+        setDocs([newDoc]);
+        setActiveIndex(0);
+        loadIntoEditor(tiptapRef, "");
+        resetDocState(state, filePath, "");
+        void saveManifest([newDoc], newDoc.id).catch(() => {});
+      })();
+      return;
+    }
+
+    const wasActive = index === activeIndex;
+    let nextActiveId: string;
+
+    if (wasActive) {
+      const target = nextDocs[Math.min(index, nextDocs.length - 1)];
+      nextActiveId = target.id;
+      loadIntoEditor(tiptapRef, target.content);
+      resetDocState(state, target.filePath, target.content);
+    } else {
+      nextActiveId = docs[activeIndex].id;
+    }
+
+    sortAndPersistDocs(nextDocs, nextActiveId, notesSortOrder, setDocs, setActiveIndex);
+  }, [activeIndex, docs, locale, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
+
+  const duplicateNote = useCallback(async (index: number) => {
+    const doc = docs[index];
+    if (!doc) return;
+
+    cacheCurrentContent();
+
+    const id = crypto.randomUUID();
+    const timestamp = Date.now();
+    let filePath = "";
+    try {
+      const notesDir = await getNotesDir();
+      await mkdir(notesDir, { recursive: true }).catch(() => {});
+      filePath = `${notesDir}/${id}.md`;
+    } catch { /* ignore */ }
+
+    const content = doc.content;
+    const newDoc: NoteDoc = {
+      id,
+      filePath,
+      fileName: doc.fileName,
+      isExternal: false,
+      isDirty: false,
+      content,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    if (filePath) {
+      try {
+        await writeTextFile(filePath, content);
+      } catch {
+        console.warn("Failed to write duplicated note file.");
+      }
+    }
+
+    const nextDocs = [...docs, newDoc];
+    sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, setDocs, setActiveIndex);
+    loadIntoEditor(tiptapRef, content);
+    resetDocState(state, filePath, content);
+  }, [cacheCurrentContent, docs, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
+
+  const exportNote = useCallback(async (index: number) => {
+    const doc = docs[index];
+    if (!doc) return;
+
+    const defaultName = doc.filePath ? getFileName(doc.filePath) : `${doc.fileName}.md`;
+    const selected = await save({ filters: MD_FILTERS, defaultPath: defaultName });
+    if (!selected) return;
+
+    const content = index === activeIndex ? getCurrentMarkdown(state, tiptapRef) : doc.content;
+    await writeTextFile(selected, content);
+  }, [activeIndex, docs, state, tiptapRef]);
+
+  const renameNote = useCallback(async (index: number, newName: string) => {
+    const doc = docs[index];
+    if (!doc) return;
+
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === doc.fileName) return;
+
+    let newFilePath = doc.filePath;
+
+    // For external files, rename the actual file on disk
+    if (doc.isExternal && doc.filePath) {
+      try {
+        const dir = doc.filePath.replace(/[\\/][^\\/]+$/, "");
+        const sep = doc.filePath.includes("\\") ? "\\" : "/";
+        // Preserve original extension if the user didn't type one
+        const hasExt = /\.[^.\\/]+$/.test(trimmed);
+        const origExt = doc.filePath.match(/\.[^.\\/]+$/)?.[0] ?? ".md";
+        const finalName = hasExt ? trimmed : `${trimmed}${origExt}`;
+        newFilePath = `${dir}${sep}${finalName}`;
+        await rename(doc.filePath, newFilePath);
+      } catch (err) {
+        console.warn("Failed to rename external file:", err);
+        return;
+      }
+    }
+
+    const nextDocs = docs.map((entry, i) => {
+      if (i !== index) return entry;
+      return { ...entry, fileName: trimmed, filePath: newFilePath, updatedAt: Date.now() };
+    });
+
+    // Update editor state if this is the active document
+    if (index === activeIndex) {
+      state.setFilePath(newFilePath);
+    }
+
+    sortAndPersistDocs(nextDocs, doc.id, notesSortOrder, setDocs, setActiveIndex);
+  }, [activeIndex, docs, notesSortOrder, setActiveIndex, setDocs, state]);
+
+  return { openFile, saveFile, saveFileAs, newNote, switchDocument, deleteNote, closeNote, duplicateNote, exportNote, renameNote };
 }

@@ -28,7 +28,7 @@ export function useAutoSave(
     if (!state.isDirty) return;
 
     const doc = docs[activeIndex];
-    if (!doc?.filePath) return;
+    if (!doc?.filePath || doc.isExternal) return;
 
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(async () => {
@@ -40,7 +40,7 @@ export function useAutoSave(
       } = stateRef.current;
 
       const target = latestDocs[latestActiveIndex];
-      if (!target?.filePath) return;
+      if (!target?.filePath || target.isExternal) return;
 
       const content = getCurrentMarkdown(latestState, latestEditorRef);
 
@@ -50,7 +50,7 @@ export function useAutoSave(
         const nextDocs = latestDocs.map((docEntry) => {
           if (docEntry.id !== target.id) return docEntry;
 
-          const nextTitle = deriveTitle(content) || getDefaultDocumentTitle(locale);
+          const nextTitle = deriveTitle(content) || docEntry.fileName || getDefaultDocumentTitle(locale, latestDocs.map((d) => d.fileName));
           return {
             ...docEntry,
             content,

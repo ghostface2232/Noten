@@ -15,6 +15,14 @@
     "dialog:default",
     "fs:read-all",
     "fs:write-all",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$HOME/**" }
+      ]
+    },
     "core:path:default"
   ]
 }

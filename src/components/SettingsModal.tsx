@@ -2,7 +2,9 @@ import { useState } from "react";
 import {
   Dialog,
   DialogSurface,
+  Dropdown,
   Label,
+  Option,
   Radio,
   RadioGroup,
   Slider,
@@ -149,6 +151,38 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     textAlign: "right",
   },
+  dropdown: {
+    minWidth: "150px",
+    fontSize: "13px",
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderTopColor: "transparent",
+    borderRightColor: "transparent",
+    borderBottomColor: "transparent",
+    borderLeftColor: "transparent",
+    ":hover": {
+      borderTopColor: "transparent",
+      borderRightColor: "transparent",
+      borderBottomColor: "transparent",
+      borderLeftColor: "transparent",
+      backgroundColor: tokens.colorNeutralBackground3Hover,
+    },
+    ":active": {
+      borderTopColor: "transparent",
+      borderRightColor: "transparent",
+      borderBottomColor: "transparent",
+      borderLeftColor: "transparent",
+      backgroundColor: tokens.colorNeutralBackground3Pressed,
+    },
+    ":focus-within": {
+      borderTopColor: "transparent",
+      borderRightColor: "transparent",
+      borderBottomColor: "transparent",
+      borderLeftColor: "transparent",
+    },
+    "::after": {
+      display: "none",
+    },
+  },
 });
 
 type TabId = "system" | "formatting" | "shortcuts";
@@ -158,6 +192,17 @@ interface SettingsModalProps {
   onClose: () => void;
   settings: Settings;
   onUpdate: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+}
+
+const SORT_ORDER_LABELS: Record<NotesSortOrder, Parameters<typeof t>[0]> = {
+  "updated-desc": "settings.noteOrder.updatedDesc",
+  "updated-asc": "settings.noteOrder.updatedAsc",
+  "created-desc": "settings.noteOrder.createdDesc",
+  "created-asc": "settings.noteOrder.createdAsc",
+};
+
+function sortOrderLabelKey(order: NotesSortOrder): Parameters<typeof t>[0] {
+  return SORT_ORDER_LABELS[order];
 }
 
 function settingItemClass(
@@ -273,14 +318,20 @@ export function SettingsModal({ open, onClose, settings, onUpdate }: SettingsMod
 
                 <div className={mergeClasses(styles.row, settingItemClass(styles))}>
                   <Label className={styles.label}>{i("settings.noteOrder")}</Label>
-                  <RadioGroup
-                    layout="horizontal"
-                    value={settings.notesSortOrder}
-                    onChange={(_, data) => onUpdate("notesSortOrder", data.value as NotesSortOrder)}
+                  <Dropdown
+                    className={styles.dropdown}
+                    value={i(sortOrderLabelKey(settings.notesSortOrder))}
+                    selectedOptions={[settings.notesSortOrder]}
+                    onOptionSelect={(_, data) => {
+                      if (data.optionValue) onUpdate("notesSortOrder", data.optionValue as NotesSortOrder);
+                    }}
+                    appearance="outline"
                   >
-                    <Radio value="recent-first" label={i("settings.noteOrder.recentFirst")} />
-                    <Radio value="recent-last" label={i("settings.noteOrder.recentLast")} />
-                  </RadioGroup>
+                    <Option value="updated-desc">{i("settings.noteOrder.updatedDesc")}</Option>
+                    <Option value="updated-asc">{i("settings.noteOrder.updatedAsc")}</Option>
+                    <Option value="created-desc">{i("settings.noteOrder.createdDesc")}</Option>
+                    <Option value="created-asc">{i("settings.noteOrder.createdAsc")}</Option>
+                  </Dropdown>
                 </div>
 
                 <div className={mergeClasses(styles.row, settingItemClass(styles))}>

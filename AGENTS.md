@@ -17,15 +17,27 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 
 ## Persistence
 
-- App settings are stored in `AppData/settings.json`.
+- App settings are stored in `AppData/Roaming/<identifier>/settings.json` via Tauri fs plugin.
 - UI state such as open-note manifest is stored in `localStorage`.
 - Notes created by the app are stored under the app data `notes` directory.
+- `appDataDir()` may not include a trailing separator; always check before joining paths.
 - The app is Tauri-only. Do not add browser fallbacks unless explicitly requested.
+
+## External vs Internal Documents
+
+- Internal documents live in the app's `notes` directory and are auto-saved.
+- External documents are files opened via Ctrl+O from outside the notes directory.
+- External documents are NOT auto-saved; the user must press Ctrl+S to write back to disk.
+- Rename on external documents renames the actual file on disk.
+- Delete on internal documents removes the file; external documents show "Close" instead (removes from sidebar only).
+- Sidebar icon: `DocumentRegular` for internal, `Folder16Regular` for external.
+- External documents show a `●` dot when dirty; internal documents show no dirty indicator.
 
 ## Current Settings Model
 
 - Theme, startup mode, note sort order, paste formatting, spellcheck, wrap mode, and paragraph spacing are user settings.
-- Default note order is `recent-first`.
+- Note sort order supports four options: `updated-desc`, `updated-asc`, `created-desc`, `created-asc` (default: `updated-desc`).
+- Old values `recent-first`/`recent-last` are auto-migrated on load.
 - Startup mode is configurable between read and edit.
 
 ## Tiptap Markdown Rules

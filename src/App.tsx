@@ -256,8 +256,11 @@ function App() {
   // 창 닫기 — 자동 저장이므로 별도 확인 없이 닫기 허용
 
   const handleTiptapDirty = useCallback(
-    (dirty: boolean) => state.setTiptapDirty(dirty),
-    [state.setTiptapDirty],
+    (dirty: boolean) => {
+      state.setTiptapDirty(dirty);
+      if (dirty) state.setIsDirty(true);
+    },
+    [state.setTiptapDirty, state.setIsDirty],
   );
 
   const handleCodemirrorChange = useCallback(
@@ -318,6 +321,12 @@ function App() {
               activeIndex={activeIndex}
               onSwitchDocument={fs.switchDocument}
               onNewNote={fs.newNote}
+              onDeleteNote={fs.deleteNote}
+              onCloseNote={fs.closeNote}
+              onDuplicateNote={fs.duplicateNote}
+              onExportNote={fs.exportNote}
+              onRenameNote={fs.renameNote}
+              notesSortOrder={settings.notesSortOrder}
               locale={locale}
               onOpenSettings={() => setSettingsOpen(true)}
             />
