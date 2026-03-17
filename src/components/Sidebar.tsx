@@ -1,9 +1,9 @@
 import { Button, Tooltip, makeStyles, tokens } from "@fluentui/react-components";
 import {
-  SettingsRegular,
-  DocumentRegular,
-  DocumentAddRegular,
   ArrowImportRegular,
+  DocumentAddRegular,
+  DocumentRegular,
+  SettingsRegular,
 } from "@fluentui/react-icons";
 import { t } from "../i18n";
 import type { NoteDoc } from "../hooks/useNotesLoader";
@@ -20,29 +20,15 @@ const useStyles = makeStyles({
     backgroundColor: "transparent",
     flexShrink: 0,
   },
-  header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    paddingTop: "12px",
-    paddingBottom: "8px",
-    paddingLeft: SIDE_PADDING,
-    paddingRight: "11px",
-    flexShrink: 0,
-  },
-  newBtn: {
-    borderRadius: "6px",
-    border: "none",
-    minWidth: "auto",
-    height: "28px",
-    width: "28px",
-    padding: "0",
-  },
   body: {
     flex: 1,
     overflow: "auto",
+    paddingTop: "54px",
     paddingLeft: SIDE_PADDING,
     paddingRight: SIDE_PADDING,
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
   },
   docItem: {
     display: "flex",
@@ -74,6 +60,21 @@ const useStyles = makeStyles({
     backgroundColor: "var(--ui-active-bg)",
     fontWeight: 500,
   },
+  newDocItem: {
+    display: "flex",
+    alignItems: "center",
+    width: "100%",
+    justifyContent: "flex-start",
+    textAlign: "left",
+    border: "none",
+    borderRadius: "6px",
+    fontSize: "13px",
+    gap: "8px",
+    minHeight: "32px",
+    paddingLeft: "8px",
+    paddingRight: "8px",
+    fontWeight: 500,
+  },
   docName: {
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -97,6 +98,7 @@ const useStyles = makeStyles({
     fontSize: "13px",
     color: tokens.colorNeutralForeground3,
     lineHeight: "1.6",
+    paddingTop: "10px",
     paddingLeft: "8px",
     paddingRight: "8px",
   },
@@ -141,37 +143,36 @@ export function Sidebar({
 
   return (
     <div className={styles.sidebar}>
-      <div className={styles.header}>
-        <Tooltip content={i("sidebar.newNote")} relationship="label">
-          <Button
-            appearance="subtle"
-            icon={<DocumentAddRegular />}
-            className={styles.newBtn}
-            onClick={onNewNote}
-          />
-        </Tooltip>
-      </div>
-
       <div className={styles.body}>
+        <Button
+          appearance="subtle"
+          icon={<DocumentAddRegular />}
+          className={styles.newDocItem}
+          onClick={onNewNote}
+          size="small"
+        >
+          {i("sidebar.newNote")}
+        </Button>
+
         {docs.length === 0 ? (
-          <span className={styles.empty}>
-            {i("sidebar.empty")}
-          </span>
+          <span className={styles.empty}>{i("sidebar.empty")}</span>
         ) : (
-          docs.map((doc, idx) => (
+          docs.map((doc, index) => (
             <Button
               key={doc.id}
               appearance="subtle"
               icon={<DocumentRegular />}
-              className={idx === activeIndex ? styles.docItemActive : styles.docItem}
-              onClick={() => onSwitchDocument(idx)}
+              className={index === activeIndex ? styles.docItemActive : styles.docItem}
+              onClick={() => onSwitchDocument(index)}
               size="small"
             >
               <span className={styles.docName}>{doc.fileName}</span>
-              {doc.isDirty && <span className={styles.dirty}>●</span>}
+              {doc.isDirty && <span className={styles.dirty}>*</span>}
               {doc.isExternal && (
                 <Tooltip content={i("sidebar.externalFile")} relationship="label">
-                  <span className={styles.badge}><ArrowImportRegular fontSize={14} /></span>
+                  <span className={styles.badge}>
+                    <ArrowImportRegular fontSize={14} />
+                  </span>
                 </Tooltip>
               )}
             </Button>

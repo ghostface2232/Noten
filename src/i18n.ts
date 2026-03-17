@@ -5,8 +5,8 @@ const dict = {
   "app.name": { en: "Markdown Studio", ko: "Markdown Studio" },
   "mode.read": { en: "Read", ko: "읽기" },
   "mode.edit": { en: "Edit", ko: "편집" },
-  "theme.light": { en: "Light mode", ko: "라이트 모드" },
-  "theme.dark": { en: "Dark mode", ko: "다크 모드" },
+  "theme.light": { en: "Light", ko: "라이트" },
+  "theme.dark": { en: "Dark", ko: "다크" },
 
   /* ─── EditorToolbar ─── */
   "editor.richtext": { en: "Rich Text", ko: "서식 편집" },
@@ -59,7 +59,7 @@ const dict = {
     en: "Open a file with Ctrl+O or create a new document with Ctrl+N.",
     ko: "Ctrl+O로 파일을 열거나 Ctrl+N으로 새 문서를 만드세요.",
   },
-  "sidebar.newNote": { en: "New note", ko: "새 메모" },
+  "sidebar.newNote": { en: "New document", ko: "새 문서" },
   "sidebar.settings": { en: "Settings", ko: "설정" },
   "sidebar.externalFile": { en: "External file", ko: "외부 파일" },
 
@@ -75,6 +75,11 @@ const dict = {
   /* ─── Settings modal ─── */
   "settings.title": { en: "Settings", ko: "설정" },
   "settings.language": { en: "Language", ko: "언어" },
+  "settings.theme": { en: "Theme", ko: "테마" },
+  "settings.startupMode": { en: "Startup mode", ko: "시작 모드" },
+  "settings.noteOrder": { en: "Note order", ko: "노트 정렬" },
+  "settings.noteOrder.recentFirst": { en: "Newest first", ko: "최신순" },
+  "settings.noteOrder.recentLast": { en: "Oldest first", ko: "오래된 순" },
   "settings.wordWrap": { en: "Word Wrap", ko: "줄바꿈" },
   "settings.wordWrap.word": { en: "Word", ko: "단어 단위" },
   "settings.wordWrap.char": { en: "Character", ko: "문자 단위" },

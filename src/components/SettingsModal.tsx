@@ -3,21 +3,30 @@ import {
   Dialog,
   DialogSurface,
   Label,
-  RadioGroup,
   Radio,
-  Switch,
+  RadioGroup,
   Slider,
+  Switch,
   makeStyles,
+  mergeClasses,
   tokens,
 } from "@fluentui/react-components";
 import { t } from "../i18n";
-import type { Settings, Locale, WordWrap, ParagraphSpacing } from "../hooks/useSettings";
+import type {
+  Locale,
+  NotesSortOrder,
+  ParagraphSpacing,
+  Settings,
+  StartupMode,
+  ThemeMode,
+  WordWrap,
+} from "../hooks/useSettings";
 
 const NAV_WIDTH = "160px";
 
 const useStyles = makeStyles({
   surface: {
-    maxWidth: "580px",
+    maxWidth: "620px",
     width: "100%",
     borderRadius: "12px",
     overflow: "hidden",
@@ -25,12 +34,10 @@ const useStyles = makeStyles({
   },
   layout: {
     display: "flex",
-    minHeight: "360px",
+    minHeight: "380px",
     padding: "4px",
     paddingLeft: 0,
   },
-
-  /* ── 좌측 사이드바 (Mica 영역) ── */
   nav: {
     width: NAV_WIDTH,
     flexShrink: 0,
@@ -86,8 +93,6 @@ const useStyles = makeStyles({
       backgroundColor: "var(--settings-nav-hover)",
     },
   },
-
-  /* ── 우측 컨텐츠 패널 (불투명 카드) ── */
   content: {
     flex: 1,
     borderRadius: "8px",
@@ -97,7 +102,15 @@ const useStyles = makeStyles({
   section: {
     display: "flex",
     flexDirection: "column",
-    gap: "20px",
+  },
+  settingItem: {
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+    paddingTop: "14px",
+    paddingBottom: "14px",
+  },
+  settingItemFirst: {
+    borderTop: "none",
+    paddingTop: 0,
   },
   row: {
     display: "flex",
@@ -117,7 +130,7 @@ const useStyles = makeStyles({
   sliderRow: {
     display: "flex",
     flexDirection: "column",
-    gap: "6px",
+    gap: "8px",
   },
   sliderHeader: {
     display: "flex",
@@ -145,26 +158,25 @@ interface SettingsModalProps {
   onClose: () => void;
   settings: Settings;
   onUpdate: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
-  isDarkMode: boolean;
 }
 
-export function SettingsModal({ open, onClose, settings, onUpdate, isDarkMode }: SettingsModalProps) {
+function settingItemClass(
+  styles: ReturnType<typeof useStyles>,
+  isFirst = false,
+) {
+  return mergeClasses(styles.settingItem, isFirst && styles.settingItemFirst);
+}
+
+export function SettingsModal({ open, onClose, settings, onUpdate }: SettingsModalProps) {
   const styles = useStyles();
   const locale = settings.locale;
+  const isDarkMode = settings.themeMode === "dark";
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
   const [tab, setTab] = useState<TabId>("system");
 
-  const micaBg = isDarkMode
-    ? "rgba(32, 32, 32, 0.80)"
-    : "rgba(243, 243, 243, 0.75)";
-
-  const panelBg = isDarkMode
-    ? "rgba(45, 45, 45, 1)"
-    : "rgba(255, 255, 255, 1)";
-
-  const borderColor = isDarkMode
-    ? "rgba(255, 255, 255, 0.08)"
-    : "rgba(0, 0, 0, 0.12)";
+  const micaBg = isDarkMode ? "rgba(32, 32, 32, 0.80)" : "rgba(243, 243, 243, 0.75)";
+  const panelBg = isDarkMode ? "rgba(45, 45, 45, 1)" : "rgba(255, 255, 255, 1)";
+  const borderColor = isDarkMode ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.12)";
 
   const navItems: { id: TabId; labelKey: Parameters<typeof t>[0] }[] = [
     { id: "system", labelKey: "settings.tab.system" },
@@ -187,14 +199,11 @@ export function SettingsModal({ open, onClose, settings, onUpdate, isDarkMode }:
         }}
         backdrop={{
           style: {
-            backgroundColor: isDarkMode
-              ? "rgba(0, 0, 0, 0.5)"
-              : "rgba(0, 0, 0, 0.3)",
+            backgroundColor: isDarkMode ? "rgba(0, 0, 0, 0.5)" : "rgba(0, 0, 0, 0.3)",
           },
         }}
       >
         <div className={styles.layout}>
-          {/* ── 좌측 네비게이션 ── */}
           <nav
             className={styles.nav}
             style={{
@@ -223,11 +232,10 @@ export function SettingsModal({ open, onClose, settings, onUpdate, isDarkMode }:
             })}
           </nav>
 
-          {/* ── 우측 컨텐츠 ── */}
           <div className={styles.content} style={{ backgroundColor: panelBg }}>
             {tab === "system" && (
               <div className={styles.section}>
-                <div className={styles.row}>
+                <div className={mergeClasses(styles.row, settingItemClass(styles, true))}>
                   <Label className={styles.label}>{i("settings.language")}</Label>
                   <RadioGroup
                     layout="horizontal"
@@ -239,7 +247,43 @@ export function SettingsModal({ open, onClose, settings, onUpdate, isDarkMode }:
                   </RadioGroup>
                 </div>
 
-                <div className={styles.row}>
+                <div className={mergeClasses(styles.row, settingItemClass(styles))}>
+                  <Label className={styles.label}>{i("settings.theme")}</Label>
+                  <RadioGroup
+                    layout="horizontal"
+                    value={settings.themeMode}
+                    onChange={(_, data) => onUpdate("themeMode", data.value as ThemeMode)}
+                  >
+                    <Radio value="light" label={i("theme.light")} />
+                    <Radio value="dark" label={i("theme.dark")} />
+                  </RadioGroup>
+                </div>
+
+                <div className={mergeClasses(styles.row, settingItemClass(styles))}>
+                  <Label className={styles.label}>{i("settings.startupMode")}</Label>
+                  <RadioGroup
+                    layout="horizontal"
+                    value={settings.startupMode}
+                    onChange={(_, data) => onUpdate("startupMode", data.value as StartupMode)}
+                  >
+                    <Radio value="read" label={i("mode.read")} />
+                    <Radio value="edit" label={i("mode.edit")} />
+                  </RadioGroup>
+                </div>
+
+                <div className={mergeClasses(styles.row, settingItemClass(styles))}>
+                  <Label className={styles.label}>{i("settings.noteOrder")}</Label>
+                  <RadioGroup
+                    layout="horizontal"
+                    value={settings.notesSortOrder}
+                    onChange={(_, data) => onUpdate("notesSortOrder", data.value as NotesSortOrder)}
+                  >
+                    <Radio value="recent-first" label={i("settings.noteOrder.recentFirst")} />
+                    <Radio value="recent-last" label={i("settings.noteOrder.recentLast")} />
+                  </RadioGroup>
+                </div>
+
+                <div className={mergeClasses(styles.row, settingItemClass(styles))}>
                   <Label className={styles.label}>{i("settings.keepFormat")}</Label>
                   <Switch
                     checked={settings.keepFormatOnPaste}
@@ -247,7 +291,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, isDarkMode }:
                   />
                 </div>
 
-                <div className={styles.row}>
+                <div className={mergeClasses(styles.row, settingItemClass(styles))}>
                   <Label className={styles.label}>{i("settings.spellcheck")}</Label>
                   <Switch
                     checked={settings.spellcheck}
@@ -259,7 +303,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, isDarkMode }:
 
             {tab === "formatting" && (
               <div className={styles.section}>
-                <div className={styles.row}>
+                <div className={mergeClasses(styles.row, settingItemClass(styles, true))}>
                   <Label className={styles.label}>{i("settings.wordWrap")}</Label>
                   <RadioGroup
                     layout="horizontal"
@@ -271,7 +315,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, isDarkMode }:
                   </RadioGroup>
                 </div>
 
-                <div className={styles.sliderRow}>
+                <div className={mergeClasses(styles.sliderRow, settingItemClass(styles))}>
                   <div className={styles.sliderHeader}>
                     <Label className={styles.label}>{i("settings.paragraphSpacing")}</Label>
                     <span className={styles.sublabel}>{settings.paragraphSpacing}%</span>

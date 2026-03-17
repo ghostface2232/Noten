@@ -8,6 +8,7 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
+import type { WordWrap } from "../hooks/useSettings";
 import "../styles/markdown-editor.css";
 
 /* ─── 라이트 / 다크 팔레트 ─── */
@@ -101,12 +102,14 @@ interface MarkdownEditorProps {
   value: string;
   onChange: (value: string) => void;
   isDarkMode: boolean;
+  wordWrap: WordWrap;
 }
 
 export function MarkdownEditor({
   value,
   onChange,
   isDarkMode,
+  wordWrap,
 }: MarkdownEditorProps) {
   const extensions = useMemo(() => {
     const hl = buildHighlightStyle(isDarkMode);
@@ -120,7 +123,7 @@ export function MarkdownEditor({
   }, [isDarkMode]);
 
   return (
-    <div className="markdown-editor">
+    <div className={`markdown-editor ${wordWrap === "char" ? "markdown-editor-wrap-char" : "markdown-editor-wrap-word"}`}>
       <CodeMirror
         value={value}
         onChange={onChange}

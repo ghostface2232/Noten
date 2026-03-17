@@ -15,6 +15,7 @@ export interface MarkdownState {
   switchEditorMode: () => void;
   updateMarkdown: (value: string) => void;
   setTiptapDirty: (dirty: boolean) => void;
+  setEditing: (editing: boolean) => void;
   setFilePath: (path: string | null) => void;
   setMarkdownRaw: (value: string) => void;
   setIsDirty: (dirty: boolean) => void;
@@ -95,6 +96,11 @@ export function useMarkdownState(): MarkdownState {
     }
   }, [isEditing, editorMode, markdown, flushTiptapIfDirty, syncCmToTiptap]);
 
+  const setEditing = useCallback((editing: boolean) => {
+    setEditorMode("richtext");
+    setIsEditing(editing);
+  }, []);
+
   return {
     markdown,
     isEditing,
@@ -107,6 +113,7 @@ export function useMarkdownState(): MarkdownState {
     switchEditorMode,
     updateMarkdown,
     setTiptapDirty,
+    setEditing,
     setFilePath,
     setMarkdownRaw: setMarkdown,
     setIsDirty,

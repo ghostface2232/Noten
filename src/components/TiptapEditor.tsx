@@ -4,11 +4,12 @@ import {
   forwardRef,
   useRef,
   useCallback,
+  type CSSProperties,
 } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
-import { Extension } from "@tiptap/core";
+import { Extension, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey, NodeSelection, TextSelection } from "@tiptap/pm/state";
-import { Slice } from "@tiptap/pm/model";
+import { Fragment, Slice } from "@tiptap/pm/model";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
@@ -25,50 +26,149 @@ import { common, createLowlight } from "lowlight";
 import SlashCommands from "../extensions/SlashCommands";
 import ImageDrop from "../extensions/ImageDrop";
 import { t } from "../i18n";
-import type { Locale } from "../hooks/useSettings";
+import type { Locale, WordWrap } from "../hooks/useSettings";
 import "../styles/tiptap-editor.css";
 
 declare module "@tiptap/core" {
   interface Storage {
     readonlyGuard: { readonly: boolean };
     slashCommands: { locale: string };
+    markdownPaste: { keepFormatOnPaste: boolean };
   }
 }
 
-/**
- * 마크다운 붙여넣기: plain text 붙여넣기 시 마크다운 구문이 감지되면
- * 마크다운으로 파싱하여 ProseMirror Slice로 삽입한다.
- */
 const MD_PATTERN = /^#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|^>\s|^```|^\|.+\||\[.+\]\(.+\)/m;
+
+function createPlainTextSlice(editor: Editor, text: string) {
+  const normalized = text.replace(/\r\n?/g, "\n");
+  const blocks = normalized.split(/\n{2,}/);
+  const paragraph = editor.schema.nodes.paragraph;
+  const hardBreak = editor.schema.nodes.hardBreak;
+
+  const nodes = blocks.map((block) => {
+    const lines = block.split("\n");
+    const content = lines.flatMap((line, index) => {
+      const parts = [];
+      if (line.length > 0) {
+        parts.push(editor.schema.text(line));
+      }
+      if (index < lines.length - 1 && hardBreak) {
+        parts.push(hardBreak.create());
+      }
+      return parts;
+    });
+
+    return paragraph.create(null, content);
+  });
+
+  return new Slice(Fragment.fromArray(nodes), 0, 0);
+}
+
+function getScrollParent(element: HTMLElement | null): HTMLElement | null {
+  let current = element?.parentElement ?? null;
+
+  while (current) {
+    const { overflowY } = window.getComputedStyle(current);
+    if (overflowY === "auto" || overflowY === "scroll") {
+      return current;
+    }
+    current = current.parentElement;
+  }
+
+  return null;
+}
+
+function refreshRenderedContent(editor: Editor) {
+  const scrollParent = getScrollParent(editor.view.dom);
+  const scrollTop = scrollParent?.scrollTop ?? 0;
+  const scrollLeft = scrollParent?.scrollLeft ?? 0;
+  const { from, to } = editor.state.selection;
+  const markdown = editor.getMarkdown();
+  const wasReadonly = editor.storage.readonlyGuard.readonly;
+
+  editor.storage.readonlyGuard.readonly = false;
+  editor.commands.setContent(markdown, {
+    emitUpdate: false,
+    contentType: "markdown",
+  });
+  editor.storage.readonlyGuard.readonly = wasReadonly;
+  editor.commands.setTextSelection({ from, to });
+
+  if (scrollParent) {
+    requestAnimationFrame(() => {
+      scrollParent.scrollTop = scrollTop;
+      scrollParent.scrollLeft = scrollLeft;
+    });
+  }
+}
+
+function refreshSpellcheckMarkers(editor: Editor, forceFullRefresh = false) {
+  const dom = editor.view.dom as HTMLElement;
+  const spellcheckEnabled = dom.getAttribute("spellcheck") === "true";
+
+  if (!spellcheckEnabled) {
+    return;
+  }
+
+  dom.setAttribute("spellcheck", "false");
+  void dom.offsetHeight;
+  dom.setAttribute("spellcheck", "true");
+
+  if (forceFullRefresh) {
+    refreshRenderedContent(editor);
+  }
+}
 
 const MarkdownPaste = Extension.create({
   name: "markdownPaste",
   priority: 100,
 
+  addStorage() {
+    return { keepFormatOnPaste: true };
+  },
+
   addProseMirrorPlugins() {
     const editor = this.editor;
+    const storage = this.storage as { keepFormatOnPaste: boolean };
+
     return [
       new Plugin({
         key: new PluginKey("markdownPaste"),
         props: {
-          handlePaste(_view, event, _slice) {
-            // HTML 콘텐츠가 있으면 기본 처리
-            if (event.clipboardData?.getData("text/html")) return false;
+          handlePaste(view, event) {
+            const clipboard = event.clipboardData;
+            const hasFiles = Array.from(clipboard?.items ?? []).some((item) => item.kind === "file");
+            if (hasFiles) return false;
 
-            const text = event.clipboardData?.getData("text/plain");
-            if (!text || !MD_PATTERN.test(text)) return false;
+            const text = clipboard?.getData("text/plain");
+            if (!text) return false;
 
-            // 마크다운을 파싱하여 JSON → ProseMirror 노드로 변환
-            if (!editor.markdown) return false;
+            if (!storage.keepFormatOnPaste) {
+              event.preventDefault();
+              const { tr } = view.state;
+              tr.replaceSelection(createPlainTextSlice(editor, text));
+              view.dispatch(tr.scrollIntoView());
+              requestAnimationFrame(() => {
+                refreshSpellcheckMarkers(editor, true);
+              });
+              return true;
+            }
+
+            if (clipboard?.getData("text/html")) return false;
+            if (!MD_PATTERN.test(text) || !editor.markdown) return false;
+
             const parsed = editor.markdown.parse(text);
             if (!parsed) return false;
 
             const doc = editor.schema.nodeFromJSON(parsed);
             event.preventDefault();
 
-            const { tr } = _view.state;
+            const { tr } = view.state;
             tr.replaceSelection(new Slice(doc.content, 0, 0));
-            _view.dispatch(tr);
+            view.dispatch(tr.scrollIntoView());
+            requestAnimationFrame(() => {
+              refreshSpellcheckMarkers(editor, true);
+            });
             return true;
           },
         },
@@ -77,12 +177,6 @@ const MarkdownPaste = Extension.create({
   },
 });
 
-/**
- * 테이블 노드 선택 가드:
- * 커서가 테이블 바로 앞/뒤에서 방향키로 이동할 때, 테이블 안으로 바로 진입하지 않고
- * 먼저 테이블 전체를 NodeSelection으로 선택한다.
- * 이미 테이블이 NodeSelection된 상태에서 방향키를 누르면 테이블 안으로 진입한다.
- */
 const TableNodeSelect = Extension.create({
   name: "tableNodeSelect",
 
@@ -92,45 +186,40 @@ const TableNodeSelect = Extension.create({
         key: new PluginKey("tableNodeSelect"),
         props: {
           handleKeyDown(view, event) {
-            if (event.key !== "ArrowDown" && event.key !== "ArrowUp" &&
-                event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+            if (
+              event.key !== "ArrowDown"
+              && event.key !== "ArrowUp"
+              && event.key !== "ArrowLeft"
+              && event.key !== "ArrowRight"
+            ) {
               return false;
             }
 
-            const { state } = view;
-            const { selection, doc } = state;
-
-            // 이미 NodeSelection이면 통과 (테이블 안으로 진입)
+            const { selection, doc } = view.state;
             if (selection instanceof NodeSelection) return false;
-
-            // TextSelection일 때만 처리
             if (!(selection instanceof TextSelection) || !selection.empty) return false;
 
             const pos = selection.$from;
             const forward = event.key === "ArrowDown" || event.key === "ArrowRight";
 
             if (forward) {
-              // 커서 뒤쪽에 테이블이 있는지 확인
               const after = pos.after();
               if (after < doc.content.size) {
                 const nodeAfter = doc.resolve(after).nodeAfter;
                 if (nodeAfter?.type.name === "table") {
                   event.preventDefault();
-                  const tr = state.tr.setSelection(NodeSelection.create(doc, after));
-                  view.dispatch(tr);
+                  view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, after)));
                   return true;
                 }
               }
             } else {
-              // 커서 앞쪽에 테이블이 있는지 확인
               const before = pos.before();
               if (before > 0) {
                 const nodeBefore = doc.resolve(before).nodeBefore;
                 if (nodeBefore?.type.name === "table") {
                   event.preventDefault();
                   const tablePos = before - nodeBefore.nodeSize;
-                  const tr = state.tr.setSelection(NodeSelection.create(doc, tablePos));
-                  view.dispatch(tr);
+                  view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, tablePos)));
                   return true;
                 }
               }
@@ -144,12 +233,6 @@ const TableNodeSelect = Extension.create({
   },
 });
 
-/**
- * 읽기 모드 가드:
- * - editable을 항상 true로 유지 → 텍스트 선택/복사가 가능
- * - readonly 상태에서 문서 변경 트랜잭션을 차단 → 편집 불가
- * - readonly 상태에서 키 입력(타이핑, 백스페이스 등)도 차단
- */
 const ReadonlyGuard = Extension.create({
   name: "readonlyGuard",
 
@@ -159,6 +242,7 @@ const ReadonlyGuard = Extension.create({
 
   addProseMirrorPlugins() {
     const storage = this.storage as { readonly: boolean };
+
     return [
       new Plugin({
         key: new PluginKey("readonlyGuard"),
@@ -169,29 +253,40 @@ const ReadonlyGuard = Extension.create({
           return true;
         },
         props: {
-          handleKeyDown(_view, _event) {
-            // readonly일 때 Ctrl+C, Ctrl+A 등 복사/선택 단축키는 허용
+          handleKeyDown(_view, event) {
             if (!storage.readonly) return false;
-            const e = _event as KeyboardEvent;
-            if (e.ctrlKey || e.metaKey) return false;
-            // 화살표, Home, End, PageUp, PageDown은 허용 (탐색)
-            if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End" ||
-                e.key === "PageUp" || e.key === "PageDown") return false;
-            // 그 외 키 입력은 차단
+            if (event.ctrlKey || event.metaKey) return false;
+            if (
+              event.key.startsWith("Arrow")
+              || event.key === "Home"
+              || event.key === "End"
+              || event.key === "PageUp"
+              || event.key === "PageDown"
+            ) {
+              return false;
+            }
             return true;
           },
           handleDOMEvents: {
-            // readonly에서 붙여넣기, 드롭, 잘라내기 차단
             paste(_view, event) {
-              if (storage.readonly) { event.preventDefault(); return true; }
+              if (storage.readonly) {
+                event.preventDefault();
+                return true;
+              }
               return false;
             },
             drop(_view, event) {
-              if (storage.readonly) { event.preventDefault(); return true; }
+              if (storage.readonly) {
+                event.preventDefault();
+                return true;
+              }
               return false;
             },
             cut(_view, event) {
-              if (storage.readonly) { event.preventDefault(); return true; }
+              if (storage.readonly) {
+                event.preventDefault();
+                return true;
+              }
               return false;
             },
           },
@@ -215,21 +310,57 @@ interface TiptapEditorProps {
   editable: boolean;
   isDarkMode: boolean;
   locale: Locale;
+  paragraphSpacing: number;
+  wordWrap: WordWrap;
+  keepFormatOnPaste: boolean;
   spellcheck: boolean;
   onDirtyChange: (dirty: boolean) => void;
   onReady?: () => void;
 }
 
 export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
-  function TiptapEditor({ initialMarkdown, editable, isDarkMode, locale, spellcheck, onDirtyChange, onReady }, ref) {
+  function TiptapEditor({
+    initialMarkdown,
+    editable,
+    isDarkMode,
+    locale,
+    paragraphSpacing,
+    wordWrap,
+    keepFormatOnPaste,
+    spellcheck,
+    onDirtyChange,
+    onReady,
+  }, ref) {
     const dirtyRef = useRef(false);
+    const spellcheckRef = useRef(spellcheck);
+    const spellcheckRefreshFrameRef = useRef<number | null>(null);
+    const editorStyle = {
+      "--editor-paragraph-spacing": `${paragraphSpacing / 50}em`,
+    } as CSSProperties;
+    const wrapClass = wordWrap === "char" ? "tiptap-wrap-char" : "tiptap-wrap-word";
+    const scheduleSpellcheckRefresh = useCallback((currentEditor: Editor, forceFullRefresh = false) => {
+      if (!spellcheckRef.current) return;
 
-    const handleUpdate = useCallback(() => {
+      if (spellcheckRefreshFrameRef.current !== null) {
+        cancelAnimationFrame(spellcheckRefreshFrameRef.current);
+      }
+
+      spellcheckRefreshFrameRef.current = requestAnimationFrame(() => {
+        refreshSpellcheckMarkers(currentEditor, forceFullRefresh);
+        spellcheckRefreshFrameRef.current = null;
+      });
+    }, []);
+
+    const handleUpdate = useCallback((currentEditor: Editor, isPaste: boolean) => {
       if (!dirtyRef.current) {
         dirtyRef.current = true;
         onDirtyChange(true);
       }
-    }, [onDirtyChange]);
+
+      if (spellcheckRef.current && isPaste) {
+        scheduleSpellcheckRefresh(currentEditor, true);
+      }
+    }, [onDirtyChange, scheduleSpellcheckRefresh]);
 
     const editor = useEditor({
       extensions: [
@@ -266,15 +397,16 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       contentType: "markdown",
       editable: true,
       immediatelyRender: true,
-      onUpdate: handleUpdate,
+      onUpdate: ({ editor: currentEditor, transaction }) => {
+        const isPaste = transaction.getMeta("paste") === true || transaction.getMeta("uiEvent") === "paste";
+        handleUpdate(currentEditor, isPaste);
+      },
     });
 
-    // editor 준비 시 onReady 호출
     useEffect(() => {
       if (editor && onReady) onReady();
     }, [editor, onReady]);
 
-    // editable prop → ReadonlyGuard storage 동기화
     useEffect(() => {
       if (editor) {
         editor.storage.readonlyGuard.readonly = !editable;
@@ -282,20 +414,33 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       }
     }, [editor, editable]);
 
-    // locale → SlashCommands storage 동기화
     useEffect(() => {
-      if (editor && editor.storage.slashCommands) {
+      if (editor?.storage.slashCommands) {
         editor.storage.slashCommands.locale = locale;
       }
     }, [editor, locale]);
 
-    // spellcheck 속성 동기화
     useEffect(() => {
-      const el = editor?.view.dom;
-      if (el) {
-        el.setAttribute("spellcheck", String(spellcheck));
+      if (editor?.storage.markdownPaste) {
+        editor.storage.markdownPaste.keepFormatOnPaste = keepFormatOnPaste;
       }
-    }, [editor, spellcheck]);
+    }, [editor, keepFormatOnPaste]);
+
+    useEffect(() => {
+      spellcheckRef.current = spellcheck;
+    }, [spellcheck]);
+
+    useEffect(() => {
+      if (!editor) return;
+      editor.view.dom.setAttribute("spellcheck", String(spellcheck));
+      scheduleSpellcheckRefresh(editor, spellcheck);
+    }, [editor, scheduleSpellcheckRefresh, spellcheck]);
+
+    useEffect(() => () => {
+      if (spellcheckRefreshFrameRef.current !== null) {
+        cancelAnimationFrame(spellcheckRefreshFrameRef.current);
+      }
+    }, []);
 
     useImperativeHandle(
       ref,
@@ -306,7 +451,6 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         },
         setContent: (markdown: string) => {
           if (!editor) return;
-          // ReadonlyGuard를 임시 해제하여 setContent가 차단되지 않게
           const wasReadonly = editor.storage.readonlyGuard.readonly;
           editor.storage.readonlyGuard.readonly = false;
           editor.commands.setContent(markdown, {
@@ -315,6 +459,9 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           });
           editor.storage.readonlyGuard.readonly = wasReadonly;
           dirtyRef.current = false;
+          if (spellcheckRef.current) {
+            scheduleSpellcheckRefresh(editor, true);
+          }
         },
         setEditable: (value: boolean) => {
           if (!editor) return;
@@ -330,8 +477,9 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
 
     return (
       <div
-        className={editable ? "tiptap-editable" : "tiptap-readonly"}
+        className={`${editable ? "tiptap-editable" : "tiptap-readonly"} ${wrapClass}`}
         data-theme={isDarkMode ? "dark" : "light"}
+        style={editorStyle}
       >
         <EditorContent editor={editor} />
       </div>

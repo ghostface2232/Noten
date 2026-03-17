@@ -9,6 +9,16 @@
   min-height: 100%;
 }
 
+.tiptap-wrap-word .ProseMirror :is(p, h1, h2, h3, h4, h5, h6, li, blockquote, td, th) {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.tiptap-wrap-char .ProseMirror :is(p, h1, h2, h3, h4, h5, h6, li, blockquote, td, th) {
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
 .ProseMirror:focus {
   outline: none;
 }
@@ -104,7 +114,7 @@
 
 /* ─── 단락 ─── */
 .ProseMirror p {
-  margin-bottom: 0.75em;
+  margin-bottom: 0;
 }
 
 /* ─── 인라인 코드 ─── */
@@ -123,7 +133,7 @@
   padding: 0;
   border-radius: var(--editor-radius);
   overflow: hidden;
-  margin-bottom: 0.75em;
+  margin-bottom: 0;
   font-family: var(--editor-font-family-mono);
   font-size: 0.9em;
   line-height: 1.5;
@@ -158,7 +168,7 @@
   padding-left: 1em;
   margin-left: 0;
   margin-right: 0;
-  margin-bottom: 0.75em;
+  margin-bottom: 0;
   color: var(--editor-color-text-secondary);
 }
 
@@ -172,7 +182,7 @@
 .ProseMirror ul,
 .ProseMirror ol {
   padding-left: 1.5em;
-  margin-bottom: 0.75em;
+  margin-bottom: 0;
 }
 
 .ProseMirror li {
@@ -250,15 +260,19 @@
   max-width: 100%;
   height: auto;
   border-radius: var(--editor-radius);
-  margin-bottom: 0.75em;
+  margin-bottom: 0;
 }
 
 /* ─── 테이블 ─── */
 .ProseMirror table {
   border-collapse: collapse;
   width: 100%;
-  margin-bottom: 0.75em;
+  margin-bottom: 0;
   overflow: auto;
+}
+
+.ProseMirror :is(p, pre, blockquote, ul, ol, img, table) + :is(p, pre, blockquote, ul, ol, img, table) {
+  margin-top: var(--editor-paragraph-spacing);
 }
 
 .ProseMirror th,

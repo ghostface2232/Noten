@@ -12,7 +12,7 @@ import { PanelLeftRegular, PanelLeftFilled } from "@fluentui/react-icons";
 import { getCurrentWindow, Effect } from "@tauri-apps/api/window";
 import { useMarkdownState } from "./hooks/useMarkdownState";
 import { useFileSystem } from "./hooks/useFileSystem";
-import { useNotesLoader } from "./hooks/useNotesLoader";
+import { saveManifest, sortNotes, useNotesLoader } from "./hooks/useNotesLoader";
 import { useAutoSave } from "./hooks/useAutoSave";
 import { useSettings } from "./hooks/useSettings";
 
@@ -77,6 +77,7 @@ const useStyles = makeStyles({
     backgroundColor: "transparent",
     borderRadius: "8px",
     padding: "3px",
+    pointerEvents: "none",
   },
   sidebarToggleBtn: {
     borderRadius: "6px",
@@ -85,6 +86,7 @@ const useStyles = makeStyles({
     height: "28px",
     width: "28px",
     padding: "0",
+    pointerEvents: "auto",
   },
   floatingCard: {
     position: "relative",
@@ -120,20 +122,31 @@ const useStyles = makeStyles({
 });
 
 function App() {
-  const [isDarkMode, setIsDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const { settings, update: updateSetting } = useSettings();
+  const { settings, update: updateSetting, isLoaded: settingsLoaded } = useSettings();
+  const isDarkMode = settings.themeMode === "dark";
   const locale = settings.locale;
   const state = useMarkdownState();
   const styles = useStyles();
   const tiptapRef = useRef<TiptapEditorHandle>(null);
   const [tiptapEditor, setTiptapEditor] = useState<import("@tiptap/react").Editor | null>(null);
+  const startupModeApplied = useRef(false);
 
   // 노트 로더
-  const { docs, setDocs, activeIndex, setActiveIndex, isLoading } = useNotesLoader();
+  const { docs, setDocs, activeIndex, setActiveIndex, isLoading } = useNotesLoader(
+    locale,
+    settings.notesSortOrder,
+    settingsLoaded,
+  );
 
   // 초기 로드 완료 시 에디터에 첫 문서 로드
+  useEffect(() => {
+    if (!settingsLoaded || startupModeApplied.current) return;
+    startupModeApplied.current = true;
+    state.setEditing(settings.startupMode === "edit");
+  }, [settings.startupMode, settingsLoaded, state.setEditing]);
+
   const initialLoaded = useRef(false);
   useEffect(() => {
     if (!isLoading && docs.length > 0 && !initialLoaded.current) {
@@ -155,10 +168,21 @@ function App() {
     setDocs,
     activeIndex,
     setActiveIndex,
+    locale,
+    settings.notesSortOrder,
   );
 
   // 자동 저장
-  useAutoSave(state, tiptapRef, docs, setDocs, activeIndex);
+  useAutoSave(
+    state,
+    tiptapRef,
+    docs,
+    setDocs,
+    activeIndex,
+    setActiveIndex,
+    locale,
+    settings.notesSortOrder,
+  );
 
   // OS Mica 효과
   const [micaSupported, setMicaSupported] = useState(true);
@@ -179,6 +203,29 @@ function App() {
   }, [tiptapEditor, state.editorRef]);
 
   useEffect(syncEditorRef, [syncEditorRef]);
+
+  useEffect(() => {
+    if (!settingsLoaded || docs.length < 2) return;
+
+    const activeId = docs[activeIndex]?.id ?? null;
+    const sortedDocs = sortNotes(docs, settings.notesSortOrder);
+    const changed = sortedDocs.some((doc, index) => doc.id !== docs[index]?.id);
+    if (!changed) return;
+
+    setDocs(sortedDocs);
+    const nextActiveIndex = activeId
+      ? Math.max(sortedDocs.findIndex((doc) => doc.id === activeId), 0)
+      : 0;
+    setActiveIndex(nextActiveIndex);
+    void saveManifest(sortedDocs, activeId).catch(() => {});
+  }, [
+    activeIndex,
+    docs,
+    settings.notesSortOrder,
+    settingsLoaded,
+    setActiveIndex,
+    setDocs,
+  ]);
 
   // isDirty → docs 동기화
   useEffect(() => {
@@ -245,12 +292,10 @@ function App() {
         />
 
         <TitleBar
-          filePath={activeDoc?.filePath ?? null}
+          documentTitle={activeDoc?.fileName ?? null}
           isDirty={state.isDirty}
           isEditing={state.isEditing}
-          isDarkMode={isDarkMode}
           locale={locale}
-          onToggleDarkMode={() => setIsDarkMode((d) => !d)}
           onToggleEditing={state.toggleEditing}
         />
 
@@ -296,6 +341,9 @@ function App() {
                   editable={state.isEditing && state.editorMode === "richtext"}
                   isDarkMode={isDarkMode}
                   locale={locale}
+                  paragraphSpacing={settings.paragraphSpacing}
+                  wordWrap={settings.wordWrap}
+                  keepFormatOnPaste={settings.keepFormatOnPaste}
                   spellcheck={settings.spellcheck}
                   onDirtyChange={handleTiptapDirty}
                   onReady={syncEditorRef}
@@ -308,6 +356,7 @@ function App() {
                     value={state.markdown}
                     onChange={handleCodemirrorChange}
                     isDarkMode={isDarkMode}
+                    wordWrap={settings.wordWrap}
                   />
                 </div>
               )}
@@ -329,7 +378,6 @@ function App() {
         onClose={() => setSettingsOpen(false)}
         settings={settings}
         onUpdate={updateSetting}
-        isDarkMode={isDarkMode}
       />
     </FluentProvider>
   );

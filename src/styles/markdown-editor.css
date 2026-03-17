@@ -23,3 +23,15 @@
 .markdown-editor .cm-content {
   padding: var(--editor-padding-y) var(--editor-padding-x);
 }
+
+.markdown-editor-wrap-word .cm-content,
+.markdown-editor-wrap-word .cm-line {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.markdown-editor-wrap-char .cm-content,
+.markdown-editor-wrap-char .cm-line {
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}

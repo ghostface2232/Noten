@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { appDataDir } from "@tauri-apps/api/path";
 import { mkdir, readTextFile, writeTextFile, readDir } from "@tauri-apps/plugin-fs";
+import type { Locale, NotesSortOrder } from "./useSettings";
+import { getDefaultDocumentTitle } from "../utils/documentTitle";
 
 export interface NoteDoc {
   id: string;
@@ -19,13 +21,32 @@ interface Manifest {
   activeNoteId: string | null;
 }
 
-let _notesDir: string | null = null;
+const UI_STATE_STORAGE_KEY = "markdown-studio-ui-state";
+
+let notesDirCache: string | null = null;
+
+export function sortNotes(docs: NoteDoc[], order: NotesSortOrder): NoteDoc[] {
+  const sorted = [...docs];
+  const direction = order === "recent-first" ? -1 : 1;
+
+  sorted.sort((a, b) => {
+    const updatedDiff = a.updatedAt - b.updatedAt;
+    if (updatedDiff !== 0) return updatedDiff * direction;
+
+    const createdDiff = a.createdAt - b.createdAt;
+    if (createdDiff !== 0) return createdDiff * direction;
+
+    return a.fileName.localeCompare(b.fileName);
+  });
+
+  return sorted;
+}
 
 export async function getNotesDir(): Promise<string> {
-  if (_notesDir) return _notesDir;
+  if (notesDirCache) return notesDirCache;
   const base = await appDataDir();
-  _notesDir = `${base}notes`;
-  return _notesDir;
+  notesDirCache = `${base}notes`;
+  return notesDirCache;
 }
 
 async function ensureNotesDir(): Promise<string> {
@@ -34,13 +55,18 @@ async function ensureNotesDir(): Promise<string> {
   return dir;
 }
 
-async function readManifest(dir: string): Promise<Manifest | null> {
+function readStoredManifest(): Manifest | null {
   try {
-    const raw = await readTextFile(`${dir}/manifest.json`);
-    return JSON.parse(raw);
+    const raw = localStorage.getItem(UI_STATE_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as Manifest;
   } catch {
     return null;
   }
+}
+
+function writeStoredManifest(manifest: Manifest) {
+  localStorage.setItem(UI_STATE_STORAGE_KEY, JSON.stringify(manifest));
 }
 
 async function readFileContent(path: string): Promise<string> {
@@ -55,34 +81,46 @@ export async function saveManifest(
   docs: NoteDoc[],
   activeId: string | null,
 ): Promise<void> {
-  const dir = await getNotesDir();
   const manifest: Manifest = {
     version: 1,
     notes: docs.map(({ id, filePath, fileName, isExternal, createdAt, updatedAt }) => ({
-      id, filePath, fileName, isExternal, createdAt, updatedAt,
+      id,
+      filePath,
+      fileName,
+      isExternal,
+      createdAt,
+      updatedAt,
     })),
     activeNoteId: activeId,
   };
-  await writeTextFile(`${dir}/manifest.json`, JSON.stringify(manifest, null, 2));
+
+  try {
+    writeStoredManifest(manifest);
+  } catch {
+    console.warn("Failed to persist UI state manifest.");
+  }
 }
 
-export function useNotesLoader() {
+export function useNotesLoader(
+  locale: Locale,
+  notesSortOrder: NotesSortOrder,
+  enabled = true,
+) {
   const [docs, setDocs] = useState<NoteDoc[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const initialized = useRef(false);
 
   useEffect(() => {
-    if (initialized.current) return;
+    if (!enabled || initialized.current) return;
     initialized.current = true;
 
     (async () => {
       try {
         const dir = await ensureNotesDir();
-        const manifest = await readManifest(dir);
+        const manifest = readStoredManifest();
 
         if (manifest && manifest.notes.length > 0) {
-          // 병렬로 모든 노트 파일 로드
           const loaded = await Promise.all(
             manifest.notes.map(async (entry) => {
               const content = await readFileContent(entry.filePath);
@@ -90,65 +128,87 @@ export function useNotesLoader() {
             }),
           );
 
-          setDocs(loaded);
-          const idx = manifest.activeNoteId
-            ? loaded.findIndex((d) => d.id === manifest.activeNoteId)
+          const sorted = sortNotes(loaded, notesSortOrder);
+          setDocs(sorted);
+
+          const activeId = manifest.activeNoteId ?? sorted[0]?.id ?? null;
+          const nextActiveIndex = activeId
+            ? sorted.findIndex((doc) => doc.id === activeId)
             : 0;
-          setActiveIndex(idx >= 0 ? idx : 0);
+          setActiveIndex(nextActiveIndex >= 0 ? nextActiveIndex : 0);
         } else {
-          // 매니페스트 없으면 notes 디렉토리 스캔
           let foundNotes: NoteDoc[] = [];
+
           try {
             const entries = await readDir(dir);
-            const mdEntries = entries.filter((e) => e.name?.endsWith(".md"));
+            const markdownEntries = entries.filter((entry) => entry.name?.endsWith(".md"));
             foundNotes = await Promise.all(
-              mdEntries.map(async (entry) => {
+              markdownEntries.map(async (entry) => {
                 const id = entry.name!.replace(/\.md$/, "");
-                const fp = `${dir}/${entry.name}`;
-                const content = await readFileContent(fp);
+                const filePath = `${dir}/${entry.name}`;
+                const content = await readFileContent(filePath);
+                const timestamp = Date.now();
                 return {
-                  id, filePath: fp,
-                  fileName: deriveTitle(content) || "Untitled",
-                  isExternal: false, isDirty: false, content,
-                  createdAt: Date.now(), updatedAt: Date.now(),
+                  id,
+                  filePath,
+                  fileName: deriveTitle(content) || getDefaultDocumentTitle(locale),
+                  isExternal: false,
+                  isDirty: false,
+                  content,
+                  createdAt: timestamp,
+                  updatedAt: timestamp,
                 } as NoteDoc;
               }),
             );
-          } catch {}
+          } catch {
+            console.warn("Failed to scan notes directory.");
+          }
 
           if (foundNotes.length === 0) {
             const id = crypto.randomUUID();
-            const fp = `${dir}/${id}.md`;
-            await writeTextFile(fp, "");
+            const filePath = `${dir}/${id}.md`;
+            const timestamp = Date.now();
+            await writeTextFile(filePath, "");
             foundNotes = [{
-              id, filePath: fp, fileName: "Untitled",
-              isExternal: false, isDirty: false, content: "",
-              createdAt: Date.now(), updatedAt: Date.now(),
+              id,
+              filePath,
+              fileName: getDefaultDocumentTitle(locale),
+              isExternal: false,
+              isDirty: false,
+              content: "",
+              createdAt: timestamp,
+              updatedAt: timestamp,
             }];
           }
 
-          setDocs(foundNotes);
+          const sorted = sortNotes(foundNotes, notesSortOrder);
+          setDocs(sorted);
           setActiveIndex(0);
-          await saveManifest(foundNotes, foundNotes[0]?.id ?? null);
+          await saveManifest(sorted, sorted[0]?.id ?? null);
         }
       } catch (err) {
-        console.warn("Notes loader failed (browser mode?):", err);
+        console.warn("Notes loader failed:", err);
+        const timestamp = Date.now();
         setDocs([{
-          id: "local", filePath: "", fileName: "Untitled",
-          isExternal: false, isDirty: false, content: "",
-          createdAt: Date.now(), updatedAt: Date.now(),
+          id: "local",
+          filePath: "",
+          fileName: getDefaultDocumentTitle(locale),
+          isExternal: false,
+          isDirty: false,
+          content: "",
+          createdAt: timestamp,
+          updatedAt: timestamp,
         }]);
         setActiveIndex(0);
       } finally {
         setIsLoading(false);
       }
     })();
-  }, []);
+  }, [enabled, locale, notesSortOrder]);
 
   return { docs, setDocs, activeIndex, setActiveIndex, isLoading };
 }
 
-/** 컨텐츠 첫 번째 줄에서 제목 추출 */
 export function deriveTitle(content: string): string {
   if (!content) return "";
   const firstLine = content.trimStart().split("\n")[0];

@@ -1,15 +1,8 @@
+import { Button, makeStyles, tokens } from "@fluentui/react-components";
 import {
-  Button,
-  Tooltip,
-  tokens,
-  makeStyles,
-} from "@fluentui/react-components";
-import {
-  WeatherMoon20Regular,
-  WeatherSunny20Regular,
-  Subtract20Regular,
   Dismiss20Regular,
   Square20Regular,
+  Subtract20Regular,
 } from "@fluentui/react-icons";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { t } from "../i18n";
@@ -21,10 +14,9 @@ const useStyles = makeStyles({
   titleBar: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
     height: "40px",
     paddingLeft: "12px",
-    paddingRight: "0px",
+    paddingRight: "0",
     backgroundColor: "transparent",
     userSelect: "none",
     position: "relative",
@@ -35,11 +27,20 @@ const useStyles = makeStyles({
     alignItems: "center",
     gap: "8px",
     minWidth: 0,
+    position: "relative",
+    top: "2px",
+    zIndex: 1,
   },
   appIcon: {
     width: "16px",
     height: "16px",
-    fontSize: "16px",
+    fontSize: "12px",
+    lineHeight: "16px",
+    textAlign: "center",
+    borderRadius: "4px",
+    backgroundColor: tokens.colorNeutralBackground3,
+    color: tokens.colorNeutralForeground1,
+    fontWeight: 600,
   },
   appName: {
     fontSize: "12px",
@@ -50,64 +51,71 @@ const useStyles = makeStyles({
   fileName: {
     fontSize: "12px",
     color: tokens.colorNeutralForeground2,
+    opacity: 0.72,
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
+    maxWidth: "320px",
   },
   dragRegion: {
     flex: 1,
     height: "100%",
   },
   actions: {
+    position: "absolute",
+    left: "50%",
+    top: "calc(50% + 2px)",
+    transform: "translate(-50%, -50%)",
     display: "flex",
     alignItems: "center",
-    gap: "8px",
-    marginRight: "12px",
+    zIndex: 2,
   },
-  tabGroup: {
+  segmentGroup: {
     display: "flex",
     alignItems: "center",
     gap: "2px",
-    height: "100%",
+    height: "30px",
+    padding: "2px",
+    borderRadius: "8px",
+    backgroundColor: tokens.colorNeutralBackground3,
+    boxShadow: `inset 0 0 0 1px ${tokens.colorNeutralStroke2}`,
   },
-  tab: {
+  segment: {
     position: "relative",
     border: "none",
-    borderRadius: "4px",
-    fontSize: "12px",
-    minWidth: "auto",
-    paddingLeft: "8px",
-    paddingRight: "8px",
-    height: "26px",
-    color: tokens.colorNeutralForeground2,
-    cursor: "pointer",
-  },
-  tabActive: {
-    position: "relative",
-    border: "none",
-    borderRadius: "4px",
+    borderRadius: "6px",
     fontSize: "12px",
     fontWeight: 500,
     minWidth: "auto",
-    paddingLeft: "8px",
-    paddingRight: "8px",
+    paddingLeft: "12px",
+    paddingRight: "12px",
+    height: "26px",
+    color: tokens.colorNeutralForeground2,
+    cursor: "pointer",
+    backgroundColor: "transparent",
+  },
+  segmentActive: {
+    position: "relative",
+    border: "none",
+    borderRadius: "6px",
+    fontSize: "12px",
+    fontWeight: 500,
+    minWidth: "auto",
+    paddingLeft: "12px",
+    paddingRight: "12px",
     height: "26px",
     color: tokens.colorNeutralForeground1,
-    "::after": {
-      content: '""',
-      position: "absolute",
-      bottom: "0px",
-      left: "8px",
-      right: "8px",
-      height: "2px",
-      borderRadius: "1px",
-      backgroundColor: tokens.colorBrandForeground1,
-    },
+    backgroundColor: tokens.colorNeutralBackground1,
+    boxShadow: tokens.shadow2,
   },
   windowControls: {
     display: "flex",
     alignItems: "center",
     height: "100%",
+    position: "relative",
+    top: "2px",
+    marginLeft: "auto",
+    zIndex: 3,
   },
   controlBtn: {
     minWidth: "46px",
@@ -128,80 +136,53 @@ const useStyles = makeStyles({
 });
 
 interface TitleBarProps {
-  filePath: string | null;
+  documentTitle: string | null;
   isDirty: boolean;
   isEditing: boolean;
-  isDarkMode: boolean;
   locale: Locale;
-  onToggleDarkMode: () => void;
   onToggleEditing: () => void;
 }
 
 export function TitleBar({
-  filePath,
+  documentTitle,
   isDirty,
   isEditing,
-  isDarkMode,
   locale,
-  onToggleDarkMode,
   onToggleEditing,
 }: TitleBarProps) {
   const styles = useStyles();
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
-
-  const fileName = filePath ? filePath.split(/[\\/]/).pop() : null;
-  const displayName = fileName
-    ? `${fileName}${isDirty ? " ●" : ""}`
-    : isDirty
-      ? "Untitled ●"
-      : "";
+  const displayName = documentTitle ? `${documentTitle}${isDirty ? " *" : ""}` : "";
 
   return (
     <div className={styles.titleBar} data-tauri-drag-region>
       <div className={styles.left} data-tauri-drag-region>
-        <span className={styles.appIcon}>📝</span>
+        <span className={styles.appIcon}>M</span>
         <span className={styles.appName}>{i("app.name")}</span>
-        {displayName && (
-          <>
-            <span className={styles.appName}>—</span>
-            <span className={styles.fileName}>{displayName}</span>
-          </>
-        )}
+        {displayName && <span className={styles.fileName}>{displayName}</span>}
       </div>
 
       <div className={styles.dragRegion} data-tauri-drag-region />
 
       <div className={styles.actions}>
-        <div className={styles.tabGroup}>
+        <div className={styles.segmentGroup}>
           <Button
-            appearance="subtle"
-            className={!isEditing ? styles.tabActive : styles.tab}
+            appearance="transparent"
+            className={!isEditing ? styles.segmentActive : styles.segment}
             onClick={() => isEditing && onToggleEditing()}
             size="small"
           >
             {i("mode.read")}
           </Button>
           <Button
-            appearance="subtle"
-            className={isEditing ? styles.tabActive : styles.tab}
+            appearance="transparent"
+            className={isEditing ? styles.segmentActive : styles.segment}
             onClick={() => !isEditing && onToggleEditing()}
             size="small"
           >
             {i("mode.edit")}
           </Button>
         </div>
-
-        <Tooltip
-          content={isDarkMode ? i("theme.light") : i("theme.dark")}
-          relationship="label"
-        >
-          <Button
-            appearance="subtle"
-            icon={isDarkMode ? <WeatherSunny20Regular /> : <WeatherMoon20Regular />}
-            onClick={onToggleDarkMode}
-            size="small"
-          />
-        </Tooltip>
       </div>
 
       <div className={styles.windowControls}>
