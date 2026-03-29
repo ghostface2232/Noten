@@ -7,6 +7,7 @@ import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import type { MarkdownState } from "./useMarkdownState";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
+import { emitDocUpdated } from "./useWindowSync";
 
 const DEBOUNCE_MS = 1000;
 
@@ -71,6 +72,9 @@ export function useAutoSave(
         setDocs(sortedDocs);
         setActiveIndex(nextIndex);
         void saveManifest(sortedDocs, target.id).catch(() => {});
+
+        const saved = sortedDocs.find((d) => d.id === target.id);
+        if (saved) emitDocUpdated(saved.id, content, saved.fileName);
 
         latestState.setIsDirty(false);
         latestState.setTiptapDirty(false);

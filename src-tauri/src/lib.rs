@@ -1,6 +1,6 @@
 use std::fs;
 use std::process::Command;
-use tauri::Manager;
+use tauri::{Listener, Manager};
 
 #[tauri::command]
 async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
@@ -55,7 +55,8 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![print_to_pdf])
         .setup(|app| {
-            if let Some(window) = app.get_webview_window("main") {
+            // Apply Mica to all existing windows
+            for (_, window) in app.webview_windows() {
                 let _ = window.set_effects(tauri::utils::config::WindowEffectsConfig {
                     effects: vec![tauri::window::Effect::Mica],
                     state: None,
@@ -63,6 +64,19 @@ pub fn run() {
                     color: None,
                 });
             }
+
+            // Apply Mica to dynamically created windows
+            let app_handle = app.handle().clone();
+            app.listen("tauri://webview-created", move |_event| {
+                for (_, window) in app_handle.webview_windows() {
+                    let _ = window.set_effects(tauri::utils::config::WindowEffectsConfig {
+                        effects: vec![tauri::window::Effect::Mica],
+                        state: None,
+                        radius: None,
+                        color: None,
+                    });
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -12,6 +12,7 @@ import type { MarkdownState } from "./useMarkdownState";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
+import { emitDocCreated, emitDocDeleted, emitDocRenamed } from "./useWindowSync";
 
 export type { NoteDoc } from "./useNotesLoader";
 
@@ -70,6 +71,7 @@ function resetDocState(
 
 export interface FileSystemActions {
   openFile: () => Promise<void>;
+  openFileByPath: (path: string) => Promise<void>;
   saveFile: () => Promise<void>;
   saveFileAs: () => Promise<void>;
   newNote: () => Promise<void>;
@@ -192,6 +194,45 @@ export function useFileSystem(
     resetDocState(state, path, content);
   }, [cacheCurrentContent, docs, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
 
+  const openFileByPath = useCallback(async (path: string) => {
+    cacheCurrentContent();
+
+    const existingIndex = docs.findIndex((doc) => doc.filePath === path);
+    if (existingIndex >= 0) {
+      setActiveIndex(existingIndex);
+      loadIntoEditor(tiptapRef, docs[existingIndex].content);
+      resetDocState(state, path, docs[existingIndex].content);
+      return;
+    }
+
+    const content = await readTextFile(path);
+    const fileName = getFileName(path);
+
+    let isExternal = true;
+    try {
+      const notesDir = await getNotesDir();
+      if (path.startsWith(notesDir)) isExternal = false;
+    } catch { /* ignore */ }
+
+    const timestamp = Date.now();
+    const newDoc: NoteDoc = {
+      id: crypto.randomUUID(),
+      filePath: path,
+      fileName,
+      isExternal,
+      isDirty: false,
+      content,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    const nextDocs = [...docs, newDoc];
+    sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, setDocs, setActiveIndex);
+
+    loadIntoEditor(tiptapRef, content);
+    resetDocState(state, path, content);
+  }, [cacheCurrentContent, docs, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
+
   const newNote = useCallback(async () => {
     cacheCurrentContent();
 
@@ -219,6 +260,7 @@ export function useFileSystem(
 
     const nextDocs = [...docs, newDoc];
     sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, setDocs, setActiveIndex);
+    emitDocCreated(newDoc);
 
     loadIntoEditor(tiptapRef, "");
     resetDocState(state, filePath, "");
@@ -259,6 +301,7 @@ export function useFileSystem(
     }
 
     const nextDocs = docs.filter((_, i) => i !== index);
+    emitDocDeleted(doc.id);
 
     // If we deleted the last doc, create a fresh one
     if (nextDocs.length === 0) {
@@ -446,7 +489,8 @@ export function useFileSystem(
     }
 
     sortAndPersistDocs(nextDocs, doc.id, notesSortOrder, setDocs, setActiveIndex);
+    emitDocRenamed(doc.id, doc.filePath, newFilePath, trimmed);
   }, [activeIndex, docs, notesSortOrder, setActiveIndex, setDocs, state]);
 
-  return { openFile, saveFile, saveFileAs, newNote, switchDocument, deleteNote, closeNote, duplicateNote, exportNote, renameNote };
+  return { openFile, openFileByPath, saveFile, saveFileAs, newNote, switchDocument, deleteNote, closeNote, duplicateNote, exportNote, renameNote };
 }

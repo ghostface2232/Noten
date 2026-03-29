@@ -13,10 +13,12 @@ import {
   MoreHorizontalRegular,
   RenameRegular,
   SettingsRegular,
+  WindowNewRegular,
 } from "@fluentui/react-icons";
 import { t } from "../i18n";
 import type { NoteDoc } from "../hooks/useNotesLoader";
 import type { Locale, NotesSortOrder } from "../hooks/useSettings";
+import { openNewWindow } from "../utils/newWindow";
 
 const SIDE_PADDING = "4px";
 
@@ -46,24 +48,14 @@ const useStyles = makeStyles({
     alignItems: "center",
     width: "100%",
   },
-  "@keyframes docSlideIn": {
-    from: { opacity: 0, maxHeight: "0px", transform: "translateY(-4px)" },
-    to: { opacity: 1, maxHeight: "40px", transform: "translateY(0)" },
-  },
   docItemNew: {
-    animationName: {
-      from: { opacity: 0, maxHeight: "0px", transform: "translateY(-4px)" },
-      to: { opacity: 1, maxHeight: "40px", transform: "translateY(0)" },
-    },
+    animationName: "docSlideIn",
     animationDuration: "0.2s",
     animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
     animationFillMode: "backwards",
   },
   docItemSlideUp: {
-    animationName: {
-      from: { transform: "translateY(34px)" },
-      to: { transform: "translateY(0)" },
-    },
+    animationName: "docSlideUp",
     animationDuration: "0.2s",
     animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
   },
@@ -673,6 +665,15 @@ export function Sidebar({
                 >
                   {i("sidebar.open")}
                 </Button>
+                <Button
+                  appearance="subtle"
+                  icon={<WindowNewRegular />}
+                  className={styles.contextMenuItem}
+                  onClick={() => { openNewWindow(); closeContextMenu(); }}
+                  size="small"
+                >
+                  {i("menu.newWindow")}
+                </Button>
               </>
             ) : (
               <>
@@ -684,6 +685,15 @@ export function Sidebar({
                   size="small"
                 >
                   {i("sidebar.rename")}
+                </Button>
+                <Button
+                  appearance="subtle"
+                  icon={<WindowNewRegular />}
+                  className={styles.contextMenuItem}
+                  onClick={() => { openNewWindow(docs[contextMenu.index]?.filePath); closeContextMenu(); }}
+                  size="small"
+                >
+                  {i("sidebar.openInNewWindow")}
                 </Button>
                 <Button
                   appearance="subtle"

@@ -64,6 +64,7 @@ const dict = {
   "sidebar.settings": { en: "Settings", ko: "설정" },
   "sidebar.externalFile": { en: "External file", ko: "외부 파일" },
   "sidebar.rename": { en: "Rename", ko: "이름 바꾸기" },
+  "sidebar.openInNewWindow": { en: "Open in new window", ko: "새 창에서 열기" },
   "sidebar.duplicate": { en: "Duplicate", ko: "복제" },
   "sidebar.delete": { en: "Delete", ko: "삭제" },
   "sidebar.close": { en: "Close", ko: "닫기" },
@@ -114,6 +115,7 @@ const dict = {
   /* ─── App Menu ─── */
   "menu.file": { en: "File", ko: "파일" },
   "menu.newDoc": { en: "New document", ko: "새 문서" },
+  "menu.newWindow": { en: "New window", ko: "새 창" },
   "menu.open": { en: "Open", ko: "열기" },
   "menu.export": { en: "Export", ko: "내보내기" },
   "menu.exportMd": { en: "Markdown (.md)", ko: "마크다운 (.md)" },

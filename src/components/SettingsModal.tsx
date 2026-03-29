@@ -33,6 +33,7 @@ const useStyles = makeStyles({
     borderRadius: "12px",
     overflow: "hidden",
     padding: "0 !important",
+    userSelect: "none",
   },
   layout: {
     display: "flex",
@@ -164,7 +165,7 @@ const useStyles = makeStyles({
   dropdown: {
     minWidth: "150px",
     fontSize: "13px",
-    backgroundColor: tokens.colorNeutralBackground3,
+    borderRadius: "6px",
     borderTopColor: "transparent",
     borderRightColor: "transparent",
     borderBottomColor: "transparent",
@@ -174,14 +175,12 @@ const useStyles = makeStyles({
       borderRightColor: "transparent",
       borderBottomColor: "transparent",
       borderLeftColor: "transparent",
-      backgroundColor: tokens.colorNeutralBackground3Hover,
     },
     ":active": {
       borderTopColor: "transparent",
       borderRightColor: "transparent",
       borderBottomColor: "transparent",
       borderLeftColor: "transparent",
-      backgroundColor: tokens.colorNeutralBackground3Pressed,
     },
     ":focus-within": {
       borderTopColor: "transparent",
@@ -336,6 +335,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate }: SettingsMod
                   <Label className={styles.label}>{i("settings.noteOrder")}</Label>
                   <Dropdown
                     className={styles.dropdown}
+                    style={{ backgroundColor: isDarkMode ? "rgba(0,0,0,0.25)" : "rgba(0,0,0,0.08)" }}
                     value={i(sortOrderLabelKey(settings.notesSortOrder))}
                     selectedOptions={[settings.notesSortOrder]}
                     onOptionSelect={(_, data) => {

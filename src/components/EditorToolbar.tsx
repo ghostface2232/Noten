@@ -94,7 +94,7 @@ const useStyles = makeStyles({
     fontWeight: 500,
   },
   headingBtn: {
-    width: "88px",
+    width: "74px",
     height: "28px",
     padding: "0 8px",
     borderRadius: "6px",
@@ -104,7 +104,7 @@ const useStyles = makeStyles({
     gap: "4px",
   },
   headingBtnActive: {
-    width: "88px",
+    width: "74px",
     height: "28px",
     padding: "0 8px",
     borderRadius: "6px",

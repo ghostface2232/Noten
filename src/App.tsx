@@ -30,6 +30,8 @@ import { SearchBar } from "./components/SearchBar";
 import { searchPluginKey, type SearchPluginState } from "./extensions/SearchHighlight";
 import { setCmSearch } from "./extensions/cmSearchHighlight";
 import { exportAsMarkdown, exportAsPdf, exportAsRtf } from "./utils/exportHandlers";
+import { useWindowSync } from "./hooks/useWindowSync";
+import { openNewWindow } from "./utils/newWindow";
 import "./App.css";
 
 const useStyles = makeStyles({
@@ -84,25 +86,34 @@ const useStyles = makeStyles({
   sidebarResizer: {
     position: "absolute",
     right: "-4px",
-    top: "50%",
-    transform: "translateY(-50%)",
+    top: 0,
+    bottom: 0,
     width: "8px",
-    height: "36px",
-    borderRadius: "4px",
     cursor: "grab",
     zIndex: 100,
-    backgroundColor: tokens.colorNeutralStroke2,
-    opacity: 0,
-    transitionProperty: "opacity",
-    transitionDuration: "0.15s",
-    ":hover": {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    "::after": {
+      content: '""',
+      width: "4px",
+      height: "56px",
+      borderRadius: "4px",
+      backgroundColor: tokens.colorBrandStroke1,
+      opacity: 0,
+      transitionProperty: "opacity",
+      transitionDuration: "0.15s",
+    },
+    ":hover::after": {
       opacity: 1,
+      transitionDelay: "0.3s",
     },
   },
   sidebarResizing: {
-    opacity: 1,
     cursor: "grabbing",
-    backgroundColor: tokens.colorNeutralStroke1,
+    "::after": {
+      opacity: "1 !important",
+    },
   },
   sidebarToggle: {
     position: "absolute",
@@ -226,6 +237,10 @@ function App() {
         state.setFilePath(doc.filePath);
         state.setIsDirty(false);
       }
+      // 콘텐츠 로드 완료 후 창 표시 (새 창 생성 시 visible:false로 시작)
+      requestAnimationFrame(() => {
+        getCurrentWindow().show().catch(() => {});
+      });
     }
   }, [isLoading, docs, activeIndex]);
 
@@ -251,6 +266,27 @@ function App() {
     locale,
     settings.notesSortOrder,
   );
+
+  // URL 쿼리 파라미터로 전달된 파일 열기 (새 창에서 열기)
+  const fileParamHandled = useRef(false);
+  useEffect(() => {
+    if (fileParamHandled.current || isLoading || docs.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const filePath = params.get("file");
+    if (filePath) {
+      fileParamHandled.current = true;
+      // docs 로딩 완료 후 중복 체크하여 열기
+      const existing = docs.findIndex((d) => d.filePath === filePath);
+      if (existing >= 0) {
+        fs.switchDocument(existing);
+      } else {
+        fs.openFileByPath(filePath).catch(() => {});
+      }
+    }
+  }, [isLoading, docs, fs.openFileByPath, fs.switchDocument]);
+
+  // 창 간 동기화 (Tauri 이벤트)
+  useWindowSync(setDocs, activeIndex, tiptapRef, setActiveIndex);
 
   // OS Mica 효과
   const [micaSupported, setMicaSupported] = useState(true);
@@ -356,7 +392,8 @@ function App() {
       if (e.ctrlKey && e.key === "o") { e.preventDefault(); fs.openFile(); }
       if (e.ctrlKey && !e.shiftKey && e.key === "s") { e.preventDefault(); fs.saveFile(); }
       if (e.ctrlKey && e.shiftKey && e.key === "S") { e.preventDefault(); fs.saveFileAs(); }
-      if (e.ctrlKey && e.key === "n") { e.preventDefault(); fs.newNote(); }
+      if (e.ctrlKey && !e.shiftKey && e.key === "n") { e.preventDefault(); fs.newNote(); }
+      if (e.ctrlKey && e.shiftKey && e.key === "N") { e.preventDefault(); openNewWindow(); }
       if (e.ctrlKey && e.key === "f") { e.preventDefault(); setDocSearchOpen((o) => !o); }
       if (e.key === "Escape" && docSearchOpen) { e.preventDefault(); setDocSearchOpen(false); }
     };
@@ -365,8 +402,11 @@ function App() {
   }, [state.toggleEditing, handleSwitchEditorMode, state.isEditing, fs.openFile, fs.saveFile, fs.saveFileAs, fs.newNote, docSearchOpen]);
 
   // 마우스 클릭 후 버튼류 요소 자동 blur → Esc/Space 시 포커스 링 방지
+  const settingsOpenRef = useRef(settingsOpen);
+  settingsOpenRef.current = settingsOpen;
   useEffect(() => {
     const handleMouseUp = () => {
+      if (settingsOpenRef.current) return;
       requestAnimationFrame(() => {
         const el = document.activeElement as HTMLElement | null;
         if (

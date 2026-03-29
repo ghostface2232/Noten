@@ -73,6 +73,17 @@ body {
   background: rgba(255, 255, 255, 0.35);
 }
 
+/* ─── 사이드바 문서 애니메이션 ─── */
+@keyframes docSlideIn {
+  from { opacity: 0; max-height: 0px; transform: translateY(-4px); }
+  to   { opacity: 1; max-height: 40px; transform: translateY(0); }
+}
+
+@keyframes docSlideUp {
+  from { transform: translateY(34px); }
+  to   { transform: translateY(0); }
+}
+
 /* ─── 다크 모드 전환: 대상 한정 트랜지션 ─── */
 .fui-FluentProvider,
 .ProseMirror,

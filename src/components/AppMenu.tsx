@@ -17,10 +17,12 @@ import {
   DocumentPdfRegular,
   TextEditStyleRegular,
   ChevronRightRegular,
+  WindowNewRegular,
 } from "@fluentui/react-icons";
 import { t, type I18nKey } from "../i18n";
 import type { Locale, ParagraphSpacing } from "../hooks/useSettings";
 import type { Editor } from "@tiptap/react";
+import { openNewWindow } from "../utils/newWindow";
 
 
 const useStyles = makeStyles({
@@ -219,6 +221,9 @@ export function AppMenu({
             </Button>
             <Button appearance="subtle" icon={<FolderOpenRegular />} className={styles.menuItem} onClick={() => act(onOpenFile)} size="small">
               <span>{i("menu.open")}</span><span className={styles.shortcut}>Ctrl+O</span>
+            </Button>
+            <Button appearance="subtle" icon={<WindowNewRegular />} className={styles.menuItem} onClick={() => act(() => openNewWindow())} size="small">
+              <span>{i("menu.newWindow")}</span><span className={styles.shortcut}>Ctrl+Shift+N</span>
             </Button>
 
             {/* Export submenu */}
