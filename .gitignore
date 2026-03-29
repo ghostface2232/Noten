@@ -13,8 +13,7 @@ dist-ssr
 *.local
 
 # Editor directories and files
-.vscode/*
-!.vscode/extensions.json
+.vscode/
 .idea
 .DS_Store
 *.suo
@@ -22,3 +21,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Claude Code
+.claude/
+AGENTS.md
+
+# Tauri build output
+src-tauri/target/
+src-tauri/gen/
+
+# Unused template assets
+public/tauri.svg
+public/vite.svg
+src/assets/react.svg

@@ -30,7 +30,7 @@ const FolderSubtractRegular = () => (
   </svg>
 );
 
-const SIDE_PADDING = "4px";
+const SIDE_PADDING = "6px";
 
 const useStyles = makeStyles({
   sidebar: {
@@ -45,7 +45,7 @@ const useStyles = makeStyles({
   body: {
     flex: 1,
     overflow: "auto",
-    paddingTop: "54px",
+    paddingTop: "58px",
     paddingLeft: SIDE_PADDING,
     paddingRight: SIDE_PADDING,
     display: "flex",
@@ -215,7 +215,7 @@ const useStyles = makeStyles({
     flexShrink: 0,
     paddingLeft: SIDE_PADDING,
     paddingRight: SIDE_PADDING,
-    paddingBottom: "6px",
+    paddingBottom: SIDE_PADDING,
   },
   settingsBtn: {
     width: "100%",
@@ -223,7 +223,7 @@ const useStyles = makeStyles({
     border: "none",
     borderRadius: "6px",
     fontSize: "13px",
-    gap: "8px",
+    gap: "5px",
     minHeight: "36px",
     paddingLeft: "8px",
     paddingRight: "8px",

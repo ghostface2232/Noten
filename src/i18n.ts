@@ -114,6 +114,8 @@ const dict = {
   "settings.shortcut.save": { en: "Save", ko: "저장" },
   "settings.shortcut.saveAs": { en: "Save as", ko: "다른 이름으로 저장" },
   "settings.shortcut.newFile": { en: "New file", ko: "새 파일" },
+  "settings.shortcut.newWindow": { en: "New window", ko: "새 창" },
+  "settings.shortcut.find": { en: "Find in document", ko: "문서에서 찾기" },
   "settings.tab.general": { en: "General", ko: "일반" },
   "settings.tab.display": { en: "Display", ko: "화면" },
   "settings.tab.shortcuts": { en: "Shortcuts", ko: "단축키" },
@@ -135,10 +137,14 @@ const dict = {
   "about.downloading": { en: "Downloading...", ko: "다운로드 중..." },
   "about.restart": { en: "Restart to apply update", ko: "재시작하여 업데이트 적용" },
   "about.error": { en: "Unable to check for updates. Please try again later.", ko: "업데이트를 확인할 수 없습니다. 나중에 다시 시도하세요." },
-  "about.copyright": { en: "© 2025 Focal Point", ko: "© 2025 Focal Point" },
+  "about.copyright": { en: "© 2026 Mingwan Bae", ko: "© 2026 Mingwan Bae" },
 
   /* ─── Notes Directory ─── */
   "settings.notesDirectory": { en: "Notes folder", ko: "저장 위치" },
+  "settings.notesDirectory.description": {
+    en: "Set the path where notes are stored. Use a cloud folder (OneDrive, Google Drive, etc.) to sync across devices.",
+    ko: "노트가 저장되는 경로를 설정합니다. 클라우드 폴더(OneDrive, Google Drive 등)를 지정하면 기기 간 동기화가 가능합니다.",
+  },
   "settings.notesDirectory.change": { en: "Change", ko: "변경" },
   "settings.notesDirectory.reset": { en: "Reset to default", ko: "기본값으로 초기화" },
   "settings.notesDirectory.default": { en: "Default", ko: "기본 위치" },

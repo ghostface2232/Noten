@@ -52,7 +52,7 @@ const useStyles = makeStyles({
     alignItems: "center",
     columnGap: "6px",
     rowGap: "4px",
-    padding: "6px 12px",
+    padding: "10px 10px",
   },
   /* tools 기본: 1줄 모드 (grid-column/row 등은 JS에서 직접 설정) */
   tools: {

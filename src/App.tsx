@@ -130,7 +130,7 @@ const useStyles = makeStyles({
   },
   sidebarToggle: {
     position: "absolute",
-    top: "12px",
+    top: "16px",
     left: "5px",
     zIndex: 10,
     display: "inline-flex",
@@ -151,7 +151,7 @@ const useStyles = makeStyles({
   },
   sidebarSearchBtn: {
     position: "absolute",
-    top: "15px",
+    top: "19px",
     right: "8px",
     zIndex: 10,
     borderRadius: "6px",
@@ -163,7 +163,7 @@ const useStyles = makeStyles({
   },
   sidebarNewGroupBtn: {
     position: "absolute",
-    top: "15px",
+    top: "19px",
     right: "64px",
     zIndex: 10,
     borderRadius: "6px",
@@ -175,7 +175,7 @@ const useStyles = makeStyles({
   },
   sidebarSelectBtn: {
     position: "absolute",
-    top: "15px",
+    top: "19px",
     right: "36px",
     zIndex: 10,
     borderRadius: "6px",

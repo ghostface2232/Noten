@@ -34,6 +34,7 @@ import type {
 } from "../hooks/useSettings";
 
 const NAV_WIDTH = "160px";
+const CONTROL_RADIUS = "6px";
 
 const useStyles = makeStyles({
   surface: {
@@ -46,7 +47,7 @@ const useStyles = makeStyles({
   },
   layout: {
     display: "flex",
-    height: "430px",
+    height: "470px",
     padding: "4px",
     paddingLeft: 0,
     position: "relative",
@@ -81,7 +82,7 @@ const useStyles = makeStyles({
     width: "100%",
     justifyContent: "flex-start",
     border: "none",
-    borderRadius: "6px",
+    borderRadius: "6px", // CONTROL_RADIUS
     fontSize: "13px",
     fontWeight: 400,
     minHeight: "32px",
@@ -102,7 +103,7 @@ const useStyles = makeStyles({
     width: "100%",
     justifyContent: "flex-start",
     border: "none",
-    borderRadius: "6px",
+    borderRadius: "6px", // CONTROL_RADIUS
     fontSize: "13px",
     fontWeight: 500,
     minHeight: "32px",
@@ -174,7 +175,7 @@ const useStyles = makeStyles({
   dropdown: {
     minWidth: "150px",
     fontSize: "13px",
-    borderRadius: "6px",
+    borderRadius: "6px", // CONTROL_RADIUS
     borderTopColor: "transparent",
     borderRightColor: "transparent",
     borderBottomColor: "transparent",
@@ -388,12 +389,13 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                   />
                 </div>
 
-                <div className={mergeClasses(styles.row, settingItemClass(styles))}>
-                  <Label className={styles.label}>{i("settings.notesDirectory")}</Label>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                <div className={settingItemClass(styles)}>
+                  <div className={styles.row}>
+                    <Label className={styles.label}>{i("settings.notesDirectory")}</Label>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
                     <Tooltip content={currentNotesDir} relationship="description" positioning="above">
                       <span style={{
-                        fontSize: "12px",
+                        fontSize: "13px",
                         opacity: 0.7,
                         maxWidth: "160px",
                         overflow: "hidden",
@@ -405,14 +407,18 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                         {settings.notesDirectory || i("settings.notesDirectory.default")}
                       </span>
                     </Tooltip>
-                    <Button size="small" appearance="subtle" onClick={onChangeNotesDir}>
+                    <Button size="medium" appearance="subtle" onClick={onChangeNotesDir} style={{ fontSize: "13px", borderRadius: CONTROL_RADIUS, minWidth: 0, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}>
                       {i("settings.notesDirectory.change")}
                     </Button>
                     {settings.notesDirectory && (
-                      <Button size="small" appearance="subtle" onClick={onResetNotesDir}>
+                      <Button size="medium" appearance="subtle" onClick={onResetNotesDir} style={{ fontSize: "13px", borderRadius: CONTROL_RADIUS, minWidth: 0, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}>
                         {i("settings.notesDirectory.reset")}
                       </Button>
                     )}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, marginTop: "8px", lineHeight: "1.5" }}>
+                    {i("settings.notesDirectory.description")}
                   </div>
                 </div>
               </div>
@@ -481,24 +487,22 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
             )}
 
             {tab === "shortcuts" && (
-              <div className={styles.shortcutGrid}>
-                <span>{i("settings.shortcut.toggleEdit")}</span>
-                <span className={styles.shortcutKey}>Ctrl+E</span>
-
-                <span>{i("settings.shortcut.switchEditor")}</span>
-                <span className={styles.shortcutKey}>Ctrl+/</span>
-
-                <span>{i("settings.shortcut.import")}</span>
-                <span className={styles.shortcutKey}>Ctrl+O</span>
-
-                <span>{i("settings.shortcut.save")}</span>
-                <span className={styles.shortcutKey}>Ctrl+S</span>
-
-                <span>{i("settings.shortcut.saveAs")}</span>
-                <span className={styles.shortcutKey}>Ctrl+Shift+S</span>
-
-                <span>{i("settings.shortcut.newFile")}</span>
-                <span className={styles.shortcutKey}>Ctrl+N</span>
+              <div className={styles.section}>
+                {([
+                  ["settings.shortcut.newFile", "Ctrl+N"],
+                  ["settings.shortcut.newWindow", "Ctrl+Shift+N"],
+                  ["settings.shortcut.save", "Ctrl+S"],
+                  ["settings.shortcut.saveAs", "Ctrl+Shift+S"],
+                  ["settings.shortcut.import", "Ctrl+O"],
+                  ["settings.shortcut.toggleEdit", "Ctrl+E"],
+                  ["settings.shortcut.switchEditor", "Ctrl+/"],
+                  ["settings.shortcut.find", "Ctrl+F"],
+                ] as [Parameters<typeof t>[0], string][]).map(([labelKey, key], idx) => (
+                  <div key={key} className={mergeClasses(styles.row, settingItemClass(styles, idx === 0))}>
+                    <Label className={styles.label}>{i(labelKey)}</Label>
+                    <span className={styles.shortcutKey}>{key}</span>
+                  </div>
+                ))}
               </div>
             )}
 
@@ -506,26 +510,64 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
               <div className={styles.section} style={{ justifyContent: "space-between", height: "100%" }}>
                 <div>
                   {/* App info */}
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "4px" }}>
-                    <img
-                      src={isDarkMode ? "/Aa_icon_dark.png" : "/Aa_icon.png"}
-                      alt="Aa"
-                      style={{ width: "40px", height: "40px", borderRadius: "8px" }}
-                    />
-                    <div>
-                      <div style={{ fontSize: "16px", fontWeight: 600, color: tokens.colorNeutralForeground1 }}>Aa</div>
-                      <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3 }}>v{appVersion}</div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "18px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                      <img
+                        src="/Aa_icon_1024.png"
+                        alt="Aa"
+                        style={{ width: "40px", height: "40px", borderRadius: "8px" }}
+                      />
+                      <div>
+                        <div style={{ fontSize: "16px", color: tokens.colorNeutralForeground1 }}>Aa Editor</div>
+                        <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3 }}>v{appVersion}</div>
+                      </div>
+                    </div>
+                    {(updaterState.status === "idle" || updaterState.status === "error" || updaterState.status === "upToDate") && (
+                      <Button
+                        size="medium"
+                        appearance="subtle"
+                        onClick={checkForUpdate}
+                        style={{ fontSize: "13px", fontWeight: 400, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
+                      >
+                        {i("about.checkUpdate")}
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Version notes */}
+                  <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.0</div>
+                    <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
+                      {locale === "ko" ? (
+                        <>
+                          · 리치 텍스트 / 마크다운 듀얼 에디터<br />
+                          · 슬래시 명령어, 이미지 드롭, 코드 블록<br />
+                          · 사이드바 노트 관리 및 그룹핑<br />
+                          · 다중 창 지원 및 창 간 동기화<br />
+                          · Mica 테마, 다크/라이트 모드<br />
+                          · 문서 내 검색<br />
+                          · PDF / Markdown / RTF 내보내기<br />
+                          · 저장 위치 변경 및 파일 감시<br />
+                          · 자동 업데이트
+                        </>
+                      ) : (
+                        <>
+                          · Rich text / Markdown dual editor<br />
+                          · Slash commands, image drop, code blocks<br />
+                          · Sidebar note management and grouping<br />
+                          · Multi-window support with cross-window sync<br />
+                          · Mica theme, dark/light mode<br />
+                          · In-document search<br />
+                          · Export to PDF / Markdown / RTF<br />
+                          · Configurable notes directory and file watcher<br />
+                          · Auto-update
+                        </>
+                      )}
                     </div>
                   </div>
 
                   {/* Update section */}
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    {updaterState.status === "idle" && (
-                      <Button appearance="subtle" size="small" onClick={checkForUpdate}>
-                        {i("about.checkUpdate")}
-                      </Button>
-                    )}
-
                     {updaterState.status === "checking" && (
                       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                         <Spinner size="tiny" />
@@ -576,20 +618,15 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                     )}
 
                     {updaterState.status === "error" && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                        <span style={{ fontSize: "12px", color: tokens.colorPaletteRedForeground1 }}>
-                          {i("about.error")}
-                        </span>
-                        <Button appearance="subtle" size="small" onClick={checkForUpdate}>
-                          {i("about.checkUpdate")}
-                        </Button>
-                      </div>
+                      <span style={{ fontSize: "12px", color: tokens.colorPaletteRedForeground1 }}>
+                        {i("about.error")}
+                      </span>
                     )}
                   </div>
                 </div>
 
                 {/* Copyright */}
-                <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3 }}>
+                <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, marginBottom: "-4px" }}>
                   {i("about.copyright")}
                 </div>
               </div>
