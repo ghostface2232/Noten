@@ -94,9 +94,9 @@ const useStyles = makeStyles({
     fontWeight: 500,
   },
   headingBtn: {
-    width: "74px",
+    width: "66px",
     height: "28px",
-    padding: "0 8px",
+    padding: "0 4px",
     borderRadius: "6px",
     border: "none",
     fontSize: "12px",
@@ -104,9 +104,9 @@ const useStyles = makeStyles({
     gap: "4px",
   },
   headingBtnActive: {
-    width: "74px",
+    width: "66px",
     height: "28px",
-    padding: "0 8px",
+    padding: "0 4px",
     borderRadius: "6px",
     border: "none",
     fontSize: "12px",
@@ -169,7 +169,7 @@ export function EditorToolbar({
    * React state를 건드리지 않으므로 re-render → observer 루프가 발생하지 않는다.
    * 레이아웃 확정 후 barHeight만 state로 전달한다.
    */
-  const BREAKPOINT = 680;
+  const BREAKPOINT = 740;
 
   const applyLayout = useCallback((t: HTMLElement, twoRows: boolean) => {
     if (twoRows) {
