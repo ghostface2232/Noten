@@ -289,6 +289,9 @@ export function useFileSystem(
     const doc = docs[index];
     if (!doc) return;
 
+    // Flush pending auto-save so the on-disk file is up-to-date before trash copy
+    if (index === activeIndex) flushAutoSaveRef?.current?.();
+
     // Capture group before it gets cleaned up below
     const group = getGroupForNote?.(doc.id) ?? null;
 
