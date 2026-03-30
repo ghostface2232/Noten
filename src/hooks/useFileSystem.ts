@@ -127,6 +127,12 @@ export function useFileSystem(
     return markdown;
   }, [activeIndex, setDocs, state, tiptapRef]);
 
+  /** Flush pending auto-save to disk, then cache editor content into docs state. */
+  const leaveCurrentDoc = useCallback(() => {
+    flushAutoSaveRef?.current?.();
+    cacheCurrentContent();
+  }, [cacheCurrentContent]);
+
   const saveFile = useCallback(async () => {
     const doc = docs[activeIndex];
     if (!doc) return;
@@ -175,8 +181,7 @@ export function useFileSystem(
   }, [activeIndex, docs, state, tiptapRef]);
 
   const importFile = useCallback(async () => {
-    flushAutoSaveRef?.current?.();
-    cacheCurrentContent();
+    leaveCurrentDoc();
 
     const selected = await open({ filters: MD_FILTERS, multiple: false });
     if (!selected) return;
@@ -230,8 +235,7 @@ export function useFileSystem(
   }, [cacheCurrentContent, docs, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
 
   const newNote = useCallback(async () => {
-    flushAutoSaveRef?.current?.();
-    cacheCurrentContent();
+    leaveCurrentDoc();
 
     const id = crypto.randomUUID();
     const timestamp = Date.now();
@@ -275,8 +279,7 @@ export function useFileSystem(
     if (index === activeIndex) return;
     if (index < 0 || index >= docs.length) return;
 
-    flushAutoSaveRef?.current?.();
-    cacheCurrentContent();
+    leaveCurrentDoc();
 
     const target = docs[index];
     loadIntoEditor(tiptapRef, target.content);
@@ -290,7 +293,7 @@ export function useFileSystem(
     if (!doc) return;
 
     // Flush pending auto-save so the on-disk file is up-to-date before trash copy
-    if (index === activeIndex) flushAutoSaveRef?.current?.();
+    if (index === activeIndex) leaveCurrentDoc();
 
     // Capture group before it gets cleaned up below
     const group = getGroupForNote?.(doc.id) ?? null;
@@ -391,8 +394,7 @@ export function useFileSystem(
     const doc = docs[index];
     if (!doc) return;
 
-    flushAutoSaveRef?.current?.();
-    cacheCurrentContent();
+    leaveCurrentDoc();
 
     const id = crypto.randomUUID();
     const timestamp = Date.now();
@@ -488,8 +490,7 @@ export function useFileSystem(
       updatedAt: trashed.updatedAt,
     };
 
-    flushAutoSaveRef?.current?.();
-    cacheCurrentContent();
+    leaveCurrentDoc();
 
     // Remove from trashed list BEFORE sortAndPersistDocs so saveManifest
     // reads the updated trashedNotesCache (without the restored note)
