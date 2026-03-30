@@ -396,7 +396,7 @@ export function useFileSystem(
 
     sortAndPersistDocs(nextDocs, doc.id, notesSortOrder, setDocs, setActiveIndex, groupsRef.current);
     emitDocRenamed(doc.id, doc.filePath, doc.filePath, trimmed);
-  }, [activeIndex, docs, notesSortOrder, setActiveIndex, setDocs, state]);
+  }, [docs, notesSortOrder, setActiveIndex, setDocs]);
 
   return { importFile, saveFile, saveFileAs, newNote, switchDocument, deleteNote, duplicateNote, exportNote, renameNote };
 }

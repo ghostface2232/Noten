@@ -276,6 +276,12 @@ function App() {
     reloadKey,
   );
 
+  // Refs for values read (but not triggering) in effects
+  const activeIndexRef = useRef(activeIndex);
+  activeIndexRef.current = activeIndex;
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+
   // 그룹 관리
   const noteGroups = useNoteGroups(groups, setGroups, docs, activeIndex);
 
@@ -382,7 +388,7 @@ function App() {
   useEffect(() => {
     if (!settingsLoaded || docs.length < 2) return;
 
-    const activeId = docs[activeIndex]?.id ?? null;
+    const activeId = docs[activeIndexRef.current]?.id ?? null;
     const sortedDocs = sortNotes(docs, settings.notesSortOrder);
     const changed = sortedDocs.some((doc, index) => doc.id !== docs[index]?.id);
     if (!changed) return;
@@ -392,11 +398,9 @@ function App() {
       ? Math.max(sortedDocs.findIndex((doc) => doc.id === activeId), 0)
       : 0;
     setActiveIndex(nextActiveIndex);
-    void saveManifest(sortedDocs, activeId, groups).catch(() => {});
+    void saveManifest(sortedDocs, activeId, groupsRef.current).catch(() => {});
   }, [
-    activeIndex,
     docs,
-    groups,
     settings.notesSortOrder,
     settingsLoaded,
     setActiveIndex,

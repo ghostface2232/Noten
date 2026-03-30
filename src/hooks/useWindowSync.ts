@@ -124,10 +124,28 @@ export function useWindowSync(
         setDocs((prev) => {
           const idx = prev.findIndex((d) => d.id === docId);
           if (idx < 0) return prev;
+
           const filtered = prev.filter((d) => d.id !== docId);
-          if (activeIndexRef.current >= filtered.length) {
-            setActiveIndex(Math.max(0, filtered.length - 1));
+          if (filtered.length === 0) {
+            setActiveIndex(0);
+            return filtered;
           }
+
+          const currentActive = activeIndexRef.current;
+
+          if (idx === currentActive) {
+            // Deleted doc is the active doc — load new active doc's content
+            const newIdx = Math.min(idx, filtered.length - 1);
+            setActiveIndex(newIdx);
+            if (tiptapRef.current) {
+              tiptapRef.current.setContent(filtered[newIdx].content);
+            }
+          } else if (idx < currentActive) {
+            // Deleted doc is before active doc — shift index down
+            setActiveIndex(currentActive - 1);
+          }
+          // idx > currentActive — no change needed
+
           return filtered;
         });
       }),
