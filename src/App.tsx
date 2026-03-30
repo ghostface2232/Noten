@@ -324,7 +324,7 @@ function App() {
     locale,
     settings.notesSortOrder,
     groups,
-    noteGroups.cleanupDeletedNote,
+    setGroups,
     noteGroups.getGroupForNote,
     trashedNotes,
     setTrashedNotes,
@@ -359,7 +359,13 @@ function App() {
   }, [isLoading, docs, fs.switchDocument]);
 
   // 창 간 동기화 (Tauri 이벤트)
-  useWindowSync(setDocs, activeIndex, tiptapRef, setActiveIndex, setGroups, setTrashedNotes);
+  const handleActiveDocChanged = useCallback((doc: { filePath: string; content: string }) => {
+    state.setMarkdownRaw(doc.content);
+    state.setFilePath(doc.filePath);
+    state.setIsDirty(false);
+    state.setTiptapDirty(false);
+  }, [state]);
+  useWindowSync(setDocs, activeIndex, tiptapRef, setActiveIndex, setGroups, setTrashedNotes, handleActiveDocChanged);
 
   // 파일 시스템 감시 (클라우드 동기화 등 외부 변경 감지)
   useFileWatcher(

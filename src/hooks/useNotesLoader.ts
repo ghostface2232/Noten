@@ -321,13 +321,11 @@ export function useNotesLoader(
   const [isLoading, setIsLoading] = useState(true);
   const initialized = useRef(false);
 
-  // Keep module-level cache in sync with React state
+  // Keep module-level cache in sync — updated synchronously (not deferred by React batching)
   const setTrashedNotes = (updater: TrashedNote[] | ((prev: TrashedNote[]) => TrashedNote[])) => {
-    setTrashedNotesState((prev) => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      setTrashedNotesCache(next);
-      return next;
-    });
+    const next = typeof updater === "function" ? updater(trashedNotesCache) : updater;
+    setTrashedNotesCache(next);
+    setTrashedNotesState(next);
   };
 
   // Reset initialized when reloadKey changes so the effect re-runs

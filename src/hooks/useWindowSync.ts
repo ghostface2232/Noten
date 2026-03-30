@@ -90,6 +90,7 @@ export function useWindowSync(
   setActiveIndex: React.Dispatch<React.SetStateAction<number>>,
   setGroups?: React.Dispatch<React.SetStateAction<NoteGroup[]>>,
   setTrashedNotes?: (updater: TrashedNote[] | ((prev: TrashedNote[]) => TrashedNote[])) => void,
+  onActiveDocChanged?: (doc: { filePath: string; content: string }) => void,
 ) {
   // Refs to avoid stale closures in event listeners
   const activeIndexRef = useRef(activeIndex);
@@ -150,8 +151,12 @@ export function useWindowSync(
             // Deleted doc is the active doc — load new active doc's content
             const newIdx = Math.min(idx, filtered.length - 1);
             setActiveIndex(newIdx);
-            if (tiptapRef.current) {
-              tiptapRef.current.setContent(filtered[newIdx].content);
+            const newDoc = filtered[newIdx];
+            if (tiptapRef.current && newDoc) {
+              tiptapRef.current.setContent(newDoc.content);
+            }
+            if (newDoc) {
+              onActiveDocChanged?.({ filePath: newDoc.filePath, content: newDoc.content });
             }
           } else if (idx < currentActive) {
             // Deleted doc is before active doc — shift index down
@@ -191,5 +196,5 @@ export function useWindowSync(
     });
 
     return () => { mounted = false; unlisteners.forEach((fn) => fn()); };
-  }, [setDocs, setActiveIndex, tiptapRef, setGroups, setTrashedNotes]);
+  }, [setDocs, setActiveIndex, tiptapRef, setGroups, setTrashedNotes, onActiveDocChanged]);
 }
