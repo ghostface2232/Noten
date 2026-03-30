@@ -38,27 +38,21 @@ const useStyles = makeStyles({
     height: "100%",
   },
   documentTitle: {
+    fontSize: "12px",
+    fontWeight: 400,
+    color: tokens.colorNeutralForeground1,
+    opacity: 0.7,
+    whiteSpace: "nowrap" as const,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    maxWidth: "200px",
+  },
+  actions: {
     position: "absolute",
     left: "50%",
     top: "calc(50% + 2px)",
     transform: "translate(-50%, -50%)",
-    fontSize: "12px",
-    fontWeight: 400,
-    color: tokens.colorNeutralForeground1,
-    opacity: 0.5,
-    whiteSpace: "nowrap" as const,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    maxWidth: "300px",
-    pointerEvents: "none" as const,
     zIndex: 2,
-  },
-  actions: {
-    display: "flex",
-    alignItems: "center",
-    position: "relative",
-    top: "2px",
-    marginRight: "4px",
   },
   segmentGroup: {
     display: "flex",
@@ -180,15 +174,14 @@ export function TitleBar({
           onExportPdf={onExportPdf}
           onExportRtf={onExportRtf}
         />
+        {documentTitle && (
+          <div className={styles.documentTitle} data-tauri-drag-region>
+            {documentTitle}
+          </div>
+        )}
       </div>
 
       <div className={styles.dragRegion} data-tauri-drag-region />
-
-      {documentTitle && (
-        <div className={styles.documentTitle} data-tauri-drag-region>
-          {documentTitle}
-        </div>
-      )}
 
       <div className={styles.actions}>
         <div className={styles.segmentGroup}>
