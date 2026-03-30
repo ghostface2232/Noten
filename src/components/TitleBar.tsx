@@ -37,14 +37,28 @@ const useStyles = makeStyles({
     flex: 1,
     height: "100%",
   },
-  actions: {
+  documentTitle: {
     position: "absolute",
     left: "50%",
     top: "calc(50% + 2px)",
     transform: "translate(-50%, -50%)",
+    fontSize: "12px",
+    fontWeight: 400,
+    color: tokens.colorNeutralForeground1,
+    opacity: 0.5,
+    whiteSpace: "nowrap" as const,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    maxWidth: "300px",
+    pointerEvents: "none" as const,
+    zIndex: 2,
+  },
+  actions: {
     display: "flex",
     alignItems: "center",
-    zIndex: 2,
+    position: "relative",
+    top: "2px",
+    marginRight: "4px",
   },
   segmentGroup: {
     display: "flex",
@@ -117,6 +131,7 @@ interface TitleBarProps {
   locale: Locale;
   editor: Editor | null;
   paragraphSpacing: ParagraphSpacing;
+  documentTitle?: string;
   onToggleEditing: () => void;
   onNewNote: () => void;
   onImportFile: () => void;
@@ -134,6 +149,7 @@ export function TitleBar({
   locale,
   editor,
   paragraphSpacing,
+  documentTitle,
   onToggleEditing,
   onNewNote,
   onImportFile,
@@ -167,6 +183,12 @@ export function TitleBar({
       </div>
 
       <div className={styles.dragRegion} data-tauri-drag-region />
+
+      {documentTitle && (
+        <div className={styles.documentTitle} data-tauri-drag-region>
+          {documentTitle}
+        </div>
+      )}
 
       <div className={styles.actions}>
         <div className={styles.segmentGroup}>
