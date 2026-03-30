@@ -37,29 +37,35 @@ export function useMarkdownState(): MarkdownState {
     setIsDirty(true);
   }, []);
 
-  /** CodeMirror → Tiptap 동기화 (ReadonlyGuard bypass 포함) */
-  const syncCmToTiptap = useCallback(() => {
+  /**
+   * 현재 활성 편집기에서 최신 마크다운을 직접 읽어 state를 동기화.
+   * dirty 플래그를 보지 않고 항상 직접 읽되, 값이 바뀐 경우에만 갱신.
+   */
+  const flushCurrentEditor = useCallback(() => {
+    const editor = editorRef.current;
+    const current = editorMode === "markdown"
+      ? codemirrorValueRef.current
+      : editor?.getMarkdown() ?? markdown;
+
+    if (current !== markdown) {
+      setMarkdown(current);
+      codemirrorValueRef.current = current;
+    }
+    setTiptapDirty(false);
+    return current;
+  }, [editorMode, markdown]);
+
+  /** 반대편 편집기에 콘텐츠를 로드 (값이 바뀐 경우에만) */
+  const loadIntoTiptap = useCallback((md: string) => {
     const editor = editorRef.current;
     if (!editor) return;
-    const cmValue = codemirrorValueRef.current;
-    setMarkdown(cmValue);
     const wasReadonly = editor.storage.readonlyGuard.readonly;
     editor.storage.readonlyGuard.readonly = false;
-    editor.commands.setContent(cmValue, {
+    editor.commands.setContent(md, {
       emitUpdate: false,
       contentType: "markdown",
     });
     editor.storage.readonlyGuard.readonly = wasReadonly;
-  }, []);
-
-  /** Tiptap에서 현재 마크다운을 읽어 state에 반영 (항상 직접 읽음) */
-  const flushTiptap = useCallback(() => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    const md = editor.getMarkdown();
-    setMarkdown(md);
-    codemirrorValueRef.current = md;
-    setTiptapDirty(false);
   }, []);
 
   const toggleEditing = useCallback(() => {
@@ -67,10 +73,9 @@ export function useMarkdownState(): MarkdownState {
     if (!editor) return;
 
     if (isEditing) {
-      if (editorMode === "richtext") {
-        flushTiptap();
-      } else {
-        syncCmToTiptap();
+      const md = flushCurrentEditor();
+      if (editorMode === "markdown") {
+        loadIntoTiptap(md);
         setEditorMode("richtext");
       }
       setIsEditing(false);
@@ -78,21 +83,22 @@ export function useMarkdownState(): MarkdownState {
       setEditorMode("richtext");
       setIsEditing(true);
     }
-  }, [isEditing, editorMode, flushTiptap, syncCmToTiptap]);
+  }, [isEditing, editorMode, flushCurrentEditor, loadIntoTiptap]);
 
   const switchEditorMode = useCallback(() => {
     const editor = editorRef.current;
     if (!editor || !isEditing) return;
 
+    const md = flushCurrentEditor();
+
     if (editorMode === "richtext") {
-      // 항상 Tiptap에서 직접 현재 콘텐츠를 읽어 동기화
-      flushTiptap();
+      codemirrorValueRef.current = md;
       setEditorMode("markdown");
     } else {
-      syncCmToTiptap();
+      loadIntoTiptap(md);
       setEditorMode("richtext");
     }
-  }, [isEditing, editorMode, flushTiptap, syncCmToTiptap]);
+  }, [isEditing, editorMode, flushCurrentEditor, loadIntoTiptap]);
 
   const setEditing = useCallback((editing: boolean) => {
     setEditorMode("richtext");
