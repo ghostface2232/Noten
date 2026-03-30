@@ -359,8 +359,10 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     }, []);
 
     const handleUpdate = useCallback((currentEditor: Editor, isPaste: boolean) => {
-      dirtyRef.current = true;
-      onDirtyChange(true);
+      if (!dirtyRef.current) {
+        dirtyRef.current = true;
+        onDirtyChange(true);
+      }
 
       if (spellcheckRef.current && isPaste) {
         scheduleSpellcheckRefresh(currentEditor, true);
@@ -438,7 +440,13 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     useEffect(() => {
       if (editor) {
         editor.storage.readonlyGuard.readonly = !editable;
-        if (!editable) dirtyRef.current = false;
+        if (!editable) {
+          dirtyRef.current = false;
+          // Read 모드 전환 시 이미지 선택/핸들/아웃라인 해제
+          if (editor.state.selection instanceof NodeSelection) {
+            editor.commands.setTextSelection(0);
+          }
+        }
       }
     }, [editor, editable]);
 

@@ -2,6 +2,7 @@ import { Extension, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
+import { bytesToDataUrl, mimeFromExt } from "../utils/imageUtils";
 
 const IMAGE_MIME = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
@@ -14,30 +15,6 @@ function loadImageSize(src: string): Promise<{ width: number; height: number }> 
     img.onerror = () => resolve({ width: 0, height: 0 });
     img.src = src;
   });
-}
-
-function bytesToDataUrl(bytes: Uint8Array, mimeType: string): string {
-  const chunkSize = 8192;
-  const parts: string[] = [];
-
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    parts.push(String.fromCharCode(...bytes.subarray(i, i + chunkSize)));
-  }
-
-  return `data:${mimeType};base64,${btoa(parts.join(""))}`;
-}
-
-function mimeFromExt(ext: string): string {
-  const map: Record<string, string> = {
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    gif: "image/gif",
-    webp: "image/webp",
-    svg: "image/svg+xml",
-  };
-
-  return map[ext.toLowerCase()] ?? "image/png";
 }
 
 export async function pickAndInsertImage(editor: Editor): Promise<void> {

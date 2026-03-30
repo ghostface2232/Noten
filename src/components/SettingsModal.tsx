@@ -250,6 +250,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
   const [appVersion, setAppVersion] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const { state: updaterState, checkForUpdate, installUpdate, restartApp } = useUpdater();
+  const subtleBtnStyle: React.CSSProperties = { fontSize: "13px", fontWeight: 400, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" };
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
@@ -415,11 +416,11 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                         {settings.notesDirectory || i("settings.notesDirectory.default")}
                       </span>
                     </Tooltip>
-                    <Button size="medium" appearance="subtle" onClick={onChangeNotesDir} style={{ fontSize: "13px", fontWeight: 400, borderRadius: CONTROL_RADIUS, minWidth: 0, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}>
+                    <Button size="medium" appearance="subtle" onClick={onChangeNotesDir} style={{ ...subtleBtnStyle, minWidth: 0 }}>
                       {i("settings.notesDirectory.change")}
                     </Button>
                     {settings.notesDirectory && (
-                      <Button size="medium" appearance="subtle" onClick={onResetNotesDir} style={{ fontSize: "13px", fontWeight: 400, borderRadius: CONTROL_RADIUS, minWidth: 0, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}>
+                      <Button size="medium" appearance="subtle" onClick={onResetNotesDir} style={{ ...subtleBtnStyle, minWidth: 0 }}>
                         {i("settings.notesDirectory.reset")}
                       </Button>
                     )}
@@ -525,7 +526,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                       size="medium"
                       appearance="subtle"
                       onClick={() => setConfirmOpen(true)}
-                      style={{ fontSize: "13px", fontWeight: 400, color: tokens.colorPaletteRedForeground1, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
+                      style={{ ...subtleBtnStyle, color: tokens.colorPaletteRedForeground1 }}
                     >
                       {i("trash.emptyAll")}
                     </Button>
@@ -554,7 +555,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                               size="medium"
                               appearance="subtle"
                               onClick={() => onRestoreNote(note.id)}
-                              style={{ fontSize: "13px", fontWeight: 400, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
+                              style={subtleBtnStyle}
                             >
                               {i("trash.restore")}
                             </Button>
@@ -562,7 +563,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                               size="medium"
                               appearance="subtle"
                               onClick={() => onPermanentlyDeleteNote(note.id)}
-                              style={{ fontSize: "13px", fontWeight: 400, color: tokens.colorPaletteRedForeground1, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
+                              style={{ ...subtleBtnStyle, color: tokens.colorPaletteRedForeground1 }}
                             >
                               {i("trash.deletePermanently")}
                             </Button>
@@ -596,7 +597,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                         size="medium"
                         appearance="subtle"
                         onClick={checkForUpdate}
-                        style={{ fontSize: "13px", fontWeight: 400, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
+                        style={subtleBtnStyle}
                       >
                         {i("about.checkUpdate")}
                       </Button>
@@ -727,7 +728,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
             size="medium"
             appearance="subtle"
             onClick={() => setConfirmOpen(false)}
-            style={{ fontSize: "13px", fontWeight: 400, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
+            style={subtleBtnStyle}
           >
             {i("trash.cancel")}
           </Button>
@@ -738,7 +739,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
               setConfirmOpen(false);
               await onEmptyTrash();
             }}
-            style={{ fontSize: "13px", fontWeight: 400, color: tokens.colorPaletteRedForeground1, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
+            style={{ ...subtleBtnStyle, color: tokens.colorPaletteRedForeground1 }}
           >
             {i("trash.confirmDelete")}
           </Button>

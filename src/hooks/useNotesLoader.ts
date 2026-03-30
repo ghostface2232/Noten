@@ -288,12 +288,13 @@ export async function saveManifest(
   const trashed = trashedNotesCache;
   const manifest: Manifest = {
     version: 1,
-    notes: docs.map(({ id, filePath, fileName, createdAt, updatedAt }) => ({
+    notes: docs.map(({ id, filePath, fileName, createdAt, updatedAt, customName }) => ({
       id,
       filePath,
       fileName,
       createdAt,
       updatedAt,
+      ...(customName ? { customName } : {}),
     })),
     activeNoteId: activeId,
     groups: groups && groups.length > 0 ? groups : undefined,
