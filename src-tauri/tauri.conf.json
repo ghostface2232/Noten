@@ -42,8 +42,6 @@
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico",
-        "headerImage": null,
-        "sidebarImage": null,
         "installerHooks": "nsis-hooks.nsh",
         "installMode": "perUser"
       }
