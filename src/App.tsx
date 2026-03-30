@@ -671,6 +671,7 @@ function App() {
           locale={locale}
           editor={tiptapEditor}
           paragraphSpacing={settings.paragraphSpacing}
+          documentTitle={activeDoc?.fileName}
           onToggleEditing={state.toggleEditing}
           onNewNote={fs.newNote}
           onImportFile={fs.importFile}

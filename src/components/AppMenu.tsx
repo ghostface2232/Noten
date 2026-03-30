@@ -8,7 +8,6 @@ import {
   ArrowExportUpRegular,
   ArrowUndoRegular,
   ArrowRedoRegular,
-  SearchRegular,
   WeatherMoonRegular,
   WeatherSunnyRegular,
   TextParagraphRegular,
@@ -257,10 +256,6 @@ export function AppMenu({
               <span>{i("menu.redo")}</span><span className={styles.shortcut}>Ctrl+Y</span>
             </Button>
             {/* ── View ── */}
-
-            <Button appearance="subtle" icon={<SearchRegular />} className={styles.menuItem} onClick={() => act(() => {})} size="small" disabled>
-              <span>{i("menu.find")}</span><span className={styles.shortcut}>Ctrl+F</span>
-            </Button>
 
             <div className={styles.groupLabelSpaced}>{i("menu.view")}</div>
             <Button appearance="subtle" icon={isDark ? <WeatherSunnyRegular /> : <WeatherMoonRegular />} className={styles.menuItem} onClick={() => act(onToggleTheme)} size="small">
