@@ -159,11 +159,11 @@ async function readFileContent(path: string): Promise<string> {
 
 // --- Startup reconciliation: folder ↔ manifest ---
 
-function getFileBaseName(filePath: string): string {
+export function getFileBaseName(filePath: string): string {
   return filePath.replace(/\\/g, "/").split("/").pop() ?? "";
 }
 
-async function reconcileWithFolder(
+export async function reconcileFolder(
   dir: string,
   docs: NoteDoc[],
   groups: NoteGroup[],
@@ -295,7 +295,7 @@ export function useNotesLoader(
 
           // Reconcile: pick up new .md files not in manifest, drop missing ones
           const { docs: reconciled, groups: reconciledGroups, changed: reconcileChanged } =
-            await reconcileWithFolder(dir, loaded, manifest.groups ?? [], locale);
+            await reconcileFolder(dir, loaded, manifest.groups ?? [], locale);
 
           const finalDocs = reconcileChanged ? reconciled : loaded;
           const finalGroups = reconcileChanged ? reconciledGroups : (manifest.groups ?? []);

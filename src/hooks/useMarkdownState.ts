@@ -55,8 +55,13 @@ export function useMarkdownState(): MarkdownState {
     if (!editor) return;
     const cmValue = codemirrorValueRef.current;
     setMarkdown(cmValue);
+    const wasReadonly = editor.storage.readonlyGuard.readonly;
     editor.storage.readonlyGuard.readonly = false;
-    editor.commands.setContent(cmValue, { contentType: "markdown" });
+    editor.commands.setContent(cmValue, {
+      emitUpdate: false,
+      contentType: "markdown",
+    });
+    editor.storage.readonlyGuard.readonly = wasReadonly;
   }, []);
 
   const toggleEditing = useCallback(() => {
