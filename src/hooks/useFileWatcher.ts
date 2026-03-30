@@ -4,6 +4,7 @@ import type { WatchEvent } from "@tauri-apps/plugin-fs";
 import { getNotesDir, deriveTitle, saveManifest, migrationInProgress, reconcileFolder } from "./useNotesLoader";
 import type { NoteDoc, NoteGroup } from "./useNotesLoader";
 import { isOwnWrite, pruneOwnWrites } from "./ownWriteTracker";
+import { getFileTimestamps } from "../utils/fileTimestamps";
 import type { Locale, NotesSortOrder } from "./useSettings";
 
 // Re-export markOwnWrite for existing consumers
@@ -116,7 +117,6 @@ export function useFileWatcher(
         return changed ? next : prev;
       });
 
-      return;
     }
 
     // ── Handle .md file changes ──
@@ -148,6 +148,8 @@ export function useFileWatcher(
         // Skip if content unchanged
         if (content === doc.content) continue;
 
+        const { updatedAt: fileUpdatedAt } = await getFileTimestamps(doc.filePath);
+
         setDocs((prev) => {
           const idx = prev.findIndex((d) => d.id === doc.id);
           if (idx < 0) return prev;
@@ -159,7 +161,7 @@ export function useFileWatcher(
             ...prev[idx],
             content,
             fileName: autoTitle,
-            updatedAt: Date.now(),
+            updatedAt: fileUpdatedAt,
             isDirty: false,
           };
 
