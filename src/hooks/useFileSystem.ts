@@ -285,10 +285,10 @@ export function useFileSystem(
     const doc = docs[index];
     if (!doc) return;
 
-    // Capture group BEFORE cleanupDeletedNote removes it
+    // Capture group before it gets cleaned up below
     const group = getGroupForNote?.(doc.id) ?? null;
 
-    // Move file to .trash instead of permanent delete
+    // Move file to .trash — abort entire delete if copy fails
     if (doc.filePath) {
       try {
         const trashDir = await ensureTrashDir();
@@ -316,13 +316,9 @@ export function useFileSystem(
           emitTrashUpdated([...(trashedNotesRef.current ?? []), trashedNote]);
         }
       } catch {
-        // Copy to .trash failed — fall back to permanent delete
-        try {
-          markOwnWrite(doc.filePath);
-          await remove(doc.filePath);
-        } catch {
-          console.warn("Failed to delete note file:", doc.filePath);
-        }
+        // Copy to .trash failed — abort deletion to preserve user data
+        console.warn("Failed to move note to trash, deletion aborted:", doc.filePath);
+        return;
       }
     }
 
@@ -486,6 +482,13 @@ export function useFileSystem(
 
     cacheCurrentContent();
 
+    // Remove from trashed list BEFORE sortAndPersistDocs so saveManifest
+    // reads the updated trashedNotesCache (without the restored note)
+    if (setTrashedNotes) {
+      setTrashedNotes((prev) => prev.filter((n) => n.id !== trashedNoteId));
+      emitTrashUpdated((trashedNotesRef.current ?? []).filter((n) => n.id !== trashedNoteId));
+    }
+
     const nextDocs = [...docs, restoredDoc];
     sortAndPersistDocs(nextDocs, restoredDoc.id, notesSortOrder, setDocs, setActiveIndex, groupsRef.current);
     emitDocCreated(restoredDoc);
@@ -499,12 +502,6 @@ export function useFileSystem(
       if (groupExists) {
         addNoteToGroup(trashed.id, trashed.groupId);
       }
-    }
-
-    // Remove from trashed list and persist
-    if (setTrashedNotes) {
-      setTrashedNotes((prev) => prev.filter((n) => n.id !== trashedNoteId));
-      emitTrashUpdated((trashedNotesRef.current ?? []).filter((n) => n.id !== trashedNoteId));
     }
   }, [cacheCurrentContent, docs, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef, setTrashedNotes, addNoteToGroup]);
 
