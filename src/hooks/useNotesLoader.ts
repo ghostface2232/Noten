@@ -4,6 +4,7 @@ import { mkdir, readTextFile, writeTextFile, readDir } from "@tauri-apps/plugin-
 import { markOwnWrite } from "./ownWriteTracker";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
+import { getFileTimestamps } from "../utils/fileTimestamps";
 
 export interface NoteDoc {
   id: string;
@@ -194,15 +195,15 @@ export async function reconcileFolder(
     try { content = await readTextFile(filePath); } catch { continue; }
 
     const id = name.replace(/\.md$/, "");
-    const timestamp = Date.now();
+    const { createdAt, updatedAt } = await getFileTimestamps(filePath);
     nextDocs.push({
       id,
       filePath,
       fileName: deriveTitle(content) || getDefaultDocumentTitle(locale),
       isDirty: false,
       content,
-      createdAt: timestamp,
-      updatedAt: timestamp,
+      createdAt,
+      updatedAt,
     });
     changed = true;
   }
@@ -326,15 +327,15 @@ export function useNotesLoader(
                 const id = entry.name!.replace(/\.md$/, "");
                 const filePath = `${dir}/${entry.name}`;
                 const content = await readFileContent(filePath);
-                const timestamp = Date.now();
+                const { createdAt, updatedAt } = await getFileTimestamps(filePath);
                 return {
                   id,
                   filePath,
                   fileName: deriveTitle(content) || getDefaultDocumentTitle(locale),
                   isDirty: false,
                   content,
-                  createdAt: timestamp,
-                  updatedAt: timestamp,
+                  createdAt,
+                  updatedAt,
                 } as NoteDoc;
               }),
             );
