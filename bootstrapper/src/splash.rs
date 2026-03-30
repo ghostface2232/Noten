@@ -19,7 +19,7 @@ use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 const WM_WORK_DONE: u32 = WM_USER + 1;
-const WM_LAUNCH_APP: u32 = WM_USER + 2;
+const WM_PRIMARY_ACTION: u32 = WM_USER + 2;
 const SPLASH_W: i32 = 480;
 const SPLASH_H: i32 = 300;
 const ANIMATION_TIMER_ID: usize = 1;
@@ -65,12 +65,21 @@ struct LogoAsset {
     _stream: IStream,
 }
 
+#[derive(Clone, Copy)]
+pub enum CompletionAction {
+    LaunchApp,
+    CloseWindow,
+}
+
 #[allow(dead_code)]
 struct SplashData {
     status_ko: String,
     status_en: String,
+    completed_status_ko: String,
+    completed_status_en: String,
     button_label_ko: String,
     button_label_en: String,
+    completion_action: CompletionAction,
     logo: Option<LogoAsset>,
     font_handles: Vec<HANDLE>,
     dpi: u32,
@@ -178,7 +187,16 @@ fn load_logo_asset() -> Option<LogoAsset> {
     }
 }
 
-pub fn run_splash<F: FnOnce() + Send + 'static>(status_ko: &str, status_en: &str, work: F) {
+pub fn run_splash<F: FnOnce() + Send + 'static>(
+    status_ko: &str,
+    status_en: &str,
+    completed_status_ko: &str,
+    completed_status_en: &str,
+    button_label_ko: &str,
+    button_label_en: &str,
+    completion_action: CompletionAction,
+    work: F,
+) {
     unsafe {
         let mut gdi_token: usize = 0;
         let gdi_input = GdiplusStartupInput {
@@ -213,8 +231,11 @@ pub fn run_splash<F: FnOnce() + Send + 'static>(status_ko: &str, status_en: &str
         let data = Box::new(SplashData {
             status_ko: status_ko.to_string(),
             status_en: status_en.to_string(),
-            button_label_ko: "앱 실행".to_string(),
-            button_label_en: "Launch App".to_string(),
+            completed_status_ko: completed_status_ko.to_string(),
+            completed_status_en: completed_status_en.to_string(),
+            button_label_ko: button_label_ko.to_string(),
+            button_label_en: button_label_en.to_string(),
+            completion_action,
             logo: load_logo_asset(),
             font_handles,
             dpi,
@@ -326,14 +347,20 @@ unsafe extern "system" fn wnd_proc(
                     let data = &mut *(data_ptr as *mut SplashData);
                     data.is_completed = true;
                     data.button_hovered = false;
-                    data.status_ko = "Complete".to_string();
-                    data.status_en = "Complete".to_string();
+                    data.status_ko = data.completed_status_ko.clone();
+                    data.status_en = data.completed_status_en.clone();
                 }
                 let _ = InvalidateRect(Some(hwnd), None, false);
                 LRESULT(0)
             }
-            WM_LAUNCH_APP => {
-                installer::launch_app();
+            WM_PRIMARY_ACTION => {
+                let data_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+                if data_ptr != 0 {
+                    let data = &*(data_ptr as *const SplashData);
+                    if matches!(data.completion_action, CompletionAction::LaunchApp) {
+                        installer::launch_app();
+                    }
+                }
                 let _ = DestroyWindow(hwnd);
                 LRESULT(0)
             }
@@ -361,7 +388,7 @@ unsafe extern "system" fn wnd_proc(
                         let x = get_x_lparam(lparam);
                         let y = get_y_lparam(lparam);
                         if point_in_rect(x, y, &launch_button_rect(data)) {
-                            let _ = PostMessageW(Some(hwnd), WM_LAUNCH_APP, WPARAM(0), LPARAM(0));
+                            let _ = PostMessageW(Some(hwnd), WM_PRIMARY_ACTION, WPARAM(0), LPARAM(0));
                             return LRESULT(0);
                         }
                     }

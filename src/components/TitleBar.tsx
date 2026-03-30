@@ -29,19 +29,25 @@ const useStyles = makeStyles({
     alignItems: "center",
     gap: "8px",
     minWidth: 0,
-    position: "relative",
-    top: "2px",
     zIndex: 1,
   },
   dragRegion: {
     flex: 1,
     height: "100%",
   },
+  appTitle: {
+    fontSize: "13px",
+    fontWeight: 500,
+    color: tokens.colorNeutralForeground1,
+    opacity: 1,
+    whiteSpace: "nowrap" as const,
+    flexShrink: 0,
+  },
   documentTitle: {
-    fontSize: "12px",
+    fontSize: "13px",
     fontWeight: 400,
     color: tokens.colorNeutralForeground1,
-    opacity: 0.7,
+    opacity: 0.55,
     whiteSpace: "nowrap" as const,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -96,25 +102,50 @@ const useStyles = makeStyles({
     display: "flex",
     alignItems: "center",
     height: "100%",
-    position: "relative",
-    top: "2px",
     marginLeft: "auto",
     zIndex: 3,
   },
   controlBtn: {
+    width: "46px",
     minWidth: "46px",
     height: "40px",
     borderRadius: "0",
     border: "none",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    margin: "0",
+    padding: "0",
+    lineHeight: 1,
+    alignSelf: "stretch",
   },
   closeBtn: {
+    width: "46px",
     minWidth: "46px",
     height: "40px",
     borderRadius: "0",
     border: "none",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    margin: "0",
+    padding: "0",
+    lineHeight: 1,
+    alignSelf: "stretch",
+    color: tokens.colorNeutralForeground1,
+    backgroundColor: "transparent",
     ":hover": {
-      backgroundColor: "#c42b1c",
-      color: "#ffffff",
+      backgroundColor: "#c42b1c !important",
+      color: "#ffffff !important",
+    },
+    ":active": {
+      backgroundColor: "#a42618 !important",
+      color: "#ffffff !important",
+    },
+    ":focus-visible": {
+      outline: "none",
+      backgroundColor: "#c42b1c !important",
+      color: "#ffffff !important",
     },
   },
 });
@@ -174,6 +205,9 @@ export function TitleBar({
           onExportPdf={onExportPdf}
           onExportRtf={onExportRtf}
         />
+        <div className={styles.appTitle} data-tauri-drag-region>
+          {i("app.name")}
+        </div>
         {documentTitle && (
           <div className={styles.documentTitle} data-tauri-drag-region>
             {documentTitle}
