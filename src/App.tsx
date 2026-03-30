@@ -314,6 +314,8 @@ function App() {
     }
   }, [isLoading, docs, activeIndex]);
 
+  const flushAutoSaveRef = useRef<(() => Promise<void>) | null>(null);
+
   const fs = useFileSystem(
     state,
     tiptapRef,
@@ -328,10 +330,11 @@ function App() {
     noteGroups.getGroupForNote,
     trashedNotes,
     setTrashedNotes,
+    flushAutoSaveRef,
   );
 
   // 자동 저장
-  useAutoSave(
+  const { scheduleAutoSave, flushAutoSave } = useAutoSave(
     state,
     tiptapRef,
     docs,
@@ -341,6 +344,7 @@ function App() {
     locale,
     settings.notesSortOrder,
   );
+  flushAutoSaveRef.current = flushAutoSave;
 
   // URL 쿼리 파라미터로 전달된 노트 열기 (새 창에서 열기)
   const fileParamHandled = useRef(false);
@@ -636,14 +640,20 @@ function App() {
   const handleTiptapDirty = useCallback(
     (dirty: boolean) => {
       state.setTiptapDirty(dirty);
-      if (dirty) state.setIsDirty(true);
+      if (dirty) {
+        state.setIsDirty(true);
+        scheduleAutoSave();
+      }
     },
-    [state.setTiptapDirty, state.setIsDirty],
+    [state.setTiptapDirty, state.setIsDirty, scheduleAutoSave],
   );
 
   const handleCodemirrorChange = useCallback(
-    (value: string) => state.updateMarkdown(value),
-    [state.updateMarkdown],
+    (value: string) => {
+      state.updateMarkdown(value);
+      scheduleAutoSave();
+    },
+    [state.updateMarkdown, scheduleAutoSave],
   );
 
   const showCodeMirror = state.isEditing && state.editorMode === "markdown";

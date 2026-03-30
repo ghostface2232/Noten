@@ -483,7 +483,7 @@ function formatTimestamp(ts: number, locale: Locale): string {
 interface SidebarProps {
   docs: NoteDoc[];
   activeIndex: number;
-  onSwitchDocument: (index: number) => void;
+  onSwitchDocument: (index: number) => void | Promise<void>;
   onNewNote: () => void;
   onDeleteNote: (index: number) => void;
   onDuplicateNote: (index: number) => void;
