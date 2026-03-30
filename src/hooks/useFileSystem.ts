@@ -8,6 +8,7 @@ import {
   sortNotes,
   getFileBaseName,
   ensureTrashDir,
+  getTrashedNotesCache,
   type NoteDoc,
   type NoteGroup,
   type TrashedNote,
@@ -312,7 +313,7 @@ export function useFileSystem(
 
         if (setTrashedNotes) {
           setTrashedNotes((prev) => [...prev, trashedNote]);
-          emitTrashUpdated([...(trashedNotesRef.current ?? []), trashedNote]);
+          emitTrashUpdated(getTrashedNotesCache());
         }
       } catch {
         // Copy to .trash failed — abort deletion to preserve user data
@@ -485,7 +486,7 @@ export function useFileSystem(
     // reads the updated trashedNotesCache (without the restored note)
     if (setTrashedNotes) {
       setTrashedNotes((prev) => prev.filter((n) => n.id !== trashedNoteId));
-      emitTrashUpdated((trashedNotesRef.current ?? []).filter((n) => n.id !== trashedNoteId));
+      emitTrashUpdated(getTrashedNotesCache());
     }
 
     // Compute groups with restored note added back atomically
@@ -521,7 +522,7 @@ export function useFileSystem(
 
     if (setTrashedNotes) {
       setTrashedNotes((prev) => prev.filter((n) => n.id !== trashedNoteId));
-      emitTrashUpdated((trashedNotesRef.current ?? []).filter((n) => n.id !== trashedNoteId));
+      emitTrashUpdated(getTrashedNotesCache());
     }
 
     // Persist immediately — trash-only change, no sortAndPersistDocs to trigger it
