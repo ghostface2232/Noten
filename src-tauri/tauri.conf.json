@@ -52,7 +52,10 @@
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM3QTE1MTU4REE0MTc3NUEKUldSYWQwSGFXRkdoeDZBL1h2Y2JYQ2VQU3BLVm8xeDNFb05ybGs5dmNzMTM2VVRaRFN4OVRJdGwK",
       "endpoints": [
         "https://github.com/ghostface2232/Noten/releases/latest/download/latest.json"
-      ]
+      ],
+      "windows": {
+        "installMode": "quiet"
+      }
     }
   }
 }

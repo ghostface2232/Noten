@@ -1,6 +1,11 @@
+use std::env;
 use std::fs;
+use std::os::windows::process::CommandExt;
+use std::path::PathBuf;
 use std::process::Command;
 use tauri::{Listener, Manager};
+
+const CREATE_NO_WINDOW_FLAG: u32 = 0x08000000;
 
 #[tauri::command]
 async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
@@ -47,6 +52,97 @@ async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
     Ok(())
 }
 
+fn resolve_bootstrapper_path() -> Option<PathBuf> {
+    if let Ok(current_exe) = env::current_exe() {
+        if let Some(dir) = current_exe.parent() {
+            let path = dir.join("noten-setup.exe");
+            if path.exists() {
+                return Some(path);
+            }
+        }
+    }
+
+    let Ok(local_app_data) = env::var("LOCALAPPDATA") else {
+        return None;
+    };
+
+    let path = PathBuf::from(local_app_data)
+        .join("Noten")
+        .join("noten-setup.exe");
+    path.exists().then_some(path)
+}
+
+fn reg_query_value(reg_key: &str, value_name: &str) -> Option<String> {
+    let output = Command::new("reg.exe")
+        .creation_flags(CREATE_NO_WINDOW_FLAG)
+        .args(["query", reg_key, "/v", value_name])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn reg_add_value(reg_key: &str, value_name: &str, value_data: &str) -> Result<(), String> {
+    let output = Command::new("reg.exe")
+        .creation_flags(CREATE_NO_WINDOW_FLAG)
+        .args([
+            "add",
+            reg_key,
+            "/v",
+            value_name,
+            "/t",
+            "REG_SZ",
+            "/d",
+            value_data,
+            "/f",
+        ])
+        .output()
+        .map_err(|e| format!("failed to run reg.exe add: {e}"))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).into_owned())
+    }
+}
+
+fn ensure_bootstrapper_uninstall_string() {
+    let Some(bootstrapper_path) = resolve_bootstrapper_path() else {
+        return;
+    };
+
+    if !bootstrapper_path.exists() {
+        return;
+    }
+
+    let uninstall_string = format!("\"{}\" --uninstall", bootstrapper_path.display());
+    let expected = uninstall_string.to_ascii_lowercase();
+    let reg_key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Noten";
+
+    let uninstall_ok = reg_query_value(reg_key, "UninstallString")
+        .map(|value| value.to_ascii_lowercase().contains(&expected))
+        .unwrap_or(false);
+    let quiet_uninstall_ok = reg_query_value(reg_key, "QuietUninstallString")
+        .map(|value| value.to_ascii_lowercase().contains(&expected))
+        .unwrap_or(false);
+
+    if uninstall_ok && quiet_uninstall_ok {
+        return;
+    }
+
+    if let Err(err) = reg_add_value(reg_key, "UninstallString", &uninstall_string) {
+        eprintln!("failed to repair UninstallString: {err}");
+    }
+
+    if let Err(err) = reg_add_value(reg_key, "QuietUninstallString", &uninstall_string) {
+        eprintln!("failed to repair QuietUninstallString: {err}");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -57,6 +153,8 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![print_to_pdf])
         .setup(|app| {
+            std::thread::spawn(ensure_bootstrapper_uninstall_string);
+
             // Apply Mica to all existing windows
             for (_, window) in app.webview_windows() {
                 let _ = window.set_effects(tauri::utils::config::WindowEffectsConfig {

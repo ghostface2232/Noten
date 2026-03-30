@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+use std::os::windows::process::CommandExt;
+
+use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
@@ -61,6 +64,8 @@ fn schedule_self_delete() {
     );
 
     let _ = std::process::Command::new("cmd")
+        .creation_flags(CREATE_NO_WINDOW.0)
+        .current_dir(std::env::temp_dir())
         .args(["/c", &command])
         .spawn();
 }
