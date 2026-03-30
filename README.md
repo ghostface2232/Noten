@@ -1,6 +1,7 @@
 <p>
   <img src="public/Aa_icon_1024.png" alt="Aa Editor" width="128" height="128" />
 </p>
+
 # Aa Editor
 <p>
   A minimal, Mica-styled Markdown editor for Windows built with Tauri + React.
