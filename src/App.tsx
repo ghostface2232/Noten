@@ -331,7 +331,7 @@ function App() {
   );
 
   // 자동 저장
-  useAutoSave(
+  const { scheduleAutoSave } = useAutoSave(
     state,
     tiptapRef,
     docs,
@@ -636,14 +636,20 @@ function App() {
   const handleTiptapDirty = useCallback(
     (dirty: boolean) => {
       state.setTiptapDirty(dirty);
-      if (dirty) state.setIsDirty(true);
+      if (dirty) {
+        state.setIsDirty(true);
+        scheduleAutoSave();
+      }
     },
-    [state.setTiptapDirty, state.setIsDirty],
+    [state.setTiptapDirty, state.setIsDirty, scheduleAutoSave],
   );
 
   const handleCodemirrorChange = useCallback(
-    (value: string) => state.updateMarkdown(value),
-    [state.updateMarkdown],
+    (value: string) => {
+      state.updateMarkdown(value);
+      scheduleAutoSave();
+    },
+    [state.updateMarkdown, scheduleAutoSave],
   );
 
   const showCodeMirror = state.isEditing && state.editorMode === "markdown";
