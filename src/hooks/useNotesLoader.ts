@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { appDataDir } from "@tauri-apps/api/path";
 import { mkdir, readTextFile, writeTextFile, readDir } from "@tauri-apps/plugin-fs";
+import { markOwnWrite } from "./ownWriteTracker";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 
@@ -99,7 +100,9 @@ async function readManifestFromFile(dir: string): Promise<Manifest | null> {
 
 async function writeManifestToFile(dir: string, manifest: Manifest): Promise<void> {
   const sep = dir.endsWith("/") || dir.endsWith("\\") ? "" : "/";
-  await writeTextFile(`${dir}${sep}manifest.json`, JSON.stringify(manifest, null, 2));
+  const manifestPath = `${dir}${sep}manifest.json`;
+  markOwnWrite(manifestPath);
+  await writeTextFile(manifestPath, JSON.stringify(manifest, null, 2));
 }
 
 // --- localStorage fallback (backup / migration source) ---

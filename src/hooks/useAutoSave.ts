@@ -8,7 +8,7 @@ import type { MarkdownState } from "./useMarkdownState";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { emitDocUpdated } from "./useWindowSync";
-import { markOwnWrite } from "./useFileWatcher";
+import { markOwnWrite } from "./ownWriteTracker";
 
 const DEBOUNCE_MS = 1000;
 
@@ -47,7 +47,7 @@ export function useAutoSave(
       const content = getCurrentMarkdown(latestState, latestEditorRef);
 
       try {
-        markOwnWrite();
+        markOwnWrite(target.filePath);
         await writeTextFile(target.filePath, content);
 
         const nextDocs = latestDocs.map((docEntry) => {
