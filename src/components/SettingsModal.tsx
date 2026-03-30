@@ -248,6 +248,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
   const [tab, setTab] = useState<TabId>("general");
   const [appVersion, setAppVersion] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const { state: updaterState, checkForUpdate, installUpdate, restartApp } = useUpdater();
 
   useEffect(() => {
@@ -413,11 +414,11 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                         {settings.notesDirectory || i("settings.notesDirectory.default")}
                       </span>
                     </Tooltip>
-                    <Button size="medium" appearance="subtle" onClick={onChangeNotesDir} style={{ fontSize: "13px", borderRadius: CONTROL_RADIUS, minWidth: 0, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}>
+                    <Button size="medium" appearance="subtle" onClick={onChangeNotesDir} style={{ fontSize: "13px", fontWeight: 400, borderRadius: CONTROL_RADIUS, minWidth: 0, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}>
                       {i("settings.notesDirectory.change")}
                     </Button>
                     {settings.notesDirectory && (
-                      <Button size="medium" appearance="subtle" onClick={onResetNotesDir} style={{ fontSize: "13px", borderRadius: CONTROL_RADIUS, minWidth: 0, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}>
+                      <Button size="medium" appearance="subtle" onClick={onResetNotesDir} style={{ fontSize: "13px", fontWeight: 400, borderRadius: CONTROL_RADIUS, minWidth: 0, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}>
                         {i("settings.notesDirectory.reset")}
                       </Button>
                     )}
@@ -520,14 +521,10 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                   </Label>
                   {trashedNotes.length > 0 && (
                     <Button
-                      size="small"
+                      size="medium"
                       appearance="subtle"
-                      onClick={async () => {
-                        if (confirm(i("trash.emptyAllConfirm"))) {
-                          await onEmptyTrash();
-                        }
-                      }}
-                      style={{ fontSize: "12px", color: tokens.colorPaletteRedForeground1, borderRadius: CONTROL_RADIUS }}
+                      onClick={() => setConfirmOpen(true)}
+                      style={{ fontSize: "13px", fontWeight: 400, color: tokens.colorPaletteRedForeground1, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
                     >
                       {i("trash.emptyAll")}
                     </Button>
@@ -553,18 +550,18 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                           </div>
                           <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
                             <Button
-                              size="small"
+                              size="medium"
                               appearance="subtle"
                               onClick={() => onRestoreNote(note.id)}
-                              style={{ fontSize: "12px", borderRadius: CONTROL_RADIUS }}
+                              style={{ fontSize: "13px", fontWeight: 400, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
                             >
                               {i("trash.restore")}
                             </Button>
                             <Button
-                              size="small"
+                              size="medium"
                               appearance="subtle"
                               onClick={() => onPermanentlyDeleteNote(note.id)}
-                              style={{ fontSize: "12px", color: tokens.colorPaletteRedForeground1, borderRadius: CONTROL_RADIUS }}
+                              style={{ fontSize: "13px", fontWeight: 400, color: tokens.colorPaletteRedForeground1, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
                             >
                               {i("trash.deletePermanently")}
                             </Button>
@@ -589,7 +586,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                         style={{ width: "40px", height: "40px", borderRadius: "8px" }}
                       />
                       <div>
-                        <div style={{ fontSize: "16px", color: tokens.colorNeutralForeground1 }}>Noten</div>
+                        <div style={{ fontSize: "16px", color: tokens.colorNeutralForeground1 }}>{i("app.name")}</div>
                         <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3 }}>v{appVersion}</div>
                       </div>
                     </div>
@@ -705,6 +702,47 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
           </div>
         </div>
       </DialogSurface>
+
+      {/* Empty All confirm dialog */}
+      <Dialog open={confirmOpen} onOpenChange={(_, data) => { if (!data.open) setConfirmOpen(false); }}>
+        <DialogSurface
+          style={{
+            maxWidth: "340px",
+            padding: "24px 20px 16px",
+            borderRadius: "12px",
+            background: themeStyles.micaBg,
+            backdropFilter: "saturate(120%) blur(60px)",
+            WebkitBackdropFilter: "saturate(120%) blur(60px)",
+            border: `1px solid ${themeStyles.borderColor}`,
+            boxShadow: themeStyles.surfaceShadow,
+          }}
+        >
+          <div style={{ fontSize: "14px", color: tokens.colorNeutralForeground1, lineHeight: "1.5", textAlign: "center" }}>
+            {i("trash.emptyAllConfirm")}
+          </div>
+          <div style={{ display: "flex", justifyContent: "center", gap: "8px", marginTop: "20px" }}>
+            <Button
+              size="medium"
+              appearance="subtle"
+              onClick={() => setConfirmOpen(false)}
+              style={{ fontSize: "13px", fontWeight: 400, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
+            >
+              {i("trash.cancel")}
+            </Button>
+            <Button
+              size="medium"
+              appearance="subtle"
+              onClick={async () => {
+                setConfirmOpen(false);
+                await onEmptyTrash();
+              }}
+              style={{ fontSize: "13px", fontWeight: 400, color: tokens.colorPaletteRedForeground1, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
+            >
+              {i("trash.confirmDelete")}
+            </Button>
+          </div>
+        </DialogSurface>
+      </Dialog>
     </Dialog>
   );
 }

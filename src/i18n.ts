@@ -162,18 +162,25 @@ const dict = {
   },
 
   /* ─── Trash ─── */
-  "settings.tab.trash": { en: "Recently Deleted", ko: "최근 삭제" },
+  "settings.tab.trash": { en: "Recently Deleted", ko: "최근 삭제한 노트" },
   "trash.count": { en: "{n} deleted notes", ko: "삭제된 노트 {n}개" },
   "trash.empty": { en: "No deleted notes", ko: "삭제된 노트가 없습니다" },
-  "trash.emptyAll": { en: "Empty trash", ko: "휴지통 비우기" },
+  "trash.emptyAll": { en: "Empty All", ko: "모두 비우기" },
   "trash.emptyAllConfirm": { en: "Permanently delete all trashed notes?", ko: "삭제된 모든 노트를 영구 삭제하시겠습니까?" },
   "trash.restore": { en: "Restore", ko: "복원" },
-  "trash.deletePermanently": { en: "Delete permanently", ko: "영구 삭제" },
+  "trash.deletePermanently": { en: "Delete", ko: "삭제" },
   "trash.daysLeft": { en: "{n} days left", ko: "{n}일 남음" },
+  "trash.confirmDelete": { en: "Delete", ko: "삭제" },
+  "trash.cancel": { en: "Cancel", ko: "취소" },
 
   /* ─── Search ─── */
   "search.placeholder": { en: "Find in document", ko: "문서에서 찾기" },
   "search.sidebarPlaceholder": { en: "Search notes", ko: "노트 검색" },
+  "search.label": { en: "Search", ko: "검색" },
+
+  /* ─── Dialog ─── */
+  "dialog.merge": { en: "Merge", ko: "병합" },
+  "dialog.overwrite": { en: "Overwrite", ko: "덮어쓰기" },
 
   /* ─── App Menu ─── */
   "menu.file": { en: "File", ko: "파일" },

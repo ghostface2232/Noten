@@ -480,8 +480,8 @@ function App() {
     if (destHasManifest) {
       const merge = await ask(t("settings.notesDirectory.mergePrompt", locale), {
         kind: "info",
-        okLabel: locale === "ko" ? "병합" : "Merge",
-        cancelLabel: locale === "ko" ? "덮어쓰기" : "Overwrite",
+        okLabel: t("dialog.merge", locale),
+        cancelLabel: t("dialog.overwrite", locale),
       });
       strategy = merge ? "merge" : "overwrite";
     }
@@ -727,7 +727,7 @@ function App() {
           >
             {sidebarOpen && (
               <>
-                <Tooltip content={locale === "ko" ? "선택" : "Select"} relationship="label" positioning="below" appearance={isDarkMode ? "inverted" : undefined}>
+                <Tooltip content={t("sidebar.select", locale)} relationship="label" positioning="below" appearance={isDarkMode ? "inverted" : undefined}>
                   <Button
                     appearance="subtle"
                     icon={<CheckboxCheckedRegular />}
@@ -736,19 +736,19 @@ function App() {
                     style={selectMode ? { backgroundColor: "var(--ui-active-bg)" } : undefined}
                   />
                 </Tooltip>
-                <Tooltip content={locale === "ko" ? "새 그룹" : "New group"} relationship="label" positioning="below" appearance={isDarkMode ? "inverted" : undefined}>
+                <Tooltip content={t("sidebar.newGroup", locale)} relationship="label" positioning="below" appearance={isDarkMode ? "inverted" : undefined}>
                   <Button
                     appearance="subtle"
                     icon={<span style={{ display: "flex", marginTop: "-1px" }}><FolderAddRegular /></span>}
                     className={styles.sidebarNewGroupBtn}
                     onClick={() => {
-                      const defaultName = locale === "ko" ? "새 그룹" : "New group";
+                      const defaultName = t("sidebar.newGroup", locale);
                       const newId = noteGroups.createGroup(defaultName);
                       setPendingRenameGroupId(newId);
                     }}
                   />
                 </Tooltip>
-                <Tooltip content={locale === "ko" ? "검색" : "Search"} relationship="label" positioning="below" appearance={isDarkMode ? "inverted" : undefined}>
+                <Tooltip content={t("search.label", locale)} relationship="label" positioning="below" appearance={isDarkMode ? "inverted" : undefined}>
                   <Button
                     appearance="subtle"
                     icon={<SearchRegular />}
