@@ -314,7 +314,7 @@ function App() {
     }
   }, [isLoading, docs, activeIndex]);
 
-  const flushAutoSaveRef = useRef<(() => void) | null>(null);
+  const flushAutoSaveRef = useRef<(() => Promise<void>) | null>(null);
 
   const fs = useFileSystem(
     state,

@@ -100,12 +100,13 @@ export function useAutoSave(
     }
   }, []);
 
-  const flushAutoSave = useCallback(() => {
+  const flushAutoSave = useCallback((): Promise<void> => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
-      doSave();
+      return doSave();
     }
+    return Promise.resolve();
   }, [doSave]);
 
   const scheduleAutoSave = useCallback(() => {
