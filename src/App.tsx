@@ -18,7 +18,7 @@ import {
 } from "@fluentui/react-icons";
 import { getCurrentWindow, Effect } from "@tauri-apps/api/window";
 import { useMarkdownState } from "./hooks/useMarkdownState";
-import { useFileSystem } from "./hooks/useFileSystem";
+import { getCurrentMarkdown, useFileSystem } from "./hooks/useFileSystem";
 import { saveManifest, sortNotes, useNotesLoader, getNotesDir, setNotesDir, resetNotesDir, setMigrationInProgress } from "./hooks/useNotesLoader";
 import { useAutoSave } from "./hooks/useAutoSave";
 import { useNoteGroups } from "./hooks/useNoteGroups";
@@ -287,6 +287,8 @@ function App() {
   // Refs for values read (but not triggering) in effects
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
+  const activeDocIdRef = useRef<string | null>(docs[activeIndex]?.id ?? null);
+  activeDocIdRef.current = docs[activeIndex]?.id ?? null;
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
 
@@ -454,9 +456,9 @@ function App() {
 
   const handleExportMd = useCallback(() => {
     const name = activeDoc?.fileName ?? "untitled";
-    const md = tiptapRef.current?.getMarkdown() ?? state.markdown;
+    const md = getCurrentMarkdown(state, tiptapRef);
     exportAsMarkdown(md, name, locale);
-  }, [activeDoc?.fileName, state.markdown, locale]);
+  }, [activeDoc?.fileName, locale, state]);
 
   const handleExportPdf = useCallback(() => {
     const el = document.querySelector(".ProseMirror") as HTMLElement | null;
@@ -473,6 +475,12 @@ function App() {
     const sorted = [...indices].sort((a, b) => b - a);
     for (const idx of sorted) fs.deleteNote(idx);
   }, [fs.deleteNote]);
+
+  const getSidebarDocumentContent = useCallback((index: number) => {
+    const doc = docs[index];
+    if (!doc) return "";
+    return index === activeIndex ? getCurrentMarkdown(state, tiptapRef) : doc.content;
+  }, [activeIndex, docs, state]);
 
   // 노트 저장 위치 변경
   const handleChangeNotesDir = useCallback(async () => {
@@ -672,12 +680,18 @@ function App() {
   );
 
   const handleCodemirrorChange = useCallback(
-    (value: string) => {
+    (sourceDocId: string | null, value: string) => {
+      if (!sourceDocId || sourceDocId !== activeDocIdRef.current) return;
       state.updateMarkdown(value);
       scheduleAutoSave();
     },
     [state.updateMarkdown, scheduleAutoSave],
   );
+
+  const handleMarkdownViewReady = useCallback((sourceDocId: string | null, view: import("@codemirror/view").EditorView) => {
+    if (!sourceDocId || sourceDocId !== activeDocIdRef.current) return;
+    setCmView(view);
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -840,6 +854,7 @@ function App() {
             <Sidebar
               docs={docs}
               activeIndex={activeIndex}
+              getDocumentContent={getSidebarDocumentContent}
               onSwitchDocument={fs.switchDocument}
               onNewNote={fs.newNote}
               onDeleteNote={fs.deleteNote}
@@ -939,12 +954,13 @@ function App() {
               {showCodeMirror && (
                 <div className={styles.editorPane}>
                   <MarkdownEditor
+                    key={activeDoc?.id ?? "markdown-editor"}
                     value={state.markdown}
-                    onChange={handleCodemirrorChange}
+                    onChange={(value) => handleCodemirrorChange(activeDoc?.id ?? null, value)}
                     isDarkMode={isDarkMode}
                     locale={locale}
                     wordWrap={settings.wordWrap}
-                    onViewReady={setCmView}
+                    onViewReady={(view) => handleMarkdownViewReady(activeDoc?.id ?? null, view)}
                   />
                 </div>
               )}

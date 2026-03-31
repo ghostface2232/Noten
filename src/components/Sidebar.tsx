@@ -499,6 +499,7 @@ function formatTimestamp(ts: number, locale: Locale): string {
 interface SidebarProps {
   docs: NoteDoc[];
   activeIndex: number;
+  getDocumentContent: (index: number) => string;
   onSwitchDocument: (index: number) => void | Promise<void>;
   onNewNote: () => void;
   onDeleteNote: (index: number) => void;
@@ -543,6 +544,7 @@ interface ContextMenuState {
 export function Sidebar({
   docs,
   activeIndex,
+  getDocumentContent,
   onSwitchDocument,
   onNewNote,
   onDeleteNote,
@@ -861,12 +863,10 @@ export function Sidebar({
   }, [contextMenu]);
 
   const handleCopyContent = useCallback((index: number) => {
-    const doc = docs[index];
-    if (doc) {
-      navigator.clipboard.writeText(doc.content).catch(() => {});
-    }
+    const content = getDocumentContent(index);
+    navigator.clipboard.writeText(content).catch(() => {});
     closeContextMenu();
-  }, [docs, closeContextMenu]);
+  }, [closeContextMenu, getDocumentContent]);
 
   // Track whether the last mousedown was inside the sidebar
   // Track whether the last mousedown was inside the sidebar (global flag for App.tsx too)
@@ -907,8 +907,8 @@ export function Sidebar({
         handleDoubleClick(activeIndex);
       } else if (ctrl && e.altKey && e.key === "c") {
         e.preventDefault();
-        const doc = docs[activeIndex];
-        if (doc) navigator.clipboard.writeText(doc.content).catch(() => {});
+        const content = getDocumentContent(activeIndex);
+        navigator.clipboard.writeText(content).catch(() => {});
       } else if (e.key === "Delete" && !ctrl && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         onDeleteNote(activeIndex);
@@ -916,7 +916,7 @@ export function Sidebar({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeIndex, docs, editingIndex, editingGroupId, onDuplicateNote, onExportNote, onDeleteNote, handleDoubleClick]);
+  }, [activeIndex, editingIndex, editingGroupId, getDocumentContent, onDuplicateNote, onExportNote, onDeleteNote, handleDoubleClick]);
 
   const toggleNoteSelection = useCallback((noteId: string) => {
     setSelectedNoteIds((prev) => {

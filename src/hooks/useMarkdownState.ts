@@ -11,6 +11,7 @@ export interface MarkdownState {
   isDirty: boolean;
   tiptapDirty: boolean;
   editorRef: React.MutableRefObject<Editor | null>;
+  readCurrentEditor: () => string;
   toggleEditing: () => void;
   switchEditorMode: () => void;
   updateMarkdown: (value: string) => void;
@@ -37,15 +38,19 @@ export function useMarkdownState(): MarkdownState {
     setIsDirty(true);
   }, []);
 
+  const readCurrentEditor = useCallback(() => {
+    const editor = editorRef.current;
+    return editorMode === "markdown"
+      ? codemirrorValueRef.current
+      : editor?.getMarkdown() ?? markdown;
+  }, [editorMode, markdown]);
+
   /**
    * 현재 활성 편집기에서 최신 마크다운을 직접 읽어 state를 동기화.
    * dirty 플래그를 보지 않고 항상 직접 읽되, 값이 바뀐 경우에만 갱신.
    */
   const flushCurrentEditor = useCallback(() => {
-    const editor = editorRef.current;
-    const current = editorMode === "markdown"
-      ? codemirrorValueRef.current
-      : editor?.getMarkdown() ?? markdown;
+    const current = readCurrentEditor();
 
     if (current !== markdown) {
       setMarkdown(current);
@@ -53,7 +58,7 @@ export function useMarkdownState(): MarkdownState {
     }
     setTiptapDirty(false);
     return current;
-  }, [editorMode, markdown]);
+  }, [markdown, readCurrentEditor]);
 
   /** 반대편 편집기에 콘텐츠를 로드 (값이 바뀐 경우에만) */
   const loadIntoTiptap = useCallback((md: string) => {
@@ -105,6 +110,11 @@ export function useMarkdownState(): MarkdownState {
     setIsEditing(editing);
   }, []);
 
+  const setMarkdownRaw = useCallback((value: string) => {
+    codemirrorValueRef.current = value;
+    setMarkdown(value);
+  }, []);
+
   return {
     markdown,
     isEditing,
@@ -113,13 +123,14 @@ export function useMarkdownState(): MarkdownState {
     isDirty,
     tiptapDirty,
     editorRef,
+    readCurrentEditor,
     toggleEditing,
     switchEditorMode,
     updateMarkdown,
     setTiptapDirty,
     setEditing,
     setFilePath,
-    setMarkdownRaw: setMarkdown,
+    setMarkdownRaw,
     setIsDirty,
   };
 }

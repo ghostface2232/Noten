@@ -51,9 +51,7 @@ export function getCurrentMarkdown(
   state: MarkdownState,
   tiptapRef: React.RefObject<TiptapEditorHandle | null>,
 ): string {
-  if (state.isEditing && state.editorMode === "markdown") {
-    return state.markdown;
-  }
+  if (state.readCurrentEditor) return state.readCurrentEditor();
 
   const editor = tiptapRef.current?.getEditor();
   return editor ? editor.getMarkdown() : state.markdown;
@@ -125,12 +123,52 @@ export function useFileSystem(
     await flushAutoSaveRef?.current?.();
   }, []);
 
+  const getLiveDocsSnapshot = useCallback((baseDocs: NoteDoc[] = docsRef.current) => {
+    const currentActiveIndex = activeIndexRef.current;
+    const activeDoc = baseDocs[currentActiveIndex];
+    if (!activeDoc) {
+      return { docs: baseDocs, activeDocId: null as string | null, activeIndex: currentActiveIndex };
+    }
+
+    const content = getCurrentMarkdown(state, tiptapRef);
+    const fileName = activeDoc.customName
+      ? activeDoc.fileName
+      : deriveTitle(content) || activeDoc.fileName || getDefaultDocumentTitle(locale, baseDocs.map((doc) => doc.fileName));
+    const contentChanged = activeDoc.content !== content;
+    const titleChanged = activeDoc.fileName !== fileName;
+
+    if (!contentChanged && !titleChanged) {
+      return { docs: baseDocs, activeDocId: activeDoc.id, activeIndex: currentActiveIndex };
+    }
+
+    const nextDocs = [...baseDocs];
+    nextDocs[currentActiveIndex] = {
+      ...activeDoc,
+      content,
+      fileName,
+      updatedAt: Date.now(),
+      isDirty: state.isDirty,
+    };
+
+    return { docs: nextDocs, activeDocId: activeDoc.id, activeIndex: currentActiveIndex };
+  }, [locale, state, tiptapRef]);
+
+  const markDocClean = useCallback((baseDocs: NoteDoc[], docId: string | null) => {
+    if (!docId) return baseDocs;
+    return baseDocs.map((doc) => (
+      doc.id === docId
+        ? { ...doc, isDirty: false }
+        : doc
+    ));
+  }, []);
+
   /** Remove the current doc if it's empty (no content, no customName, not the last doc).
    *  Returns the cleaned docs array. */
   const pruneEmptyCurrentDoc = useCallback((baseDocs: NoteDoc[]): NoteDoc[] => {
-    const leaving = baseDocs[activeIndex];
+    const currentActiveIndex = activeIndexRef.current;
+    const leaving = baseDocs[currentActiveIndex];
     if (!leaving) return baseDocs;
-    const currentContent = getCurrentMarkdown(state, tiptapRef).trim();
+    const currentContent = leaving.content.trim();
     if (currentContent || leaving.customName || baseDocs.length <= 1) return baseDocs;
 
     if (leaving.filePath) {
@@ -142,10 +180,10 @@ export function useFileSystem(
         .filter((g) => g.noteIds.length > 0));
     cancelDocSaveRef?.current?.(leavingId);
 
-    const pruned = baseDocs.filter((_, i) => i !== activeIndex);
+    const pruned = baseDocs.filter((_, i) => i !== currentActiveIndex);
     setDocs(pruned);
     return pruned;
-  }, [activeIndex, state, tiptapRef, setDocs, setGroups]);
+  }, [cancelDocSaveRef, setDocs, setGroups]);
 
   const saveFile = useCallback(async () => {
     const doc = docs[activeIndex];
@@ -198,9 +236,11 @@ export function useFileSystem(
     const sourcePaths = paths.filter(Boolean);
     if (sourcePaths.length === 0) return;
 
+    const { docs: liveDocs, activeDocId } = getLiveDocsSnapshot();
     await leaveCurrentDoc();
+    const baseDocs = markDocClean(liveDocs, activeDocId);
 
-    const existingNames = new Set(docs.map((d) => d.fileName));
+    const existingNames = new Set(baseDocs.map((d) => d.fileName));
     const importedDocs: NoteDoc[] = [];
 
     for (const sourcePath of sourcePaths) {
@@ -245,7 +285,7 @@ export function useFileSystem(
     if (importedDocs.length === 0) return;
 
     const lastImported = importedDocs[importedDocs.length - 1];
-    const prunedDocs = pruneEmptyCurrentDoc(docs);
+    const prunedDocs = pruneEmptyCurrentDoc(baseDocs);
     const nextDocs = [...prunedDocs, ...importedDocs];
     sortAndPersistDocs(nextDocs, lastImported.id, notesSortOrder, setDocs, setActiveIndex, groupsRef.current);
     importedDocs.forEach((doc) => emitDocCreated(doc));
@@ -253,7 +293,7 @@ export function useFileSystem(
     loadIntoEditor(tiptapRef, lastImported.content);
     resetDocState(state, lastImported.filePath, lastImported.content);
     notifyActiveDocRef?.current?.(lastImported.id, lastImported.filePath);
-  }, [docs, leaveCurrentDoc, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
+  }, [getLiveDocsSnapshot, leaveCurrentDoc, markDocClean, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef, pruneEmptyCurrentDoc]);
 
   const importFile = useCallback(async () => {
     const selected = await open({ filters: MD_FILTERS, multiple: true });
@@ -264,15 +304,17 @@ export function useFileSystem(
   }, [importFiles]);
 
   const newNote = useCallback(async () => {
+    const { docs: liveDocs, activeDocId, activeIndex: currentActiveIndex } = getLiveDocsSnapshot();
     await leaveCurrentDoc();
+    const baseDocs = markDocClean(liveDocs, activeDocId);
 
     // Check if current note is empty and should be replaced
-    const currentDoc = docs[activeIndex];
-    const currentContent = getCurrentMarkdown(state, tiptapRef).trim();
+    const currentDoc = baseDocs[currentActiveIndex];
+    const currentContent = currentDoc?.content.trim() ?? "";
     const willReplace = !!currentDoc && !currentContent && !currentDoc.customName;
 
     // Remove current empty note (first render — sidebar sees deletion)
-    let prunedDocs = docs;
+    let prunedDocs = baseDocs;
     if (willReplace) {
       if (currentDoc.filePath) {
         try { markOwnWrite(currentDoc.filePath); remove(currentDoc.filePath).catch(() => {}); } catch {}
@@ -282,7 +324,7 @@ export function useFileSystem(
       setGroups?.((prev) =>
         prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }))
           .filter((g) => g.noteIds.length > 0));
-      prunedDocs = docs.filter((_, i) => i !== activeIndex);
+      prunedDocs = baseDocs.filter((_, i) => i !== currentActiveIndex);
       setDocs(prunedDocs);
     }
 
@@ -326,35 +368,40 @@ export function useFileSystem(
     } else {
       addNewDoc();
     }
-  }, [activeIndex, leaveCurrentDoc, docs, locale, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
+  }, [cancelDocSaveRef, getLiveDocsSnapshot, leaveCurrentDoc, locale, markDocClean, notesSortOrder, setActiveIndex, setDocs, setGroups, state, tiptapRef]);
 
   const switchDocument = useCallback(async (index: number) => {
-    if (index === activeIndex) return;
-    if (index < 0 || index >= docs.length) return;
+    const { docs: liveDocs, activeDocId, activeIndex: currentActiveIndex } = getLiveDocsSnapshot();
+    if (index === currentActiveIndex) return;
+    if (index < 0 || index >= liveDocs.length) return;
 
     await leaveCurrentDoc();
+    const baseDocs = markDocClean(liveDocs, activeDocId);
 
-    const nextDocs = pruneEmptyCurrentDoc(docs);
+    const nextDocs = pruneEmptyCurrentDoc(baseDocs);
     let targetIndex = index;
-    if (nextDocs.length < docs.length && index > activeIndex) targetIndex = index - 1;
+    if (nextDocs.length < baseDocs.length && index > currentActiveIndex) targetIndex = index - 1;
 
     const target = nextDocs[targetIndex];
+    setDocs(nextDocs);
     loadIntoEditor(tiptapRef, target.content);
     resetDocState(state, target.filePath, target.content);
     notifyActiveDocRef?.current?.(target.id, target.filePath);
     setActiveIndex(targetIndex);
     void saveManifest(nextDocs, target.id, groupsRef.current).catch(() => {});
-  }, [activeIndex, leaveCurrentDoc, docs, setActiveIndex, setDocs, setGroups, state, tiptapRef]);
+  }, [getLiveDocsSnapshot, leaveCurrentDoc, markDocClean, setActiveIndex, setDocs, state, tiptapRef, pruneEmptyCurrentDoc]);
 
   const deleteNote = useCallback(async (index: number) => {
-    const doc = docs[index];
+    const { docs: liveDocs, activeDocId, activeIndex: currentActiveIndex } = getLiveDocsSnapshot();
+    const doc = liveDocs[index];
     if (!doc) return;
 
     // Cancel any pending autosave timer for this doc to prevent orphan writes after deletion
     cancelDocSaveRef?.current?.(doc.id);
 
     // Flush pending auto-save so the on-disk file is up-to-date before trash copy
-    if (index === activeIndex) await leaveCurrentDoc();
+    if (index === currentActiveIndex) await leaveCurrentDoc();
+    const baseDocs = index === currentActiveIndex ? markDocClean(liveDocs, activeDocId) : liveDocs;
 
     // Capture group before it gets cleaned up below
     const group = getGroupForNote?.(doc.id) ?? null;
@@ -393,7 +440,7 @@ export function useFileSystem(
       }
     }
 
-    const nextDocs = docs.filter((_, i) => i !== index);
+    const nextDocs = baseDocs.filter((_, i) => i !== index);
     emitDocDeleted(doc.id);
 
     // Compute cleaned groups atomically (remove note from all groups)
@@ -437,7 +484,7 @@ export function useFileSystem(
     }
 
     // Determine the next active document
-    const wasActive = index === activeIndex;
+    const wasActive = index === currentActiveIndex;
     let nextActiveId: string;
 
     if (wasActive) {
@@ -447,17 +494,21 @@ export function useFileSystem(
       resetDocState(state, target.filePath, target.content);
       notifyActiveDocRef?.current?.(target.id, target.filePath);
     } else {
-      nextActiveId = docs[activeIndex].id;
+      nextActiveId = baseDocs[currentActiveIndex].id;
     }
 
     sortAndPersistDocs(nextDocs, nextActiveId, notesSortOrder, setDocs, setActiveIndex, cleanedGroups);
-  }, [activeIndex, docs, locale, notesSortOrder, setActiveIndex, setDocs, setGroups, state, tiptapRef, getGroupForNote, setTrashedNotes]);
+  }, [cancelDocSaveRef, getLiveDocsSnapshot, getGroupForNote, leaveCurrentDoc, locale, markDocClean, notesSortOrder, setActiveIndex, setDocs, setGroups, setTrashedNotes, state, tiptapRef]);
 
   const duplicateNote = useCallback(async (index: number) => {
-    const doc = docs[index];
+    const { docs: liveDocs, activeDocId } = getLiveDocsSnapshot();
+    const doc = liveDocs[index];
     if (!doc) return;
 
     await leaveCurrentDoc();
+    const baseDocs = markDocClean(liveDocs, activeDocId);
+    const sourceDoc = baseDocs[index];
+    if (!sourceDoc) return;
 
     const id = crypto.randomUUID();
     const timestamp = Date.now();
@@ -468,11 +519,11 @@ export function useFileSystem(
       filePath = `${notesDir}/${id}.md`;
     } catch { /* ignore */ }
 
-    const content = index === activeIndex ? getCurrentMarkdown(state, tiptapRef) : doc.content;
+    const content = sourceDoc.content;
     const newDoc: NoteDoc = {
       id,
       filePath,
-      fileName: doc.fileName,
+      fileName: sourceDoc.fileName,
       isDirty: false,
       content,
       createdAt: timestamp,
@@ -488,13 +539,13 @@ export function useFileSystem(
       }
     }
 
-    const prunedDocs = pruneEmptyCurrentDoc(docs);
+    const prunedDocs = pruneEmptyCurrentDoc(baseDocs);
     const nextDocs = [...prunedDocs, newDoc];
     sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, setDocs, setActiveIndex, groupsRef.current);
     loadIntoEditor(tiptapRef, content);
     resetDocState(state, filePath, content);
     notifyActiveDocRef?.current?.(newDoc.id, filePath);
-  }, [leaveCurrentDoc, docs, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
+  }, [getLiveDocsSnapshot, leaveCurrentDoc, markDocClean, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef, pruneEmptyCurrentDoc]);
 
   const exportNote = useCallback(async (index: number) => {
     const doc = docs[index];
@@ -509,20 +560,21 @@ export function useFileSystem(
   }, [activeIndex, docs, state, tiptapRef]);
 
   const renameNote = useCallback(async (index: number, newName: string) => {
-    const doc = docs[index];
+    const { docs: liveDocs } = getLiveDocsSnapshot();
+    const doc = liveDocs[index];
     if (!doc) return;
 
     const trimmed = newName.trim();
     if (!trimmed || trimmed === doc.fileName) return;
 
-    const nextDocs = docs.map((entry, i) => {
+    const nextDocs = liveDocs.map((entry, i) => {
       if (i !== index) return entry;
       return { ...entry, fileName: trimmed, updatedAt: Date.now(), customName: true };
     });
 
     sortAndPersistDocs(nextDocs, doc.id, notesSortOrder, setDocs, setActiveIndex, groupsRef.current);
     emitDocRenamed(doc.id, doc.filePath, doc.filePath, trimmed);
-  }, [docs, notesSortOrder, setActiveIndex, setDocs]);
+  }, [getLiveDocsSnapshot, notesSortOrder, setActiveIndex, setDocs]);
 
   const restoreNote = useCallback(async (trashedNoteId: string) => {
     const trashed = trashedNotesRef.current?.find((n) => n.id === trashedNoteId);
@@ -555,7 +607,9 @@ export function useFileSystem(
       updatedAt: trashed.updatedAt,
     };
 
+    const { docs: liveDocs, activeDocId } = getLiveDocsSnapshot();
     await leaveCurrentDoc();
+    const baseDocs = markDocClean(liveDocs, activeDocId);
 
     // Remove from trashed list BEFORE sortAndPersistDocs so saveManifest
     // reads the updated trashedNotesCache (without the restored note)
@@ -581,7 +635,7 @@ export function useFileSystem(
       }
     }
 
-    const prunedDocs = pruneEmptyCurrentDoc(docs);
+    const prunedDocs = pruneEmptyCurrentDoc(baseDocs);
     const nextDocs = [...prunedDocs, restoredDoc];
     sortAndPersistDocs(nextDocs, restoredDoc.id, notesSortOrder, setDocs, setActiveIndex, restoredGroups);
     emitDocCreated(restoredDoc);
@@ -589,7 +643,7 @@ export function useFileSystem(
     loadIntoEditor(tiptapRef, content);
     resetDocState(state, restoredPath, content);
     notifyActiveDocRef?.current?.(restoredDoc.id, restoredPath);
-  }, [leaveCurrentDoc, docs, notesSortOrder, setActiveIndex, setDocs, setGroups, state, tiptapRef, setTrashedNotes]);
+  }, [getLiveDocsSnapshot, leaveCurrentDoc, markDocClean, notesSortOrder, setActiveIndex, setDocs, setGroups, setTrashedNotes, state, tiptapRef, pruneEmptyCurrentDoc]);
 
   const permanentlyDeleteNote = useCallback(async (trashedNoteId: string) => {
     const trashed = trashedNotesRef.current?.find((n) => n.id === trashedNoteId);
