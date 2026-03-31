@@ -653,10 +653,8 @@ function App() {
   // 창 닫기 — pending autosave flush 후 닫기
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    getCurrentWindow().onCloseRequested(async (event) => {
-      event.preventDefault();
+    getCurrentWindow().onCloseRequested(async () => {
       await flushAutoSaveRef.current?.();
-      await getCurrentWindow().destroy();
     }).then((fn) => { unlisten = fn; });
     return () => unlisten?.();
   }, []);

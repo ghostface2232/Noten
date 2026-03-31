@@ -32,6 +32,7 @@ export function useAutoSave(
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const pendingSnapshotsRef = useRef(new Map<string, SaveSnapshot>());
   const latestRevisionByDocRef = useRef(new Map<string, number>());
+  const hasPendingChangesRef = useRef(false);
   const stateRef = useRef({
     state,
     tiptapRef,
@@ -165,7 +166,11 @@ export function useAutoSave(
     timersRef.current.clear();
     pendingSnapshotsRef.current.clear();
 
-    // Always capture a fresh snapshot from the current editor state
+    // Only save if scheduleAutoSave was called (content actually changed)
+    if (!hasPendingChangesRef.current) return Promise.resolve();
+    hasPendingChangesRef.current = false;
+
+    // Capture a fresh snapshot from the current editor state
     const freshSnapshot = createSnapshot();
     if (!freshSnapshot) return Promise.resolve();
 
@@ -176,6 +181,7 @@ export function useAutoSave(
     const snapshot = createSnapshot();
     if (!snapshot) return;
 
+    hasPendingChangesRef.current = true;
     pendingSnapshotsRef.current.set(snapshot.docId, snapshot);
 
     const existingTimer = timersRef.current.get(snapshot.docId);
@@ -188,6 +194,7 @@ export function useAutoSave(
       const pending = pendingSnapshotsRef.current.get(snapshot.docId);
       pendingSnapshotsRef.current.delete(snapshot.docId);
       if (pending) {
+        hasPendingChangesRef.current = false;
         void doSave(pending);
       }
     }, DEBOUNCE_MS);
