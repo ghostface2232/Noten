@@ -9,7 +9,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-blue?style=flat-square)
 
 <p>
-  A minimal, Mica-styled Markdown editor for Windows built with Tauri + React.
+  A markdown and rich text editor inspired by Apple Notes and Notion — clean, fast, and built for Windows.
 </p>
 
 ## Features
