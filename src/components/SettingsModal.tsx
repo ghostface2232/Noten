@@ -632,31 +632,21 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
 
                   {/* Version notes */}
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.0</div>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.1</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 리치 텍스트 / 마크다운 듀얼 에디터<br />
-                          · 슬래시 명령어, 이미지 드롭, 코드 블록<br />
-                          · 사이드바 노트 관리 및 그룹핑<br />
-                          · 다중 창 지원 및 창 간 동기화<br />
-                          · Mica 테마, 다크/라이트 모드<br />
-                          · 문서 내 검색<br />
-                          · PDF / Markdown / RTF 내보내기<br />
-                          · 저장 위치 변경 및 파일 감시<br />
-                          · 자동 업데이트
+                          · 빠른 문서 전환과 새 문서 생성 시 저장 안정성 개선<br />
+                          · 마크다운 편집 잔상 및 빈 영역 동작 개선<br />
+                          · 설정의 노트 저장 위치 표시 정리<br />
+                          · Windows 제거 흐름 및 정리 동작 개선
                         </>
                       ) : (
                         <>
-                          · Rich text / Markdown dual editor<br />
-                          · Slash commands, image drop, code blocks<br />
-                          · Sidebar note management and grouping<br />
-                          · Multi-window support with cross-window sync<br />
-                          · Mica theme, dark/light mode<br />
-                          · In-document search<br />
-                          · Export to PDF / Markdown / RTF<br />
-                          · Configurable notes directory and file watcher<br />
-                          · Auto-update
+                          · Improved save reliability when switching notes or creating a new note quickly<br />
+                          · Improved Markdown editing leftovers and empty-area behavior<br />
+                          · Refined the notes directory display in Settings<br />
+                          · Improved the Windows uninstall and cleanup flow
                         </>
                       )}
                     </div>

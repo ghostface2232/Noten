@@ -47,11 +47,13 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           Write-Host "[1/1] Copying NSIS bundle to bootstrapper assets..."
-          $source = Join-Path $PWD "src-tauri\target\release\bundle\nsis\Noten_0.1.0_x64-setup.exe"
           $destination = Join-Path $PWD "bootstrapper\assets\nsis-payload.exe"
+          $source = Get-ChildItem (Join-Path $PWD "src-tauri\target\release\bundle\nsis\Noten_*_x64-setup.exe") |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
 
-          if (-not (Test-Path -LiteralPath $source)) {
-            throw "NSIS bundle not found: $source"
+          if (-not $source) {
+            throw "NSIS bundle not found under src-tauri\\target\\release\\bundle\\nsis"
           }
 
           Copy-Item -LiteralPath $source -Destination $destination -Force
