@@ -3,6 +3,11 @@
 </p>
 
 # Noten
+
+[![License](https://img.shields.io/github/license/ghostface2232/Noten?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/ghostface2232/Noten?style=flat-square)](https://github.com/ghostface2232/Noten/releases)
+![Platform](https://img.shields.io/badge/platform-Windows-blue?style=flat-square)
+
 <p>
   A minimal, Mica-styled Markdown editor for Windows built with Tauri + React.
 </p>
