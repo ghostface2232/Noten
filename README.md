@@ -10,7 +10,7 @@
 ## Features
 - **Dual editor** - Rich text (WYSIWYG) and Markdown side by side, switchable with `Ctrl+/`
 - **Slash commands** - Type `/` to insert headings, lists, code blocks, images, and more
-- **Image support** - Drag & drop, paste, and resize images with corner handles
+- **Image support** - Drag & drop, paste, resize with corner handles, and drag to reorder
 - **Note management** - Sidebar with grouping, multi-select, drag reorder, search, and context menus
 - **Recently deleted** - Soft-delete with 14-day retention and restore
 - **Multi-window** - Open notes in separate windows with real-time cross-window sync
@@ -28,16 +28,26 @@
 - [CodeMirror](https://codemirror.net/) - Markdown editor
 
 ## Keyboard Shortcuts
+
+### Global
 | Action | Shortcut |
 |---|---|
-| New file | `Ctrl+N` |
+| New document | `Ctrl+N` |
 | New window | `Ctrl+Shift+N` |
-| Save | `Ctrl+S` |
-| Save as | `Ctrl+Shift+S` |
-| Import file | `Ctrl+O` |
+| Open file | `Ctrl+O` |
+| Save now | `Ctrl+S` |
 | Toggle edit mode | `Ctrl+E` |
 | Switch editor | `Ctrl+/` |
 | Find in document | `Ctrl+F` |
+
+### Sidebar (when sidebar is focused)
+| Action | Shortcut |
+|---|---|
+| Rename | `Ctrl+R` |
+| Duplicate | `Ctrl+D` |
+| Export | `Ctrl+Shift+X` |
+| Copy content | `Ctrl+Alt+C` |
+| Delete | `Delete` |
 
 ## License
 MIT

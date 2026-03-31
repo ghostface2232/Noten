@@ -4,7 +4,7 @@ import {
   ArrowDownloadRegular,
   ArrowExportUpRegular,
   ChevronRightRegular,
-  CopyRegular,
+  CopySelectRegular,
   DeleteRegular,
   DismissRegular,
   DocumentAddRegular,
@@ -899,7 +899,7 @@ export function Sidebar({
       if (ctrl && e.key === "d") {
         e.preventDefault();
         onDuplicateNote(activeIndex);
-      } else if (ctrl && e.shiftKey && e.key === "E") {
+      } else if (ctrl && e.shiftKey && e.key === "X") {
         e.preventDefault();
         onExportNote(activeIndex);
       } else if (ctrl && e.key === "r") {
@@ -1617,11 +1617,11 @@ export function Sidebar({
                 onClick={() => { onExportNote(contextMenu.index); closeContextMenu(); }}
                 size="small"
               >
-                {i("sidebar.export")}<span className={styles.shortcutHint}>Ctrl+Shift+E</span>
+                {i("sidebar.export")}<span className={styles.shortcutHint}>Ctrl+Shift+X</span>
               </Button>
               <Button
                 appearance="subtle"
-                icon={<CopyRegular />}
+                icon={<CopySelectRegular />}
                 className={styles.contextMenuItem}
                 onClick={() => handleCopyContent(contextMenu.index)}
                 size="small"

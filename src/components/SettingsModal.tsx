@@ -26,6 +26,11 @@ import {
   Edit20Regular,
   Code20Regular,
   Search20Regular,
+  Rename20Regular,
+  DocumentCopy20Regular,
+  ArrowExportUp20Regular,
+  CopySelect20Regular,
+  Delete20Regular,
 } from "@fluentui/react-icons";
 import { getVersion } from "@tauri-apps/api/app";
 import { t } from "../i18n";
@@ -514,6 +519,11 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                   ["settings.shortcut.toggleEdit", "Ctrl+E", Edit20Regular],
                   ["settings.shortcut.switchEditor", "Ctrl+/", Code20Regular],
                   ["settings.shortcut.find", "Ctrl+F", Search20Regular],
+                  ["settings.shortcut.rename", "Ctrl+R", Rename20Regular],
+                  ["settings.shortcut.duplicate", "Ctrl+D", DocumentCopy20Regular],
+                  ["settings.shortcut.export", "Ctrl+Shift+X", ArrowExportUp20Regular],
+                  ["settings.shortcut.copyContent", "Ctrl+Alt+C", CopySelect20Regular],
+                  ["settings.shortcut.delete", "Delete", Delete20Regular],
                 ] as [Parameters<typeof t>[0], string, React.ComponentType][]).map(([labelKey, key, Icon], idx) => (
                   <div key={key} className={mergeClasses(styles.row, settingItemClass(styles, idx === 0))}>
                     <Label className={styles.label} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
