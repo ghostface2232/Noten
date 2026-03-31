@@ -75,13 +75,20 @@ body {
 
 /* ─── 사이드바 문서 애니메이션 ─── */
 @keyframes docSlideIn {
-  from { opacity: 0; max-height: 0px; transform: translateY(-4px); }
-  to   { opacity: 1; max-height: 40px; transform: translateY(0); }
+  0%   { opacity: 0; max-height: 0px; transform: translateY(-4px); }
+  40%  { opacity: 0; max-height: 40px; }
+  100% { opacity: 1; max-height: 40px; transform: translateY(0); }
 }
 
 @keyframes docSlideUp {
   from { transform: translateY(34px); }
   to   { transform: translateY(0); }
+}
+
+@keyframes docSlideOut {
+  0%   { opacity: 1; max-height: 40px; }
+  40%  { opacity: 0; max-height: 40px; }
+  100% { opacity: 0; max-height: 0px; }
 }
 
 @keyframes groupChildExpand {

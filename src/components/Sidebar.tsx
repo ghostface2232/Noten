@@ -61,14 +61,22 @@ const useStyles = makeStyles({
   },
   docItemNew: {
     animationName: "docSlideIn",
-    animationDuration: "0.2s",
-    animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+    animationDuration: "0.3s",
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
     animationFillMode: "backwards",
   },
   docItemSlideUp: {
     animationName: "docSlideUp",
     animationDuration: "0.2s",
     animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+  },
+  docItemExit: {
+    animationName: "docSlideOut",
+    animationDuration: "0.25s",
+    animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+    animationFillMode: "forwards",
+    pointerEvents: "none" as const,
+    overflow: "hidden",
   },
   groupChildExpand: {
     animationName: "groupChildExpand",
@@ -607,8 +615,10 @@ export function Sidebar({
 
   // Detect added/removed docs for animation
   const prevDocListRef = useRef<string[]>(docs.map((d) => d.id));
+  const prevDocsSnapshotRef = useRef<Map<string, NoteDoc>>(new Map(docs.map((d) => [d.id, d])));
   const [newDocIds, setNewDocIds] = useState<Set<string>>(new Set());
   const [slideUpFromIndex, setSlideUpFromIndex] = useState(-1);
+  const [exitingDoc, setExitingDoc] = useState<{ doc: NoteDoc; index: number } | null>(null);
 
   // Track groups that just expanded (for child animation)
   const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(new Set());
@@ -632,22 +642,36 @@ export function Sidebar({
     for (const id of currentIds) {
       if (!prevSet.has(id)) added.add(id);
     }
-    if (added.size > 0) {
-      setNewDocIds(added);
-      timers.push(setTimeout(() => setNewDocIds(new Set()), 250));
+    let removedId: string | null = null;
+    let removedIdx = -1;
+    for (let idx = 0; idx < prevList.length; idx++) {
+      if (!currentSet.has(prevList[idx])) {
+        removedId = prevList[idx];
+        removedIdx = idx;
+        break;
+      }
     }
 
-    if (currentIds.length < prevList.length) {
-      for (let idx = 0; idx < prevList.length; idx++) {
-        if (!currentSet.has(prevList[idx])) {
-          setSlideUpFromIndex(idx);
-          timers.push(setTimeout(() => setSlideUpFromIndex(-1), 250));
-          break;
-        }
+    if (added.size > 0) {
+      setNewDocIds(added);
+      timers.push(setTimeout(() => setNewDocIds(new Set()), 300));
+    }
+
+    if (removedId && added.size === 0) {
+      const snapshot = prevDocsSnapshotRef.current.get(removedId);
+      if (snapshot) {
+        // Exit animation handles the space collapse — no slideUp needed
+        setExitingDoc({ doc: snapshot, index: removedIdx });
+        timers.push(setTimeout(() => setExitingDoc(null), 280));
+      } else {
+        // Fallback: no snapshot, use slideUp
+        setSlideUpFromIndex(removedIdx);
+        timers.push(setTimeout(() => setSlideUpFromIndex(-1), 250));
       }
     }
 
     prevDocListRef.current = currentIds;
+    prevDocsSnapshotRef.current = new Map(docs.map((d) => [d.id, d]));
     return () => timers.forEach(clearTimeout);
   }, [docs]);
 
@@ -1253,18 +1277,36 @@ export function Sidebar({
           {i("sidebar.newNote")}
         </Button>
 
-        {renderItems.length === 0 ? (
+        {renderItems.length === 0 && !exitingDoc ? (
           <span className={styles.empty}>{sidebarSearchQuery ? "" : i("sidebar.empty")}</span>
         ) : (
-          renderItems.map((item) => {
-            if (item.kind === "note") {
-              return renderNoteItem(item.doc, item.originalIndex, item.indented);
-            }
-            if (item.kind === "group") {
-              return renderGroupHeader(item.group);
-            }
-            return null;
-          })
+          <>
+            {exitingDoc && exitingDoc.index === 0 && (
+              <div key={`exit-${exitingDoc.doc.id}`} className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}>
+                <div className={styles.docItem} style={{ opacity: 0.5 }}>
+                  <span className={styles.docName}>{exitingDoc.doc.fileName}</span>
+                </div>
+              </div>
+            )}
+            {renderItems.map((item, i) => {
+              const elements = [];
+              if (item.kind === "note") {
+                elements.push(renderNoteItem(item.doc, item.originalIndex, item.indented));
+              } else if (item.kind === "group") {
+                elements.push(renderGroupHeader(item.group));
+              }
+              if (exitingDoc && exitingDoc.index === i + 1) {
+                elements.unshift(
+                  <div key={`exit-${exitingDoc.doc.id}`} className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}>
+                    <div className={styles.docItem} style={{ opacity: 0.5 }}>
+                      <span className={styles.docName}>{exitingDoc.doc.fileName}</span>
+                    </div>
+                  </div>
+                );
+              }
+              return elements;
+            })}
+          </>
         )}
       </div>
 

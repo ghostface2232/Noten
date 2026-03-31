@@ -261,16 +261,27 @@ export function useFileSystem(
   }, [importFiles]);
 
   const newNote = useCallback(async () => {
-    // If current note is empty, just keep focus on it instead of creating another
-    const currentContent = getCurrentMarkdown(state, tiptapRef).trim();
-    const currentDoc = docs[activeIndex];
-    if (currentDoc && !currentContent && !currentDoc.customName) {
-      loadIntoEditor(tiptapRef, "");
-      resetDocState(state, currentDoc.filePath, "");
-      return;
-    }
-
     await leaveCurrentDoc();
+
+    // Check if current note is empty and should be replaced
+    const currentDoc = docs[activeIndex];
+    const currentContent = getCurrentMarkdown(state, tiptapRef).trim();
+    const willReplace = !!currentDoc && !currentContent && !currentDoc.customName;
+
+    // Remove current empty note (first render — sidebar sees deletion)
+    let prunedDocs = docs;
+    if (willReplace) {
+      if (currentDoc.filePath) {
+        try { markOwnWrite(currentDoc.filePath); remove(currentDoc.filePath).catch(() => {}); } catch {}
+      }
+      cancelDocSaveRef?.current?.(currentDoc.id);
+      const leavingId = currentDoc.id;
+      setGroups?.((prev) =>
+        prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }))
+          .filter((g) => g.noteIds.length > 0));
+      prunedDocs = docs.filter((_, i) => i !== activeIndex);
+      setDocs(prunedDocs);
+    }
 
     const id = crypto.randomUUID();
     const timestamp = Date.now();
@@ -286,28 +297,31 @@ export function useFileSystem(
     const newDoc: NoteDoc = {
       id,
       filePath,
-      fileName: getDefaultDocumentTitle(locale, docs.map((d) => d.fileName)),
+      fileName: getDefaultDocumentTitle(locale, prunedDocs.map((d) => d.fileName)),
       isDirty: false,
       content: "",
       createdAt: timestamp,
       updatedAt: timestamp,
     };
 
-    const nextDocs = [...docs, newDoc];
-    sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, setDocs, setActiveIndex, groupsRef.current);
-    emitDocCreated(newDoc);
+    const addNewDoc = () => {
+      const nextDocs = [...prunedDocs, newDoc];
+      sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, setDocs, setActiveIndex, groupsRef.current);
+      emitDocCreated(newDoc);
+      loadIntoEditor(tiptapRef, "");
+      resetDocState(state, filePath, "");
+      notifyActiveDocRef?.current?.(id, filePath);
+      if (filePath) {
+        markOwnWrite(filePath);
+        writeTextFile(filePath, "").catch(() => {});
+      }
+    };
 
-    loadIntoEditor(tiptapRef, "");
-    resetDocState(state, filePath, "");
-    notifyActiveDocRef?.current?.(id, filePath);
-
-    if (!filePath) return;
-
-    try {
-      markOwnWrite(filePath);
-      await writeTextFile(filePath, "");
-    } catch (error) {
-      console.warn("Failed to create new note file:", error);
+    if (willReplace) {
+      // Delay addition so sidebar renders the deletion first, then the new item slides in
+      setTimeout(addNewDoc, 120);
+    } else {
+      addNewDoc();
     }
   }, [activeIndex, leaveCurrentDoc, docs, locale, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
 
