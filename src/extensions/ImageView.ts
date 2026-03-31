@@ -33,7 +33,7 @@ function showContextMenu(
       action: async () => {
         closeContextMenu();
         const ext = mimeToExt(src);
-        const path = await save({ filters: [{ name: "Image", extensions: [ext] }] });
+        const path = await save({ title: i("dialog.saveImage"), filters: [{ name: "Image", extensions: [ext] }] });
         if (!path) return;
         await writeFile(path, dataUrlToUint8Array(src));
       },

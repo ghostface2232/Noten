@@ -2,6 +2,8 @@ import { save, message } from "@tauri-apps/plugin-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
 import { htmlToRtf } from "./htmlToRtf";
+import { t } from "../i18n";
+import type { Locale } from "../hooks/useSettings";
 
 async function fontToDataUrl(publicPath: string): Promise<string> {
   try {
@@ -39,8 +41,9 @@ const MD_FILTERS = [{ name: "Markdown", extensions: ["md", "markdown", "txt"] }]
 const RTF_FILTERS = [{ name: "Rich Text Format", extensions: ["rtf"] }];
 const PDF_FILTERS = [{ name: "PDF", extensions: ["pdf"] }];
 
-export async function exportAsMarkdown(markdown: string, defaultName: string) {
+export async function exportAsMarkdown(markdown: string, defaultName: string, locale: Locale = "en") {
   const selected = await save({
+    title: t("dialog.export", locale),
     filters: MD_FILTERS,
     defaultPath: defaultName.replace(/\.[^.]+$/, "") + ".md",
   });
@@ -48,12 +51,13 @@ export async function exportAsMarkdown(markdown: string, defaultName: string) {
   try {
     await writeTextFile(selected, markdown);
   } catch (err) {
-    await message(`${err}`, { title: "Export failed", kind: "error" });
+    await message(`${err}`, { title: t("dialog.exportFailed", locale), kind: "error" });
   }
 }
 
-export async function exportAsPdf(editorEl: HTMLElement, defaultName: string) {
+export async function exportAsPdf(editorEl: HTMLElement, defaultName: string, locale: Locale = "en") {
   const selected = await save({
+    title: t("dialog.export", locale),
     filters: PDF_FILTERS,
     defaultPath: defaultName.replace(/\.[^.]+$/, "") + ".pdf",
   });
@@ -182,12 +186,13 @@ export async function exportAsPdf(editorEl: HTMLElement, defaultName: string) {
     await invoke("print_to_pdf", { html: htmlContent, outputPath: selected });
   } catch (err) {
     console.error("PDF export failed:", err);
-    await message(`PDF export failed: ${err}`, { title: "Export failed", kind: "error" });
+    await message(`PDF export failed: ${err}`, { title: t("dialog.exportFailed", locale), kind: "error" });
   }
 }
 
-export async function exportAsRtf(html: string, defaultName: string) {
+export async function exportAsRtf(html: string, defaultName: string, locale: Locale = "en") {
   const selected = await save({
+    title: t("dialog.export", locale),
     filters: RTF_FILTERS,
     defaultPath: defaultName.replace(/\.[^.]+$/, "") + ".rtf",
   });
@@ -196,6 +201,6 @@ export async function exportAsRtf(html: string, defaultName: string) {
     const rtfContent = htmlToRtf(html);
     await writeTextFile(selected, rtfContent);
   } catch (err) {
-    await message(`${err}`, { title: "Export failed", kind: "error" });
+    await message(`${err}`, { title: t("dialog.exportFailed", locale), kind: "error" });
   }
 }

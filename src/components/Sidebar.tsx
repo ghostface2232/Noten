@@ -868,7 +868,21 @@ export function Sidebar({
     closeContextMenu();
   }, [docs, closeContextMenu]);
 
-  // Sidebar keyboard shortcuts — only when focus is inside the sidebar (not editor)
+  // Track whether the last mousedown was inside the sidebar
+  // Track whether the last mousedown was inside the sidebar (global flag for App.tsx too)
+  const sidebarActiveRef = useRef(false);
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      const sidebar = document.querySelector("[data-sidebar]");
+      const active = !!sidebar?.contains(e.target as Node);
+      sidebarActiveRef.current = active;
+      document.documentElement.dataset.sidebarActive = active ? "1" : "";
+    };
+    window.addEventListener("mousedown", onMouseDown, true);
+    return () => window.removeEventListener("mousedown", onMouseDown, true);
+  }, []);
+
+  // Sidebar keyboard shortcuts — only when last click was inside the sidebar
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Skip if editing a note name inline or a group name
@@ -877,9 +891,8 @@ export function Sidebar({
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       if ((e.target as HTMLElement)?.isContentEditable) return;
-      // Skip if no sidebar focus — check if the sidebar container contains focus
-      const sidebar = document.querySelector("[data-sidebar]");
-      if (!sidebar?.contains(document.activeElement) && !sidebar?.contains(e.target as Node)) return;
+      // Skip if last click was not inside the sidebar
+      if (!sidebarActiveRef.current) return;
 
       const ctrl = e.ctrlKey || e.metaKey;
 
@@ -1226,7 +1239,7 @@ export function Sidebar({
   };
 
   return (
-    <div className={styles.sidebar} data-sidebar>
+    <div className={styles.sidebar} data-sidebar tabIndex={-1} style={{ outline: "none" }}>
       <div
         className={styles.body}
         data-sidebar-body

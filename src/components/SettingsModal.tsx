@@ -17,7 +17,16 @@ import {
   mergeClasses,
   tokens,
 } from "@fluentui/react-components";
-import { CheckmarkCircle20Regular } from "@fluentui/react-icons";
+import {
+  CheckmarkCircle20Regular,
+  DocumentAdd20Regular,
+  WindowNew20Regular,
+  Save20Regular,
+  ArrowDownload20Regular,
+  Edit20Regular,
+  Code20Regular,
+  Search20Regular,
+} from "@fluentui/react-icons";
 import { getVersion } from "@tauri-apps/api/app";
 import { t } from "../i18n";
 import { useUpdater } from "../hooks/useUpdater";
@@ -498,17 +507,18 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
             {tab === "shortcuts" && (
               <div className={styles.section}>
                 {([
-                  ["settings.shortcut.newFile", "Ctrl+N"],
-                  ["settings.shortcut.newWindow", "Ctrl+Shift+N"],
-                  ["settings.shortcut.save", "Ctrl+S"],
-                  ["settings.shortcut.saveAs", "Ctrl+Shift+S"],
-                  ["settings.shortcut.import", "Ctrl+O"],
-                  ["settings.shortcut.toggleEdit", "Ctrl+E"],
-                  ["settings.shortcut.switchEditor", "Ctrl+/"],
-                  ["settings.shortcut.find", "Ctrl+F"],
-                ] as [Parameters<typeof t>[0], string][]).map(([labelKey, key], idx) => (
+                  ["settings.shortcut.newFile", "Ctrl+N", DocumentAdd20Regular],
+                  ["settings.shortcut.newWindow", "Ctrl+Shift+N", WindowNew20Regular],
+                  ["settings.shortcut.save", "Ctrl+S", Save20Regular],
+                  ["settings.shortcut.import", "Ctrl+O", ArrowDownload20Regular],
+                  ["settings.shortcut.toggleEdit", "Ctrl+E", Edit20Regular],
+                  ["settings.shortcut.switchEditor", "Ctrl+/", Code20Regular],
+                  ["settings.shortcut.find", "Ctrl+F", Search20Regular],
+                ] as [Parameters<typeof t>[0], string, React.ComponentType][]).map(([labelKey, key, Icon], idx) => (
                   <div key={key} className={mergeClasses(styles.row, settingItemClass(styles, idx === 0))}>
-                    <Label className={styles.label}>{i(labelKey)}</Label>
+                    <Label className={styles.label} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <Icon />{i(labelKey)}
+                    </Label>
                     <span className={styles.shortcutKey}>{key}</span>
                   </div>
                 ))}

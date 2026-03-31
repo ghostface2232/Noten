@@ -455,18 +455,18 @@ function App() {
   const handleExportMd = useCallback(() => {
     const name = activeDoc?.fileName ?? "untitled";
     const md = tiptapRef.current?.getMarkdown() ?? state.markdown;
-    exportAsMarkdown(md, name);
-  }, [activeDoc?.fileName, state.markdown]);
+    exportAsMarkdown(md, name, locale);
+  }, [activeDoc?.fileName, state.markdown, locale]);
 
   const handleExportPdf = useCallback(() => {
     const el = document.querySelector(".ProseMirror") as HTMLElement | null;
-    if (el) exportAsPdf(el, activeDoc?.fileName ?? "untitled");
-  }, [activeDoc?.fileName]);
+    if (el) exportAsPdf(el, activeDoc?.fileName ?? "untitled", locale);
+  }, [activeDoc?.fileName, locale]);
 
   const handleExportRtf = useCallback(() => {
     const name = activeDoc?.fileName ?? "untitled";
     const html = tiptapEditor?.getHTML() ?? "";
-    exportAsRtf(html, name);
+    exportAsRtf(html, name, locale);
   }, [activeDoc?.fileName, tiptapEditor]);
 
   const handleDeleteNotes = useCallback((indices: number[]) => {
@@ -564,7 +564,7 @@ function App() {
   // 단축키
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const sidebarFocused = !!document.querySelector("[data-sidebar]")?.contains(document.activeElement);
+      const sidebarFocused = document.documentElement.dataset.sidebarActive === "1";
 
       // 브라우저 단축키 차단 (새로고침, DevTools 등) — 사이드바 포커스 시 Ctrl+R은 rename으로 사용
       if ((e.ctrlKey && e.key === "r" && !sidebarFocused) || (e.ctrlKey && e.shiftKey && e.key === "R")) { e.preventDefault(); return; }
@@ -574,7 +574,6 @@ function App() {
       if (e.ctrlKey && e.key === "/" && state.isEditing) { e.preventDefault(); handleSwitchEditorMode(); }
       if (e.ctrlKey && e.key === "o") { e.preventDefault(); fs.importFile(); }
       if (e.ctrlKey && !e.shiftKey && e.key === "s") { e.preventDefault(); fs.saveFile(); }
-      if (e.ctrlKey && e.shiftKey && e.key === "S") { e.preventDefault(); fs.saveFileAs(); }
       if (e.ctrlKey && !e.shiftKey && e.key === "n") { e.preventDefault(); fs.newNote(); }
       if (e.ctrlKey && e.shiftKey && e.key === "N") { e.preventDefault(); openNewWindow(); }
       if (e.ctrlKey && e.key === "f") { e.preventDefault(); setDocSearchOpen((o) => !o); }
@@ -582,7 +581,7 @@ function App() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [state.toggleEditing, handleSwitchEditorMode, state.isEditing, fs.importFile, fs.saveFile, fs.saveFileAs, fs.newNote, docSearchOpen]);
+  }, [state.toggleEditing, handleSwitchEditorMode, state.isEditing, fs.importFile, fs.saveFile, fs.newNote, docSearchOpen]);
 
   // 마우스 클릭 후 버튼류 요소 자동 blur → Esc/Space 시 포커스 링 방지
   const settingsOpenRef = useRef(settingsOpen);

@@ -19,6 +19,7 @@ import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsUpdated, emitTrashUpdated } from "./useWindowSync";
 import { markOwnWrite } from "./ownWriteTracker";
+import { t } from "../i18n";
 
 export type { NoteDoc } from "./useNotesLoader";
 
@@ -154,7 +155,7 @@ export function useFileSystem(
 
     let targetPath = doc.filePath;
     if (!targetPath) {
-      const selected = await save({ filters: MD_FILTERS, defaultPath: `${doc.fileName}.md` });
+      const selected = await save({ title: t("dialog.save", locale), filters: MD_FILTERS, defaultPath: `${doc.fileName}.md` });
       if (!selected) return;
       targetPath = selected;
     }
@@ -187,7 +188,7 @@ export function useFileSystem(
     const markdown = getCurrentMarkdown(state, tiptapRef);
     const doc = docs[activeIndex];
     const defaultName = doc?.filePath ? getFileName(doc.filePath) : "untitled.md";
-    const selected = await save({ filters: MD_FILTERS, defaultPath: defaultName });
+    const selected = await save({ title: t("dialog.export", locale), filters: MD_FILTERS, defaultPath: defaultName });
     if (!selected) return;
     markOwnWrite(selected);
     await writeTextFile(selected, markdown);
@@ -255,9 +256,11 @@ export function useFileSystem(
   }, [docs, leaveCurrentDoc, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
 
   const importFile = useCallback(async () => {
-    const selected = await open({ filters: MD_FILTERS, multiple: false });
+    const selected = await open({ filters: MD_FILTERS, multiple: true });
     if (!selected) return;
-    await importFiles([selected as string]);
+    const paths = Array.isArray(selected) ? selected : [selected];
+    if (paths.length === 0) return;
+    await importFiles(paths as string[]);
   }, [importFiles]);
 
   const newNote = useCallback(async () => {
@@ -497,7 +500,7 @@ export function useFileSystem(
     if (!doc) return;
 
     const defaultName = doc.filePath ? getFileName(doc.filePath) : `${doc.fileName}.md`;
-    const selected = await save({ filters: MD_FILTERS, defaultPath: defaultName });
+    const selected = await save({ title: t("dialog.export", locale), filters: MD_FILTERS, defaultPath: defaultName });
     if (!selected) return;
 
     const content = index === activeIndex ? getCurrentMarkdown(state, tiptapRef) : doc.content;
