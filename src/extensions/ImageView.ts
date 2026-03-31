@@ -8,7 +8,7 @@ import { dataUrlToUint8Array, mimeToExt, bytesToDataUrl, mimeFromExt } from "../
 import { closeContextMenu, createMenuShell, createMenuItem } from "../utils/contextMenuRegistry";
 
 const HANDLE_SIZE = 10;
-const HANDLE_HIT = 20;
+const HANDLE_HIT = 32;
 const MIN_WIDTH = 60;
 
 function showContextMenu(
@@ -102,7 +102,6 @@ export function createImageNodeView(editor: Editor) {
     img.draggable = false;
     img.style.cssText = "display:block;max-width:100%;height:auto;border-radius:var(--editor-radius);cursor:default;";
     if (HTMLAttributes.width) img.style.width = `${HTMLAttributes.width}px`;
-    if (HTMLAttributes.height) img.style.height = `${HTMLAttributes.height}px`;
     dom.appendChild(img);
 
     const handles: HTMLElement[] = [];
@@ -118,10 +117,10 @@ export function createImageNodeView(editor: Editor) {
         opacity:0;pointer-events:none;
         display:flex;align-items:center;justify-content:center;
       `;
-      if (corner.includes("n")) hitArea.style.top = `-${HANDLE_HIT / 2}px`;
-      if (corner.includes("s")) hitArea.style.bottom = `-${HANDLE_HIT / 2}px`;
-      if (corner.includes("w")) hitArea.style.left = `-${HANDLE_HIT / 2}px`;
-      if (corner.includes("e")) hitArea.style.right = `-${HANDLE_HIT / 2}px`;
+      if (corner.includes("n")) hitArea.style.top = `-${HANDLE_SIZE / 2}px`;
+      if (corner.includes("s")) hitArea.style.bottom = `-${HANDLE_SIZE / 2}px`;
+      if (corner.includes("w")) hitArea.style.left = `-${HANDLE_SIZE / 2}px`;
+      if (corner.includes("e")) hitArea.style.right = `-${HANDLE_SIZE / 2}px`;
       const knob = document.createElement("div");
       knob.style.cssText = `
         width:${HANDLE_SIZE}px;height:${HANDLE_SIZE}px;
@@ -215,7 +214,6 @@ export function createImageNodeView(editor: Editor) {
           const dx = isLeft ? startX - ev.clientX : ev.clientX - startX;
           const newW = Math.max(MIN_WIDTH, startW + dx);
           img.style.width = `${newW}px`;
-          img.style.height = `${Math.round(newW * aspectRatio)}px`;
         };
 
         const cleanup = () => {
@@ -266,7 +264,6 @@ export function createImageNodeView(editor: Editor) {
         if (updatedNode.attrs.alt) img.alt = updatedNode.attrs.alt;
         if (updatedNode.attrs.width) {
           img.style.width = `${updatedNode.attrs.width}px`;
-          img.style.height = `${updatedNode.attrs.height}px`;
         }
         syncDragState();
         updateSelection();
