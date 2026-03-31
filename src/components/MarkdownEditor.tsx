@@ -14,6 +14,60 @@ import { showGenericContextMenu, type TextContextMenuContext } from "../extensio
 import type { Locale, WordWrap } from "../hooks/useSettings";
 import "../styles/markdown-editor.css";
 
+function moveCursorToDocumentEndIfBelow(view: EditorView, clientY: number) {
+  let endCoords: ReturnType<EditorView["coordsAtPos"]> | null = null;
+  try {
+    endCoords = view.coordsAtPos(view.state.doc.length);
+  } catch {
+    endCoords = null;
+  }
+
+  if (!endCoords || clientY <= endCoords.bottom) {
+    return false;
+  }
+
+  view.dispatch({
+    selection: { anchor: view.state.doc.length },
+    scrollIntoView: false,
+  });
+  view.focus();
+  return true;
+}
+
+function isBelowDocumentEnd(view: EditorView, clientY: number) {
+  let endCoords: ReturnType<EditorView["coordsAtPos"]> | null = null;
+  try {
+    endCoords = view.coordsAtPos(view.state.doc.length);
+  } catch {
+    endCoords = null;
+  }
+
+  return !!endCoords && clientY > endCoords.bottom;
+}
+
+function createContextMenuContext(view: EditorView, locale: Locale): TextContextMenuContext {
+  const { from, to } = view.state.selection.main;
+  return {
+    hasSelection: from !== to,
+    isEditable: true,
+    locale,
+    cut: () => document.execCommand("cut"),
+    copy: () => document.execCommand("copy"),
+    paste: async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        view.dispatch(view.state.replaceSelection(text));
+      } catch { document.execCommand("paste"); }
+      view.focus();
+    },
+    selectAll: () => {
+      view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
+      view.focus();
+    },
+    focus: () => view.focus(),
+  };
+}
+
 /* ─── 라이트 / 다크 팔레트 ─── */
 const palette = {
   light: {
@@ -120,35 +174,25 @@ export function MarkdownEditor({
 }: MarkdownEditorProps) {
   const localeRef = useRef(locale);
   localeRef.current = locale;
+  const viewRef = useRef<EditorView | null>(null);
 
   const extensions = useMemo(() => {
     const hl = buildHighlightStyle(isDarkMode);
     const theme = buildEditorTheme(isDarkMode);
 
     const cmContextMenu = EditorView.domEventHandlers({
+      mousedown(event, view) {
+        if (event.button !== 0) return false;
+        if (!moveCursorToDocumentEndIfBelow(view, event.clientY)) return false;
+        event.preventDefault();
+        return true;
+      },
       contextmenu(event, view) {
         event.preventDefault();
-        const { from, to } = view.state.selection.main;
-        const ctx: TextContextMenuContext = {
-          hasSelection: from !== to,
-          isEditable: true,
-          locale: localeRef.current,
-          cut: () => document.execCommand("cut"),
-          copy: () => document.execCommand("copy"),
-          paste: async () => {
-            try {
-              const text = await navigator.clipboard.readText();
-              view.dispatch(view.state.replaceSelection(text));
-            } catch { document.execCommand("paste"); }
-            view.focus();
-          },
-          selectAll: () => {
-            view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
-            view.focus();
-          },
-          focus: () => view.focus(),
-        };
-        showGenericContextMenu({ x: event.clientX, y: event.clientY }, ctx);
+        showGenericContextMenu(
+          { x: event.clientX, y: event.clientY },
+          createContextMenuContext(view, localeRef.current),
+        );
         return true;
       },
     });
@@ -165,13 +209,38 @@ export function MarkdownEditor({
 
   const handleCreateEditor = useCallback(
     (view: EditorView, _state: EditorState) => {
+      viewRef.current = view;
       onViewReady?.(view);
     },
     [onViewReady],
   );
 
+  const handleWrapperMouseDownCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const view = viewRef.current;
+    if (!view) return;
+    if (!isBelowDocumentEnd(view, event.clientY)) return;
+    if (!moveCursorToDocumentEndIfBelow(view, event.clientY)) return;
+    event.preventDefault();
+  }, []);
+
+  const handleWrapperContextMenuCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const view = viewRef.current;
+    if (!view) return;
+    if (!isBelowDocumentEnd(view, event.clientY)) return;
+    event.preventDefault();
+    showGenericContextMenu(
+      { x: event.clientX, y: event.clientY },
+      createContextMenuContext(view, localeRef.current),
+    );
+  }, []);
+
   return (
-    <div className={`markdown-editor ${wordWrap === "char" ? "markdown-editor-wrap-char" : "markdown-editor-wrap-word"}`}>
+    <div
+      className={`markdown-editor ${wordWrap === "char" ? "markdown-editor-wrap-char" : "markdown-editor-wrap-word"}`}
+      onMouseDownCapture={handleWrapperMouseDownCapture}
+      onContextMenuCapture={handleWrapperContextMenuCapture}
+    >
       <CodeMirror
         value={value}
         onChange={onChange}

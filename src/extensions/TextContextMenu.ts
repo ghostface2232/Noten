@@ -1,5 +1,5 @@
 import { Extension, type Editor } from "@tiptap/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
 import { closeContextMenu, createMenuShell, createMenuItem, createMenuSeparator } from "../utils/contextMenuRegistry";
@@ -108,6 +108,27 @@ function tiptapContext(editor: Editor): TextContextMenuContext {
   };
 }
 
+export function createTiptapTextContextMenuContext(editor: Editor): TextContextMenuContext {
+  return tiptapContext(editor);
+}
+
+export function moveTiptapSelectionToEnd(editor: Editor) {
+  if (editor.storage.readonlyGuard?.readonly) return;
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.atEnd(editor.state.doc)));
+  editor.commands.focus();
+}
+
+export function isBelowTiptapDocumentEnd(editor: Editor, clientY: number) {
+  let endCoords: ReturnType<typeof editor.view.coordsAtPos> | null = null;
+  try {
+    endCoords = editor.view.coordsAtPos(editor.state.doc.content.size);
+  } catch {
+    endCoords = null;
+  }
+
+  return !!endCoords && clientY > endCoords.bottom;
+}
+
 const TextContextMenu = Extension.create({
   name: "textContextMenu",
 
@@ -126,7 +147,7 @@ const TextContextMenu = Extension.create({
               event.preventDefault();
               showGenericContextMenu(
                 { x: event.clientX, y: event.clientY },
-                tiptapContext(editor),
+                createTiptapTextContextMenuContext(editor),
               );
               return true;
             },

@@ -426,7 +426,15 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                       )}
                     </div>
                   </div>
-                  <Tooltip content={currentNotesDir} relationship="description" positioning="above">
+                  <Tooltip
+                    content={(
+                      <span style={{ userSelect: "none", WebkitUserSelect: "none", pointerEvents: "none" }}>
+                        {currentNotesDir}
+                      </span>
+                    )}
+                    relationship="description"
+                    positioning="above"
+                  >
                     <div style={{
                       fontSize: "13px",
                       color: tokens.colorNeutralForeground3,

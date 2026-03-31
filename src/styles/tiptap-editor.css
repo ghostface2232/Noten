@@ -1,5 +1,16 @@
 /* ─── ProseMirror 기본 레이아웃 ─── */
+.tiptap-editable,
+.tiptap-readonly {
+  height: 100%;
+}
+
+.tiptap-editable,
+.tiptap-editable .ProseMirror {
+  cursor: text;
+}
+
 .ProseMirror {
+  box-sizing: border-box;
   outline: none;
   color: var(--editor-color-text);
   font-family: var(--editor-font-family);

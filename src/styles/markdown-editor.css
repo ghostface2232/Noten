@@ -1,8 +1,15 @@
 /* ─── CodeMirror Markdown 소스 에디터 ─── */
 /* 색상/커서/선택/거터는 MarkdownEditor.tsx의 buildEditorTheme()에서 JS로 제어 */
 
+.markdown-editor {
+  height: 100%;
+  cursor: text;
+}
+
 .markdown-editor .cm-editor {
   background: transparent;
+  cursor: text;
+  height: 100%;
 }
 
 .markdown-editor .cm-editor.cm-focused {
@@ -10,8 +17,10 @@
 }
 
 .markdown-editor .cm-scroller {
+  cursor: text;
   line-height: var(--editor-line-height);
   overflow-x: hidden;
+  min-height: 100%;
 }
 
 .markdown-editor .cm-content,
@@ -21,6 +30,8 @@
 }
 
 .markdown-editor .cm-content {
+  box-sizing: border-box;
+  min-height: 100%;
   padding: var(--editor-padding-y) var(--editor-padding-x);
 }
 

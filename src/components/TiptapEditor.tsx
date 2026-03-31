@@ -28,7 +28,12 @@ import { common, createLowlight } from "lowlight";
 import SlashCommands from "../extensions/SlashCommands";
 import ImageDrop from "../extensions/ImageDrop";
 import { createImageNodeView } from "../extensions/ImageView";
-import TextContextMenu from "../extensions/TextContextMenu";
+import TextContextMenu, {
+  createTiptapTextContextMenuContext,
+  isBelowTiptapDocumentEnd,
+  moveTiptapSelectionToEnd,
+  showGenericContextMenu,
+} from "../extensions/TextContextMenu";
 import { SearchHighlight } from "../extensions/SearchHighlight";
 import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
@@ -519,6 +524,21 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         className={`${editable ? "tiptap-editable" : "tiptap-readonly"} ${wrapClass}`}
         data-theme={isDarkMode ? "dark" : "light"}
         style={editorStyle}
+        onMouseDownCapture={(event) => {
+          if (!editor || !editable || event.button !== 0) return;
+          if (!isBelowTiptapDocumentEnd(editor, event.clientY)) return;
+          event.preventDefault();
+          moveTiptapSelectionToEnd(editor);
+        }}
+        onContextMenuCapture={(event) => {
+          if (!editor) return;
+          if (!isBelowTiptapDocumentEnd(editor, event.clientY)) return;
+          event.preventDefault();
+          showGenericContextMenu(
+            { x: event.clientX, y: event.clientY },
+            createTiptapTextContextMenuContext(editor),
+          );
+        }}
       >
         <EditorContent editor={editor} />
       </div>
