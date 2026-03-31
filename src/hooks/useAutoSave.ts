@@ -91,7 +91,7 @@ export function useAutoSave(
     };
   }, []);
 
-  const doSave = useCallback(async (snapshot: SaveSnapshot) => {
+  const doSave = useCallback(async (snapshot: SaveSnapshot): Promise<boolean> => {
     const {
       locale: latestLocale,
       notesSortOrder: latestSortOrder,
@@ -104,7 +104,7 @@ export function useAutoSave(
       await writeTextFile(snapshot.filePath, snapshot.content);
 
       if ((latestRevisionByDocRef.current.get(snapshot.docId) ?? 0) !== snapshot.revision) {
-        return;
+        return false;
       }
 
       const live = stateRef.current;
@@ -134,7 +134,7 @@ export function useAutoSave(
       });
 
       if (!savedDocStillExists) {
-        return;
+        return false;
       }
 
       const sortedDocs = sortNotes(nextDocs, latestSortOrder);
@@ -153,12 +153,14 @@ export function useAutoSave(
         live.state.setIsDirty(false);
         live.state.setTiptapDirty(false);
       }
+      return true;
     } catch (err) {
       console.warn("Auto-save failed:", err);
+      return false;
     }
   }, []);
 
-  const flushAutoSave = useCallback((): Promise<void> => {
+  const flushAutoSave = useCallback((): Promise<boolean> => {
     // Clear all pending timers
     for (const timer of timersRef.current.values()) {
       clearTimeout(timer);
@@ -167,12 +169,14 @@ export function useAutoSave(
     pendingSnapshotsRef.current.clear();
 
     // Only save if scheduleAutoSave was called (content actually changed)
-    if (!hasPendingChangesRef.current) return Promise.resolve();
+    if (!hasPendingChangesRef.current) {
+      return Promise.resolve(!stateRef.current.state.isDirty);
+    }
     hasPendingChangesRef.current = false;
 
     // Capture a fresh snapshot from the current editor state
     const freshSnapshot = createSnapshot();
-    if (!freshSnapshot) return Promise.resolve();
+    if (!freshSnapshot) return Promise.resolve(false);
 
     return doSave(freshSnapshot);
   }, [createSnapshot, doSave]);

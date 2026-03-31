@@ -28,7 +28,10 @@ pub fn extract_and_run_nsis() -> Result<(), String> {
 pub fn run_uninstall() -> Result<(), String> {
     let uninstall_path = install_dir().join("uninstall.exe");
     if !uninstall_path.exists() {
-        return Ok(());
+        return Err(format!(
+            "uninstall.exe not found at {}",
+            uninstall_path.display()
+        ));
     }
 
     let status = Command::new(uninstall_path)

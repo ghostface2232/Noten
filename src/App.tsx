@@ -324,7 +324,7 @@ function App() {
     }
   }, [isLoading, docs, activeIndex]);
 
-  const flushAutoSaveRef = useRef<(() => Promise<void>) | null>(null);
+  const flushAutoSaveRef = useRef<(() => Promise<boolean>) | null>(null);
   const notifyActiveDocRef = useRef<((id: string, filePath: string) => void) | null>(null);
   const cancelDocSaveRef = useRef<((docId: string) => void) | null>(null);
 

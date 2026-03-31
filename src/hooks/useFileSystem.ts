@@ -105,7 +105,7 @@ export function useFileSystem(
   getGroupForNote?: (noteId: string) => NoteGroup | null,
   trashedNotes?: TrashedNote[],
   setTrashedNotes?: (updater: TrashedNote[] | ((prev: TrashedNote[]) => TrashedNote[])) => void,
-  flushAutoSaveRef?: React.RefObject<(() => Promise<void>) | null>,
+  flushAutoSaveRef?: React.RefObject<(() => Promise<boolean>) | null>,
   notifyActiveDocRef?: React.RefObject<((id: string, filePath: string) => void) | null>,
   cancelDocSaveRef?: React.RefObject<((docId: string) => void) | null>,
 ): FileSystemActions {
@@ -120,8 +120,9 @@ export function useFileSystem(
 
   /** Flush pending auto-save to disk before leaving the current document. */
   const leaveCurrentDoc = useCallback(async () => {
-    await flushAutoSaveRef?.current?.();
-  }, []);
+    if (!flushAutoSaveRef?.current) return !state.isDirty;
+    return flushAutoSaveRef.current();
+  }, [flushAutoSaveRef, state.isDirty]);
 
   const getLiveDocsSnapshot = useCallback((baseDocs: NoteDoc[] = docsRef.current) => {
     const currentActiveIndex = activeIndexRef.current;
@@ -237,8 +238,8 @@ export function useFileSystem(
     if (sourcePaths.length === 0) return;
 
     const { docs: liveDocs, activeDocId } = getLiveDocsSnapshot();
-    await leaveCurrentDoc();
-    const baseDocs = markDocClean(liveDocs, activeDocId);
+    const didPersistCurrentDoc = await leaveCurrentDoc();
+    const baseDocs = didPersistCurrentDoc ? markDocClean(liveDocs, activeDocId) : liveDocs;
 
     const existingNames = new Set(baseDocs.map((d) => d.fileName));
     const importedDocs: NoteDoc[] = [];
@@ -305,8 +306,8 @@ export function useFileSystem(
 
   const newNote = useCallback(async () => {
     const { docs: liveDocs, activeDocId, activeIndex: currentActiveIndex } = getLiveDocsSnapshot();
-    await leaveCurrentDoc();
-    const baseDocs = markDocClean(liveDocs, activeDocId);
+    const didPersistCurrentDoc = await leaveCurrentDoc();
+    const baseDocs = didPersistCurrentDoc ? markDocClean(liveDocs, activeDocId) : liveDocs;
 
     // Check if current note is empty and should be replaced
     const currentDoc = baseDocs[currentActiveIndex];
@@ -375,8 +376,8 @@ export function useFileSystem(
     if (index === currentActiveIndex) return;
     if (index < 0 || index >= liveDocs.length) return;
 
-    await leaveCurrentDoc();
-    const baseDocs = markDocClean(liveDocs, activeDocId);
+    const didPersistCurrentDoc = await leaveCurrentDoc();
+    const baseDocs = didPersistCurrentDoc ? markDocClean(liveDocs, activeDocId) : liveDocs;
 
     const nextDocs = pruneEmptyCurrentDoc(baseDocs);
     let targetIndex = index;
@@ -400,8 +401,10 @@ export function useFileSystem(
     cancelDocSaveRef?.current?.(doc.id);
 
     // Flush pending auto-save so the on-disk file is up-to-date before trash copy
-    if (index === currentActiveIndex) await leaveCurrentDoc();
-    const baseDocs = index === currentActiveIndex ? markDocClean(liveDocs, activeDocId) : liveDocs;
+    const didPersistCurrentDoc = index === currentActiveIndex ? await leaveCurrentDoc() : false;
+    const baseDocs = index === currentActiveIndex && didPersistCurrentDoc
+      ? markDocClean(liveDocs, activeDocId)
+      : liveDocs;
 
     // Capture group before it gets cleaned up below
     const group = getGroupForNote?.(doc.id) ?? null;
@@ -505,8 +508,8 @@ export function useFileSystem(
     const doc = liveDocs[index];
     if (!doc) return;
 
-    await leaveCurrentDoc();
-    const baseDocs = markDocClean(liveDocs, activeDocId);
+    const didPersistCurrentDoc = await leaveCurrentDoc();
+    const baseDocs = didPersistCurrentDoc ? markDocClean(liveDocs, activeDocId) : liveDocs;
     const sourceDoc = baseDocs[index];
     if (!sourceDoc) return;
 
@@ -608,8 +611,8 @@ export function useFileSystem(
     };
 
     const { docs: liveDocs, activeDocId } = getLiveDocsSnapshot();
-    await leaveCurrentDoc();
-    const baseDocs = markDocClean(liveDocs, activeDocId);
+    const didPersistCurrentDoc = await leaveCurrentDoc();
+    const baseDocs = didPersistCurrentDoc ? markDocClean(liveDocs, activeDocId) : liveDocs;
 
     // Remove from trashed list BEFORE sortAndPersistDocs so saveManifest
     // reads the updated trashedNotesCache (without the restored note)
