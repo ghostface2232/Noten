@@ -150,6 +150,7 @@ const dict = {
   "settings.tab.about": { en: "About", ko: "정보" },
   "about.checkUpdate": { en: "Check for updates", ko: "업데이트 확인" },
   "about.checking": { en: "Checking for updates...", ko: "업데이트를 확인하는 중..." },
+  "about.checkingShort": { en: "Checking...", ko: "확인 중..." },
   "about.upToDate": { en: "You're on the latest version", ko: "최신 버전입니다" },
   "about.available": { en: "Update available", ko: "업데이트 가능" },
   "about.install": { en: "Install update", ko: "업데이트 설치" },

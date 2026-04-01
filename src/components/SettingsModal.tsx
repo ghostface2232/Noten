@@ -618,14 +618,18 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                         <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3 }}>v{appVersion}</div>
                       </div>
                     </div>
-                    {(updaterState.status === "idle" || updaterState.status === "error" || updaterState.status === "upToDate") && (
+                    {(updaterState.status === "idle" ||
+                      updaterState.status === "error" ||
+                      updaterState.status === "upToDate" ||
+                      updaterState.status === "checking") && (
                       <Button
                         size="medium"
                         appearance="subtle"
                         onClick={checkForUpdate}
+                        disabled={updaterState.status === "checking"}
                         style={subtleBtnStyle}
                       >
-                        {i("about.checkUpdate")}
+                        {updaterState.status === "checking" ? i("about.checkingShort") : i("about.checkUpdate")}
                       </Button>
                     )}
                   </div>
