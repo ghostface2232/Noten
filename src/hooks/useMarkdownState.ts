@@ -77,12 +77,9 @@ export function useMarkdownState(): MarkdownState {
   }, []);
 
   const applySurface = useCallback((nextSurface: EditorSurface) => {
-    const editor = editorRef.current;
     if (nextSurface === surface) return;
 
-    const md = surface === "markdown"
-      ? codemirrorValueRef.current
-      : editor?.getMarkdown() ?? markdown;
+    const md = flushCurrentEditor();
 
     if (nextSurface === "markdown") {
       codemirrorValueRef.current = md;
@@ -90,11 +87,12 @@ export function useMarkdownState(): MarkdownState {
       return;
     }
 
+    const editor = editorRef.current;
     if (editor) {
       loadIntoTiptap(md);
     }
     setSurfaceRaw("note");
-  }, [loadIntoTiptap, markdown, surface]);
+  }, [flushCurrentEditor, loadIntoTiptap, surface]);
 
   const setSurface = useCallback((nextSurface: EditorSurface) => {
     applySurface(nextSurface);

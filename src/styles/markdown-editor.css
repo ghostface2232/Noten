@@ -29,6 +29,10 @@
   font-size: var(--editor-font-size) !important;
 }
 
+.markdown-editor .cm-line {
+  padding: 0;
+}
+
 .markdown-editor .cm-content {
   box-sizing: border-box;
   min-height: 100%;
