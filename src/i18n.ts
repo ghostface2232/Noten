@@ -5,8 +5,8 @@ const dict = {
   "app.name": { en: "Noten", ko: "Noten" },
   "surface.note": { en: "Note", ko: "노트" },
   "surface.markdown": { en: "Markdown", ko: "마크다운" },
-  "noteState.quiet": { en: "Quiet", ko: "조용히 보기" },
-  "noteState.editing": { en: "Editing", ko: "편집 중" },
+  "noteState.quiet": { en: "View", ko: "보기" },
+  "noteState.editing": { en: "Edit", ko: "편집" },
   "theme.light": { en: "Light", ko: "라이트" },
   "theme.dark": { en: "Dark", ko: "다크" },
 

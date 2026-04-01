@@ -937,6 +937,7 @@ function App() {
               surface={state.surface}
               onSelectSurface={handleSelectSurface}
               editor={tiptapEditor}
+              cmView={cmView}
               sidebarOpen={sidebarOpen}
               visible={isNoteEditing}
               locale={locale}

@@ -404,14 +404,6 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                   </Dropdown>
                 </div>
 
-                <div className={mergeClasses(styles.row, settingItemClass(styles))}>
-                  <Label className={styles.label}>{i("settings.keepFormat")}</Label>
-                  <Switch
-                    checked={settings.keepFormatOnPaste}
-                    onChange={(_, data) => onUpdate("keepFormatOnPaste", data.checked)}
-                  />
-                </div>
-
                 <div className={settingItemClass(styles)}>
                   <div className={styles.row}>
                     <Label className={styles.label}>{i("settings.notesDirectory")}</Label>
@@ -489,6 +481,14 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                     <Radio value="word" label={i("settings.wordWrap.word")} />
                     <Radio value="char" label={i("settings.wordWrap.char")} />
                   </RadioGroup>
+                </div>
+
+                <div className={mergeClasses(styles.row, settingItemClass(styles))}>
+                  <Label className={styles.label}>{i("settings.keepFormat")}</Label>
+                  <Switch
+                    checked={settings.keepFormatOnPaste}
+                    onChange={(_, data) => onUpdate("keepFormatOnPaste", data.checked)}
+                  />
                 </div>
 
                 <div className={mergeClasses(styles.sliderRow, settingItemClass(styles))}>
