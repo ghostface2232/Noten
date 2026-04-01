@@ -4,7 +4,6 @@ pub const PRODUCT_NAME: &str = "Noten";
 pub const APP_IDENTIFIER: &str = "com.noten.app";
 pub const APP_EXE_NAME: &str = "Noten.exe";
 pub const SETUP_EXE_NAME: &str = "maintenance-helper.exe";
-pub const NSIS_TEMP_NAME: &str = "Noten_silent_setup.exe";
 pub const UNINSTALL_REG_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Noten";
 
 pub fn install_dir() -> PathBuf {

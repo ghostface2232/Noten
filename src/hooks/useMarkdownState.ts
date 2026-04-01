@@ -14,7 +14,6 @@ export interface MarkdownState {
   editorRef: React.MutableRefObject<Editor | null>;
   readCurrentEditor: () => string;
   setSurface: (surface: EditorSurface) => void;
-  toggleSurface: () => void;
   setNoteState: (state: NoteState) => void;
   enterNoteEditing: () => void;
   exitNoteEditing: () => void;
@@ -98,10 +97,6 @@ export function useMarkdownState(): MarkdownState {
     applySurface(nextSurface);
   }, [applySurface]);
 
-  const toggleSurface = useCallback(() => {
-    applySurface(surface === "note" ? "markdown" : "note");
-  }, [applySurface, surface]);
-
   const setNoteState = useCallback((nextState: NoteState) => {
     setNoteStateRaw(nextState);
   }, []);
@@ -141,7 +136,6 @@ export function useMarkdownState(): MarkdownState {
     editorRef,
     readCurrentEditor,
     setSurface,
-    toggleSurface,
     setNoteState,
     enterNoteEditing,
     exitNoteEditing,

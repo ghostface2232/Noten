@@ -11,7 +11,6 @@ const dict = {
   "theme.dark": { en: "Dark", ko: "다크" },
 
   /* ─── EditorToolbar ─── */
-  "editor.markdown": { en: "Markdown", ko: "마크다운" },
   "heading.body": { en: "Body", ko: "본문" },
   "heading.h1": { en: "Heading 1", ko: "제목 1" },
   "heading.h2": { en: "Heading 2", ko: "제목 2" },

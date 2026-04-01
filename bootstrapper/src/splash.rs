@@ -84,7 +84,6 @@ struct LogoAsset {
 #[derive(Clone, Copy)]
 pub enum CompletionAction {
     LaunchApp,
-    CloseWindow,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -82,7 +82,6 @@ struct LogoAsset {
 
 #[derive(Clone, Copy)]
 pub enum CompletionAction {
-    LaunchApp,
     CloseWindow,
 }
 
@@ -144,7 +143,7 @@ struct SplashData {
     ready_button_label_en: Option<String>,
     secondary_button_label_ko: Option<String>,
     secondary_button_label_en: Option<String>,
-    completion_action: CompletionAction,
+    _completion_action: CompletionAction,
     logo: Option<LogoAsset>,
     font_handles: Vec<HANDLE>,
     dpi: u32,
@@ -323,7 +322,7 @@ where
             ready_button_label_en: config.ready_button_label_en.map(str::to_string),
             secondary_button_label_ko: config.secondary_button_label_ko.map(str::to_string),
             secondary_button_label_en: config.secondary_button_label_en.map(str::to_string),
-            completion_action: config.completion_action,
+            _completion_action: config.completion_action,
             logo: load_logo_asset(),
             font_handles,
             dpi,
