@@ -636,6 +636,27 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
 
                   {/* Version notes */}
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.2</div>
+                    <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
+                      {locale === "ko" ? (
+                        <>
+                          · 오픈소스 폰트로 교체 (Pretendard JP / JetBrains Mono)<br />
+                          · Markdown 소스 모드에서 서식 제거, 구문 색상만 표시<br />
+                          · 노트 ↔ Markdown 전환 시 콘텐츠 동기화 문제 수정<br />
+                          · 설정 UI 및 시작 화면 라벨 정리
+                        </>
+                      ) : (
+                        <>
+                          · Switched to open-source fonts (Pretendard JP / JetBrains Mono)<br />
+                          · Markdown source mode now shows syntax colors only, removed formatting<br />
+                          · Fixed content sync issue when switching between Note and Markdown surfaces<br />
+                          · Polished settings UI and startup labels
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
                     <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.1</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
