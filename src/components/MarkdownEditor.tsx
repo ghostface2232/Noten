@@ -104,30 +104,30 @@ function buildHighlightStyle(dark: boolean) {
   const p = dark ? palette.dark : palette.light;
 
   return HighlightStyle.define([
-    // 헤딩
-    { tag: tags.heading1, fontSize: "2em", fontWeight: "bold", color: p.text },
-    { tag: tags.heading2, fontSize: "1.5em", fontWeight: "bold", color: p.text },
-    { tag: tags.heading3, fontSize: "1.25em", fontWeight: "bold", color: p.text },
-    { tag: tags.heading4, fontWeight: "bold", color: p.text },
-    { tag: tags.heading5, fontWeight: "bold", color: p.text },
-    { tag: tags.heading6, fontWeight: "bold", color: p.text },
-    // 서식
-    { tag: tags.strong, fontWeight: "700" },
-    { tag: tags.emphasis, fontStyle: "italic" },
-    { tag: tags.strikethrough, textDecoration: "line-through" },
-    // 인라인 코드
-    { tag: tags.monospace, backgroundColor: p.codeBg, borderRadius: "3px", padding: "0.1em 0.3em" },
+    // 헤딩 (컬러만, 크기·굵기 제거)
+    { tag: tags.heading1, color: p.text },
+    { tag: tags.heading2, color: p.text },
+    { tag: tags.heading3, color: p.text },
+    { tag: tags.heading4, color: p.text },
+    { tag: tags.heading5, color: p.text },
+    { tag: tags.heading6, color: p.text },
+    // 서식 (컬러만, 굵기·이탤릭·취소선 제거)
+    { tag: tags.strong, color: p.text },
+    { tag: tags.emphasis, color: p.text },
+    { tag: tags.strikethrough, color: p.textSecondary },
+    // 인라인 코드 (배경·패딩 제거, 컬러만)
+    { tag: tags.monospace, color: p.accent },
     // 링크
-    { tag: tags.link, color: p.accent, textDecoration: "underline" },
+    { tag: tags.link, color: p.accent },
     { tag: tags.url, color: p.accent },
     // 인용
-    { tag: tags.quote, color: p.textSecondary, fontStyle: "italic" },
+    { tag: tags.quote, color: p.textSecondary },
     // 마크다운 메타 문자 (# - > ``` 등)
     { tag: tags.meta, color: p.meta },
     { tag: tags.processingInstruction, color: p.meta },
     // 코드블럭 내 구문 강조
     { tag: tags.keyword, color: p.keyword },
-    { tag: tags.comment, color: p.comment, fontStyle: "italic" },
+    { tag: tags.comment, color: p.comment },
     { tag: tags.string, color: p.string },
     { tag: tags.number, color: p.number },
     { tag: tags.variableName, color: p.text },
