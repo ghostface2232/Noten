@@ -640,17 +640,19 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
+                          · 편집/읽기 모드를 노트/Markdown 서피스 모델로 전환<br />
+                          · 부트스트래퍼에서 제거 로직 분리, maintenance-helper로 이전<br />
                           · 오픈소스 폰트로 교체 (Pretendard JP / JetBrains Mono)<br />
                           · Markdown 소스 모드에서 서식 제거, 구문 색상만 표시<br />
-                          · 노트 ↔ Markdown 전환 시 콘텐츠 동기화 문제 수정<br />
-                          · 설정 UI 및 시작 화면 라벨 정리
+                          · 노트 ↔ Markdown 전환 시 콘텐츠 동기화 수정
                         </>
                       ) : (
                         <>
+                          · Replaced Edit/Read mode with Note/Markdown surface model<br />
+                          · Separated uninstall logic from bootstrapper into maintenance-helper<br />
                           · Switched to open-source fonts (Pretendard JP / JetBrains Mono)<br />
-                          · Markdown source mode now shows syntax colors only, removed formatting<br />
-                          · Fixed content sync issue when switching between Note and Markdown surfaces<br />
-                          · Polished settings UI and startup labels
+                          · Markdown source mode now shows syntax colors only<br />
+                          · Fixed content sync when switching between Note and Markdown
                         </>
                       )}
                     </div>
