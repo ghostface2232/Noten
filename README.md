@@ -56,5 +56,4 @@
 
 ## License
 MIT
----
 © 2026 Mingwan Bae
