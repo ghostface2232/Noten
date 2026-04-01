@@ -9,7 +9,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-blue?style=flat-square)
 
 
-A clean, fast markdown and rich text editor for Windows, inspired by Apple Notes and Notion.
+A clean, fast and modern note-taking app for Windows, with markdown and rich text editing.
 Powered by [Tiptap](https://tiptap.dev/) and [CodeMirror](https://codemirror.net/).
 
 
