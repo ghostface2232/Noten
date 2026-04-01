@@ -33,6 +33,7 @@ AGENTS.md
 # Tauri build output
 src-tauri/target/
 src-tauri/gen/
+src-tauri/resources/maintenance-helper.exe
 
 # Unused template assets
 public/tauri.svg
@@ -42,3 +43,7 @@ src/assets/react.svg
 # Bootstrapper
 bootstrapper/target/
 bootstrapper/assets/nsis-payload.exe
+
+# Maintenance helper
+maintenance-helper/target/
+maintenance-helper/assets/nsis-payload.exe

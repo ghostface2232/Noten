@@ -3,15 +3,16 @@ use std::slice;
 
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE, REG_SZ, RegCloseKey, RegOpenKeyExW, RegSetValueExW,
+    HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE, REG_SZ, RegCloseKey, RegDeleteKeyW, RegOpenKeyExW,
+    RegSetValueExW,
 };
 use windows::core::PCWSTR;
 
-use crate::constants::{UNINSTALL_REG_KEY, install_dir};
+use crate::constants::{SETUP_EXE_NAME, UNINSTALL_REG_KEY, install_dir};
 
 pub fn fix_uninstall_string() -> Result<(), String> {
     unsafe {
-        let uninstall_path = install_dir().join("maintenance-helper.exe");
+        let uninstall_path = install_dir().join(SETUP_EXE_NAME);
         let uninstall_string = format!("\"{}\" --uninstall", uninstall_path.display());
 
         let mut subkey: Vec<u16> = UNINSTALL_REG_KEY.encode_utf16().collect();
@@ -40,6 +41,22 @@ pub fn fix_uninstall_string() -> Result<(), String> {
         if set_status != ERROR_SUCCESS {
             return Err(format!(
                 "failed to set uninstall registry values: {set_status:?}"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+pub fn remove_uninstall_registry() -> Result<(), String> {
+    unsafe {
+        let mut subkey: Vec<u16> = UNINSTALL_REG_KEY.encode_utf16().collect();
+        subkey.push(0);
+
+        let status = RegDeleteKeyW(HKEY_CURRENT_USER, PCWSTR(subkey.as_ptr()));
+        if status != ERROR_SUCCESS {
+            return Err(format!(
+                "failed to delete uninstall registry key: {status:?}"
             ));
         }
     }

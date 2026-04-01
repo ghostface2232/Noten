@@ -3,7 +3,7 @@ use std::fs;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
-use tauri::{Listener, Manager};
+use tauri::{AppHandle, Listener, Manager, Runtime, path::BaseDirectory};
 
 const CREATE_NO_WINDOW_FLAG: u32 = 0x08000000;
 
@@ -52,40 +52,6 @@ async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_bootstrapper_path() -> Option<PathBuf> {
-    if let Ok(current_exe) = env::current_exe() {
-        if let Some(dir) = current_exe.parent() {
-            let path = dir.join("noten-setup.exe");
-            if path.exists() {
-                return Some(path);
-            }
-        }
-    }
-
-    let Ok(local_app_data) = env::var("LOCALAPPDATA") else {
-        return None;
-    };
-
-    let path = PathBuf::from(local_app_data)
-        .join("Noten")
-        .join("noten-setup.exe");
-    path.exists().then_some(path)
-}
-
-fn reg_query_value(reg_key: &str, value_name: &str) -> Option<String> {
-    let output = Command::new("reg.exe")
-        .creation_flags(CREATE_NO_WINDOW_FLAG)
-        .args(["query", reg_key, "/v", value_name])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    Some(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
 fn reg_add_value(reg_key: &str, value_name: &str, value_data: &str) -> Result<(), String> {
     let output = Command::new("reg.exe")
         .creation_flags(CREATE_NO_WINDOW_FLAG)
@@ -110,29 +76,35 @@ fn reg_add_value(reg_key: &str, value_name: &str, value_data: &str) -> Result<()
     }
 }
 
-fn ensure_bootstrapper_uninstall_string() {
-    let Some(bootstrapper_path) = resolve_bootstrapper_path() else {
+fn ensure_maintenance_helper<R: Runtime>(app_handle: AppHandle<R>) {
+    let Ok(resource_helper_path) =
+        app_handle
+            .path()
+            .resolve("maintenance-helper.exe", BaseDirectory::Resource)
+    else {
         return;
     };
 
-    if !bootstrapper_path.exists() {
+    let Ok(local_app_data) = env::var("LOCALAPPDATA") else {
+        return;
+    };
+
+    let target_dir = PathBuf::from(local_app_data).join("Noten");
+    if let Err(err) = fs::create_dir_all(&target_dir) {
+        eprintln!("failed to create maintenance helper directory: {err}");
         return;
     }
 
-    let uninstall_string = format!("\"{}\" --uninstall", bootstrapper_path.display());
-    let expected = uninstall_string.to_ascii_lowercase();
+    let target_helper_path = target_dir.join("maintenance-helper.exe");
+    if let Err(err) = fs::copy(&resource_helper_path, &target_helper_path) {
+        eprintln!(
+            "failed to copy maintenance-helper.exe to {}: {err}",
+            target_helper_path.display()
+        );
+    }
+
+    let uninstall_string = format!("\"{}\" --uninstall", target_helper_path.display());
     let reg_key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Noten";
-
-    let uninstall_ok = reg_query_value(reg_key, "UninstallString")
-        .map(|value| value.to_ascii_lowercase().contains(&expected))
-        .unwrap_or(false);
-    let quiet_uninstall_ok = reg_query_value(reg_key, "QuietUninstallString")
-        .map(|value| value.to_ascii_lowercase().contains(&expected))
-        .unwrap_or(false);
-
-    if uninstall_ok && quiet_uninstall_ok {
-        return;
-    }
 
     if let Err(err) = reg_add_value(reg_key, "UninstallString", &uninstall_string) {
         eprintln!("failed to repair UninstallString: {err}");
@@ -153,7 +125,8 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![print_to_pdf])
         .setup(|app| {
-            std::thread::spawn(ensure_bootstrapper_uninstall_string);
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || ensure_maintenance_helper(app_handle));
 
             // Apply Mica to all existing windows
             for (_, window) in app.webview_windows() {

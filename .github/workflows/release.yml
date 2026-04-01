@@ -31,6 +31,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build maintenance-helper
+        working-directory: maintenance-helper
+        run: cargo build --release
+
+      - name: Copy maintenance-helper to Tauri resources
+        shell: pwsh
+        run: |
+          $source = "maintenance-helper\target\release\maintenance-helper.exe"
+          $dest = "src-tauri\resources\maintenance-helper.exe"
+          New-Item -ItemType Directory -Path "src-tauri\resources" -Force | Out-Null
+          Copy-Item -LiteralPath $source -Destination $dest -Force
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
