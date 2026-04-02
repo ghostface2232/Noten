@@ -8,10 +8,11 @@ import type { Locale } from "../hooks/useSettings";
 const useStyles = makeStyles({
   shell: {
     flexShrink: 0,
+    height: "24px",
     overflow: "hidden",
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground3,
-    transitionProperty: "height, opacity, border-top-color",
+    transitionProperty: "border-top-color, background-color",
     transitionDuration: "0.25s",
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
   },
@@ -109,8 +110,7 @@ export function StatusBar({ markdown, surface, editor, hidden, locale }: StatusB
     <div
       className={hidden ? `${styles.shell} ${styles.shellHidden}` : styles.shell}
       style={{
-        height: hidden ? 0 : 24,
-        opacity: hidden ? 0 : 1,
+        backgroundColor: hidden ? "transparent" : undefined,
         borderTopColor: hidden ? "transparent" : undefined,
       }}
     >
