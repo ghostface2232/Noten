@@ -204,6 +204,14 @@ const useStyles = makeStyles({
     overflow: "auto",
     position: "relative",
   },
+  toolbarAnchor: {
+    position: "sticky",
+    top: 0,
+    height: 0,
+    zIndex: 10,
+    overflow: "visible",
+    pointerEvents: "none",
+  },
   searchBarAnchor: {
     position: "sticky",
     top: 0,
@@ -630,7 +638,15 @@ function App() {
   }, [handleSelectSurface, state.surface]);
 
   const handleActivateNoteEditing = useCallback(() => {
+    const el = contentRef.current;
+    const h = toolbarHeightRef.current;
+    const needsScroll = el && h && el.scrollTop < h;
+
     state.enterNoteEditing();
+
+    if (needsScroll) {
+      requestAnimationFrame(() => { el.scrollTop = h; });
+    }
   }, [state.enterNoteEditing]);
 
   const handleNewNote = useCallback(async () => {
@@ -896,6 +912,9 @@ function App() {
   const showCodeMirror = state.surface === "markdown";
   const hideEditorChrome = isNoteSurface && state.noteState === "quiet";
 
+  const toolbarHeightRef = useRef(0);
+  const handleBarHeight = useCallback((h: number) => { toolbarHeightRef.current = h; }, []);
+
   return (
     <FluentProvider
       theme={isDarkMode ? webDarkTheme : webLightTheme}
@@ -1057,17 +1076,19 @@ function App() {
           </div>
 
           <div ref={floatingCardRef} className={styles.floatingCard}>
-            <EditorToolbar
-              surface={state.surface}
-              onSelectSurface={handleSelectSurface}
-              editor={tiptapEditor}
-              cmView={cmView}
-              sidebarOpen={sidebarOpen}
-              hidden={hideEditorChrome}
-              locale={locale}
-            />
-
             <div ref={contentRef} className={styles.content}>
+              <div className={styles.toolbarAnchor}>
+                <EditorToolbar
+                  surface={state.surface}
+                  onSelectSurface={handleSelectSurface}
+                  editor={tiptapEditor}
+                  cmView={cmView}
+                  sidebarOpen={sidebarOpen}
+                  hidden={hideEditorChrome}
+                  locale={locale}
+                  onBarHeight={handleBarHeight}
+                />
+              </div>
               {(docSearchOpen || docGoToLineOpen) && (
                 <div className={styles.searchBarAnchor}>
                   {docSearchOpen ? (

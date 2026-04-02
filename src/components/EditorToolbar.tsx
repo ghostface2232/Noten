@@ -43,6 +43,7 @@ const useStyles = makeStyles({
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground1,
     zIndex: 5,
+    pointerEvents: "auto",
     transitionProperty: "height, opacity, border-bottom-color",
     transitionDuration: "0.25s",
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
@@ -159,6 +160,7 @@ interface EditorToolbarProps {
   sidebarOpen: boolean;
   hidden: boolean;
   locale: Locale;
+  onBarHeight?: (height: number) => void;
 }
 
 export function EditorToolbar({
@@ -169,6 +171,7 @@ export function EditorToolbar({
   sidebarOpen,
   hidden,
   locale,
+  onBarHeight,
 }: EditorToolbarProps) {
   const styles = useStyles();
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
@@ -227,8 +230,10 @@ export function EditorToolbar({
       applyLayout(t, needs);
     }
 
-    setBarHeight(g.offsetHeight);
-  }, [applyLayout, formattingVisible]);
+    const h = g.offsetHeight;
+    setBarHeight(h);
+    onBarHeight?.(h);
+  }, [applyLayout, formattingVisible, onBarHeight]);
 
   useEffect(() => {
     const el = gridRef.current;
