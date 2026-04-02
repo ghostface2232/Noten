@@ -35,6 +35,7 @@ import { EditorToolbar } from "./components/EditorToolbar";
 import { StatusBar } from "./components/StatusBar";
 import { SettingsModal } from "./components/SettingsModal";
 import { SearchBar } from "./components/SearchBar";
+import { GoToLineBar } from "./components/GoToLineBar";
 import { searchPluginKey, type SearchPluginState } from "./extensions/SearchHighlight";
 import { setCmSearch } from "./extensions/cmSearchHighlight";
 import { t } from "./i18n";
@@ -232,6 +233,58 @@ const SIDEBAR_MAX = 400;
 const SIDEBAR_DEFAULT = 260;
 const MARKDOWN_FILE_PATTERN = /\.(md|markdown|mdx|txt)$/i;
 
+function shortcutTargetElement(target: EventTarget | null): HTMLElement | null {
+  if (target instanceof HTMLElement) return target;
+  if (target instanceof Node) return target.parentElement;
+  return null;
+}
+
+function isEditorShortcutTarget(target: EventTarget | null) {
+  const element = shortcutTargetElement(target);
+  return !!element?.closest(".ProseMirror, .cm-editor");
+}
+
+function toggleMarkdownStrike(cmView: import("@codemirror/view").EditorView) {
+  const { state } = cmView;
+  const selection = state.selection.main;
+  if (selection.empty) {
+    cmView.dispatch({
+      changes: { from: selection.from, to: selection.to, insert: "~~~~" },
+      selection: { anchor: selection.from + 2 },
+      scrollIntoView: true,
+    });
+    cmView.focus();
+    return;
+  }
+
+  const before = selection.from >= 2 ? state.doc.sliceString(selection.from - 2, selection.from) : "";
+  const after = selection.to + 2 <= state.doc.length
+    ? state.doc.sliceString(selection.to, selection.to + 2)
+    : "";
+
+  if (before === "~~" && after === "~~") {
+    cmView.dispatch({
+      changes: [
+        { from: selection.from - 2, to: selection.from, insert: "" },
+        { from: selection.to, to: selection.to + 2, insert: "" },
+      ],
+      selection: { anchor: selection.from - 2, head: selection.to - 2 },
+      scrollIntoView: true,
+    });
+  } else {
+    cmView.dispatch({
+      changes: [
+        { from: selection.from, to: selection.from, insert: "~~" },
+        { from: selection.to, to: selection.to, insert: "~~" },
+      ],
+      selection: { anchor: selection.from + 2, head: selection.to + 2 },
+      scrollIntoView: true,
+    });
+  }
+
+  cmView.focus();
+}
+
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     try { return localStorage.getItem("sidebar-open") === "true"; } catch { return false; }
@@ -244,6 +297,7 @@ function App() {
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [docSearchOpen, setDocSearchOpen] = useState(false);
+  const [docGoToLineOpen, setDocGoToLineOpen] = useState(false);
   const [sidebarSearchOpen, setSidebarSearchOpen] = useState(false);
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   const [cmView, setCmView] = useState<import("@codemirror/view").EditorView | null>(null);
@@ -592,18 +646,45 @@ function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const sidebarFocused = document.documentElement.dataset.sidebarActive === "1";
+      const ctrl = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
 
       // 브라우저 단축키 차단 (새로고침, DevTools 등) — 사이드바 포커스 시 Ctrl+R은 rename으로 사용
-      if ((e.ctrlKey && e.key === "r" && !sidebarFocused) || (e.ctrlKey && e.shiftKey && e.key === "R")) { e.preventDefault(); return; }
+      if ((ctrl && key === "r" && !sidebarFocused) || (ctrl && e.shiftKey && key === "r")) { e.preventDefault(); return; }
       if (e.key === "F5" || (e.ctrlKey && e.shiftKey && e.key === "I") || e.key === "F12") { e.preventDefault(); return; }
 
-      if (e.ctrlKey && e.key === "/") { e.preventDefault(); handleToggleSurface(); }
-      if (e.ctrlKey && e.key === "o") { e.preventDefault(); fs.importFile(); }
-      if (e.ctrlKey && !e.shiftKey && e.key === "s") { e.preventDefault(); fs.saveFile(); }
-      if (e.ctrlKey && !e.shiftKey && e.key === "n") { e.preventDefault(); void handleNewNote(); }
-      if (e.ctrlKey && e.shiftKey && e.key === "N") { e.preventDefault(); openNewWindow(); }
-      if (e.ctrlKey && e.key === "f") { e.preventDefault(); setDocSearchOpen((o) => !o); }
-      if (e.key === "Escape" && docSearchOpen) {
+      if (ctrl && key === "/") { e.preventDefault(); handleToggleSurface(); }
+      if (ctrl && key === "o") { e.preventDefault(); fs.importFile(); }
+      if (ctrl && !e.shiftKey && key === "s") { e.preventDefault(); fs.saveFile(); }
+      if (ctrl && !e.shiftKey && key === "n") { e.preventDefault(); void handleNewNote(); }
+      if (ctrl && e.shiftKey && key === "n") { e.preventDefault(); openNewWindow(); }
+      if (ctrl && !e.shiftKey && key === "f") {
+        e.preventDefault();
+        setDocGoToLineOpen(false);
+        setDocSearchOpen((o) => !o);
+        return;
+      }
+      if (ctrl && !e.shiftKey && key === "g") {
+        e.preventDefault();
+        if (state.surface === "markdown") {
+          setDocSearchOpen(false);
+          setDocGoToLineOpen((o) => !o);
+        }
+        return;
+      }
+      if (ctrl && e.shiftKey && key === "x" && isEditorShortcutTarget(e.target)) {
+        e.preventDefault();
+        if (state.surface === "markdown" && cmView) {
+          toggleMarkdownStrike(cmView);
+        } else if (state.surface === "note" && state.noteState === "editing") {
+          tiptapRef.current?.getEditor()?.chain().focus().toggleStrike().run();
+        }
+        return;
+      }
+      if (e.key === "Escape" && docGoToLineOpen) {
+        e.preventDefault();
+        setDocGoToLineOpen(false);
+      } else if (e.key === "Escape" && docSearchOpen) {
         e.preventDefault();
         setDocSearchOpen(false);
       } else if (e.key === "Escape" && state.surface === "note" && state.noteState === "editing") {
@@ -613,7 +694,24 @@ function App() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [docSearchOpen, fs.importFile, fs.saveFile, handleNewNote, handleToggleSurface, state.exitNoteEditing, state.noteState, state.surface]);
+  }, [
+    cmView,
+    docGoToLineOpen,
+    docSearchOpen,
+    fs.importFile,
+    fs.saveFile,
+    handleNewNote,
+    handleToggleSurface,
+    state.exitNoteEditing,
+    state.noteState,
+    state.surface,
+  ]);
+
+  useEffect(() => {
+    if (state.surface !== "markdown" && docGoToLineOpen) {
+      setDocGoToLineOpen(false);
+    }
+  }, [docGoToLineOpen, state.surface]);
 
   // 마우스 클릭 후 버튼류 요소 자동 blur → Esc/Space 시 포커스 링 방지
   const settingsOpenRef = useRef(settingsOpen);
@@ -949,15 +1047,23 @@ function App() {
             />
 
             <div ref={contentRef} className={styles.content}>
-              {docSearchOpen && (
+              {(docSearchOpen || docGoToLineOpen) && (
                 <div className={styles.searchBarAnchor}>
-                  <SearchBar
-                    editor={tiptapEditor}
-                    cmView={cmView}
-                    isCmMode={showCodeMirror}
-                    onClose={() => setDocSearchOpen(false)}
-                    locale={locale}
-                  />
+                  {docSearchOpen ? (
+                    <SearchBar
+                      editor={tiptapEditor}
+                      cmView={cmView}
+                      isCmMode={showCodeMirror}
+                      onClose={() => setDocSearchOpen(false)}
+                      locale={locale}
+                    />
+                  ) : (
+                    <GoToLineBar
+                      cmView={cmView}
+                      onClose={() => setDocGoToLineOpen(false)}
+                      locale={locale}
+                    />
+                  )}
                 </div>
               )}
               <div className={showCodeMirror ? styles.editorPaneHidden : styles.editorPane}>

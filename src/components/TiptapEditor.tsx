@@ -306,6 +306,16 @@ const ReadonlyGuard = Extension.create({
   },
 });
 
+const MarkdownSafeTextAlign = TextAlign.extend({
+  addKeyboardShortcuts() {
+    return {
+      "Mod-Shift-l": () => true,
+      "Mod-Shift-e": () => true,
+      "Mod-Shift-r": () => true,
+    };
+  },
+});
+
 const lowlight = createLowlight(common);
 
 export interface TiptapEditorHandle {
@@ -414,7 +424,7 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         }),
         Placeholder.configure({ placeholder: () => t("placeholder", localeRef.current) }),
         Typography,
-        TextAlign.configure({ types: ["heading", "paragraph"] }),
+        MarkdownSafeTextAlign.configure({ types: ["heading", "paragraph"] }),
         Underline,
         TaskList,
         TaskItem.configure({ nested: true }),

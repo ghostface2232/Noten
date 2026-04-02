@@ -18,7 +18,7 @@ const dict = {
   "tool.bold": { en: "Bold (Ctrl+B)", ko: "굵게 (Ctrl+B)" },
   "tool.italic": { en: "Italic (Ctrl+I)", ko: "기울임 (Ctrl+I)" },
   "tool.underline": { en: "Underline (Ctrl+U)", ko: "밑줄 (Ctrl+U)" },
-  "tool.strike": { en: "Strikethrough", ko: "취소선" },
+  "tool.strike": { en: "Strikethrough (Ctrl+Shift+X)", ko: "취소선 (Ctrl+Shift+X)" },
   "tool.code": { en: "Inline code", ko: "인라인 코드" },
   "tool.bulletList": { en: "Bullet list", ko: "글머리 기호 목록" },
   "tool.orderedList": { en: "Numbered list", ko: "번호 목록" },
@@ -129,6 +129,8 @@ const dict = {
   "settings.shortcut.newFile": { en: "New document", ko: "새 문서" },
   "settings.shortcut.newWindow": { en: "New window", ko: "새 창" },
   "settings.shortcut.find": { en: "Find in document", ko: "문서에서 찾기" },
+  "settings.shortcut.gotoLine": { en: "Go to line (Markdown)", ko: "줄 이동 (Markdown)" },
+  "settings.shortcut.strike": { en: "Strikethrough", ko: "취소선" },
   "settings.shortcut.rename": { en: "Rename", ko: "이름 바꾸기" },
   "settings.shortcut.duplicate": { en: "Duplicate", ko: "복제" },
   "settings.shortcut.export": { en: "Export", ko: "내보내기" },
@@ -194,6 +196,7 @@ const dict = {
 
   /* ─── Search ─── */
   "search.placeholder": { en: "Find in document", ko: "문서에서 찾기" },
+  "search.gotoLinePlaceholder": { en: "Go to line", ko: "줄 이동" },
   "search.sidebarPlaceholder": { en: "Search notes", ko: "노트 검색" },
   "search.label": { en: "Search", ko: "검색" },
 

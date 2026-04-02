@@ -902,7 +902,7 @@ export function Sidebar({
       } else if (ctrl && !e.shiftKey && !e.altKey && e.key === "e") {
         e.preventDefault();
         onExportNote(activeIndex);
-      } else if (ctrl && e.key === "r") {
+      } else if ((ctrl && e.key === "r") || e.key === "F2") {
         e.preventDefault();
         handleDoubleClick(activeIndex);
       } else if (ctrl && e.altKey && e.key === "c") {
@@ -1590,7 +1590,7 @@ export function Sidebar({
                 onClick={() => { handleDoubleClick(contextMenu.index); closeContextMenu(); }}
                 size="small"
               >
-                {i("sidebar.rename")}<span className={styles.shortcutHint}>Ctrl+R</span>
+                {i("sidebar.rename")}<span className={styles.shortcutHint}>Ctrl+R / F2</span>
               </Button>
               <Button
                 appearance="subtle"
