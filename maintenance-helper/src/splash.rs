@@ -69,11 +69,9 @@ const CHECKBOX_BG_COLOR: u32 = 0xFFFFFFFF;
 const CHECKBOX_CHECK_COLOR: u32 = 0xFF0078D4;
 const GDIP_OK: Status = Status(0);
 
-const FONT_FACE: &str = "SFProKRDisplay";
-const BUTTON_FONT_FACE: &str = "Segoe UI Variable";
+const FONT_FACE: &str = "Pretendard JP Medium";
 const APP_LOGO_PNG: &[u8] = include_bytes!("../assets/Noten_icon_512.png");
-const FONT_REGULAR: &[u8] = include_bytes!("../assets/SFProKR-Regular-04.otf");
-const FONT_MEDIUM: &[u8] = include_bytes!("../assets/SFProKR-Medium-05.otf");
+const FONT_MEDIUM: &[u8] = include_bytes!("../assets/PretendardJP-Medium.otf");
 
 struct LogoAsset {
     image: *mut GpImage,
@@ -165,7 +163,7 @@ fn scale_dpi(value: i32, dpi: u32) -> i32 {
 
 fn load_fonts() -> Vec<HANDLE> {
     let mut handles = Vec::new();
-    for font_data in [FONT_REGULAR, FONT_MEDIUM] {
+    for font_data in [FONT_MEDIUM] {
         unsafe {
             let mut num_fonts: u32 = 0;
             let handle = AddFontMemResourceEx(
@@ -682,7 +680,7 @@ unsafe fn paint_splash_contents(hdc: HDC, data: &SplashData) {
         let mut title: Vec<u16> = "Noten".encode_utf16().collect();
         DrawTextW(hdc, &mut title, &mut title_rect, DT_CENTER | DT_SINGLELINE);
 
-        let status_font = create_font(scale_dpi(STATUS_FONT_SIZE, data.dpi), FW_NORMAL.0 as i32);
+        let status_font = create_font(scale_dpi(STATUS_FONT_SIZE, data.dpi), FW_MEDIUM.0 as i32);
         SelectObject(hdc, status_font.into());
         SetTextColor(hdc, STATUS_COLOR);
         let mut status_rect = RECT {
@@ -949,11 +947,7 @@ unsafe fn paint_launch_button(hdc: HDC, data: &SplashData, hovered: bool, label:
         );
         let _ = GdipDeleteGraphics(graphics);
 
-        let button_font = create_font_with_face(
-            BUTTON_FONT_FACE,
-            scale_dpi(BUTTON_FONT_SIZE, data.dpi),
-            FW_NORMAL.0 as i32,
-        );
+        let button_font = create_font(scale_dpi(BUTTON_FONT_SIZE, data.dpi), FW_MEDIUM.0 as i32);
         let old_font = SelectObject(hdc, button_font.into());
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, BUTTON_TEXT_COLOR);
@@ -1007,11 +1001,7 @@ unsafe fn paint_secondary_button(hdc: HDC, data: &SplashData, hovered: bool, lab
 
         let _ = GdipDeleteGraphics(graphics);
 
-        let button_font = create_font_with_face(
-            BUTTON_FONT_FACE,
-            scale_dpi(BUTTON_FONT_SIZE, data.dpi),
-            FW_NORMAL.0 as i32,
-        );
+        let button_font = create_font(scale_dpi(BUTTON_FONT_SIZE, data.dpi), FW_MEDIUM.0 as i32);
         let old_font = SelectObject(hdc, button_font.into());
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, SECONDARY_BUTTON_TEXT_COLOR);
@@ -1080,7 +1070,7 @@ unsafe fn paint_checkbox(hdc: HDC, data: &SplashData, checkbox: &CheckboxState) 
 
         let _ = GdipDeleteGraphics(graphics);
 
-        let label_font = create_font(scale_dpi(CHECKBOX_FONT_SIZE, data.dpi), FW_NORMAL.0 as i32);
+        let label_font = create_font(scale_dpi(CHECKBOX_FONT_SIZE, data.dpi), FW_MEDIUM.0 as i32);
         let old_font = SelectObject(hdc, label_font.into());
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, CHECKBOX_TEXT_COLOR);

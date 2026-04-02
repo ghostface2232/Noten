@@ -1,6 +1,9 @@
 use std::fs;
+use std::os::windows::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+
+use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::constants::{
     default_notes_dir, install_dir, roaming_app_dir, settings_path, APP_EXE_NAME, SETUP_EXE_NAME,
@@ -12,7 +15,11 @@ pub fn run_nsis_uninstall() {
         return;
     }
 
-    match Command::new(&uninstall_path).arg("/S").status() {
+    match Command::new(&uninstall_path)
+        .creation_flags(CREATE_NO_WINDOW.0)
+        .arg("/S")
+        .status()
+    {
         Ok(status) if status.success() => {}
         Ok(status) => {
             eprintln!("[maintenance-helper] warning: uninstall.exe exited with status {status}");

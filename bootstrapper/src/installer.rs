@@ -1,8 +1,10 @@
 use std::env;
 use std::fs;
+use std::os::windows::process::CommandExt;
 use std::process::Command;
 
 use crate::constants::{APP_EXE_NAME, NSIS_TEMP_NAME, install_dir};
+use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
 const NSIS_BYTES: &[u8] = include_bytes!("../assets/nsis-payload.exe");
 
@@ -12,6 +14,7 @@ pub fn extract_and_run_nsis() -> Result<(), String> {
         .map_err(|error| format!("failed to write NSIS payload: {error}"))?;
 
     let status = Command::new(&temp_path)
+        .creation_flags(CREATE_NO_WINDOW.0)
         .arg("/S")
         .status()
         .map_err(|error| format!("failed to run NSIS payload: {error}"))?;
@@ -26,5 +29,7 @@ pub fn extract_and_run_nsis() -> Result<(), String> {
 }
 pub fn launch_app() {
     let app_path = install_dir().join(APP_EXE_NAME);
-    let _ = Command::new(app_path).spawn();
+    let _ = Command::new(app_path)
+        .creation_flags(CREATE_NO_WINDOW.0)
+        .spawn();
 }
