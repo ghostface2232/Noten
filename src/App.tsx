@@ -403,6 +403,11 @@ function App() {
       .catch(() => setMicaSupported(false));
   }, []);
 
+  // 앱 테마 설정을 윈도우에 동기화 (OS 다크모드와 독립적으로 동작)
+  useEffect(() => {
+    getCurrentWindow().setTheme(isDarkMode ? "dark" : "light");
+  }, [isDarkMode]);
+
   const syncEditorRef = useCallback(() => {
     if (tiptapRef.current) {
       const editor = tiptapRef.current.getEditor();

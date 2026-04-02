@@ -13,6 +13,7 @@
     "core:window:allow-start-dragging",
     "core:window:allow-set-focus",
     "core:window:allow-set-effects",
+    "core:window:allow-set-theme",
     "core:window:allow-show",
     "core:window:allow-create",
     "core:webview:allow-create-webview-window",

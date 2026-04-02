@@ -13,6 +13,7 @@ body,
   height: 100%;
   overflow: hidden;
   background: transparent;
+  color-scheme: light;
 }
 
 body {
@@ -125,6 +126,7 @@ body {
 
 /* ─── 다크 모드에서 active 배경 변수 오버라이드 ─── */
 [data-theme="dark"] {
+  color-scheme: dark;
   --ui-active-bg: rgba(255, 255, 255, 0.12);
   --sidebar-search-bg: rgba(255, 255, 255, 0.08);
 }
