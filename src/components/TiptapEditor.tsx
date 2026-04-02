@@ -336,8 +336,7 @@ interface TiptapEditorProps {
   spellcheck: boolean;
   onDirtyChange: (dirty: boolean) => void;
   onReady?: () => void;
-  onToolbarStateActivate?: () => void;
-  onActivateQuietState?: () => void;
+  onChromeActivate?: () => void;
 }
 
 export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
@@ -352,8 +351,7 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     spellcheck,
     onDirtyChange,
     onReady,
-    onToolbarStateActivate,
-    onActivateQuietState,
+    onChromeActivate,
   }, ref) {
     const dirtyRef = useRef(false);
     const localeRef = useRef(locale);
@@ -542,19 +540,12 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           if (!editor || event.button !== 0) return;
           const target = event.target as HTMLElement | null;
           const isLinkClick = !!target?.closest("a");
-          let activated = false;
 
           if (!isLinkClick) {
-            onToolbarStateActivate?.();
+            onChromeActivate?.();
           }
 
-          if (!editable && !isLinkClick) {
-            onActivateQuietState?.();
-            editor.storage.readonlyGuard.readonly = false;
-            activated = true;
-          }
-
-          if ((!editable && !activated) || isLinkClick) return;
+          if (!editable || isLinkClick) return;
           if (!isBelowTiptapDocumentEnd(editor, event.clientY)) return;
           event.preventDefault();
           moveTiptapSelectionToEnd(editor);

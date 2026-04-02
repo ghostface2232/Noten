@@ -4,7 +4,6 @@ import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 
 export type Locale = "en" | "ko";
 export type ThemeMode = "light" | "dark";
-export type StartupMode = "quiet" | "editing";
 export type NotesSortOrder = "updated-desc" | "updated-asc" | "created-desc" | "created-asc";
 export type WordWrap = "word" | "char";
 export type ParagraphSpacing = 0 | 10 | 20 | 30 | 40 | 50;
@@ -14,7 +13,6 @@ export type FontFamily = "sans" | "serif";
 export interface Settings {
   locale: Locale;
   themeMode: ThemeMode;
-  startupMode: StartupMode;
   notesSortOrder: NotesSortOrder;
   wordWrap: WordWrap;
   paragraphSpacing: ParagraphSpacing;
@@ -28,7 +26,6 @@ export interface Settings {
 const DEFAULTS: Settings = {
   locale: "ko",
   themeMode: "light",
-  startupMode: "quiet",
   notesSortOrder: "updated-desc",
   wordWrap: "word",
   paragraphSpacing: 30,
@@ -69,20 +66,25 @@ function migrateSortOrder(order: string): NotesSortOrder {
   return valid.includes(order as NotesSortOrder) ? (order as NotesSortOrder) : DEFAULTS.notesSortOrder;
 }
 
-function migrateStartupMode(mode: string): StartupMode {
-  if (mode === "read") return "quiet";
-  if (mode === "edit") return "editing";
-  return mode === "editing" ? "editing" : "quiet";
-}
-
 function parseSettings(raw: string | null): Settings {
   if (!raw) return DEFAULTS;
 
   try {
-    const parsed = { ...DEFAULTS, ...JSON.parse(raw) };
-    parsed.notesSortOrder = migrateSortOrder(parsed.notesSortOrder);
-    parsed.startupMode = migrateStartupMode(parsed.startupMode);
-    return parsed;
+    const parsed = JSON.parse(raw) as Partial<Settings> & Record<string, unknown>;
+    return {
+      locale: parsed.locale === "en" ? "en" : DEFAULTS.locale,
+      themeMode: parsed.themeMode === "dark" ? "dark" : DEFAULTS.themeMode,
+      notesSortOrder: migrateSortOrder(String(parsed.notesSortOrder ?? DEFAULTS.notesSortOrder)),
+      wordWrap: parsed.wordWrap === "char" ? "char" : DEFAULTS.wordWrap,
+      paragraphSpacing: [0, 10, 20, 30, 40, 50].includes(parsed.paragraphSpacing as number)
+        ? (parsed.paragraphSpacing as ParagraphSpacing)
+        : DEFAULTS.paragraphSpacing,
+      keepFormatOnPaste: typeof parsed.keepFormatOnPaste === "boolean" ? parsed.keepFormatOnPaste : DEFAULTS.keepFormatOnPaste,
+      spellcheck: typeof parsed.spellcheck === "boolean" ? parsed.spellcheck : DEFAULTS.spellcheck,
+      groupLayout: parsed.groupLayout === "mixed" ? "mixed" : DEFAULTS.groupLayout,
+      fontFamily: parsed.fontFamily === "serif" ? "serif" : DEFAULTS.fontFamily,
+      notesDirectory: typeof parsed.notesDirectory === "string" ? parsed.notesDirectory : DEFAULTS.notesDirectory,
+    };
   } catch {
     return DEFAULTS;
   }

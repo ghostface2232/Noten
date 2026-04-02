@@ -2,21 +2,16 @@ import { useState, useRef, useCallback } from "react";
 import type { Editor } from "@tiptap/react";
 
 export type EditorSurface = "note" | "markdown";
-export type NoteState = "quiet" | "editing";
 
 export interface MarkdownState {
   markdown: string;
   surface: EditorSurface;
-  noteState: NoteState;
   filePath: string | null;
   isDirty: boolean;
   tiptapDirty: boolean;
   editorRef: React.MutableRefObject<Editor | null>;
   readCurrentEditor: () => string;
   setSurface: (surface: EditorSurface) => void;
-  setNoteState: (state: NoteState) => void;
-  enterNoteEditing: () => void;
-  exitNoteEditing: () => void;
   updateMarkdown: (value: string) => void;
   setTiptapDirty: (dirty: boolean) => void;
   setFilePath: (path: string | null) => void;
@@ -27,7 +22,6 @@ export interface MarkdownState {
 export function useMarkdownState(): MarkdownState {
   const [markdown, setMarkdown] = useState("");
   const [surface, setSurfaceRaw] = useState<EditorSurface>("note");
-  const [noteState, setNoteStateRaw] = useState<NoteState>("quiet");
   const [filePath, setFilePath] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [tiptapDirty, setTiptapDirty] = useState(false);
@@ -97,30 +91,6 @@ export function useMarkdownState(): MarkdownState {
     applySurface(nextSurface);
   }, [applySurface]);
 
-  const setNoteState = useCallback((nextState: NoteState) => {
-    setNoteStateRaw(nextState);
-  }, []);
-
-  const enterNoteEditing = useCallback(() => {
-    setNoteStateRaw("editing");
-  }, []);
-
-  const exitNoteEditing = useCallback(() => {
-    const editor = editorRef.current;
-    if (!editor) {
-      setNoteStateRaw("quiet");
-      return;
-    }
-
-    const md = flushCurrentEditor();
-    if (surface === "markdown") {
-      codemirrorValueRef.current = md;
-    } else {
-      loadIntoTiptap(md);
-    }
-    setNoteStateRaw("quiet");
-  }, [flushCurrentEditor, loadIntoTiptap, surface]);
-
   const setMarkdownRaw = useCallback((value: string) => {
     codemirrorValueRef.current = value;
     setMarkdown(value);
@@ -129,16 +99,12 @@ export function useMarkdownState(): MarkdownState {
   return {
     markdown,
     surface,
-    noteState,
     filePath,
     isDirty,
     tiptapDirty,
     editorRef,
     readCurrentEditor,
     setSurface,
-    setNoteState,
-    enterNoteEditing,
-    exitNoteEditing,
     updateMarkdown,
     setTiptapDirty,
     setFilePath,

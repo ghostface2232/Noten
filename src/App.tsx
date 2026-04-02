@@ -316,9 +316,7 @@ function App() {
   const styles = useStyles();
   const tiptapRef = useRef<TiptapEditorHandle>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const floatingCardRef = useRef<HTMLDivElement>(null);
   const [tiptapEditor, setTiptapEditor] = useState<import("@tiptap/react").Editor | null>(null);
-  const startupModeApplied = useRef(false);
 
   // 노트 디렉토리 초기화 (settings 로드 → 경로 설정 → 노트 로딩)
   const [notesDirReady, setNotesDirReady] = useState(false);
@@ -361,14 +359,6 @@ function App() {
   // Select 모드 & 그룹 생성 후 rename 트리거
   const [selectMode, setSelectMode] = useState(false);
   const [pendingRenameGroupId, setPendingRenameGroupId] = useState<string | null>(null);
-
-  // 초기 로드 완료 시 에디터에 첫 문서 로드
-  useEffect(() => {
-    if (!settingsLoaded || startupModeApplied.current) return;
-    startupModeApplied.current = true;
-    state.setSurface("note");
-    state.setNoteState(settings.startupMode === "editing" ? "editing" : "quiet");
-  }, [settings.startupMode, settingsLoaded, state.setNoteState, state.setSurface]);
 
   const initialLoaded = useRef(false);
   useEffect(() => {
@@ -637,21 +627,15 @@ function App() {
     handleSelectSurface(state.surface === "note" ? "markdown" : "note");
   }, [handleSelectSurface, state.surface]);
 
-  const [toolbarShownByInteraction, setToolbarShownByInteraction] = useState(false);
-  const handleShowToolbar = useCallback(() => {
-    setToolbarShownByInteraction(true);
+  const [chromeShownByInteraction, setChromeShownByInteraction] = useState(false);
+  const handleShowEditorChrome = useCallback(() => {
+    setChromeShownByInteraction(true);
   }, []);
-
-  const handleActivateNoteEditing = useCallback(() => {
-    setToolbarShownByInteraction(true);
-    state.enterNoteEditing();
-  }, [state.enterNoteEditing]);
 
   const handleNewNote = useCallback(async () => {
     await fs.newNote();
     state.setSurface("note");
-    state.setNoteState("editing");
-  }, [fs.newNote, state.setNoteState, state.setSurface]);
+  }, [fs.newNote, state.setSurface]);
 
   // 단축키
   useEffect(() => {
@@ -693,7 +677,7 @@ function App() {
         e.preventDefault();
         if (state.surface === "markdown" && cmView) {
           toggleMarkdownStrike(cmView);
-        } else if (state.surface === "note" && state.noteState === "editing") {
+        } else if (state.surface === "note") {
           tiptapRef.current?.getEditor()?.chain().focus().toggleStrike().run();
         }
         return;
@@ -704,10 +688,6 @@ function App() {
       } else if (e.key === "Escape" && docSearchOpen) {
         e.preventDefault();
         setDocSearchOpen(false);
-      } else if (e.key === "Escape" && state.surface === "note" && state.noteState === "editing") {
-        e.preventDefault();
-        setToolbarShownByInteraction(false);
-        state.exitNoteEditing();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -720,10 +700,7 @@ function App() {
     fs.saveFile,
     handleNewNote,
     handleToggleSurface,
-    state.exitNoteEditing,
-    state.noteState,
     state.surface,
-    setToolbarShownByInteraction,
   ]);
 
   useEffect(() => {
@@ -742,32 +719,6 @@ function App() {
       setDocGoToLineOpen(false);
     }
   }, [docGoToLineOpen, state.surface]);
-
-  useEffect(() => {
-    const handleMouseDown = (event: MouseEvent) => {
-      if (settingsOpenRef.current) return;
-      if (state.surface !== "note" || state.noteState !== "editing") return;
-
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (floatingCardRef.current?.contains(target)) return;
-
-      const portalRoot = document.getElementById("portal-root");
-      if (portalRoot?.contains(target)) return;
-      if (
-        target instanceof Element
-        && (target.closest(".fui-MenuPopover") || target.closest('[role="menu"]'))
-      ) {
-        return;
-      }
-
-      setToolbarShownByInteraction(false);
-      state.exitNoteEditing();
-    };
-
-    window.addEventListener("mousedown", handleMouseDown, true);
-    return () => window.removeEventListener("mousedown", handleMouseDown, true);
-  }, [state.exitNoteEditing, state.noteState, state.surface]);
 
   // 마우스 클릭 후 버튼류 요소 자동 blur → Esc/Space 시 포커스 링 방지
   const settingsOpenRef = useRef(settingsOpen);
@@ -892,7 +843,7 @@ function App() {
         return;
       }
 
-      if (state.surface !== "note" || state.noteState !== "editing") return;
+      if (state.surface !== "note") return;
 
       const editor = tiptapRef.current?.getEditor();
       if (!editor) return;
@@ -912,19 +863,17 @@ function App() {
       disposed = true;
       unlisten?.();
     };
-  }, [cmView, fs.importFiles, scheduleAutoSave, state.noteState, state.setIsDirty, state.surface]);
+  }, [cmView, fs.importFiles, scheduleAutoSave, state.setIsDirty, state.surface]);
 
   const isNoteSurface = state.surface === "note";
-  const isNoteEditing = isNoteSurface && state.noteState === "editing";
   const showCodeMirror = state.surface === "markdown";
   const [isContentAtTop, setIsContentAtTop] = useState(true);
-  const hideToolbar = isNoteSurface && !isContentAtTop && !toolbarShownByInteraction;
-  const hideStatusBar = isNoteSurface && state.noteState === "quiet";
+  const hideEditorChrome = isNoteSurface && !isContentAtTop && !chromeShownByInteraction;
+  const hideToolbar = hideEditorChrome;
+  const hideStatusBar = hideEditorChrome;
 
-  const toolbarHeightRef = useRef(0);
   const [toolbarHeight, setToolbarHeight] = useState(0);
   const handleBarHeight = useCallback((h: number) => {
-    toolbarHeightRef.current = h;
     setToolbarHeight((prev) => (prev === h ? prev : h));
   }, []);
 
@@ -935,7 +884,7 @@ function App() {
     const updateIsAtTop = () => {
       const next = el.scrollTop <= 1;
       setIsContentAtTop((prev) => (prev === next ? prev : next));
-      setToolbarShownByInteraction(false);
+      setChromeShownByInteraction(false);
     };
 
     updateIsAtTop();
@@ -949,7 +898,7 @@ function App() {
       if (!el) return;
       const next = el.scrollTop <= 1;
       setIsContentAtTop((prev) => (prev === next ? prev : next));
-      setToolbarShownByInteraction(false);
+      setChromeShownByInteraction(false);
     });
   }, [activeDoc?.id, state.surface]);
 
@@ -1113,7 +1062,7 @@ function App() {
             />
           </div>
 
-          <div ref={floatingCardRef} className={styles.floatingCard}>
+          <div className={styles.floatingCard}>
             <div ref={contentRef} className={styles.content}>
               <div className={styles.toolbarAnchor}>
                 <EditorToolbar
@@ -1161,7 +1110,7 @@ function App() {
                 <TiptapEditor
                   ref={tiptapRef}
                   initialMarkdown={activeDoc?.content ?? ""}
-                  editable={isNoteEditing}
+                  editable={isNoteSurface}
                   isDarkMode={isDarkMode}
                   locale={locale}
                   paragraphSpacing={settings.paragraphSpacing}
@@ -1170,8 +1119,7 @@ function App() {
                   spellcheck={settings.spellcheck}
                   onDirtyChange={handleTiptapDirty}
                   onReady={syncEditorRef}
-                  onToolbarStateActivate={!showCodeMirror ? handleShowToolbar : undefined}
-                  onActivateQuietState={!showCodeMirror && state.noteState === "quiet" ? handleActivateNoteEditing : undefined}
+                  onChromeActivate={!showCodeMirror ? handleShowEditorChrome : undefined}
                 />
               </div>
 

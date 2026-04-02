@@ -23,7 +23,6 @@ import {
   WindowNew20Regular,
   Save20Regular,
   ArrowDownload20Regular,
-  Edit20Regular,
   Code20Regular,
   Search20Regular,
   TextNumberListLtr20Regular,
@@ -44,7 +43,6 @@ import type {
   NotesSortOrder,
   ParagraphSpacing,
   Settings,
-  StartupMode,
   ThemeMode,
   WordWrap,
 } from "../hooks/useSettings";
@@ -359,18 +357,6 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                 </div>
 
                 <div className={mergeClasses(styles.row, settingItemClass(styles))}>
-                  <Label className={styles.label}>{i("settings.startupMode")}</Label>
-                  <RadioGroup
-                    layout="horizontal"
-                    value={settings.startupMode}
-                    onChange={(_, data) => onUpdate("startupMode", data.value as StartupMode)}
-                  >
-                    <Radio value="quiet" label={i("noteState.quiet")} />
-                    <Radio value="editing" label={i("noteState.editing")} />
-                  </RadioGroup>
-                </div>
-
-                <div className={mergeClasses(styles.row, settingItemClass(styles))}>
                   <Label className={styles.label}>{i("settings.noteOrder")}</Label>
                   <Dropdown
                     className={styles.dropdown}
@@ -525,7 +511,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                   ["settings.shortcut.save", "Ctrl+S", Save20Regular],
                   ["settings.shortcut.import", "Ctrl+O", ArrowDownload20Regular],
                   ["settings.shortcut.switchSurface", "Ctrl+/", Code20Regular],
-                  ["settings.shortcut.enterEditing", "Click / Esc", Edit20Regular],
+                  ["settings.shortcut.showChrome", "Click / Scroll", Code20Regular],
                   ["settings.shortcut.find", "Ctrl+F", Search20Regular],
                   ["settings.shortcut.gotoLine", "Ctrl+G", TextNumberListLtr20Regular],
                   ["settings.shortcut.strike", "Ctrl+Shift+X", TextStrikethrough20Regular],
