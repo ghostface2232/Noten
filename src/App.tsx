@@ -450,18 +450,14 @@ function App() {
     notesDirReady && !isLoading,
   );
 
-  // OS Mica 효과
+  // OS Mica 효과 — setTheme("dark")가 Mica를 죽이므로 항상 light 고정
   const [micaSupported, setMicaSupported] = useState(true);
   useEffect(() => {
-    getCurrentWindow()
-      .setEffects({ effects: [Effect.Mica] })
-      .catch(() => setMicaSupported(false));
+    const win = getCurrentWindow();
+    win.setTheme("light");
+    win.setEffects({ effects: [Effect.Mica] }).catch(() => setMicaSupported(false));
   }, []);
 
-  // 앱 테마 설정을 윈도우에 동기화 (OS 다크모드와 독립적으로 동작)
-  useEffect(() => {
-    getCurrentWindow().setTheme(isDarkMode ? "dark" : "light");
-  }, [isDarkMode]);
 
   const syncEditorRef = useCallback(() => {
     if (tiptapRef.current) {
@@ -790,19 +786,6 @@ function App() {
     return () => window.removeEventListener("contextmenu", handleContextMenu);
   }, []);
 
-  // 설정 모달 열릴 때 body 배경색 설정 (blur 가장자리 흰색 방지)
-  useEffect(() => {
-    if (settingsOpen) {
-      document.body.style.transition = "none";
-      document.body.style.background = isDarkMode ? "#1a1a1a" : "#f3f3f3";
-    } else {
-      document.body.style.transition = "background 0.2s ease";
-      const timer = setTimeout(() => {
-        document.body.style.background = "transparent";
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [settingsOpen, isDarkMode]);
 
   // 검색 닫힐 때 하이라이트 정리
   useEffect(() => {
@@ -920,7 +903,7 @@ function App() {
       data-theme={isDarkMode ? "dark" : "light"}
     >
       <div
-        className={mergeClasses(styles.root, settingsOpen && styles.rootBlurred)}
+        className={styles.root}
         style={{ "--editor-font-family": `var(--editor-font-family-${settings.fontFamily})` } as React.CSSProperties}
       >
         <div

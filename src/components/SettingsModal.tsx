@@ -279,7 +279,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
       panelBg: dark ? "rgba(56, 56, 56, 0.70)" : "rgba(255, 255, 255, 0.70)",
       borderColor: dark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.06)",
       noiseOpacity: dark ? 0.035 : 0.025,
-      backdropBg: dark ? "rgba(0, 0, 0, 0.30)" : "rgba(0, 0, 0, 0.14)",
+      backdropBg: dark ? "rgba(0, 0, 0, 0.45)" : "rgba(0, 0, 0, 0.32)",
       navHover: dark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.04)",
       navActiveBg: dark ? "rgba(255, 255, 255, 0.10)" : "rgba(0, 0, 0, 0.06)",
       surfaceShadow: dark

@@ -139,6 +139,17 @@ const useStyles = makeStyles({
     paddingLeft: "8px",
     paddingRight: "8px",
     fontWeight: 500,
+    marginBottom: "8px",
+  },
+  notesLabel: {
+    fontSize: "11px",
+    fontWeight: 500,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.05em",
+    color: tokens.colorNeutralForeground4,
+    opacity: 0.85,
+    paddingLeft: "10px",
+    paddingBottom: "4px",
   },
   docName: {
     overflow: "hidden",
@@ -1294,6 +1305,9 @@ export function Sidebar({
           <span className={styles.empty}>{sidebarSearchQuery ? "" : i("sidebar.empty")}</span>
         ) : (
           <>
+            {!sidebarSearchQuery && (
+              <span className={styles.notesLabel}>{i("sidebar.notesLabel")}</span>
+            )}
             {exitingDoc && exitingDoc.index === 0 && (
               <div key={`exit-${exitingDoc.doc.id}`} className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}>
                 <div className={styles.docItem} style={{ opacity: 0.5 }}>

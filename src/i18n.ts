@@ -96,6 +96,7 @@ const dict = {
   "sidebar.cancelSelect": { en: "Cancel", ko: "취소" },
   "sidebar.nSelected": { en: " selected", ko: "개 선택됨" },
   "sidebar.groupNamePlaceholder": { en: "Group name", ko: "그룹 이름" },
+  "sidebar.notesLabel": { en: "My Notes", ko: "내 노트" },
 
   /* ─── StatusBar ─── */
   "status.chars": { en: " chars", ko: " 자" },
