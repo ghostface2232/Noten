@@ -74,6 +74,19 @@ const useStyles = makeStyles({
     gridColumn: "2",
     gridRow: "1",
     justifySelf: "center",
+    overflow: "hidden",
+    maxWidth: "1600px",
+    opacity: 1,
+    transform: "translateY(0)",
+    transitionProperty: "opacity, transform, max-width",
+    transitionDuration: "0.2s",
+    transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+  },
+  toolsHidden: {
+    maxWidth: "0px",
+    opacity: 0,
+    transform: "translateY(-6px)",
+    pointerEvents: "none",
   },
   undo: {
     gridColumn: "3",
@@ -163,7 +176,8 @@ export function EditorToolbar({
     { key: "note", label: i("surface.note") },
     { key: "markdown", label: i("surface.markdown") },
   ];
-  const showFormattingTools = surface === "note" && !!editor;
+  const showFormattingTools = !!editor;
+  const formattingVisible = surface === "note" && !!editor;
   const showUndo = surface === "note" ? !!editor : !!cmView;
 
   const gridRef = useRef<HTMLDivElement>(null);
@@ -208,13 +222,13 @@ export function EditorToolbar({
     if (!g) return;
 
     if (t) {
-      const needs = g.clientWidth < BREAKPOINT;
+      const needs = formattingVisible && g.clientWidth < BREAKPOINT;
       isTwoRows.current = needs;
       applyLayout(t, needs);
     }
 
     setBarHeight(g.offsetHeight);
-  }, [applyLayout]);
+  }, [applyLayout, formattingVisible]);
 
   useEffect(() => {
     const el = gridRef.current;
@@ -227,7 +241,7 @@ export function EditorToolbar({
   // toolbar content 변경 시 DOM 렌더 완료 후 measure (이중 rAF로 레이아웃 확정 보장)
   useEffect(() => {
     requestAnimationFrame(() => requestAnimationFrame(measure));
-  }, [measure, showFormattingTools, showUndo]);
+  }, [measure, formattingVisible, showFormattingTools, showUndo]);
 
   const isHeading = editor?.isActive("heading") ?? false;
   const headingLabel = getHeadingLabel(editor, locale);
@@ -274,7 +288,10 @@ export function EditorToolbar({
 
         {showFormattingTools && (
           <>
-            <div ref={toolsRef} className={styles.tools}>
+            <div
+              ref={toolsRef}
+              className={formattingVisible ? styles.tools : `${styles.tools} ${styles.toolsHidden}`}
+            >
               <Menu>
                 <MenuTrigger>
                   <Button

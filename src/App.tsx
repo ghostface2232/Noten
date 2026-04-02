@@ -308,6 +308,7 @@ function App() {
   const styles = useStyles();
   const tiptapRef = useRef<TiptapEditorHandle>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const floatingCardRef = useRef<HTMLDivElement>(null);
   const [tiptapEditor, setTiptapEditor] = useState<import("@tiptap/react").Editor | null>(null);
   const startupModeApplied = useRef(false);
 
@@ -713,6 +714,25 @@ function App() {
     }
   }, [docGoToLineOpen, state.surface]);
 
+  useEffect(() => {
+    const handleMouseDown = (event: MouseEvent) => {
+      if (settingsOpenRef.current) return;
+      if (state.surface !== "note" || state.noteState !== "editing") return;
+
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (floatingCardRef.current?.contains(target)) return;
+
+      const portalRoot = document.getElementById("portal-root");
+      if (portalRoot?.contains(target)) return;
+
+      state.exitNoteEditing();
+    };
+
+    window.addEventListener("mousedown", handleMouseDown, true);
+    return () => window.removeEventListener("mousedown", handleMouseDown, true);
+  }, [state.exitNoteEditing, state.noteState, state.surface]);
+
   // 마우스 클릭 후 버튼류 요소 자동 blur → Esc/Space 시 포커스 링 방지
   const settingsOpenRef = useRef(settingsOpen);
   settingsOpenRef.current = settingsOpen;
@@ -1036,7 +1056,7 @@ function App() {
             />
           </div>
 
-          <div className={styles.floatingCard}>
+          <div ref={floatingCardRef} className={styles.floatingCard}>
             <EditorToolbar
               surface={state.surface}
               onSelectSurface={handleSelectSurface}
