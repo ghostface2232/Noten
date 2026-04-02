@@ -637,13 +637,13 @@ function App() {
     handleSelectSurface(state.surface === "note" ? "markdown" : "note");
   }, [handleSelectSurface, state.surface]);
 
-  const [reserveTopToolbarSpace, setReserveTopToolbarSpace] = useState(false);
-  const handleActivateNoteEditing = useCallback(() => {
-    const el = contentRef.current;
-    const h = toolbarHeightRef.current;
-    const shouldReserveSpace = !!(el && h && el.scrollTop < h);
+  const [toolbarShownByInteraction, setToolbarShownByInteraction] = useState(false);
+  const handleShowToolbar = useCallback(() => {
+    setToolbarShownByInteraction(true);
+  }, []);
 
-    setReserveTopToolbarSpace(shouldReserveSpace);
+  const handleActivateNoteEditing = useCallback(() => {
+    setToolbarShownByInteraction(true);
     state.enterNoteEditing();
   }, [state.enterNoteEditing]);
 
@@ -706,6 +706,7 @@ function App() {
         setDocSearchOpen(false);
       } else if (e.key === "Escape" && state.surface === "note" && state.noteState === "editing") {
         e.preventDefault();
+        setToolbarShownByInteraction(false);
         state.exitNoteEditing();
       }
     };
@@ -722,6 +723,7 @@ function App() {
     state.exitNoteEditing,
     state.noteState,
     state.surface,
+    setToolbarShownByInteraction,
   ]);
 
   useEffect(() => {
@@ -742,12 +744,6 @@ function App() {
   }, [docGoToLineOpen, state.surface]);
 
   useEffect(() => {
-    if (state.surface !== "note" || state.noteState !== "editing") {
-      setReserveTopToolbarSpace(false);
-    }
-  }, [state.noteState, state.surface]);
-
-  useEffect(() => {
     const handleMouseDown = (event: MouseEvent) => {
       if (settingsOpenRef.current) return;
       if (state.surface !== "note" || state.noteState !== "editing") return;
@@ -758,7 +754,14 @@ function App() {
 
       const portalRoot = document.getElementById("portal-root");
       if (portalRoot?.contains(target)) return;
+      if (
+        target instanceof Element
+        && (target.closest(".fui-MenuPopover") || target.closest('[role="menu"]'))
+      ) {
+        return;
+      }
 
+      setToolbarShownByInteraction(false);
       state.exitNoteEditing();
     };
 
@@ -914,7 +917,9 @@ function App() {
   const isNoteSurface = state.surface === "note";
   const isNoteEditing = isNoteSurface && state.noteState === "editing";
   const showCodeMirror = state.surface === "markdown";
-  const hideEditorChrome = isNoteSurface && state.noteState === "quiet";
+  const [isContentAtTop, setIsContentAtTop] = useState(true);
+  const hideToolbar = isNoteSurface && !isContentAtTop && !toolbarShownByInteraction;
+  const hideStatusBar = isNoteSurface && state.noteState === "quiet";
 
   const toolbarHeightRef = useRef(0);
   const [toolbarHeight, setToolbarHeight] = useState(0);
@@ -922,6 +927,31 @@ function App() {
     toolbarHeightRef.current = h;
     setToolbarHeight((prev) => (prev === h ? prev : h));
   }, []);
+
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+
+    const updateIsAtTop = () => {
+      const next = el.scrollTop <= 1;
+      setIsContentAtTop((prev) => (prev === next ? prev : next));
+      setToolbarShownByInteraction(false);
+    };
+
+    updateIsAtTop();
+    el.addEventListener("scroll", updateIsAtTop, { passive: true });
+    return () => el.removeEventListener("scroll", updateIsAtTop);
+  }, []);
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      const el = contentRef.current;
+      if (!el) return;
+      const next = el.scrollTop <= 1;
+      setIsContentAtTop((prev) => (prev === next ? prev : next));
+      setToolbarShownByInteraction(false);
+    });
+  }, [activeDoc?.id, state.surface]);
 
   return (
     <FluentProvider
@@ -1092,16 +1122,16 @@ function App() {
                   editor={tiptapEditor}
                   cmView={cmView}
                   sidebarOpen={sidebarOpen}
-                  hidden={hideEditorChrome}
+                  hidden={hideToolbar}
                   locale={locale}
                   onBarHeight={handleBarHeight}
                 />
               </div>
-              {isNoteEditing && reserveTopToolbarSpace && toolbarHeight > 0 && (
-                <div style={{ height: `${toolbarHeight}px`, pointerEvents: "none" }} />
-              )}
               {(docSearchOpen || docGoToLineOpen) && (
-                <div className={styles.searchBarAnchor}>
+                <div
+                  className={styles.searchBarAnchor}
+                  style={isNoteSurface && !hideToolbar && toolbarHeight > 0 ? { top: `${toolbarHeight}px` } : undefined}
+                >
                   {docSearchOpen ? (
                     <SearchBar
                       editor={tiptapEditor}
@@ -1119,6 +1149,14 @@ function App() {
                   )}
                 </div>
               )}
+              {isNoteSurface && toolbarHeight > 0 && (
+                <div
+                  style={{
+                    height: `max(calc(${toolbarHeight}px - 1rem), 0px)`,
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
               <div className={showCodeMirror ? styles.editorPaneHidden : styles.editorPane}>
                 <TiptapEditor
                   ref={tiptapRef}
@@ -1132,6 +1170,7 @@ function App() {
                   spellcheck={settings.spellcheck}
                   onDirtyChange={handleTiptapDirty}
                   onReady={syncEditorRef}
+                  onToolbarStateActivate={!showCodeMirror ? handleShowToolbar : undefined}
                   onActivateQuietState={!showCodeMirror && state.noteState === "quiet" ? handleActivateNoteEditing : undefined}
                 />
               </div>
@@ -1155,7 +1194,7 @@ function App() {
               markdown={state.markdown}
               surface={state.surface}
               editor={tiptapEditor}
-              hidden={hideEditorChrome}
+              hidden={hideStatusBar}
               locale={locale}
             />
           </div>

@@ -336,6 +336,7 @@ interface TiptapEditorProps {
   spellcheck: boolean;
   onDirtyChange: (dirty: boolean) => void;
   onReady?: () => void;
+  onToolbarStateActivate?: () => void;
   onActivateQuietState?: () => void;
 }
 
@@ -351,6 +352,7 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     spellcheck,
     onDirtyChange,
     onReady,
+    onToolbarStateActivate,
     onActivateQuietState,
   }, ref) {
     const dirtyRef = useRef(false);
@@ -541,6 +543,10 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           const target = event.target as HTMLElement | null;
           const isLinkClick = !!target?.closest("a");
           let activated = false;
+
+          if (!isLinkClick) {
+            onToolbarStateActivate?.();
+          }
 
           if (!editable && !isLinkClick) {
             onActivateQuietState?.();
