@@ -640,44 +640,23 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
 
                   {/* Version notes */}
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.2</div>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.3</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 편집/읽기 모드를 노트/Markdown 서피스 모델로 전환<br />
-                          · 부트스트래퍼에서 제거 로직 분리, maintenance-helper로 이전<br />
-                          · 오픈소스 폰트로 교체 (Pretendard JP / JetBrains Mono)<br />
-                          · Markdown 소스 모드에서 서식 제거, 구문 색상만 표시<br />
-                          · 노트 ↔ Markdown 전환 시 콘텐츠 동기화 수정
+                          · 사이드바 문서 목록에 "내 노트" 라벨 추가<br />
+                          · 다크모드 Mica 효과 안정성 수정<br />
+                          · 노트 보기 모드에서 툴바/상태바 숨김 처리<br />
+                          · 에디터 및 사이드바 키보드 단축키 추가<br />
+                          · 에디터 모드 전환 동작 개선
                         </>
                       ) : (
                         <>
-                          · Replaced Edit/Read mode with Note/Markdown surface model<br />
-                          · Separated uninstall logic from bootstrapper into maintenance-helper<br />
-                          · Switched to open-source fonts (Pretendard JP / JetBrains Mono)<br />
-                          · Markdown source mode now shows syntax colors only<br />
-                          · Fixed content sync when switching between Note and Markdown
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.1</div>
-                    <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
-                      {locale === "ko" ? (
-                        <>
-                          · 빠른 문서 전환과 새 문서 생성 시 저장 안정성 개선<br />
-                          · Markdown 화면 잔상 및 빈 영역 동작 개선<br />
-                          · 설정의 노트 저장 위치 표시 정리<br />
-                          · Windows 제거 흐름 및 정리 동작 개선
-                        </>
-                      ) : (
-                        <>
-                          · Improved save reliability when switching notes or creating a new note quickly<br />
-                          · Improved Markdown surface leftovers and empty-area behavior<br />
-                          · Refined the notes directory display in Settings<br />
-                          · Improved the Windows uninstall and cleanup flow
+                          · Added "My Notes" label above document list in sidebar<br />
+                          · Fixed dark mode Mica stability<br />
+                          · Hide toolbar and status bar in Note view mode<br />
+                          · Added editor and sidebar keyboard shortcuts<br />
+                          · Improved editor mode transition behavior
                         </>
                       )}
                     </div>
