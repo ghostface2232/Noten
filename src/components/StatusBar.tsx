@@ -13,12 +13,15 @@ const useStyles = makeStyles({
     overflow: "hidden",
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground3,
-    transitionProperty: "border-top-color, background-color",
+    transitionProperty: "height, border-top-color, background-color",
     transitionDuration: "0.25s",
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
   },
   shellHidden: {
     pointerEvents: "none",
+    height: "0px",
+    borderTop: "none",
+    backgroundColor: "transparent",
   },
   statusBar: {
     display: "flex",
