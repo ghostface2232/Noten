@@ -246,6 +246,10 @@
   display: none;
 }
 
+.ProseMirror .noten-code-block.is-mermaid pre.is-code-collapsed code {
+  display: none !important;
+}
+
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-preview {
   margin-top: 0;
   border-top: 1px solid var(--editor-color-border);
@@ -258,7 +262,7 @@
   display: block;
   width: auto;
   min-width: 0;
-  max-width: none;
+  max-width: 100%;
   height: auto;
   padding: 0.45rem 0.2rem 0.2rem;
   border: none;

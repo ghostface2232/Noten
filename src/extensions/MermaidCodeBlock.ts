@@ -113,7 +113,8 @@ class MermaidCodeBlockView implements NodeView {
     this.toggleButton = document.createElement("button");
     this.toggleButton.type = "button";
     this.toggleButton.className = "noten-mermaid-code-toggle";
-    this.toggleButton.addEventListener("mousedown", this.handleToggleMouseDown);
+    this.toggleButton.addEventListener("click", this.handleToggleClick);
+    this.toggleButton.addEventListener("keydown", this.handleToggleKeyDown);
     this.preElement.append(this.toggleButton);
 
     this.contentDOM = this.codeElement;
@@ -156,10 +157,20 @@ class MermaidCodeBlockView implements NodeView {
     return this.previewElement.contains(mutation.target) || this.errorElement.contains(mutation.target);
   }
 
+  stopEvent(event: Event): boolean {
+    const target = event.target;
+    if (!(target instanceof Node)) {
+      return false;
+    }
+
+    return this.toggleButton.contains(target);
+  }
+
   destroy() {
     this.renderToken += 1;
     this.clearRenderTimeout();
-    this.toggleButton.removeEventListener("mousedown", this.handleToggleMouseDown);
+    this.toggleButton.removeEventListener("click", this.handleToggleClick);
+    this.toggleButton.removeEventListener("keydown", this.handleToggleKeyDown);
   }
 
   private syncStructureFromNode() {
@@ -215,7 +226,17 @@ class MermaidCodeBlockView implements NodeView {
     this.renderTimeout = null;
   }
 
-  private readonly handleToggleMouseDown = (event: MouseEvent) => {
+  private readonly handleToggleClick = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    this.setCodeCollapsed(!this.codeCollapsed);
+  };
+
+  private readonly handleToggleKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
     this.setCodeCollapsed(!this.codeCollapsed);
@@ -228,7 +249,7 @@ class MermaidCodeBlockView implements NodeView {
 
     this.codeCollapsed = next;
     this.dom.classList.toggle("is-code-collapsed", next);
-    this.codeElement.hidden = next;
+    this.preElement.classList.toggle("is-code-collapsed", next);
     this.syncToggleButton();
   }
 
