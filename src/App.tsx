@@ -243,6 +243,7 @@ const SIDEBAR_MAX = 400;
 const SIDEBAR_DEFAULT = 260;
 const MARKDOWN_FILE_PATTERN = /\.(md|markdown|mdx|txt)$/i;
 const CHROME_HIDE_SCROLL_THRESHOLD = 36;
+const CHROME_LOCK_MS = 300;
 
 function shortcutTargetElement(target: EventTarget | null): HTMLElement | null {
   if (target instanceof HTMLElement) return target;
@@ -652,7 +653,7 @@ function App() {
   const handleShowEditorChrome = useCallback(() => {
     chromeVisibleRef.current = true;
     setChromeVisible(true);
-    chromeLockUntilRef.current = Date.now() + 300;
+    chromeLockUntilRef.current = Date.now() + CHROME_LOCK_MS;
   }, []);
 
   const handleNewNote = useCallback(async () => {

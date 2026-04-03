@@ -257,8 +257,6 @@ class MermaidCodeBlockView implements NodeView {
     }
 
     this.codeCollapsed = next;
-    this.dom.classList.toggle("is-code-collapsed", next);
-    this.preElement.classList.toggle("is-code-collapsed", next);
     this.codeBody.classList.toggle("is-collapsed", next);
     this.syncToggleButton();
   }
