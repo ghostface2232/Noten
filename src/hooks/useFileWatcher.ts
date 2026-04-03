@@ -153,7 +153,8 @@ export function useFileWatcher(
 
         const { updatedAt: fileUpdatedAt } = await getFileTimestamps(doc.filePath);
 
-        let needsSyncMarkdown = false;
+        const isActiveDoc =
+          docsRef.current.findIndex((d) => d.id === doc.id) === activeIndexRef.current;
 
         setDocs((prev) => {
           const idx = prev.findIndex((d) => d.id === doc.id);
@@ -170,16 +171,13 @@ export function useFileWatcher(
             isDirty: false,
           };
 
-          // If this is the active document, update editor
-          if (idx === activeIndexRef.current && tiptapRef.current) {
-            tiptapRef.current.setContent(content);
-            needsSyncMarkdown = true;
-          }
-
           return updated;
         });
 
-        if (needsSyncMarkdown) {
+        // Sync editor & markdown state outside the updater to avoid
+        // React batching deferring the side-effect check.
+        if (isActiveDoc && tiptapRef.current) {
+          tiptapRef.current.setContent(content);
           onActiveDocChangedRef.current?.({ filePath: doc.filePath, content });
         }
       }
