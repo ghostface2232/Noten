@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
-import type { NoteDoc } from "./useNotesLoader";
+import type { NoteDoc, NoteGroup } from "./useNotesLoader";
 import { deriveTitle, saveManifest, sortNotes } from "./useNotesLoader";
 import { getCurrentMarkdown } from "./useFileSystem";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
@@ -28,6 +28,7 @@ export function useAutoSave(
   setActiveIndex: React.Dispatch<React.SetStateAction<number>>,
   locale: Locale,
   notesSortOrder: NotesSortOrder,
+  groups: NoteGroup[],
 ) {
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const pendingSnapshotsRef = useRef(new Map<string, SaveSnapshot>());
@@ -42,6 +43,7 @@ export function useAutoSave(
     notesSortOrder,
     setDocs,
     setActiveIndex,
+    groups,
   });
   stateRef.current = {
     state,
@@ -52,6 +54,7 @@ export function useAutoSave(
     notesSortOrder,
     setDocs,
     setActiveIndex,
+    groups,
   };
 
   // Synchronously tracks which doc the editor currently holds.
@@ -144,7 +147,7 @@ export function useAutoSave(
 
       latestSetDocs(sortedDocs);
       latestSetActiveIndex(nextIndex);
-      await saveManifest(sortedDocs, currentActiveId).catch(() => {});
+      await saveManifest(sortedDocs, currentActiveId, stateRef.current.groups).catch(() => {});
 
       const saved = sortedDocs.find((d) => d.id === snapshot.docId);
       if (saved) emitDocUpdated(saved.id, snapshot.content, saved.fileName);

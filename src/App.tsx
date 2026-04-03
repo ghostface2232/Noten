@@ -175,6 +175,7 @@ function App() {
     setActiveIndex,
     locale,
     settings.notesSortOrder,
+    groups,
   );
   flushAutoSaveRef.current = flushAutoSave;
   notifyActiveDocRef.current = notifyActiveDoc;
