@@ -600,8 +600,6 @@ interface SidebarProps {
   onAddNoteToGroup: (noteId: string, groupId: string) => void;
   onRemoveNoteFromGroup: (noteId: string) => void;
   onMoveNotesToGroup: (noteIds: string[], groupId: string) => void;
-  onInsertNoteInGroup: (noteId: string, groupId: string, index: number) => void;
-  onReorderNoteInGroup: (noteId: string, groupId: string, newIndex: number) => void;
   onToggleGroupCollapsed: (groupId: string) => void;
   onDeleteNotes: (indices: number[]) => void;
   /* ─── Select mode (controlled from App) ─── */
@@ -645,8 +643,6 @@ export function Sidebar({
   onAddNoteToGroup,
   onRemoveNoteFromGroup,
   onMoveNotesToGroup,
-  onInsertNoteInGroup,
-  onReorderNoteInGroup,
   onToggleGroupCollapsed,
   onDeleteNotes,
   selectMode,
@@ -659,7 +655,6 @@ export function Sidebar({
 
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
-  const [focusedGroupId, setFocusedGroupId] = useState<string | null>(null);
   const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingValue, setEditingValue] = useState("");
@@ -701,8 +696,6 @@ export function Sidebar({
     sidebarBodyRef,
     onAddNoteToGroup,
     onMoveNotesToGroup,
-    onInsertNoteInGroup,
-    onReorderNoteInGroup,
     onToggleGroupCollapsed,
   });
 
@@ -993,34 +986,6 @@ export function Sidebar({
       if (!sidebarActiveRef.current) return;
 
       const ctrl = e.ctrlKey || e.metaKey;
-
-      // Group shortcuts (when a group is focused)
-      if (focusedGroupId) {
-        if ((ctrl && e.key === "r") || e.key === "F2") {
-          e.preventDefault();
-          const group = groups.find((g) => g.id === focusedGroupId);
-          if (group) { setEditingGroupId(group.id); setEditingGroupValue(group.name); }
-        } else if (ctrl && e.key === "u") {
-          e.preventDefault();
-          const gid = focusedGroupId;
-          setFocusedGroupId(null);
-          animateGroupRemoval(gid, [], () => onUngroupGroup(gid));
-        } else if (e.key === "Delete" && !ctrl && !e.altKey && !e.shiftKey) {
-          e.preventDefault();
-          const gid = focusedGroupId;
-          const group = groups.find((g) => g.id === gid);
-          const noteIds = group?.noteIds ?? [];
-          if (noteIds.length > 0) {
-            setConfirmDeleteGroupId(gid);
-          } else {
-            setFocusedGroupId(null);
-            animateGroupRemoval(gid, [], () => onDeleteGroup(gid));
-          }
-        }
-        return;
-      }
-
-      // Note shortcuts
       if (ctrl && e.key === "d") {
         e.preventDefault();
         onDuplicateNote(activeIndex);
@@ -1041,7 +1006,7 @@ export function Sidebar({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeIndex, editingIndex, editingGroupId, focusedGroupId, groups, getDocumentContent, onDuplicateNote, onExportNote, onDeleteNote, onDeleteGroup, onUngroupGroup, handleDoubleClick, animateGroupRemoval]);
+  }, [activeIndex, editingIndex, editingGroupId, getDocumentContent, onDuplicateNote, onExportNote, onDeleteNote, handleDoubleClick]);
 
   const toggleNoteSelection = useCallback((noteId: string) => {
     setSelectedNoteIds((prev) => {
@@ -1100,12 +1065,36 @@ export function Sidebar({
     const gItems: RenderItem[] = [];
     const nItems: RenderItem[] = [];
 
+    const desc = notesSortOrder.endsWith("-desc");
+    const byTitle = notesSortOrder.startsWith("title");
+    const byCreated = notesSortOrder.startsWith("created");
+    const dir = desc ? -1 : 1;
+
+    const sortGroupNotes = (entries: { doc: NoteDoc; originalIndex: number }[]) => {
+      return [...entries].sort((a, b) => {
+        if (byTitle) {
+          const cmp = a.doc.fileName.localeCompare(b.doc.fileName, locale);
+          if (cmp !== 0) return cmp * dir;
+          return (b.doc.updatedAt - a.doc.updatedAt);
+        }
+        const primary = byCreated
+          ? a.doc.createdAt - b.doc.createdAt
+          : a.doc.updatedAt - b.doc.updatedAt;
+        if (primary !== 0) return primary * dir;
+        return a.doc.fileName.localeCompare(b.doc.fileName, locale);
+      });
+    };
+
     for (const group of groups) {
       gItems.push({ kind: "group", group });
       if (!group.collapsed) {
+        const entries: { doc: NoteDoc; originalIndex: number }[] = [];
         for (const noteId of group.noteIds) {
           const entry = docsMap.get(noteId);
-          if (entry) gItems.push({ kind: "note", doc: entry.doc, originalIndex: entry.originalIndex, indented: true });
+          if (entry) entries.push(entry);
+        }
+        for (const entry of sortGroupNotes(entries)) {
+          gItems.push({ kind: "note", doc: entry.doc, originalIndex: entry.originalIndex, indented: true });
         }
       }
     }
@@ -1116,7 +1105,7 @@ export function Sidebar({
     }
 
     return { groupItems: gItems, noteItems: nItems };
-  }, [isSearching, filteredDocs, docs, groups, groupedNoteIds]);
+  }, [isSearching, filteredDocs, docs, groups, groupedNoteIds, notesSortOrder, locale]);
 
   const renderNoteItem = (doc: NoteDoc, originalIndex: number, indented: boolean) => {
     const isSelected = selectedNoteIds.has(doc.id);
@@ -1209,7 +1198,6 @@ export function Sidebar({
               )}
               onClick={() => {
                 if (isDragging.current) return;
-                setFocusedGroupId(null);
                 if (selectMode) {
                   toggleNoteSelection(doc.id);
                 } else {
@@ -1282,7 +1270,7 @@ export function Sidebar({
           appearance="subtle"
           className={styles.groupHeader}
           size="small"
-          onClick={() => { if (!isEditing) { setFocusedGroupId(group.id); onToggleGroupCollapsed(group.id); } }}
+          onClick={() => { if (!isEditing) onToggleGroupCollapsed(group.id); }}
         >
           <span className={mergeClasses(
             styles.groupChevron,
@@ -1873,7 +1861,7 @@ export function Sidebar({
                 }}
                 size="small"
               >
-                {i("sidebar.renameGroup")}<span className={styles.shortcutHint}>Ctrl+R / F2</span>
+                {i("sidebar.renameGroup")}
               </Button>
               <Button
                 appearance="subtle"
@@ -1882,12 +1870,11 @@ export function Sidebar({
                 onClick={() => {
                   const gid = contextMenu.groupId!;
                   closeContextMenu();
-                  setFocusedGroupId(null);
                   animateGroupRemoval(gid, [], () => onUngroupGroup(gid));
                 }}
                 size="small"
               >
-                {i("sidebar.ungroupGroup")}<span className={styles.shortcutHint}>Ctrl+U</span>
+                {i("sidebar.ungroupGroup")}
               </Button>
               <Button
                 appearance="subtle"
@@ -1901,13 +1888,12 @@ export function Sidebar({
                   if (noteIds.length > 0) {
                     setConfirmDeleteGroupId(gid);
                   } else {
-                    setFocusedGroupId(null);
                     animateGroupRemoval(gid, [], () => onDeleteGroup(gid));
                   }
                 }}
                 size="small"
               >
-                {i("sidebar.deleteGroupAndNotes")}<span className={styles.shortcutHint}>Delete</span>
+                {i("sidebar.deleteGroupAndNotes")}
               </Button>
             </>
           )}
@@ -1937,7 +1923,6 @@ export function Sidebar({
                   onClick={() => {
                     const gid = confirmDeleteGroupId;
                     setConfirmDeleteGroupId(null);
-                    setFocusedGroupId(null);
                     animateGroupRemoval(gid, noteIds, () => {
                       if (group) {
                         const indices = noteIds

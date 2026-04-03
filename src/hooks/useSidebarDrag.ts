@@ -7,9 +7,8 @@ const SCROLL_EDGE = 40;
 const SCROLL_SPEED = 8;
 
 interface DropTarget {
-  type: "group-header" | "group-insert";
-  groupId?: string;
-  index?: number;
+  type: "group";
+  groupId: string;
 }
 
 interface DragSession {
@@ -17,7 +16,6 @@ interface DragSession {
   allNoteIds: string[];
   sourceGroupId: string | null;
   ghost: HTMLElement;
-  indicator: HTMLElement;
   startX: number;
   startY: number;
   pendingX: number;
@@ -44,8 +42,6 @@ interface UseSidebarDragOptions {
   sidebarBodyRef: React.RefObject<HTMLElement | null>;
   onAddNoteToGroup: (noteId: string, groupId: string) => void;
   onMoveNotesToGroup: (noteIds: string[], groupId: string) => void;
-  onInsertNoteInGroup: (noteId: string, groupId: string, index: number) => void;
-  onReorderNoteInGroup: (noteId: string, groupId: string, newIndex: number) => void;
   onToggleGroupCollapsed: (groupId: string) => void;
 }
 
@@ -65,7 +61,6 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
     if (s.expandTimer !== null) clearTimeout(s.expandTimer);
 
     s.ghost.remove();
-    s.indicator.remove();
     s.dimmedEls.forEach((el) => { el.style.opacity = ""; });
     s.fadedEls.forEach((el) => { el.style.opacity = ""; el.style.pointerEvents = ""; });
 
@@ -82,27 +77,11 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
     const o = optsRef.current;
     const t = s.target;
 
-    if (t) {
-      const isSingle = s.allNoteIds.length === 1;
-
-      if (t.type === "group-header" && t.groupId) {
-        if (s.sourceGroupId === t.groupId && isSingle) {
-          // no-op: dropped on own group header
-        } else if (isSingle) {
-          o.onAddNoteToGroup(s.noteId, t.groupId);
-        } else {
-          o.onMoveNotesToGroup(s.allNoteIds, t.groupId);
-        }
-      } else if (t.type === "group-insert" && t.groupId != null && t.index != null) {
-        if (isSingle) {
-          if (s.sourceGroupId === t.groupId) {
-            o.onReorderNoteInGroup(s.noteId, t.groupId, t.index);
-          } else {
-            o.onInsertNoteInGroup(s.noteId, t.groupId, t.index);
-          }
-        } else {
-          o.onMoveNotesToGroup(s.allNoteIds, t.groupId);
-        }
+    if (t && t.groupId !== s.sourceGroupId) {
+      if (s.allNoteIds.length === 1) {
+        o.onAddNoteToGroup(s.noteId, t.groupId);
+      } else {
+        o.onMoveNotesToGroup(s.allNoteIds, t.groupId);
       }
     }
 
@@ -144,41 +123,35 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
     const noteInGroup = el.closest<HTMLElement>("[data-doc-item][data-group-id]");
 
     let nextTarget: DropTarget | null = null;
+    let targetGroupId: string | null = null;
 
     if (groupHeader) {
-      const gid = groupHeader.dataset.groupId!;
-      nextTarget = { type: "group-header", groupId: gid };
+      targetGroupId = groupHeader.dataset.groupId!;
+    } else if (noteInGroup && noteInGroup.dataset.noteId !== s.noteId) {
+      targetGroupId = noteInGroup.dataset.groupId!;
+    }
+
+    if (targetGroupId) {
+      nextTarget = { type: "group", groupId: targetGroupId };
 
       // Auto-expand collapsed groups
-      const group = optsRef.current.groups.find((g) => g.id === gid);
-      if (group?.collapsed && s.expandGroupId !== gid) {
+      const group = optsRef.current.groups.find((g) => g.id === targetGroupId);
+      if (group?.collapsed && s.expandGroupId !== targetGroupId) {
         if (s.expandTimer !== null) clearTimeout(s.expandTimer);
-        s.expandGroupId = gid;
+        s.expandGroupId = targetGroupId;
         s.expandTimer = window.setTimeout(() => {
           s.expandTimer = null;
-          optsRef.current.onToggleGroupCollapsed(gid);
+          optsRef.current.onToggleGroupCollapsed(targetGroupId!);
         }, AUTO_EXPAND_DELAY);
+      } else if (!groupHeader) {
+        clearAutoExpand(s);
       }
-    } else if (noteInGroup) {
-      const gid = noteInGroup.dataset.groupId!;
-      const nid = noteInGroup.dataset.noteId;
-      if (nid && nid !== s.noteId) {
-        const group = optsRef.current.groups.find((g) => g.id === gid);
-        if (group) {
-          const noteRect = noteInGroup.getBoundingClientRect();
-          const isTopHalf = y < noteRect.top + noteRect.height / 2;
-          const noteIdx = group.noteIds.indexOf(nid);
-          const insertIdx = isTopHalf ? noteIdx : noteIdx + 1;
-          nextTarget = { type: "group-insert", groupId: gid, index: insertIdx };
-        }
-      }
-      clearAutoExpand(s);
     } else {
       clearAutoExpand(s);
     }
 
     // Update visuals
-    applyTarget(s, nextTarget, el);
+    applyTarget(nextTarget);
     s.target = nextTarget;
   }, []);
 
@@ -252,11 +225,6 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
     ghost.style.transform = `translate3d(${startX + 8}px, ${startY - 14}px, 0)`;
     document.body.appendChild(ghost);
 
-    // Create indicator
-    const indicator = document.createElement("div");
-    indicator.className = "sidebar-drop-indicator";
-    document.body.appendChild(indicator);
-
     // Dim source elements
     const dimmedEls: HTMLElement[] = [];
     for (const id of allNoteIds) {
@@ -282,7 +250,6 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
       allNoteIds,
       sourceGroupId: sourceGroup?.id ?? null,
       ghost,
-      indicator,
       startX,
       startY,
       pendingX: ev.clientX,
@@ -315,44 +282,12 @@ function clearAutoExpand(s: DragSession) {
 
 function clearTarget(s: DragSession) {
   document.querySelectorAll(".sidebar-drag-over").forEach((el) => el.classList.remove("sidebar-drag-over"));
-  document.querySelectorAll(".sidebar-drag-over-section").forEach((el) => el.classList.remove("sidebar-drag-over-section"));
-  s.indicator.style.opacity = "0";
   s.target = null;
 }
 
-function applyTarget(s: DragSession, t: DropTarget | null, _hitEl: Element) {
-  // Clear previous
+function applyTarget(t: DropTarget | null) {
   document.querySelectorAll(".sidebar-drag-over").forEach((el) => el.classList.remove("sidebar-drag-over"));
-  s.indicator.style.opacity = "0";
-
   if (!t) return;
-
-  if (t.type === "group-header" && t.groupId) {
-    const header = document.querySelector<HTMLElement>(`[data-group-item][data-group-id="${t.groupId}"]`);
-    if (header) header.classList.add("sidebar-drag-over");
-  } else if (t.type === "group-insert" && t.groupId != null && t.index != null) {
-    const groupEl = document.querySelector<HTMLElement>(`[data-group-item][data-group-id="${t.groupId}"]`);
-    if (groupEl) groupEl.classList.add("sidebar-drag-over");
-
-    const notesInGroup = Array.from(
-      document.querySelectorAll<HTMLElement>(`[data-doc-item][data-group-id="${t.groupId}"]`),
-    );
-    if (notesInGroup.length > 0) {
-      let refRect: DOMRect;
-      if (t.index >= notesInGroup.length) {
-        refRect = notesInGroup[notesInGroup.length - 1].getBoundingClientRect();
-        positionIndicator(s.indicator, refRect.bottom, refRect.left, refRect.width);
-      } else {
-        refRect = notesInGroup[t.index].getBoundingClientRect();
-        positionIndicator(s.indicator, refRect.top, refRect.left, refRect.width);
-      }
-    }
-  }
-}
-
-function positionIndicator(indicator: HTMLElement, top: number, left: number, width: number) {
-  indicator.style.top = `${top - 1}px`;
-  indicator.style.left = `${left + 4}px`;
-  indicator.style.width = `${width - 8}px`;
-  indicator.style.opacity = "1";
+  const header = document.querySelector<HTMLElement>(`[data-group-item][data-group-id="${t.groupId}"]`);
+  if (header) header.classList.add("sidebar-drag-over");
 }

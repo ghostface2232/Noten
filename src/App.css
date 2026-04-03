@@ -130,19 +130,6 @@ body {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 
-.sidebar-drop-indicator {
-  position: fixed;
-  top: 0;
-  left: 0;
-  pointer-events: none;
-  z-index: 10000;
-  height: 2px;
-  background: #0078d4;
-  border-radius: 1px;
-  opacity: 0;
-  transition: opacity 0.1s ease, top 0.08s ease;
-}
-
 [data-group-item].sidebar-drag-over {
   outline: 2px solid #0078d4;
   outline-offset: -2px;
