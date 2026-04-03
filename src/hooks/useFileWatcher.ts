@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
+import { flushSync } from "react-dom";
 import { watch, readTextFile } from "@tauri-apps/plugin-fs";
 import type { WatchEvent } from "@tauri-apps/plugin-fs";
 import { getNotesDir, deriveTitle, saveManifest, migrationInProgress, reconcileFolder } from "./useNotesLoader";
@@ -155,31 +156,35 @@ export function useFileWatcher(
 
         let needsSyncMarkdown = false;
 
-        setDocs((prev) => {
-          const idx = prev.findIndex((d) => d.id === doc.id);
-          if (idx < 0) return prev;
-          const updated = [...prev];
-          const autoTitle = prev[idx].customName
-            ? prev[idx].fileName
-            : deriveTitle(content) || prev[idx].fileName;
-          updated[idx] = {
-            ...prev[idx],
-            content,
-            fileName: autoTitle,
-            updatedAt: fileUpdatedAt,
-            isDirty: false,
-          };
+        // flushSync forces the updater to run synchronously so the
+        // flag it sets is reliable when checked afterwards.  Side
+        // effects stay outside the updater for StrictMode safety.
+        flushSync(() => {
+          setDocs((prev) => {
+            const idx = prev.findIndex((d) => d.id === doc.id);
+            if (idx < 0) return prev;
+            const updated = [...prev];
+            const autoTitle = prev[idx].customName
+              ? prev[idx].fileName
+              : deriveTitle(content) || prev[idx].fileName;
+            updated[idx] = {
+              ...prev[idx],
+              content,
+              fileName: autoTitle,
+              updatedAt: fileUpdatedAt,
+              isDirty: false,
+            };
 
-          // If this is the active document, update editor
-          if (idx === activeIndexRef.current && tiptapRef.current) {
-            tiptapRef.current.setContent(content);
-            needsSyncMarkdown = true;
-          }
+            if (idx === activeIndexRef.current) {
+              needsSyncMarkdown = true;
+            }
 
-          return updated;
+            return updated;
+          });
         });
 
-        if (needsSyncMarkdown) {
+        if (needsSyncMarkdown && tiptapRef.current) {
+          tiptapRef.current.setContent(content);
           onActiveDocChangedRef.current?.({ filePath: doc.filePath, content });
         }
       }

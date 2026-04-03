@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { flushSync } from "react-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen } from "@tauri-apps/api/event";
 import type { NoteDoc, NoteGroup, TrashedNote } from "./useNotesLoader";
@@ -107,24 +108,28 @@ export function useWindowSync(
         const { sourceWindow, docId, content, fileName, updatedAt } = event.payload;
         if (sourceWindow === WINDOW_LABEL) return;
 
-        let syncFilePath = "";
         let needsSyncMarkdown = false;
+        let syncFilePath = "";
 
-        setDocs((prev) => {
-          const idx = prev.findIndex((d) => d.id === docId);
-          if (idx < 0) return prev;
-          const updated = [...prev];
-          updated[idx] = { ...updated[idx], content, fileName, updatedAt, isDirty: false };
+        // flushSync forces the updater to run synchronously so the
+        // flags it sets are reliable when checked afterwards.
+        flushSync(() => {
+          setDocs((prev) => {
+            const idx = prev.findIndex((d) => d.id === docId);
+            if (idx < 0) return prev;
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], content, fileName, updatedAt, isDirty: false };
 
-          if (idx === activeIndexRef.current && tiptapRef.current) {
-            tiptapRef.current.setContent(content);
-            needsSyncMarkdown = true;
-            syncFilePath = updated[idx].filePath;
-          }
-          return updated;
+            if (idx === activeIndexRef.current) {
+              needsSyncMarkdown = true;
+              syncFilePath = updated[idx].filePath;
+            }
+            return updated;
+          });
         });
 
-        if (needsSyncMarkdown) {
+        if (needsSyncMarkdown && tiptapRef.current) {
+          tiptapRef.current.setContent(content);
           onActiveDocChangedRef.current?.({ filePath: syncFilePath, content });
         }
       }),
