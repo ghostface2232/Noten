@@ -8,6 +8,10 @@ const MERMAID_RENDER_DELAY_MS = 120;
 const MERMAID_FONT_FAMILY = '"JetBrains Mono", "Pretendard JP", "Segoe UI", monospace';
 const MERMAID_FONT_SIZE_PX = "12px";
 const EDGE_LABEL_PILL_PADDING_X = 6;
+const EDGE_LABEL_PILL_PADDING_Y = 2;
+const EDGE_LABEL_PILL_MIN_TRACK_MULTIPLIER = 3.8;
+const EDGE_LABEL_PILL_MIN_WIDTH_PX = 56;
+const EDGE_LABEL_PILL_MIN_SIDE_CAP_PX = 14;
 const MERMAID_TOGGLE_ICON_UP = '<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M10.53 7.22a.75.75 0 0 0-1.06 0L5.22 11.47a.75.75 0 1 0 1.06 1.06L10 8.81l3.72 3.72a.75.75 0 0 0 1.06-1.06l-4.25-4.25Z"/></svg>';
 const MERMAID_TOGGLE_ICON_DOWN = '<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M5.22 8.53a.75.75 0 0 1 1.06-1.06L10 11.19l3.72-3.72a.75.75 0 0 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.53Z"/></svg>';
 type MermaidApi = typeof import("mermaid")["default"];
@@ -134,6 +138,7 @@ class MermaidCodeBlockView implements NodeView {
 
     this.node = node;
     this.syncStructureFromNode();
+    this.applyEdgeLabelPillShapeToCurrentPreview();
     this.scheduleRender();
     return true;
   }
@@ -189,6 +194,7 @@ class MermaidCodeBlockView implements NodeView {
     const renderKey = `${normalizeLanguage(this.node.attrs.language)}\u0000${source}`;
 
     if (!force && renderKey === this.lastRenderKey) {
+      this.applyEdgeLabelPillShapeToCurrentPreview();
       return;
     }
 
@@ -235,26 +241,132 @@ class MermaidCodeBlockView implements NodeView {
   }
 
   private applyEdgeLabelPillShape(svgElement: SVGSVGElement) {
-    const labels = svgElement.querySelectorAll<SVGGraphicsElement>(".edgeLabel rect, .edgeLabel .labelBkg");
+    const edgeLabelGroups = svgElement.querySelectorAll<SVGGElement>(".edgeLabel");
+    const svgNs = "http://www.w3.org/2000/svg";
 
-    labels.forEach((rect) => {
-      if (!(rect instanceof SVGRectElement)) {
+    edgeLabelGroups.forEach((group) => {
+      group.classList.remove("has-custom-pill");
+      group.querySelectorAll<SVGElement>(".noten-edge-pill").forEach((pill) => pill.remove());
+
+      const labelGroup = group.querySelector<SVGGElement>(".label") ?? group;
+      let labelBox: DOMRect | SVGRect | null = null;
+      const contentCandidates = [
+        ...Array.from(labelGroup.querySelectorAll<SVGGraphicsElement>("text, foreignObject")),
+      ];
+
+      for (const target of contentCandidates) {
+        try {
+          const box = this.getBBoxInAncestorCoords(target, group);
+          if (Number.isFinite(box.x) && Number.isFinite(box.y) && box.width > 0 && box.height > 0) {
+            if (!labelBox) {
+              labelBox = box;
+            } else {
+              const minX = Math.min(labelBox.x, box.x);
+              const minY = Math.min(labelBox.y, box.y);
+              const maxX = Math.max(labelBox.x + labelBox.width, box.x + box.width);
+              const maxY = Math.max(labelBox.y + labelBox.height, box.y + box.height);
+              labelBox = { x: minX, y: minY, width: maxX - minX, height: maxY - minY } as SVGRect;
+            }
+          }
+        } catch {
+          // Ignore non-measurable target.
+        }
+      }
+
+      if (!labelBox) {
+        try {
+          const direct = this.getBBoxInAncestorCoords(labelGroup, group);
+          if (Number.isFinite(direct.x) && Number.isFinite(direct.y) && direct.width > 0 && direct.height > 0) {
+            labelBox = direct;
+          }
+        } catch {
+          // Keep null and skip.
+        }
+      }
+
+      if (!labelBox) {
         return;
       }
 
-      const width = rect.width.baseVal.value;
-      const height = rect.height.baseVal.value;
-      const x = rect.x.baseVal.value;
+      const contentWidth = labelBox.width;
+      const contentHeight = labelBox.height;
+      const pillHeight = contentHeight + EDGE_LABEL_PILL_PADDING_Y * 2;
+      const desiredWidth = contentWidth + EDGE_LABEL_PILL_PADDING_X * 2;
+      const minTrackWidth = Math.max(
+        pillHeight * EDGE_LABEL_PILL_MIN_TRACK_MULTIPLIER,
+        pillHeight + EDGE_LABEL_PILL_MIN_SIDE_CAP_PX * 2,
+        EDGE_LABEL_PILL_MIN_WIDTH_PX,
+      );
+      const pillWidth = Math.max(desiredWidth, minTrackWidth);
+      const pillX = labelBox.x - EDGE_LABEL_PILL_PADDING_X - (pillWidth - desiredWidth) / 2;
+      const pillY = labelBox.y - EDGE_LABEL_PILL_PADDING_Y;
+      const pillRadius = pillHeight / 2;
 
-      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-        return;
+      for (const oldBg of Array.from(group.querySelectorAll<SVGElement>(".noten-edge-pill, .labelBkg, .background, .label rect"))) {
+        oldBg.remove();
       }
 
-      rect.x.baseVal.value = x - EDGE_LABEL_PILL_PADDING_X;
-      rect.width.baseVal.value = width + EDGE_LABEL_PILL_PADDING_X * 2;
-      rect.rx.baseVal.value = height / 2;
-      rect.ry.baseVal.value = height / 2;
+      const pill = document.createElementNS(svgNs, "rect");
+      pill.setAttribute("class", "noten-edge-pill");
+      pill.setAttribute("x", pillX.toFixed(2));
+      pill.setAttribute("y", pillY.toFixed(2));
+      pill.setAttribute("width", pillWidth.toFixed(2));
+      pill.setAttribute("height", pillHeight.toFixed(2));
+      pill.setAttribute("rx", pillRadius.toFixed(2));
+      pill.setAttribute("ry", pillRadius.toFixed(2));
+      group.insertBefore(pill, group.firstChild);
+      group.classList.add("has-custom-pill");
     });
+  }
+
+  private getBBoxInAncestorCoords(
+    element: SVGGraphicsElement,
+    ancestor: SVGGraphicsElement,
+  ): SVGRect {
+    const box = element.getBBox();
+    const elementCtm = element.getCTM();
+    const ancestorCtm = ancestor.getCTM();
+
+    if (!elementCtm || !ancestorCtm) {
+      return box as SVGRect;
+    }
+
+    let ancestorInverse: DOMMatrix;
+    try {
+      ancestorInverse = ancestorCtm.inverse();
+    } catch {
+      return box as SVGRect;
+    }
+
+    const toAncestor = ancestorInverse.multiply(elementCtm);
+    const corners = [
+      new DOMPoint(box.x, box.y),
+      new DOMPoint(box.x + box.width, box.y),
+      new DOMPoint(box.x, box.y + box.height),
+      new DOMPoint(box.x + box.width, box.y + box.height),
+    ].map((point) => point.matrixTransform(toAncestor));
+
+    const xs = corners.map((corner) => corner.x);
+    const ys = corners.map((corner) => corner.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const maxX = Math.max(...xs);
+    const maxY = Math.max(...ys);
+
+    return {
+      x: minX,
+      y: minY,
+      width: Math.max(0, maxX - minX),
+      height: Math.max(0, maxY - minY),
+    } as SVGRect;
+  }
+
+  private applyEdgeLabelPillShapeToCurrentPreview() {
+    const svgElement = this.previewElement.querySelector("svg");
+    if (!svgElement) {
+      return;
+    }
+    this.applyEdgeLabelPillShape(svgElement);
   }
 
   private async renderPreview(source: string) {
@@ -282,13 +394,19 @@ class MermaidCodeBlockView implements NodeView {
       }
 
       this.previewElement.innerHTML = svg;
+      this.previewElement.hidden = false;
       const svgElement = this.previewElement.querySelector("svg");
       if (svgElement) {
         svgElement.classList.add("noten-mermaid-svg");
         this.applyEdgeLabelPillShape(svgElement);
+        window.requestAnimationFrame(() => {
+          if (token !== this.renderToken) {
+            return;
+          }
+          this.applyEdgeLabelPillShapeToCurrentPreview();
+        });
       }
       bindFunctions?.(this.previewElement);
-      this.previewElement.hidden = false;
       this.errorElement.hidden = true;
       this.errorElement.textContent = "";
     } catch (error) {

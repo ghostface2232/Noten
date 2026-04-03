@@ -319,15 +319,19 @@
   stroke: var(--editor-color-text-secondary) !important;
 }
 
-.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edgeLabel .labelBkg,
-.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edgeLabel rect {
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edgeLabel .noten-edge-pill {
   fill: var(--editor-color-bg-subtle) !important;
   fill-opacity: 1 !important;
   opacity: 1 !important;
   stroke: var(--editor-color-border) !important;
   stroke-width: 1px !important;
-  rx: 999px;
-  ry: 999px;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edgeLabel.has-custom-pill .labelBkg,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edgeLabel.has-custom-pill .background,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edgeLabel.has-custom-pill .label rect:not(.noten-edge-pill) {
+  fill: transparent !important;
+  stroke: transparent !important;
 }
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edgeLabel foreignObject,
@@ -840,8 +844,7 @@
   stroke: #9e9e9e !important;
 }
 
-[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edgeLabel .labelBkg,
-[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edgeLabel rect {
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edgeLabel .noten-edge-pill {
   fill: #2a2a2a !important;
   fill-opacity: 1 !important;
   opacity: 1 !important;
