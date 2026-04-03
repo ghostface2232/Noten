@@ -229,6 +229,7 @@
   width: 16px;
   height: 16px;
   display: block;
+  transition: transform 0.2s ease;
 }
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle:hover {
@@ -242,12 +243,28 @@
   box-shadow: none;
 }
 
-.ProseMirror .noten-code-block.is-mermaid.is-code-collapsed pre code {
-  display: none;
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle[data-collapsed="true"] svg {
+  transform: rotate(180deg);
 }
 
-.ProseMirror .noten-code-block.is-mermaid pre.is-code-collapsed code {
-  display: none !important;
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.2s ease;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-body.is-collapsed {
+  grid-template-rows: 0fr;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-body > code {
+  overflow-y: hidden;
+  transition: padding 0.2s ease;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-body.is-collapsed > code {
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-preview {

@@ -202,6 +202,7 @@ const useStyles = makeStyles({
   content: {
     flex: "1",
     overflow: "auto",
+    overscrollBehavior: "contain",
     position: "relative",
   },
   toolbarAnchor: {
@@ -645,8 +646,12 @@ function App() {
   }, [handleSelectSurface, state.surface]);
 
   const [chromeVisible, setChromeVisible] = useState(true);
+  const chromeLockUntilRef = useRef(0);
+  const chromeVisibleRef = useRef(true);
   const handleShowEditorChrome = useCallback(() => {
+    chromeVisibleRef.current = true;
     setChromeVisible(true);
+    chromeLockUntilRef.current = Date.now() + 300;
   }, []);
 
   const handleNewNote = useCallback(async () => {
@@ -918,14 +923,28 @@ function App() {
 
     const updateChromeVisibility = () => {
       const nextTop = el.scrollTop;
+      const now = Date.now();
+
+      if (now < chromeLockUntilRef.current) {
+        lastScrollTopRef.current = nextTop;
+        return;
+      }
+
       const previousTop = lastScrollTopRef.current;
+      let next: boolean | undefined;
 
       if (nextTop <= 1) {
-        setChromeVisible(true);
+        next = true;
       } else if (nextTop < previousTop) {
-        setChromeVisible(true);
+        next = true;
       } else if (nextTop >= CHROME_HIDE_SCROLL_THRESHOLD) {
-        setChromeVisible(false);
+        next = false;
+      }
+
+      if (next !== undefined && next !== chromeVisibleRef.current) {
+        chromeVisibleRef.current = next;
+        setChromeVisible(next);
+        chromeLockUntilRef.current = now + 300;
       }
 
       lastScrollTopRef.current = nextTop;
@@ -943,7 +962,9 @@ function App() {
       if (!el) return;
       const nextTop = el.scrollTop;
       lastScrollTopRef.current = nextTop;
-      setChromeVisible(nextTop < CHROME_HIDE_SCROLL_THRESHOLD);
+      const next = nextTop < CHROME_HIDE_SCROLL_THRESHOLD;
+      chromeVisibleRef.current = next;
+      setChromeVisible(next);
     });
   }, [activeDoc?.id, state.surface]);
 

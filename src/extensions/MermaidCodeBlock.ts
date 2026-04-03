@@ -13,7 +13,6 @@ const EDGE_LABEL_PILL_MIN_TRACK_MULTIPLIER = 3.8;
 const EDGE_LABEL_PILL_MIN_WIDTH_PX = 56;
 const EDGE_LABEL_PILL_MIN_SIDE_CAP_PX = 14;
 const MERMAID_TOGGLE_ICON_UP = '<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M10.53 7.22a.75.75 0 0 0-1.06 0L5.22 11.47a.75.75 0 1 0 1.06 1.06L10 8.81l3.72 3.72a.75.75 0 0 0 1.06-1.06l-4.25-4.25Z"/></svg>';
-const MERMAID_TOGGLE_ICON_DOWN = '<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M5.22 8.53a.75.75 0 0 1 1.06-1.06L10 11.19l3.72-3.72a.75.75 0 0 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.53Z"/></svg>';
 type MermaidApi = typeof import("mermaid")["default"];
 type Rect = { x: number; y: number; width: number; height: number };
 
@@ -91,6 +90,7 @@ class MermaidCodeBlockView implements NodeView {
 
   private node: ProseMirrorNode;
   private readonly preElement: HTMLPreElement;
+  private readonly codeBody: HTMLDivElement;
   private readonly codeElement: HTMLElement;
   private readonly toggleButton: HTMLButtonElement;
   private readonly previewElement: HTMLDivElement;
@@ -107,12 +107,16 @@ class MermaidCodeBlockView implements NodeView {
     this.dom.className = "noten-code-block";
 
     this.preElement = document.createElement("pre");
+    this.codeBody = document.createElement("div");
+    this.codeBody.className = "noten-mermaid-code-body";
     this.codeElement = document.createElement("code");
-    this.preElement.append(this.codeElement);
+    this.codeBody.append(this.codeElement);
+    this.preElement.append(this.codeBody);
 
     this.toggleButton = document.createElement("button");
     this.toggleButton.type = "button";
     this.toggleButton.className = "noten-mermaid-code-toggle";
+    this.toggleButton.innerHTML = MERMAID_TOGGLE_ICON_UP;
     this.toggleButton.addEventListener("click", this.handleToggleClick);
     this.toggleButton.addEventListener("keydown", this.handleToggleKeyDown);
     this.preElement.append(this.toggleButton);
@@ -150,7 +154,12 @@ class MermaidCodeBlockView implements NodeView {
       return false;
     }
 
-    if (this.toggleButton.contains(mutation.target)) {
+    if (
+      mutation.target === this.dom ||
+      mutation.target === this.preElement ||
+      mutation.target === this.codeBody ||
+      this.toggleButton.contains(mutation.target)
+    ) {
       return true;
     }
 
@@ -250,12 +259,12 @@ class MermaidCodeBlockView implements NodeView {
     this.codeCollapsed = next;
     this.dom.classList.toggle("is-code-collapsed", next);
     this.preElement.classList.toggle("is-code-collapsed", next);
+    this.codeBody.classList.toggle("is-collapsed", next);
     this.syncToggleButton();
   }
 
   private syncToggleButton() {
     this.toggleButton.dataset.collapsed = this.codeCollapsed ? "true" : "false";
-    this.toggleButton.innerHTML = this.codeCollapsed ? MERMAID_TOGGLE_ICON_DOWN : MERMAID_TOGGLE_ICON_UP;
     this.toggleButton.setAttribute("aria-pressed", this.codeCollapsed ? "true" : "false");
     this.toggleButton.setAttribute("aria-label", this.codeCollapsed ? "Expand Mermaid source" : "Collapse Mermaid source");
     this.toggleButton.setAttribute("title", this.codeCollapsed ? "Expand Mermaid source" : "Collapse Mermaid source");

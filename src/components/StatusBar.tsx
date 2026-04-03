@@ -20,7 +20,7 @@ const useStyles = makeStyles({
   shellHidden: {
     pointerEvents: "none",
     height: "0px",
-    borderTop: "none",
+    borderTopColor: "transparent",
     backgroundColor: "transparent",
   },
   statusBar: {
@@ -118,10 +118,6 @@ export function StatusBar({ markdown, surface, editor, cmView, hidden, locale }:
   return (
     <div
       className={hidden ? `${styles.shell} ${styles.shellHidden}` : styles.shell}
-      style={{
-        backgroundColor: hidden ? "transparent" : undefined,
-        borderTopColor: hidden ? "transparent" : undefined,
-      }}
     >
       <div className={hidden ? `${styles.statusBar} ${styles.statusBarHidden}` : styles.statusBar}>
         <div className={styles.left}>
