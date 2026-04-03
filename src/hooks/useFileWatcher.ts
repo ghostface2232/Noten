@@ -44,6 +44,7 @@ export function useFileWatcher(
   locale: Locale,
   notesSortOrder: NotesSortOrder,
   enabled: boolean,
+  onActiveDocChanged?: (doc: { filePath: string; content: string }) => void,
 ) {
   const docsRef = useRef(docs);
   docsRef.current = docs;
@@ -51,6 +52,8 @@ export function useFileWatcher(
   groupsRef.current = groups;
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
+  const onActiveDocChangedRef = useRef(onActiveDocChanged);
+  onActiveDocChangedRef.current = onActiveDocChanged;
 
   const handleWatchEvent = useCallback(async (event: WatchEvent) => {
     if (migrationInProgress) return;
@@ -150,6 +153,8 @@ export function useFileWatcher(
 
         const { updatedAt: fileUpdatedAt } = await getFileTimestamps(doc.filePath);
 
+        let needsSyncMarkdown = false;
+
         setDocs((prev) => {
           const idx = prev.findIndex((d) => d.id === doc.id);
           if (idx < 0) return prev;
@@ -168,10 +173,15 @@ export function useFileWatcher(
           // If this is the active document, update editor
           if (idx === activeIndexRef.current && tiptapRef.current) {
             tiptapRef.current.setContent(content);
+            needsSyncMarkdown = true;
           }
 
           return updated;
         });
+
+        if (needsSyncMarkdown) {
+          onActiveDocChangedRef.current?.({ filePath: doc.filePath, content });
+        }
       }
     }
 

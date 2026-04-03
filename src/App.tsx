@@ -211,6 +211,7 @@ function App() {
     activeIndex, setActiveIndex, tiptapRef,
     locale, settings.notesSortOrder,
     notesDirReady && !isLoading,
+    handleActiveDocChanged,
   );
 
   // OS Mica 효과 — setTheme("dark")가 Mica를 죽이므로 항상 light 고정

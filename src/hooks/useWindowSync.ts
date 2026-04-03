@@ -95,6 +95,8 @@ export function useWindowSync(
   // Refs to avoid stale closures in event listeners
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
+  const onActiveDocChangedRef = useRef(onActiveDocChanged);
+  onActiveDocChangedRef.current = onActiveDocChanged;
 
   useEffect(() => {
     let mounted = true;
@@ -105,6 +107,9 @@ export function useWindowSync(
         const { sourceWindow, docId, content, fileName, updatedAt } = event.payload;
         if (sourceWindow === WINDOW_LABEL) return;
 
+        let syncFilePath = "";
+        let needsSyncMarkdown = false;
+
         setDocs((prev) => {
           const idx = prev.findIndex((d) => d.id === docId);
           if (idx < 0) return prev;
@@ -113,9 +118,15 @@ export function useWindowSync(
 
           if (idx === activeIndexRef.current && tiptapRef.current) {
             tiptapRef.current.setContent(content);
+            needsSyncMarkdown = true;
+            syncFilePath = updated[idx].filePath;
           }
           return updated;
         });
+
+        if (needsSyncMarkdown) {
+          onActiveDocChangedRef.current?.({ filePath: syncFilePath, content });
+        }
       }),
 
       listen<DocRenamedPayload>("doc-renamed", (event) => {
