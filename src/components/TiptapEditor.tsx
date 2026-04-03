@@ -421,6 +421,8 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     const [linkPopoverOpen, setLinkPopoverOpen] = useState(false);
     const [linkUrl, setLinkUrl] = useState("");
     const [linkHasValue, setLinkHasValue] = useState(false);
+    const [linkInputFadeLeft, setLinkInputFadeLeft] = useState(false);
+    const [linkInputFadeRight, setLinkInputFadeRight] = useState(false);
     const [linkHoverPopoverOpen, setLinkHoverPopoverOpen] = useState(false);
     const [linkHoverHref, setLinkHoverHref] = useState("");
     const [linkHoverAnchorEl, setLinkHoverAnchorEl] = useState<HTMLAnchorElement | null>(null);
@@ -509,6 +511,25 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       setLinkUrl(href);
       setLinkHasValue(Boolean(href));
       setLinkPopoverOpen(true);
+    }, []);
+
+    const updateLinkInputFades = useCallback(() => {
+      const inputEl = linkInputRef.current;
+      if (!inputEl) {
+        setLinkInputFadeLeft(false);
+        setLinkInputFadeRight(false);
+        return;
+      }
+
+      const maxScrollLeft = Math.max(0, inputEl.scrollWidth - inputEl.clientWidth);
+      if (maxScrollLeft <= 1) {
+        setLinkInputFadeLeft(false);
+        setLinkInputFadeRight(false);
+        return;
+      }
+
+      setLinkInputFadeLeft(inputEl.scrollLeft > 1);
+      setLinkInputFadeRight(inputEl.scrollLeft < maxScrollLeft - 1);
     }, []);
 
     const editor = useEditor({
@@ -739,6 +760,7 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       requestAnimationFrame(() => {
         linkInputRef.current?.focus();
         linkInputRef.current?.select();
+        updateLinkInputFades();
       });
 
       return () => {
@@ -747,7 +769,32 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           linkPopoverCleanupRef.current = null;
         }
       };
-    }, [editor, linkPopoverOpen]);
+    }, [editor, linkPopoverOpen, updateLinkInputFades]);
+
+    useEffect(() => {
+      if (!linkPopoverOpen) {
+        setLinkInputFadeLeft(false);
+        setLinkInputFadeRight(false);
+        return;
+      }
+
+      const inputEl = linkInputRef.current;
+      if (!inputEl) return;
+
+      const update = () => updateLinkInputFades();
+      const updateNextFrame = () => {
+        requestAnimationFrame(update);
+      };
+
+      updateNextFrame();
+      inputEl.addEventListener("scroll", update, { passive: true });
+      window.addEventListener("resize", updateNextFrame);
+
+      return () => {
+        inputEl.removeEventListener("scroll", update);
+        window.removeEventListener("resize", updateNextFrame);
+      };
+    }, [linkPopoverOpen, linkUrl, updateLinkInputFades]);
 
     useEffect(() => {
       if (!linkPopoverOpen) return;
@@ -992,14 +1039,21 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
             aria-label={t("link.popover.title", locale)}
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <div className="tiptap-link-popover-input-wrap">
+            <div
+              className={`tiptap-link-popover-input-wrap${linkInputFadeLeft ? " show-left-fade" : ""}${linkInputFadeRight ? " show-right-fade" : ""}`}
+            >
               <span className="tiptap-link-popover-input-prefix">URL</span>
               <input
                 ref={linkInputRef}
                 className="tiptap-link-popover-input"
                 type="text"
                 value={linkUrl}
-                onChange={(event) => setLinkUrl(event.target.value)}
+                onChange={(event) => {
+                  setLinkUrl(event.target.value);
+                  requestAnimationFrame(updateLinkInputFades);
+                }}
+                onClick={() => requestAnimationFrame(updateLinkInputFades)}
+                onKeyUp={() => requestAnimationFrame(updateLinkInputFades)}
                 placeholder={t("link.popover.placeholder", locale)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
