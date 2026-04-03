@@ -38,6 +38,7 @@ const useStyles = makeStyles({
   appTitle: {
     fontSize: "13px",
     fontWeight: 500,
+    fontFamily: '"Pretendard JP", system-ui, sans-serif',
     color: tokens.colorNeutralForeground1,
     opacity: 1,
     whiteSpace: "nowrap" as const,
@@ -46,6 +47,7 @@ const useStyles = makeStyles({
   documentTitle: {
     fontSize: "13px",
     fontWeight: 400,
+    fontFamily: '"Pretendard JP", system-ui, sans-serif',
     color: tokens.colorNeutralForeground1,
     opacity: 0.55,
     whiteSpace: "nowrap" as const,

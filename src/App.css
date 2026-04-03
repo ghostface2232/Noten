@@ -26,6 +26,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* FluentProvider가 자체 font-family(Segoe UI)를 설정하므로,
+   타이틀바 drag region 요소에 PretendardJP를 직접 적용 */
+[data-tauri-drag-region] {
+  font-family: "Pretendard JP", system-ui, sans-serif;
+}
+
 /* ─── 에디터 스크롤바 트랙: 툴바 아래부터 시작 ─── */
 .editor-scroll-area::-webkit-scrollbar-track {
   margin-top: var(--scrollbar-offset, 0);

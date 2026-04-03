@@ -3,7 +3,7 @@ use std::fs;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
-use tauri::{AppHandle, Listener, Manager, Runtime, path::BaseDirectory};
+use tauri::{AppHandle, Manager, Runtime, path::BaseDirectory};
 
 const CREATE_NO_WINDOW_FLAG: u32 = 0x08000000;
 
@@ -128,28 +128,8 @@ pub fn run() {
             let app_handle = app.handle().clone();
             std::thread::spawn(move || ensure_maintenance_helper(app_handle));
 
-            // Apply Mica to all existing windows
-            for (_, window) in app.webview_windows() {
-                let _ = window.set_effects(tauri::utils::config::WindowEffectsConfig {
-                    effects: vec![tauri::window::Effect::Mica],
-                    state: None,
-                    radius: None,
-                    color: None,
-                });
-            }
-
-            // Apply Mica to dynamically created windows
-            let app_handle = app.handle().clone();
-            app.listen("tauri://webview-created", move |_event| {
-                for (_, window) in app_handle.webview_windows() {
-                    let _ = window.set_effects(tauri::utils::config::WindowEffectsConfig {
-                        effects: vec![tauri::window::Effect::Mica],
-                        state: None,
-                        radius: None,
-                        color: None,
-                    });
-                }
-            });
+            // Mica는 tauri.conf.json의 windowEffects와 프론트엔드의
+            // setEffects() 호출로 적용됨 — 여기서 중복 적용하지 않음
             Ok(())
         })
         .run(tauri::generate_context!())

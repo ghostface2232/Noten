@@ -86,7 +86,7 @@ export const useStyles = makeStyles({
     position: "absolute",
     top: "16px",
     left: "5px",
-    zIndex: 10,
+    zIndex: 20,
     display: "inline-flex",
     alignItems: "center",
     backgroundColor: "transparent",

@@ -215,11 +215,21 @@ function App() {
   );
 
   // OS Mica 효과 — setTheme("dark")가 Mica를 죽이므로 항상 light 고정
+  // 첫 페인트 후 실행하여 DWM 재구성이 초기 WebView2 렌더와 충돌하지 않도록 함
   const [micaSupported, setMicaSupported] = useState(true);
   useEffect(() => {
-    const win = getCurrentWindow();
-    win.setTheme("light");
-    win.setEffects({ effects: [Effect.Mica] }).catch(() => setMicaSupported(false));
+    const raf = requestAnimationFrame(() => {
+      const win = getCurrentWindow();
+      (async () => {
+        try {
+          await win.setTheme("light");
+          await win.setEffects({ effects: [Effect.Mica] });
+        } catch {
+          setMicaSupported(false);
+        }
+      })();
+    });
+    return () => cancelAnimationFrame(raf);
   }, []);
 
 
