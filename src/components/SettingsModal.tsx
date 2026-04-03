@@ -666,7 +666,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                             {updaterState.body}
                           </div>
                         )}
-                        <Button appearance="primary" size="small" onClick={installUpdate}>
+                        <Button appearance="primary" size="medium" onClick={installUpdate} style={{ borderRadius: "6px" }}>
                           {i("about.install")}
                         </Button>
                       </div>
@@ -682,7 +682,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                     )}
 
                     {updaterState.status === "ready" && (
-                      <Button appearance="primary" size="small" onClick={restartApp}>
+                      <Button appearance="primary" size="medium" onClick={restartApp} style={{ borderRadius: "6px" }}>
                         {i("about.restart")}
                       </Button>
                     )}
