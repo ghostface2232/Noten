@@ -480,9 +480,7 @@ export function deriveTitle(content: string): string {
       // headings
       .replace(/^#+\s*/, "")
       // block quotes (possibly nested)
-      .replace(/^(?:>\s*)+/, "")
-      // unordered list markers
-      .replace(/^[-*+]\s+/, "");
+      .replace(/^(?:>\s*)+/, "");
     const heading = stripInlineMarkdown(stripped);
     if (heading) return heading.slice(0, 20);
   }
