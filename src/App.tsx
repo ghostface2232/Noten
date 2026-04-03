@@ -203,6 +203,7 @@ const useStyles = makeStyles({
     flex: "1",
     overflow: "auto",
     overscrollBehavior: "contain",
+    scrollbarGutter: "stable",
     position: "relative",
   },
   toolbarAnchor: {
@@ -1129,7 +1130,7 @@ function App() {
           </div>
 
           <div className={styles.floatingCard}>
-            <div ref={contentRef} className={styles.content}>
+            <div ref={contentRef} className={`${styles.content} editor-scroll-area`} style={toolbarHeight > 0 ? { "--scrollbar-offset": `${toolbarHeight}px` } as React.CSSProperties : undefined}>
               <div className={styles.toolbarAnchor}>
                 <EditorToolbar
                   surface={state.surface}
