@@ -614,7 +614,7 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
 
                   {/* Version notes */}
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.4</div>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.5</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>

@@ -6,7 +6,7 @@ fn main() {
         res.set_icon("../src-tauri/icons/icon.ico");
         res.set("ProductName", "Noten");
         res.set("FileDescription", "Noten Maintenance Helper");
-        res.set("ProductVersion", "0.1.4");
+        res.set("ProductVersion", "0.1.5");
         res.set("LegalCopyright", "\u{00a9} 2026 Mingwan Bae");
         res.compile().expect("Failed to compile Windows resources");
     }
