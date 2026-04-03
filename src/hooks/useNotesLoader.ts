@@ -58,13 +58,20 @@ export function setTrashedNotesCache(notes: TrashedNote[]) { trashedNotesCache =
 export let migrationInProgress = false;
 export function setMigrationInProgress(v: boolean) { migrationInProgress = v; }
 
-export function sortNotes(docs: NoteDoc[], order: NotesSortOrder): NoteDoc[] {
+export function sortNotes(docs: NoteDoc[], order: NotesSortOrder, locale: Locale = "en"): NoteDoc[] {
   const sorted = [...docs];
   const desc = order.endsWith("-desc");
   const direction = desc ? -1 : 1;
+  const byTitle = order.startsWith("title");
   const byCreated = order.startsWith("created");
 
   sorted.sort((a, b) => {
+    if (byTitle) {
+      const cmp = a.fileName.localeCompare(b.fileName, locale);
+      if (cmp !== 0) return cmp * direction;
+      return b.updatedAt - a.updatedAt;
+    }
+
     const primaryDiff = byCreated
       ? a.createdAt - b.createdAt
       : a.updatedAt - b.updatedAt;
@@ -75,7 +82,7 @@ export function sortNotes(docs: NoteDoc[], order: NotesSortOrder): NoteDoc[] {
       : a.createdAt - b.createdAt;
     if (secondaryDiff !== 0) return secondaryDiff * direction;
 
-    return a.fileName.localeCompare(b.fileName);
+    return a.fileName.localeCompare(b.fileName, locale);
   });
 
   return sorted;
@@ -367,7 +374,7 @@ export function useNotesLoader(
           const finalDocs = reconcileChanged ? reconciled : loaded;
           const finalGroups = reconcileChanged ? reconciledGroups : (manifest.groups ?? []);
 
-          const sorted = sortNotes(finalDocs, notesSortOrder);
+          const sorted = sortNotes(finalDocs, notesSortOrder, locale);
           setDocs(sorted);
           setGroups(finalGroups);
 
@@ -425,7 +432,7 @@ export function useNotesLoader(
             }];
           }
 
-          const sorted = sortNotes(foundNotes, notesSortOrder);
+          const sorted = sortNotes(foundNotes, notesSortOrder, locale);
           setDocs(sorted);
           setActiveIndex(0);
           await saveManifest(sorted, sorted[0]?.id ?? null);

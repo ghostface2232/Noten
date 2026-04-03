@@ -33,11 +33,12 @@ function sortAndPersistDocs(
   nextDocs: NoteDoc[],
   activeId: string | null,
   notesSortOrder: NotesSortOrder,
+  locale: Locale,
   setDocs: React.Dispatch<React.SetStateAction<NoteDoc[]>>,
   setActiveIndex: React.Dispatch<React.SetStateAction<number>>,
   groups?: NoteGroup[],
 ) {
-  const sortedDocs = sortNotes(nextDocs, notesSortOrder);
+  const sortedDocs = sortNotes(nextDocs, notesSortOrder, locale);
   const nextActiveIndex = activeId
     ? Math.max(sortedDocs.findIndex((doc) => doc.id === activeId), 0)
     : 0;
@@ -218,7 +219,7 @@ export function useFileSystem(
       };
     });
 
-    sortAndPersistDocs(nextDocs, doc.id, notesSortOrder, setDocs, setActiveIndex, groupsRef.current);
+    sortAndPersistDocs(nextDocs, doc.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
     state.setIsDirty(false);
     state.setTiptapDirty(false);
   }, [activeIndex, docs, locale, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
@@ -288,7 +289,7 @@ export function useFileSystem(
     const lastImported = importedDocs[importedDocs.length - 1];
     const prunedDocs = pruneEmptyCurrentDoc(baseDocs, activeDocId);
     const nextDocs = [...prunedDocs, ...importedDocs];
-    sortAndPersistDocs(nextDocs, lastImported.id, notesSortOrder, setDocs, setActiveIndex, groupsRef.current);
+    sortAndPersistDocs(nextDocs, lastImported.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
     importedDocs.forEach((doc) => emitDocCreated(doc));
 
     loadIntoEditor(tiptapRef, lastImported.content);
@@ -352,7 +353,7 @@ export function useFileSystem(
 
     const addNewDoc = () => {
       const nextDocs = [...prunedDocs, newDoc];
-      sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, setDocs, setActiveIndex, groupsRef.current);
+      sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
       emitDocCreated(newDoc);
       loadIntoEditor(tiptapRef, "");
       resetDocState(state, filePath, "");
@@ -501,7 +502,7 @@ export function useFileSystem(
       nextActiveId = baseDocs[currentActiveIndex].id;
     }
 
-    sortAndPersistDocs(nextDocs, nextActiveId, notesSortOrder, setDocs, setActiveIndex, cleanedGroups);
+    sortAndPersistDocs(nextDocs, nextActiveId, notesSortOrder, locale, setDocs, setActiveIndex, cleanedGroups);
   }, [cancelDocSaveRef, getLiveDocsSnapshot, getGroupForNote, leaveCurrentDoc, locale, markDocClean, notesSortOrder, setActiveIndex, setDocs, setGroups, setTrashedNotes, state, tiptapRef]);
 
   const duplicateNote = useCallback(async (index: number) => {
@@ -545,7 +546,7 @@ export function useFileSystem(
 
     const prunedDocs = pruneEmptyCurrentDoc(baseDocs, activeDocId);
     const nextDocs = [...prunedDocs, newDoc];
-    sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, setDocs, setActiveIndex, groupsRef.current);
+    sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
     loadIntoEditor(tiptapRef, content);
     resetDocState(state, filePath, content);
     notifyActiveDocRef?.current?.(newDoc.id, filePath);
@@ -576,7 +577,7 @@ export function useFileSystem(
       return { ...entry, fileName: trimmed, updatedAt: Date.now(), customName: true };
     });
 
-    sortAndPersistDocs(nextDocs, doc.id, notesSortOrder, setDocs, setActiveIndex, groupsRef.current);
+    sortAndPersistDocs(nextDocs, doc.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
     emitDocRenamed(doc.id, doc.filePath, doc.filePath, trimmed);
   }, [getLiveDocsSnapshot, notesSortOrder, setActiveIndex, setDocs]);
 
@@ -641,7 +642,7 @@ export function useFileSystem(
 
     const prunedDocs = pruneEmptyCurrentDoc(baseDocs, activeDocId);
     const nextDocs = [...prunedDocs, restoredDoc];
-    sortAndPersistDocs(nextDocs, restoredDoc.id, notesSortOrder, setDocs, setActiveIndex, restoredGroups);
+    sortAndPersistDocs(nextDocs, restoredDoc.id, notesSortOrder, locale, setDocs, setActiveIndex, restoredGroups);
     emitDocCreated(restoredDoc);
 
     loadIntoEditor(tiptapRef, content);

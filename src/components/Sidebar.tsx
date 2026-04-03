@@ -20,7 +20,7 @@ import {
 } from "@fluentui/react-icons";
 import { t } from "../i18n";
 import type { NoteDoc, NoteGroup } from "../hooks/useNotesLoader";
-import type { GroupLayout, Locale, NotesSortOrder } from "../hooks/useSettings";
+import type { Locale, NotesSortOrder } from "../hooks/useSettings";
 import { openNewWindow } from "../utils/newWindow";
 import { clampMenuToViewport } from "../utils/clampMenuPosition";
 
@@ -140,8 +140,22 @@ const useStyles = makeStyles({
     paddingRight: "8px",
     fontWeight: 500,
     marginBottom: "8px",
+    "& .new-doc-shortcut": {
+      marginLeft: "auto",
+      fontSize: "11px",
+      color: tokens.colorNeutralForeground3,
+      opacity: 0,
+      flexShrink: 0,
+      whiteSpace: "nowrap",
+      fontWeight: 400,
+      transitionProperty: "opacity",
+      transitionDuration: "0.15s",
+    },
+    ":hover .new-doc-shortcut": {
+      opacity: 0.7,
+    },
   },
-  notesLabel: {
+  sectionLabel: {
     fontSize: "11px",
     fontWeight: 500,
     textTransform: "uppercase" as const,
@@ -150,6 +164,25 @@ const useStyles = makeStyles({
     opacity: 0.85,
     paddingLeft: "10px",
     paddingBottom: "4px",
+  },
+  groupsSection: {
+    display: "grid",
+    gridTemplateRows: "1fr",
+    transitionProperty: "grid-template-rows, opacity, margin-bottom",
+    transitionDuration: "0.25s",
+    transitionTimingFunction: "ease",
+    marginBottom: "8px",
+  },
+  groupsSectionHidden: {
+    gridTemplateRows: "0fr",
+    opacity: 0,
+    marginBottom: "0px",
+  },
+  groupsSectionInner: {
+    overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
   },
   docName: {
     overflow: "hidden",
@@ -299,6 +332,38 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow16,
     padding: "4px",
     minWidth: "140px",
+  },
+  confirmOverlay: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 1002,
+  },
+  confirmPopover: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    transform: "translate(-50%, -50%)",
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: "10px",
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    boxShadow: tokens.shadow16,
+    padding: "16px",
+    width: "240px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+    zIndex: 1003,
+  },
+  confirmMessage: {
+    fontSize: "13px",
+    color: tokens.colorNeutralForeground1,
+    lineHeight: "1.45",
+    textAlign: "center" as const,
+  },
+  confirmActions: {
+    display: "flex",
+    gap: "8px",
+    justifyContent: "flex-end",
   },
   searchBoxWrapper: {
     overflow: "hidden",
@@ -527,7 +592,6 @@ interface SidebarProps {
   onSidebarSearchClose: () => void;
   /* ─── Group props ─── */
   groups: NoteGroup[];
-  groupLayout: GroupLayout;
   onCreateGroup: (name: string, initialNoteIds?: string[]) => string;
   onRenameGroup: (groupId: string, name: string) => void;
   onDeleteGroup: (groupId: string) => void;
@@ -571,7 +635,6 @@ export function Sidebar({
   onSidebarSearchQueryChange,
   onSidebarSearchClose,
   groups,
-  groupLayout,
   onCreateGroup,
   onRenameGroup,
   onDeleteGroup,
@@ -591,6 +654,8 @@ export function Sidebar({
 
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
+  const [focusedGroupId, setFocusedGroupId] = useState<string | null>(null);
+  const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -907,6 +972,33 @@ export function Sidebar({
 
       const ctrl = e.ctrlKey || e.metaKey;
 
+      // Group shortcuts (when a group is focused)
+      if (focusedGroupId) {
+        if ((ctrl && e.key === "r") || e.key === "F2") {
+          e.preventDefault();
+          const group = groups.find((g) => g.id === focusedGroupId);
+          if (group) { setEditingGroupId(group.id); setEditingGroupValue(group.name); }
+        } else if (ctrl && e.key === "u") {
+          e.preventDefault();
+          const gid = focusedGroupId;
+          setFocusedGroupId(null);
+          animateGroupRemoval(gid, [], () => onUngroupGroup(gid));
+        } else if (e.key === "Delete" && !ctrl && !e.altKey && !e.shiftKey) {
+          e.preventDefault();
+          const gid = focusedGroupId;
+          const group = groups.find((g) => g.id === gid);
+          const noteIds = group?.noteIds ?? [];
+          if (noteIds.length > 0) {
+            setConfirmDeleteGroupId(gid);
+          } else {
+            setFocusedGroupId(null);
+            animateGroupRemoval(gid, [], () => onDeleteGroup(gid));
+          }
+        }
+        return;
+      }
+
+      // Note shortcuts
       if (ctrl && e.key === "d") {
         e.preventDefault();
         onDuplicateNote(activeIndex);
@@ -927,7 +1019,7 @@ export function Sidebar({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeIndex, editingIndex, editingGroupId, getDocumentContent, onDuplicateNote, onExportNote, onDeleteNote, handleDoubleClick]);
+  }, [activeIndex, editingIndex, editingGroupId, focusedGroupId, groups, getDocumentContent, onDuplicateNote, onExportNote, onDeleteNote, onDeleteGroup, onUngroupGroup, handleDoubleClick, animateGroupRemoval]);
 
   const toggleNoteSelection = useCallback((noteId: string) => {
     setSelectedNoteIds((prev) => {
@@ -972,72 +1064,37 @@ export function Sidebar({
     | { kind: "note"; doc: NoteDoc; originalIndex: number; indented: boolean }
     | { kind: "group"; group: NoteGroup }
 
-  const renderItems = useMemo((): RenderItem[] => {
+  const { groupItems, noteItems } = useMemo(() => {
     if (isSearching) {
-      return filteredDocs.map(({ doc, originalIndex }) => ({
-        kind: "note" as const,
-        doc,
-        originalIndex,
-        indented: false,
-      }));
+      return {
+        groupItems: [] as RenderItem[],
+        noteItems: filteredDocs.map(({ doc, originalIndex }) => ({
+          kind: "note" as const, doc, originalIndex, indented: false,
+        })),
+      };
     }
 
-    const items: RenderItem[] = [];
     const docsMap = new Map(docs.map((d, i) => [d.id, { doc: d, originalIndex: i }]));
+    const gItems: RenderItem[] = [];
+    const nItems: RenderItem[] = [];
+
+    for (const group of groups) {
+      gItems.push({ kind: "group", group });
+      if (!group.collapsed) {
+        for (const noteId of group.noteIds) {
+          const entry = docsMap.get(noteId);
+          if (entry) gItems.push({ kind: "note", doc: entry.doc, originalIndex: entry.originalIndex, indented: true });
+        }
+      }
+    }
 
     const ungrouped = filteredDocs.filter(({ doc }) => !groupedNoteIds.has(doc.id));
-
-    if (groupLayout === "groups-first") {
-      // Groups first
-      for (const group of groups) {
-        items.push({ kind: "group", group });
-        if (!group.collapsed) {
-          for (const noteId of group.noteIds) {
-            const entry = docsMap.get(noteId);
-            if (entry) items.push({ kind: "note", doc: entry.doc, originalIndex: entry.originalIndex, indented: true });
-          }
-        }
-      }
-      // Ungrouped notes
-      for (const { doc, originalIndex } of ungrouped) {
-        items.push({ kind: "note", doc, originalIndex, indented: false });
-      }
-    } else {
-      // Mixed: interleave groups and ungrouped notes by timestamp
-      type Slot =
-        | { ts: number; entry: RenderItem; children?: RenderItem[] }
-        ;
-
-      const slots: Slot[] = [];
-
-      for (const group of groups) {
-        const children: RenderItem[] = [];
-        if (!group.collapsed) {
-          for (const noteId of group.noteIds) {
-            const entry = docsMap.get(noteId);
-            if (entry) children.push({ kind: "note", doc: entry.doc, originalIndex: entry.originalIndex, indented: true });
-          }
-        }
-        slots.push({ ts: group.createdAt, entry: { kind: "group", group }, children });
-      }
-
-      for (const { doc, originalIndex } of ungrouped) {
-        const ts = notesSortOrder.startsWith("created") ? doc.createdAt : doc.updatedAt;
-        slots.push({ ts, entry: { kind: "note", doc, originalIndex, indented: false } });
-      }
-
-      const desc = notesSortOrder.endsWith("-desc");
-      slots.sort((a, b) => desc ? b.ts - a.ts : a.ts - b.ts);
-
-      for (const slot of slots) {
-        items.push(slot.entry);
-        if (slot.children) items.push(...slot.children);
-      }
-
+    for (const { doc, originalIndex } of ungrouped) {
+      nItems.push({ kind: "note", doc, originalIndex, indented: false });
     }
 
-    return items;
-  }, [isSearching, filteredDocs, docs, groups, groupedNoteIds, groupLayout, notesSortOrder]);
+    return { groupItems: gItems, noteItems: nItems };
+  }, [isSearching, filteredDocs, docs, groups, groupedNoteIds]);
 
   const renderNoteItem = (doc: NoteDoc, originalIndex: number, indented: boolean) => {
     const isSelected = selectedNoteIds.has(doc.id);
@@ -1125,6 +1182,7 @@ export function Sidebar({
                 indented && !selectMode && styles.docItemIndented,
               )}
               onClick={() => {
+                setFocusedGroupId(null);
                 if (selectMode) {
                   toggleNoteSelection(doc.id);
                 } else {
@@ -1196,7 +1254,7 @@ export function Sidebar({
           appearance="subtle"
           className={styles.groupHeader}
           size="small"
-          onClick={() => !isEditing && onToggleGroupCollapsed(group.id)}
+          onClick={() => { if (!isEditing) { setFocusedGroupId(group.id); onToggleGroupCollapsed(group.id); } }}
         >
           <span className={mergeClasses(
             styles.groupChevron,
@@ -1299,14 +1357,29 @@ export function Sidebar({
           size="small"
         >
           {i("sidebar.newNote")}
+          <span className="new-doc-shortcut">Ctrl+N</span>
         </Button>
 
-        {renderItems.length === 0 && !exitingDoc ? (
+        {groupItems.length === 0 && noteItems.length === 0 && !exitingDoc ? (
           <span className={styles.empty}>{sidebarSearchQuery ? "" : i("sidebar.empty")}</span>
         ) : (
           <>
+            {/* Groups section */}
             {!sidebarSearchQuery && (
-              <span className={styles.notesLabel}>{i("sidebar.notesLabel")}</span>
+              <div className={mergeClasses(styles.groupsSection, groups.length === 0 && styles.groupsSectionHidden)}>
+                <div className={styles.groupsSectionInner}>
+                  <span className={styles.sectionLabel}>{i("sidebar.groupsLabel")}</span>
+                  {groupItems.map((item) => {
+                    if (item.kind === "group") return renderGroupHeader(item.group);
+                    return renderNoteItem(item.doc, item.originalIndex, item.indented);
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Notes section */}
+            {!sidebarSearchQuery && (noteItems.length > 0 || exitingDoc) && (
+              <span className={styles.sectionLabel}>{i("sidebar.notesLabel")}</span>
             )}
             {exitingDoc && exitingDoc.index === 0 && (
               <div key={`exit-${exitingDoc.doc.id}`} className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}>
@@ -1315,14 +1388,10 @@ export function Sidebar({
                 </div>
               </div>
             )}
-            {renderItems.map((item, i) => {
-              const elements = [];
-              if (item.kind === "note") {
-                elements.push(renderNoteItem(item.doc, item.originalIndex, item.indented));
-              } else if (item.kind === "group") {
-                elements.push(renderGroupHeader(item.group));
-              }
-              if (exitingDoc && exitingDoc.index === i + 1) {
+            {noteItems.map((item, idx) => {
+              if (item.kind !== "note") return null;
+              const elements = [renderNoteItem(item.doc, item.originalIndex, item.indented)];
+              if (exitingDoc && exitingDoc.index === idx + 1) {
                 elements.unshift(
                   <div key={`exit-${exitingDoc.doc.id}`} className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}>
                     <div className={styles.docItem} style={{ opacity: 0.5 }}>
@@ -1773,7 +1842,7 @@ export function Sidebar({
                 }}
                 size="small"
               >
-                {i("sidebar.renameGroup")}
+                {i("sidebar.renameGroup")}<span className={styles.shortcutHint}>Ctrl+R / F2</span>
               </Button>
               <Button
                 appearance="subtle"
@@ -1782,11 +1851,12 @@ export function Sidebar({
                 onClick={() => {
                   const gid = contextMenu.groupId!;
                   closeContextMenu();
+                  setFocusedGroupId(null);
                   animateGroupRemoval(gid, [], () => onUngroupGroup(gid));
                 }}
                 size="small"
               >
-                {i("sidebar.ungroupGroup")}
+                {i("sidebar.ungroupGroup")}<span className={styles.shortcutHint}>Ctrl+U</span>
               </Button>
               <Button
                 appearance="subtle"
@@ -1797,24 +1867,64 @@ export function Sidebar({
                   const group = groups.find((g) => g.id === gid);
                   const noteIds = group?.noteIds ?? [];
                   closeContextMenu();
-                  animateGroupRemoval(gid, noteIds, () => {
-                    if (group) {
-                      const indices = noteIds
-                        .map((nid) => docs.findIndex((d) => d.id === nid))
-                        .filter((idx) => idx >= 0);
-                      onDeleteNotes(indices);
-                    }
-                    onDeleteGroup(gid);
-                  });
+                  if (noteIds.length > 0) {
+                    setConfirmDeleteGroupId(gid);
+                  } else {
+                    setFocusedGroupId(null);
+                    animateGroupRemoval(gid, [], () => onDeleteGroup(gid));
+                  }
                 }}
                 size="small"
               >
-                {i("sidebar.deleteGroupAndNotes")}
+                {i("sidebar.deleteGroupAndNotes")}<span className={styles.shortcutHint}>Delete</span>
               </Button>
             </>
           )}
         </div>
       )}
+
+      {confirmDeleteGroupId && (() => {
+        const group = groups.find((g) => g.id === confirmDeleteGroupId);
+        const noteIds = group?.noteIds ?? [];
+        return (
+          <>
+            <div className={styles.confirmOverlay} onClick={() => setConfirmDeleteGroupId(null)} />
+            <div className={styles.confirmPopover}>
+              <span className={styles.confirmMessage}>{i("sidebar.confirmDeleteGroup")}</span>
+              <div className={styles.confirmActions}>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  onClick={() => setConfirmDeleteGroupId(null)}
+                >
+                  {i("sidebar.cancel")}
+                </Button>
+                <Button
+                  appearance="primary"
+                  size="small"
+                  style={{ backgroundColor: tokens.colorPaletteRedBackground3, color: "#fff" }}
+                  onClick={() => {
+                    const gid = confirmDeleteGroupId;
+                    setConfirmDeleteGroupId(null);
+                    setFocusedGroupId(null);
+                    animateGroupRemoval(gid, noteIds, () => {
+                      if (group) {
+                        const indices = noteIds
+                          .map((nid) => docs.findIndex((d) => d.id === nid))
+                          .filter((idx) => idx >= 0);
+                        onDeleteNotes(indices);
+                      }
+                      onDeleteGroup(gid);
+                    });
+                  }}
+                >
+                  {i("sidebar.confirmDelete")}
+                </Button>
+              </div>
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }

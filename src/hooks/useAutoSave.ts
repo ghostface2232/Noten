@@ -137,7 +137,7 @@ export function useAutoSave(
         return false;
       }
 
-      const sortedDocs = sortNotes(nextDocs, latestSortOrder);
+      const sortedDocs = sortNotes(nextDocs, latestSortOrder, latestLocale);
       const nextIndex = currentActiveId
         ? Math.max(sortedDocs.findIndex((docEntry) => docEntry.id === currentActiveId), 0)
         : 0;

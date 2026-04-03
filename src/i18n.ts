@@ -99,6 +99,9 @@ const dict = {
   "sidebar.renameGroup": { en: "Rename", ko: "이름 바꾸기" },
   "sidebar.ungroupGroup": { en: "Ungroup", ko: "그룹 해제" },
   "sidebar.deleteGroupAndNotes": { en: "Delete group and notes", ko: "그룹과 노트 삭제" },
+  "sidebar.confirmDeleteGroup": { en: "Delete this group and all its notes?", ko: "이 그룹과 모든 노트를 삭제할까요?" },
+  "sidebar.cancel": { en: "Cancel", ko: "취소" },
+  "sidebar.confirmDelete": { en: "Delete", ko: "삭제" },
   "sidebar.newGroupFromSelection": { en: "New group from selection", ko: "선택으로 새 그룹" },
   "sidebar.moveToGroup": { en: "Move to group...", ko: "그룹으로 이동..." },
   "sidebar.deleteSelected": { en: "Delete selected", ko: "선택 항목 삭제" },
@@ -106,7 +109,8 @@ const dict = {
   "sidebar.cancelSelect": { en: "Cancel", ko: "취소" },
   "sidebar.nSelected": { en: " selected", ko: "개 선택됨" },
   "sidebar.groupNamePlaceholder": { en: "Group name", ko: "그룹 이름" },
-  "sidebar.notesLabel": { en: "My Notes", ko: "내 노트" },
+  "sidebar.groupsLabel": { en: "GROUPS", ko: "그룹" },
+  "sidebar.notesLabel": { en: "NOTES", ko: "노트" },
 
   /* ─── StatusBar ─── */
   "status.chars": { en: " chars", ko: " 자" },
@@ -126,6 +130,8 @@ const dict = {
   "settings.noteOrder.updatedAsc": { en: "Edited: oldest first", ko: "편집일: 오래된 순" },
   "settings.noteOrder.createdDesc": { en: "Created: newest first", ko: "생성일: 최신순" },
   "settings.noteOrder.createdAsc": { en: "Created: oldest first", ko: "생성일: 오래된 순" },
+  "settings.noteOrder.titleAsc": { en: "Title: A → Z", ko: "제목: ㄱ → ㅎ" },
+  "settings.noteOrder.titleDesc": { en: "Title: Z → A", ko: "제목: ㅎ → ㄱ" },
   "settings.wordWrap": { en: "Word Wrap", ko: "줄바꿈" },
   "settings.wordWrap.word": { en: "Word", ko: "단어 단위" },
   "settings.wordWrap.char": { en: "Character", ko: "문자 단위" },
@@ -154,10 +160,6 @@ const dict = {
   "settings.fontFamily.sans": { en: "Sans-serif", ko: "산세리프" },
   "settings.fontFamily.serif": { en: "Serif", ko: "세리프" },
   "settings.spellcheck": { en: "Spelling & grammar indicators", ko: "맞춤법 및 문법 표시" },
-  "settings.groupLayout": { en: "Group layout", ko: "그룹 배치" },
-  "settings.groupsFirst": { en: "Groups first", ko: "그룹 우선" },
-  "settings.mixed": { en: "Mixed", ko: "혼합" },
-
   /* ─── About tab ─── */
   "settings.tab.about": { en: "About", ko: "정보" },
   "about.checkUpdate": { en: "Check for updates", ko: "업데이트 확인" },

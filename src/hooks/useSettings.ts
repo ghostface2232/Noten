@@ -4,7 +4,7 @@ import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 
 export type Locale = "en" | "ko";
 export type ThemeMode = "light" | "dark";
-export type NotesSortOrder = "updated-desc" | "updated-asc" | "created-desc" | "created-asc";
+export type NotesSortOrder = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "title-asc" | "title-desc";
 export type WordWrap = "word" | "char";
 export type ParagraphSpacing = 0 | 10 | 20 | 30 | 40 | 50;
 export type GroupLayout = "groups-first" | "mixed";
@@ -62,7 +62,7 @@ async function getSettingsPath(): Promise<string> {
 function migrateSortOrder(order: string): NotesSortOrder {
   if (order === "recent-first") return "updated-desc";
   if (order === "recent-last") return "updated-asc";
-  const valid: NotesSortOrder[] = ["updated-desc", "updated-asc", "created-desc", "created-asc"];
+  const valid: NotesSortOrder[] = ["updated-desc", "updated-asc", "created-desc", "created-asc", "title-asc", "title-desc"];
   return valid.includes(order as NotesSortOrder) ? (order as NotesSortOrder) : DEFAULTS.notesSortOrder;
 }
 

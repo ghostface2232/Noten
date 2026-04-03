@@ -39,7 +39,6 @@ import { t } from "../i18n";
 import { useUpdater } from "../hooks/useUpdater";
 import type {
   FontFamily,
-  GroupLayout,
   Locale,
   NotesSortOrder,
   ParagraphSpacing,
@@ -241,6 +240,8 @@ const SORT_ORDER_LABELS: Record<NotesSortOrder, Parameters<typeof t>[0]> = {
   "updated-asc": "settings.noteOrder.updatedAsc",
   "created-desc": "settings.noteOrder.createdDesc",
   "created-asc": "settings.noteOrder.createdAsc",
+  "title-asc": "settings.noteOrder.titleAsc",
+  "title-desc": "settings.noteOrder.titleDesc",
 };
 
 function sortOrderLabelKey(order: NotesSortOrder): Parameters<typeof t>[0] {
@@ -373,23 +374,8 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
                     <Option value="updated-asc">{i("settings.noteOrder.updatedAsc")}</Option>
                     <Option value="created-desc">{i("settings.noteOrder.createdDesc")}</Option>
                     <Option value="created-asc">{i("settings.noteOrder.createdAsc")}</Option>
-                  </Dropdown>
-                </div>
-
-                <div className={mergeClasses(styles.row, settingItemClass(styles))}>
-                  <Label className={styles.label}>{i("settings.groupLayout")}</Label>
-                  <Dropdown
-                    className={styles.dropdown}
-                    style={{ backgroundColor: themeStyles.dropdownBg }}
-                    value={i(settings.groupLayout === "groups-first" ? "settings.groupsFirst" : "settings.mixed")}
-                    selectedOptions={[settings.groupLayout]}
-                    onOptionSelect={(_, data) => {
-                      if (data.optionValue) onUpdate("groupLayout", data.optionValue as GroupLayout);
-                    }}
-                    appearance="outline"
-                  >
-                    <Option value="groups-first">{i("settings.groupsFirst")}</Option>
-                    <Option value="mixed">{i("settings.mixed")}</Option>
+                    <Option value="title-asc">{i("settings.noteOrder.titleAsc")}</Option>
+                    <Option value="title-desc">{i("settings.noteOrder.titleDesc")}</Option>
                   </Dropdown>
                 </div>
 

@@ -488,7 +488,7 @@ function App() {
     if (!settingsLoaded || docs.length < 2) return;
 
     const activeId = docs[activeIndexRef.current]?.id ?? null;
-    const sortedDocs = sortNotes(docs, settings.notesSortOrder);
+    const sortedDocs = sortNotes(docs, settings.notesSortOrder, locale);
     const changed = sortedDocs.some((doc, index) => doc.id !== docs[index]?.id);
     if (!changed) return;
 
@@ -1088,7 +1088,6 @@ function App() {
               onSidebarSearchQueryChange={setSidebarSearchQuery}
               onSidebarSearchClose={() => { setSidebarSearchOpen(false); setSidebarSearchQuery(""); }}
               groups={groups}
-              groupLayout={settings.groupLayout}
               onCreateGroup={noteGroups.createGroup}
               onRenameGroup={noteGroups.renameGroup}
               onDeleteGroup={noteGroups.deleteGroup}
