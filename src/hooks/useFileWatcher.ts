@@ -6,7 +6,7 @@ import { getNotesDir, deriveTitle, saveManifest, migrationInProgress, reconcileF
 import type { NoteDoc, NoteGroup } from "./useNotesLoader";
 import { isOwnWrite, pruneOwnWrites } from "./ownWriteTracker";
 import { getFileTimestamps } from "../utils/fileTimestamps";
-import type { Locale, NotesSortOrder } from "./useSettings";
+import type { Locale } from "./useSettings";
 
 // Re-export markOwnWrite for existing consumers
 export { markOwnWrite } from "./ownWriteTracker";
@@ -43,7 +43,6 @@ export function useFileWatcher(
   setActiveIndex: React.Dispatch<React.SetStateAction<number>>,
   tiptapRef: React.RefObject<{ setContent: (md: string) => void } | null>,
   locale: Locale,
-  notesSortOrder: NotesSortOrder,
   enabled: boolean,
   onActiveDocChanged?: (doc: { filePath: string; content: string }) => void,
 ) {
@@ -211,7 +210,7 @@ export function useFileWatcher(
       const activeDoc = reconciledDocs[activeIndexRef.current];
       await saveManifest(reconciledDocs, activeDoc?.id ?? null, reconciledGroups).catch(() => {});
     }
-  }, [locale, setDocs, setGroups, setActiveIndex, tiptapRef, notesSortOrder]);
+  }, [locale, setDocs, setGroups, setActiveIndex, tiptapRef]);
 
   useEffect(() => {
     if (!enabled) return;

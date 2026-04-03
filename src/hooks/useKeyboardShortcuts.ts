@@ -1,5 +1,4 @@
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from "react";
-import type { Editor } from "@tiptap/react";
 import type { EditorView } from "@codemirror/view";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import { openNewWindow } from "../utils/newWindow";
@@ -63,7 +62,6 @@ function toggleMarkdownStrike(cmView: EditorView) {
 
 export interface UseKeyboardShortcutsParams {
   activeCmView: EditorView | null;
-  noteEditor: Editor | null;
   tiptapRef: RefObject<TiptapEditorHandle | null>;
   surface: "note" | "markdown";
   docSearchOpen: boolean;
@@ -79,7 +77,6 @@ export interface UseKeyboardShortcutsParams {
 
 export function useKeyboardShortcuts({
   activeCmView,
-  noteEditor,
   tiptapRef,
   surface,
   docSearchOpen,
@@ -106,7 +103,7 @@ export function useKeyboardShortcuts({
         }
         if (surface === "note") {
           e.preventDefault();
-          noteEditor?.commands.focus();
+          tiptapRef.current?.getEditor()?.commands.focus();
           return;
         }
       }
@@ -160,7 +157,6 @@ export function useKeyboardShortcuts({
     activeCmView,
     docGoToLineOpen,
     docSearchOpen,
-    noteEditor,
     onImportFile,
     onNewNote,
     onSaveFile,

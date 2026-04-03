@@ -209,7 +209,7 @@ function App() {
   useFileWatcher(
     docs, setDocs, groups, setGroups,
     activeIndex, setActiveIndex, tiptapRef,
-    locale, settings.notesSortOrder,
+    locale,
     notesDirReady && !isLoading,
     handleActiveDocChanged,
   );
@@ -428,7 +428,6 @@ function App() {
 
   useKeyboardShortcuts({
     activeCmView,
-    noteEditor,
     tiptapRef,
     surface: state.surface,
     docSearchOpen,

@@ -172,7 +172,7 @@ export function useWindowSync(
               tiptapRef.current.setContent(newDoc.content);
             }
             if (newDoc) {
-              onActiveDocChanged?.({ filePath: newDoc.filePath, content: newDoc.content });
+              onActiveDocChangedRef.current?.({ filePath: newDoc.filePath, content: newDoc.content });
             }
           } else if (idx < currentActive) {
             // Deleted doc is before active doc — shift index down
