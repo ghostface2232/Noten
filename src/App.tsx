@@ -3,9 +3,7 @@ import {
   FluentProvider,
   webLightTheme,
   webDarkTheme,
-  makeStyles,
   mergeClasses,
-  tokens,
   Button,
   Tooltip,
 } from "@fluentui/react-components";
@@ -43,265 +41,16 @@ import { exportAsMarkdown, exportAsPdf, exportAsRtf } from "./utils/exportHandle
 import { migrateNotesDir, hasManifest } from "./utils/migrateNotesDir";
 import { useFileWatcher } from "./hooks/useFileWatcher";
 import { useWindowSync } from "./hooks/useWindowSync";
-import { openNewWindow } from "./utils/newWindow";
+import { useChromeVisibility } from "./hooks/useChromeVisibility";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useDragDrop } from "./hooks/useDragDrop";
 import { open as openDialog, confirm, ask, message } from "@tauri-apps/plugin-dialog";
-import { buildImageMarkdownFromPaths, insertImagesAtPosition, isImagePath } from "./extensions/ImageDrop";
+import { useStyles } from "./App.styles";
 import "./App.css";
-
-const useStyles = makeStyles({
-  root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100vh",
-    color: tokens.colorNeutralForeground1,
-    position: "relative",
-    transitionProperty: "filter",
-    transitionDuration: "0.2s",
-    transitionTimingFunction: "ease",
-  },
-  rootBlurred: {
-    filter: "blur(4px)",
-    willChange: "filter",
-  },
-  micaOverlay: {
-    position: "absolute",
-    inset: "0",
-    pointerEvents: "none",
-    zIndex: 1,
-    opacity: 0,
-    transitionProperty: "opacity",
-    transitionDuration: "0.4s",
-    transitionTimingFunction: "ease",
-  },
-  micaOverlayActive: {
-    opacity: 1,
-  },
-  body: {
-    flex: "1",
-    display: "flex",
-    position: "relative",
-    overflow: "hidden",
-    zIndex: 2,
-  },
-  sidebarSlot: {
-    position: "relative",
-    width: 0,
-    flexShrink: 0,
-    overflow: "hidden",
-  },
-  sidebarSlotAnimated: {
-    transitionProperty: "width",
-    transitionDuration: "0.3s",
-    transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
-  },
-  sidebarSlotOpen: {
-    width: "var(--shell-sidebar-width)",
-    overflow: "visible",
-  },
-  sidebarResizer: {
-    position: "absolute",
-    right: "-4px",
-    top: 0,
-    bottom: 0,
-    width: "8px",
-    cursor: "ew-resize",
-    zIndex: 100,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    "::after": {
-      content: '""',
-      width: "4px",
-      height: "56px",
-      borderRadius: "4px",
-      backgroundColor: tokens.colorBrandStroke1,
-      opacity: 0,
-      transitionProperty: "opacity",
-      transitionDuration: "0.15s",
-    },
-    ":hover::after": {
-      opacity: 1,
-      transitionDelay: "0.3s",
-    },
-  },
-  sidebarResizing: {
-    cursor: "ew-resize",
-    "::after": {
-      opacity: "1 !important",
-    },
-  },
-  sidebarToggle: {
-    position: "absolute",
-    top: "16px",
-    left: "5px",
-    zIndex: 10,
-    display: "inline-flex",
-    alignItems: "center",
-    backgroundColor: "transparent",
-    borderRadius: "8px",
-    padding: "3px",
-    pointerEvents: "none",
-  },
-  sidebarToggleBtn: {
-    borderRadius: "6px",
-    border: "none",
-    minWidth: "auto",
-    height: "28px",
-    width: "28px",
-    padding: "0",
-    pointerEvents: "auto",
-  },
-  sidebarSearchBtn: {
-    position: "absolute",
-    top: "19px",
-    right: "8px",
-    zIndex: 10,
-    borderRadius: "6px",
-    border: "none",
-    minWidth: "auto",
-    height: "28px",
-    width: "28px",
-    padding: "0",
-  },
-  sidebarNewGroupBtn: {
-    position: "absolute",
-    top: "19px",
-    right: "64px",
-    zIndex: 10,
-    borderRadius: "6px",
-    border: "none",
-    minWidth: "auto",
-    height: "28px",
-    width: "28px",
-    padding: "0",
-  },
-  sidebarSelectBtn: {
-    position: "absolute",
-    top: "19px",
-    right: "36px",
-    zIndex: 10,
-    borderRadius: "6px",
-    border: "none",
-    minWidth: "auto",
-    height: "28px",
-    width: "28px",
-    padding: "0",
-  },
-  floatingCard: {
-    position: "relative",
-    display: "flex",
-    flexDirection: "column",
-    flex: "1",
-    minWidth: 0,
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderTopLeftRadius: "8px",
-    overflow: "hidden",
-    boxShadow: "-1px 0 3px rgba(0,0,0,0.08)",
-    marginTop: "var(--shell-card-gap)",
-  },
-  content: {
-    flex: "1",
-    overflow: "auto",
-    overscrollBehavior: "contain",
-    scrollbarGutter: "stable",
-    position: "relative",
-  },
-  toolbarAnchor: {
-    position: "sticky",
-    top: 0,
-    height: 0,
-    zIndex: 10,
-    overflow: "visible",
-    pointerEvents: "none",
-  },
-  searchBarAnchor: {
-    position: "sticky",
-    top: 0,
-    height: 0,
-    zIndex: 50,
-    overflow: "visible",
-    pointerEvents: "none",
-  },
-  editorPane: {
-    opacity: 1,
-    transitionProperty: "opacity",
-    transitionDuration: "0.15s",
-    transitionTimingFunction: "ease",
-    height: "100%",
-  },
-  editorPaneHidden: {
-    opacity: 0,
-    position: "absolute",
-    pointerEvents: "none",
-    height: 0,
-    overflow: "hidden",
-  },
-});
 
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 400;
 const SIDEBAR_DEFAULT = 260;
-const MARKDOWN_FILE_PATTERN = /\.(md|markdown|mdx|txt)$/i;
-const CHROME_HIDE_SCROLL_THRESHOLD = 36;
-const CHROME_LOCK_MS = 300;
-
-function shortcutTargetElement(target: EventTarget | null): HTMLElement | null {
-  if (target instanceof HTMLElement) return target;
-  if (target instanceof Node) return target.parentElement;
-  return null;
-}
-
-function isEditorShortcutTarget(target: EventTarget | null) {
-  const element = shortcutTargetElement(target);
-  return !!element?.closest(".ProseMirror, .cm-editor");
-}
-
-function isDialogTarget(target: EventTarget | null) {
-  const element = shortcutTargetElement(target);
-  return !!element?.closest('[role="dialog"]');
-}
-
-function toggleMarkdownStrike(cmView: import("@codemirror/view").EditorView) {
-  const { state } = cmView;
-  const selection = state.selection.main;
-  if (selection.empty) {
-    cmView.dispatch({
-      changes: { from: selection.from, to: selection.to, insert: "~~~~" },
-      selection: { anchor: selection.from + 2 },
-      scrollIntoView: true,
-    });
-    cmView.focus();
-    return;
-  }
-
-  const before = selection.from >= 2 ? state.doc.sliceString(selection.from - 2, selection.from) : "";
-  const after = selection.to + 2 <= state.doc.length
-    ? state.doc.sliceString(selection.to, selection.to + 2)
-    : "";
-
-  if (before === "~~" && after === "~~") {
-    cmView.dispatch({
-      changes: [
-        { from: selection.from - 2, to: selection.from, insert: "" },
-        { from: selection.to, to: selection.to + 2, insert: "" },
-      ],
-      selection: { anchor: selection.from - 2, head: selection.to - 2 },
-      scrollIntoView: true,
-    });
-  } else {
-    cmView.dispatch({
-      changes: [
-        { from: selection.from, to: selection.from, insert: "~~" },
-        { from: selection.to, to: selection.to, insert: "~~" },
-      ],
-      selection: { anchor: selection.from + 2, head: selection.to + 2 },
-      scrollIntoView: true,
-    });
-  }
-
-  cmView.focus();
-}
-
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     try { return localStorage.getItem("sidebar-open") === "true"; } catch { return false; }
@@ -647,14 +396,13 @@ function App() {
     handleSelectSurface(state.surface === "note" ? "markdown" : "note");
   }, [handleSelectSurface, state.surface]);
 
-  const [chromeVisible, setChromeVisible] = useState(true);
-  const chromeLockUntilRef = useRef(0);
-  const chromeVisibleRef = useRef(true);
-  const handleShowEditorChrome = useCallback(() => {
-    chromeVisibleRef.current = true;
-    setChromeVisible(true);
-    chromeLockUntilRef.current = Date.now() + CHROME_LOCK_MS;
-  }, []);
+  const {
+    chromeVisible,
+    toolbarHeight,
+    editorTopOffset,
+    handleShowEditorChrome,
+    handleBarHeight,
+  } = useChromeVisibility(contentRef, activeDoc?.id, state.surface);
 
   const handleNewNote = useCallback(async () => {
     await fs.newNote();
@@ -668,83 +416,21 @@ function App() {
     }
   }, [state.surface]);
 
-  // 단축키
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const sidebarFocused = document.documentElement.dataset.sidebarActive === "1";
-      const ctrl = e.ctrlKey || e.metaKey;
-      const key = e.key.toLowerCase();
-
-      if (e.key === "Tab" && !isDialogTarget(e.target)) {
-        if (state.surface === "markdown") {
-          e.preventDefault();
-          activeCmView?.focus();
-          return;
-        }
-        if (state.surface === "note") {
-          e.preventDefault();
-          noteEditor?.commands.focus();
-          return;
-        }
-      }
-
-      // 브라우저/WebView 단축키 차단 — 사이드바 포커스 시 Ctrl+R은 rename으로 사용
-      if ((ctrl && key === "r" && !sidebarFocused) || (ctrl && e.shiftKey && key === "r")) { e.preventDefault(); return; }
-      if (e.key === "F5" || e.key === "F12" || e.key === "F7") { e.preventDefault(); return; }
-      if (ctrl && e.shiftKey && (key === "i" || key === "j" || key === "c")) { e.preventDefault(); return; }
-      if (ctrl && (key === "p" || key === "u")) { e.preventDefault(); return; }
-      if (ctrl && (key === "=" || key === "+" || key === "-" || key === "0")) { e.preventDefault(); return; }
-      if (ctrl && (e.key === "Add" || e.key === "Subtract")) { e.preventDefault(); return; }
-      if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); return; }
-      if (e.key === "BrowserBack" || e.key === "BrowserForward") { e.preventDefault(); return; }
-
-      if (ctrl && key === "/") { e.preventDefault(); handleToggleSurface(); }
-      if (ctrl && key === "o") { e.preventDefault(); fs.importFile(); }
-      if (ctrl && !e.shiftKey && key === "s") { e.preventDefault(); fs.saveFile(); }
-      if (ctrl && !e.shiftKey && key === "n") { e.preventDefault(); void handleNewNote(); }
-      if (ctrl && e.shiftKey && key === "n") { e.preventDefault(); openNewWindow(); }
-      if (ctrl && !e.shiftKey && key === "f") {
-        e.preventDefault();
-        setDocGoToLineOpen(false);
-        setDocSearchOpen((o) => !o);
-        return;
-      }
-      if (ctrl && !e.shiftKey && key === "g") {
-        e.preventDefault();
-        handleToggleGoToLine();
-        return;
-      }
-      if (ctrl && e.shiftKey && key === "x" && isEditorShortcutTarget(e.target)) {
-        e.preventDefault();
-        if (state.surface === "markdown" && activeCmView) {
-          toggleMarkdownStrike(activeCmView);
-        } else if (state.surface === "note") {
-          tiptapRef.current?.getEditor()?.chain().focus().toggleStrike().run();
-        }
-        return;
-      }
-      if (e.key === "Escape" && docGoToLineOpen) {
-        e.preventDefault();
-        setDocGoToLineOpen(false);
-      } else if (e.key === "Escape" && docSearchOpen) {
-        e.preventDefault();
-        setDocSearchOpen(false);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [
+  useKeyboardShortcuts({
     activeCmView,
-    docGoToLineOpen,
-    docSearchOpen,
-    fs.importFile,
-    fs.saveFile,
-    handleNewNote,
-    handleToggleGoToLine,
-    handleToggleSurface,
     noteEditor,
-    state.surface,
-  ]);
+    tiptapRef,
+    surface: state.surface,
+    docSearchOpen,
+    docGoToLineOpen,
+    setDocSearchOpen,
+    setDocGoToLineOpen,
+    onToggleSurface: handleToggleSurface,
+    onToggleGoToLine: handleToggleGoToLine,
+    onNewNote: handleNewNote,
+    onImportFile: fs.importFile,
+    onSaveFile: fs.saveFile,
+  });
 
   useEffect(() => {
     const handleWheel = (event: WheelEvent) => {
@@ -852,123 +538,19 @@ function App() {
     setCmView(view);
   }, []);
 
-  useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
+  useDragDrop({
+    activeCmView,
+    tiptapRef,
+    surface: state.surface,
+    docReady,
+    importFiles: fs.importFiles,
+    setIsDirty: state.setIsDirty,
+    scheduleAutoSave,
+  });
 
-    void getCurrentWindow().onDragDropEvent(async ({ payload }) => {
-      if (disposed || payload.type !== "drop") return;
-
-      const markdownPaths = payload.paths.filter((path) => MARKDOWN_FILE_PATTERN.test(path));
-      const imagePaths = payload.paths.filter((path) => isImagePath(path));
-
-      if (markdownPaths.length > 0) {
-        await fs.importFiles(markdownPaths);
-      }
-
-      if (imagePaths.length === 0) {
-        return;
-      }
-
-      const scale = window.devicePixelRatio || 1;
-      const clientX = payload.position.x / scale;
-      const clientY = payload.position.y / scale;
-
-      if (state.surface === "markdown" && activeCmView) {
-        const pos = activeCmView.posAtCoords({ x: clientX, y: clientY }) ?? activeCmView.state.doc.length;
-        const markdown = await buildImageMarkdownFromPaths(imagePaths);
-        const insert = pos > 0 ? `\n\n${markdown}\n\n` : `${markdown}\n\n`;
-        activeCmView.dispatch({
-          changes: { from: pos, to: pos, insert },
-          selection: { anchor: pos + insert.length },
-          scrollIntoView: true,
-        });
-        return;
-      }
-
-      if (state.surface !== "note" || !docReady) return;
-
-      const editor = tiptapRef.current?.getEditor();
-      if (!editor) return;
-      const pos = editor.view.posAtCoords({ left: clientX, top: clientY })?.pos;
-      await insertImagesAtPosition(editor, imagePaths, pos);
-      state.setIsDirty(true);
-      scheduleAutoSave();
-    }).then((fn) => {
-      if (disposed) {
-        fn();
-        return;
-      }
-      unlisten = fn;
-    }).catch(() => {});
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [activeCmView, docReady, fs.importFiles, scheduleAutoSave, state.setIsDirty, state.surface]);
-
-  const lastScrollTopRef = useRef(0);
   const hideEditorChrome = !chromeVisible;
   const hideToolbar = hideEditorChrome;
   const hideStatusBar = hideEditorChrome;
-
-  const [toolbarHeight, setToolbarHeight] = useState(0);
-  const editorTopOffset = Math.max(toolbarHeight - 16, 0);
-  const handleBarHeight = useCallback((h: number) => {
-    setToolbarHeight((prev) => (prev === h ? prev : h));
-  }, []);
-
-  useEffect(() => {
-    const el = contentRef.current;
-    if (!el) return;
-
-    const updateChromeVisibility = () => {
-      const nextTop = el.scrollTop;
-      const now = Date.now();
-
-      if (now < chromeLockUntilRef.current) {
-        lastScrollTopRef.current = nextTop;
-        return;
-      }
-
-      const previousTop = lastScrollTopRef.current;
-      let next: boolean | undefined;
-
-      if (nextTop <= 1) {
-        next = true;
-      } else if (nextTop < previousTop) {
-        next = true;
-      } else if (nextTop >= CHROME_HIDE_SCROLL_THRESHOLD) {
-        next = false;
-      }
-
-      if (next !== undefined && next !== chromeVisibleRef.current) {
-        chromeVisibleRef.current = next;
-        setChromeVisible(next);
-        chromeLockUntilRef.current = now + 300;
-      }
-
-      lastScrollTopRef.current = nextTop;
-    };
-
-    lastScrollTopRef.current = el.scrollTop;
-    updateChromeVisibility();
-    el.addEventListener("scroll", updateChromeVisibility, { passive: true });
-    return () => el.removeEventListener("scroll", updateChromeVisibility);
-  }, []);
-
-  useEffect(() => {
-    requestAnimationFrame(() => {
-      const el = contentRef.current;
-      if (!el) return;
-      const nextTop = el.scrollTop;
-      lastScrollTopRef.current = nextTop;
-      const next = nextTop < CHROME_HIDE_SCROLL_THRESHOLD;
-      chromeVisibleRef.current = next;
-      setChromeVisible(next);
-    });
-  }, [activeDoc?.id, state.surface]);
 
   return (
     <FluentProvider
