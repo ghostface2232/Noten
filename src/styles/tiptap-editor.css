@@ -105,7 +105,7 @@
 
 .ProseMirror h2 {
   font-size: var(--heading2-size);
-  font-weight: 500;
+  font-weight: 600;
   margin-top: 0.85em;
   margin-bottom: 0.4em;
   line-height: 1.2 !important;
@@ -113,10 +113,14 @@
 
 .ProseMirror h3 {
   font-size: var(--heading3-size);
-  font-weight: 500;
+  font-weight: 600;
   margin-top: 0.7em;
   margin-bottom: 0.3em;
   line-height: 1.25 !important;
+}
+
+.ProseMirror :is(h4, h5, h6) {
+  font-weight: 500;
 }
 
 .ProseMirror h1:first-child,
