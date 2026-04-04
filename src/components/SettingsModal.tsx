@@ -616,29 +616,27 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
 
                   {/* Version notes */}
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.5</div>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.6</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 사이드바 그룹 기능 추가 (드래그 앤 드롭, 제목 정렬, 단축키)<br />
-                          · Mermaid 다이어그램 렌더링 및 소스 토글 지원<br />
-                          · 링크 팝오버 및 테마 연동 UI 개선<br />
-                          · Ctrl+G 행 이동 단축키 지원<br />
-                          · 자동 저장 시 그룹 데이터 유실 방지<br />
-                          · 사이드바 토글, 툴바 레이아웃, 상태바 안정성 개선<br />
-                          · 설정 모달 업데이트 버튼 레이아웃 수정<br />
-                          · 내부 코드 구조 리팩토링 (App, Sidebar 모듈 분리)
+                          · Mermaid 다이어그램 다크 모드 시인성 개선 및 시각 품질 통일<br />
+                          · 사이드바 검색을 본문 포함 전역 검색으로 확장<br />
+                          · 코드 블럭에 코드 복사 버튼 추가<br />
+                          · 검색 바에 바꾸기 / 전체 바꾸기 기능 추가 (Ctrl+H)<br />
+                          · 행 이동(Ctrl+G) 인디케이터 추가 및 동작 개선<br />
+                          · 사이드바 문서 목록 스크롤 클리핑 및 그라디언트 적용<br />
+                          · 노트 서식 정리 및 체크박스 정렬 보정
                         </>
                       ) : (
                         <>
-                          · Added sidebar group feature (drag-and-drop, title sort, shortcuts)<br />
-                          · Mermaid diagram rendering with source toggle support<br />
-                          · Link popover and theme-aligned UI refinements<br />
-                          · Ctrl+G go-to-line shortcut support<br />
-                          · Fixed group data loss during auto-save<br />
-                          · Improved sidebar toggle, toolbar layout, and status bar stability<br />
-                          · Fixed settings modal update button layout<br />
-                          · Internal code refactoring (App, Sidebar module extraction)
+                          · Improved Mermaid diagram dark mode visibility and visual consistency<br />
+                          · Extended sidebar search to full-text across all notes<br />
+                          · Added copy button to code blocks<br />
+                          · Added find and replace / replace all to search bar (Ctrl+H)<br />
+                          · Added go-to-line (Ctrl+G) indicator and improved behavior<br />
+                          · Added scroll clipping and gradient fade to sidebar document list<br />
+                          · Cleaned up note formatting and fixed checkbox alignment
                         </>
                       )}
                     </div>

@@ -1,6 +1,6 @@
 [package]
 name = "noten"
-version = "0.1.5"
+version = "0.1.6"
 description = "Noten - Markdown Editor"
 authors = ["you"]
 edition = "2021"

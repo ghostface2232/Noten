@@ -504,6 +504,13 @@ function App() {
     }
   }, [docSearchOpen, tiptapEditor, cmView]);
 
+  // 문서 전환 시 검색/바꾸기/행이동 바 닫기
+  useEffect(() => {
+    setDocSearchOpen(false);
+    setDocSearchReplace(false);
+    setDocGoToLineOpen(false);
+  }, [activeDoc?.id]);
+
   // 창 닫기 — pending autosave flush 후 닫기
   useEffect(() => {
     let unlisten: (() => void) | undefined;
