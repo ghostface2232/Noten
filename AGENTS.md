@@ -98,7 +98,7 @@ Do not use old community-package APIs such as `editor.storage.markdown.getMarkdo
 - Toolbar formatting controls on the Note/Markdown switch use a fade transition instead of appearing/disappearing abruptly.
 - Browser/WebView shortcuts that would interfere with app behavior are blocked. This includes reload, DevTools, print, source view, caret browsing, zoom, and browser back/forward. Ctrl+R is unblocked when sidebar has focus (used for rename).
 - Sidebar shortcuts (Ctrl+D, Ctrl+R, F2, Ctrl+Alt+C, Delete) are active when last mousedown was inside the sidebar. Tracked via `data-sidebar-active` attribute on `document.documentElement`.
-- Editor shortcuts include `Ctrl+Shift+X` for strike-through and `Ctrl+G` for Go to Line in Markdown mode.
+- Editor shortcuts include `Ctrl+Shift+X` for strike-through, `Ctrl+G` for Go to Line, and `Ctrl+H` for Find and Replace. All are handled at the window level via `useKeyboardShortcuts`, not inside individual editor keymaps.
 - Sidebar shortcut hints are displayed in context menus. Shortcut style is unified across all menus (opacity 0.45, 12px, 24px left padding).
 
 ## Local Dev Workflow

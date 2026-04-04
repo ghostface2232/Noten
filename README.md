@@ -17,7 +17,7 @@ Powered by [Tiptap](https://tiptap.dev/) and [CodeMirror](https://codemirror.net
 - **Note / Markdown surfaces** - An always-editable Note surface and an explicit Markdown source view switchable with `Ctrl+/`
 - **Slash commands** - Type `/` to insert headings, lists, code blocks, images, and more
 - **Image support** - Drag & drop, paste, resize with corner handles, and drag to reorder
-- **Note management** - Sidebar with grouping, multi-select, drag reorder, search, and context menus
+- **Note management** - Sidebar with grouping, multi-select, drag reorder, full-text search, and context menus
 - **Recently deleted** - Soft-delete with 14-day retention and restore
 - **Multi-window** - Open notes in separate windows with real-time cross-window sync
 - **Mica theme** - Native Windows 11 Mica material with dark/light mode
@@ -54,7 +54,8 @@ Powered by [Tiptap](https://tiptap.dev/) and [CodeMirror](https://codemirror.net
 | Switch Note / Markdown | `Ctrl+/` |
 | Show toolbar / status bar | `Click editor` / scroll up / top of document |
 | Find in document | `Ctrl+F` |
-| Go to line (Markdown) | `Ctrl+G` |
+| Find and replace | `Ctrl+H` |
+| Go to line | `Ctrl+G` |
 | Strike-through | `Ctrl+Shift+X` |
 
 ### Sidebar (when sidebar is focused)
