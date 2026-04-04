@@ -12,15 +12,32 @@ export const useStyles = makeStyles({
     flexShrink: 0,
     userSelect: "none",
   },
+  sidebarFixed: {
+    flexShrink: 0,
+    paddingTop: "58px",
+    paddingLeft: SIDE_PADDING,
+    paddingRight: SIDE_PADDING,
+  },
   body: {
     flex: 1,
     overflow: "auto",
-    paddingTop: "58px",
     paddingLeft: SIDE_PADDING,
     paddingRight: SIDE_PADDING,
     display: "flex",
     flexDirection: "column",
     gap: "2px",
+    "--sidebar-mask-top": "0px",
+    "--sidebar-mask-bottom": "0px",
+    maskImage: "linear-gradient(to bottom, transparent, black var(--sidebar-mask-top), black calc(100% - var(--sidebar-mask-bottom)), transparent)",
+    transitionProperty: "--sidebar-mask-top, --sidebar-mask-bottom",
+    transitionDuration: "0.3s",
+    transitionTimingFunction: "ease",
+    "&[data-scroll-top='false']": {
+      "--sidebar-mask-top": "24px",
+    },
+    "&[data-scroll-bottom='false']": {
+      "--sidebar-mask-bottom": "24px",
+    },
   },
   docItemWrapper: {
     position: "relative",

@@ -149,6 +149,8 @@ export function Sidebar({
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
 
   const sidebarBodyRef = useRef<HTMLDivElement>(null);
+  const [scrollAtTop, setScrollAtTop] = useState(true);
+  const [scrollAtBottom, setScrollAtBottom] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
   const groupInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -704,18 +706,7 @@ export function Sidebar({
 
   return (
     <div className={styles.sidebar} data-sidebar tabIndex={-1} style={{ outline: "none" }}>
-      <div
-        ref={sidebarBodyRef}
-        className={styles.body}
-        data-sidebar-body
-        onContextMenu={(e) => {
-          if ((e.target as HTMLElement).closest("[data-doc-item]")) return;
-          if ((e.target as HTMLElement).closest("[data-group-item]")) return;
-          e.preventDefault();
-          e.stopPropagation();
-          setContextMenu({ type: "empty", index: -1, x: e.clientX, y: e.clientY });
-        }}
-      >
+      <div className={styles.sidebarFixed}>
         <div className={mergeClasses(styles.searchBoxWrapper, sidebarSearchOpen && styles.searchBoxWrapperOpen)}>
           <div className={styles.searchBox}>
             <input
@@ -755,7 +746,27 @@ export function Sidebar({
           {i("sidebar.newNote")}
           <span className="new-doc-shortcut">Ctrl+N</span>
         </Button>
+      </div>
 
+      <div
+        ref={sidebarBodyRef}
+        className={styles.body}
+        data-sidebar-body
+        data-scroll-top={scrollAtTop ? "true" : "false"}
+        data-scroll-bottom={scrollAtBottom ? "true" : "false"}
+        onScroll={(e) => {
+          const el = e.target as HTMLElement;
+          setScrollAtTop(el.scrollTop <= 0);
+          setScrollAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 1);
+        }}
+        onContextMenu={(e) => {
+          if ((e.target as HTMLElement).closest("[data-doc-item]")) return;
+          if ((e.target as HTMLElement).closest("[data-group-item]")) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setContextMenu({ type: "empty", index: -1, x: e.clientX, y: e.clientY });
+        }}
+      >
         {groupItems.length === 0 && noteItems.length === 0 && !exitingDoc ? (
           <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : sidebarSearchQuery ? "" : i("sidebar.empty")}</span>
         ) : (

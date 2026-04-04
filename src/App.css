@@ -1,3 +1,15 @@
+@property --sidebar-mask-top {
+  syntax: '<length>';
+  initial-value: 0px;
+  inherits: false;
+}
+
+@property --sidebar-mask-bottom {
+  syntax: '<length>';
+  initial-value: 0px;
+  inherits: false;
+}
+
 /* 전역 리셋 */
 *,
 *::before,
