@@ -211,6 +211,7 @@ const dict = {
   "search.placeholder": { en: "Find in document", ko: "문서에서 찾기" },
   "search.gotoLinePlaceholder": { en: "Go to line", ko: "줄 이동" },
   "search.sidebarPlaceholder": { en: "Search notes", ko: "노트 검색" },
+  "search.noResults": { en: "No matching notes", ko: "일치하는 노트 없음" },
   "search.label": { en: "Search", ko: "검색" },
 
   /* ─── Dialog ─── */

@@ -459,7 +459,7 @@ export function useNotesLoader(
   return { docs, setDocs, activeIndex, setActiveIndex, groups, setGroups, trashedNotes, setTrashedNotes, isLoading };
 }
 
-function stripInlineMarkdown(text: string): string {
+export function stripInlineMarkdown(text: string): string {
   let s = text;
   // links: [text](url) → text
   s = s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
@@ -475,25 +475,48 @@ function stripInlineMarkdown(text: string): string {
   return s.trim();
 }
 
+function stripBlockMarkers(line: string): string {
+  return line
+    .replace(/^#+\s*/, "")
+    .replace(/^(?:>\s*)+/, "")
+    .replace(/^[-*+]\s+/, "")
+    .replace(/^\d+\.\s+/, "");
+}
+
 export function deriveTitle(content: string): string {
   if (!content) return "";
   const lines = content.trimStart().split("\n");
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
-    // skip images and code fences
     if (line.startsWith("![") || line.startsWith("<img") || line.startsWith("```")) continue;
-    const stripped = line
-      // headings
-      .replace(/^#+\s*/, "")
-      // block quotes (possibly nested)
-      .replace(/^(?:>\s*)+/, "")
-      // unordered list markers
-      .replace(/^[-*+]\s+/, "")
-      // ordered list markers
-      .replace(/^\d+\.\s+/, "");
-    const heading = stripInlineMarkdown(stripped);
+    const heading = stripInlineMarkdown(stripBlockMarkers(line));
     if (heading) return heading.slice(0, 20);
   }
   return "";
+}
+
+export function stripMarkdownContent(content: string): string {
+  if (!content) return "";
+  const lines = content.split("\n");
+  const result: string[] = [];
+  let inFence = false;
+
+  for (const raw of lines) {
+    if (raw.trimStart().startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith("![") || line.startsWith("<img")) continue;
+    if (/^[-*_]{3,}\s*$/.test(line)) continue;
+
+    const plain = stripInlineMarkdown(stripBlockMarkers(line));
+    if (plain) result.push(plain);
+  }
+
+  return result.join(" ").replace(/\s+/g, " ").trim();
 }

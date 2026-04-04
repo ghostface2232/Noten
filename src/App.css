@@ -171,6 +171,11 @@ body {
   to   { opacity: 0; max-height: 0px; overflow: hidden; }
 }
 
+@keyframes searchResultFadeIn {
+  0%   { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
 
 /* ─── 다크 모드 전환: 대상 한정 트랜지션 ─── */
 .fui-FluentProvider,

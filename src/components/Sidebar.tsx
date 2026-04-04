@@ -13,12 +13,35 @@ import {
 } from "@fluentui/react-icons";
 import { t } from "../i18n";
 import type { NoteDoc, NoteGroup } from "../hooks/useNotesLoader";
+import { stripMarkdownContent } from "../hooks/useNotesLoader";
 import type { Locale, NotesSortOrder } from "../hooks/useSettings";
 import { useSidebarDrag } from "../hooks/useSidebarDrag";
 import { useSidebarAnimations } from "../hooks/useSidebarAnimations";
 import { useStyles } from "./Sidebar.styles";
 import { SidebarContextMenus, FolderSubtractRegular } from "./SidebarContextMenus";
 import type { ContextMenuState } from "./SidebarContextMenus";
+
+interface SearchSnippet { before: string; match: string; after: string }
+type MatchType = "title" | "body" | "both";
+const MATCH_TYPE_ORDER: Record<MatchType, number> = { both: 0, title: 1, body: 2 };
+
+function extractSnippet(text: string, query: string, windowSize = 80): SearchSnippet | null {
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const idx = lowerText.indexOf(lowerQuery);
+  if (idx === -1) return null;
+
+  const matchEnd = idx + query.length;
+  const half = Math.floor((windowSize - query.length) / 2);
+  const start = Math.max(0, idx - half);
+  const end = Math.min(text.length, matchEnd + half);
+
+  return {
+    before: (start > 0 ? "..." : "") + text.slice(start, idx),
+    match: text.slice(idx, matchEnd),
+    after: text.slice(matchEnd, end) + (end < text.length ? "..." : ""),
+  };
+}
 
 function formatTimestamp(ts: number, locale: Locale): string {
   const now = Date.now();
@@ -181,14 +204,54 @@ export function Sidebar({
   }, [selectMode]);
 
 
-  // Filter docs by search query
+  // Debounced search query (250ms)
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  useEffect(() => {
+    if (!sidebarSearchQuery) { setDebouncedQuery(""); return; }
+    const timer = setTimeout(() => setDebouncedQuery(sidebarSearchQuery), 250);
+    return () => clearTimeout(timer);
+  }, [sidebarSearchQuery]);
+
+  // Incremental stripped-content cache — only re-strips docs whose content changed
+  const strippedCacheRef = useRef(new Map<string, { content: string; stripped: string }>());
+  const strippedContentMap = useMemo(() => {
+    const cache = strippedCacheRef.current;
+    const activeIds = new Set<string>();
+    for (const doc of docs) {
+      activeIds.add(doc.id);
+      const cached = cache.get(doc.id);
+      if (cached && cached.content === doc.content) continue;
+      cache.set(doc.id, { content: doc.content, stripped: stripMarkdownContent(doc.content) });
+    }
+    for (const id of cache.keys()) {
+      if (!activeIds.has(id)) cache.delete(id);
+    }
+    return cache;
+  }, [docs]);
+
+  // Filter docs by search query (title + body)
   const filteredDocs = useMemo(() => {
-    if (!sidebarSearchQuery) return docs.map((doc, index) => ({ doc, originalIndex: index }));
-    const q = sidebarSearchQuery.toLowerCase();
-    return docs
-      .map((doc, index) => ({ doc, originalIndex: index }))
-      .filter(({ doc }) => doc.fileName.toLowerCase().includes(q));
-  }, [docs, sidebarSearchQuery]);
+    if (!debouncedQuery) return docs.map((doc, index) => ({
+      doc, originalIndex: index, matchType: "title" as MatchType, snippet: null as SearchSnippet | null,
+    }));
+    const q = debouncedQuery.toLowerCase();
+    const results: { doc: NoteDoc; originalIndex: number; matchType: MatchType; snippet: SearchSnippet | null }[] = [];
+
+    for (let i = 0; i < docs.length; i++) {
+      const doc = docs[i];
+      const titleMatch = doc.fileName.toLowerCase().includes(q);
+      const stripped = strippedContentMap.get(doc.id)?.stripped ?? "";
+      const bodyMatch = stripped.toLowerCase().includes(q);
+      if (!titleMatch && !bodyMatch) continue;
+
+      const matchType: MatchType = titleMatch && bodyMatch ? "both" : titleMatch ? "title" : "body";
+      const snippet = bodyMatch ? extractSnippet(stripped, debouncedQuery) : null;
+      results.push({ doc, originalIndex: i, matchType, snippet });
+    }
+
+    results.sort((a, b) => MATCH_TYPE_ORDER[a.matchType] - MATCH_TYPE_ORDER[b.matchType]);
+    return results;
+  }, [docs, debouncedQuery, strippedContentMap]);
 
   // Focus the rename input when editing starts
   useEffect(() => {
@@ -345,19 +408,19 @@ export function Sidebar({
 
   /* ─── Render helpers ─── */
 
-  const isSearching = !!sidebarSearchQuery;
+  const isSearching = !!debouncedQuery;
 
   // Compute render items: when not searching, organize by groups
   type RenderItem =
-    | { kind: "note"; doc: NoteDoc; originalIndex: number; indented: boolean }
+    | { kind: "note"; doc: NoteDoc; originalIndex: number; indented: boolean; matchType?: MatchType; snippet?: SearchSnippet | null }
     | { kind: "group"; group: NoteGroup }
 
   const { groupItems, noteItems } = useMemo(() => {
     if (isSearching) {
       return {
         groupItems: [] as RenderItem[],
-        noteItems: filteredDocs.map(({ doc, originalIndex }) => ({
-          kind: "note" as const, doc, originalIndex, indented: false,
+        noteItems: filteredDocs.map(({ doc, originalIndex, matchType, snippet }) => ({
+          kind: "note" as const, doc, originalIndex, indented: false, matchType, snippet,
         })),
       };
     }
@@ -408,7 +471,7 @@ export function Sidebar({
     return { groupItems: gItems, noteItems: nItems };
   }, [isSearching, filteredDocs, docs, groups, groupedNoteIds, notesSortOrder, locale]);
 
-  const renderNoteItem = (doc: NoteDoc, originalIndex: number, indented: boolean) => {
+  const renderNoteItem = (doc: NoteDoc, originalIndex: number, indented: boolean, snippet?: SearchSnippet | null, searchIndex?: number) => {
     const isSelected = selectedNoteIds.has(doc.id);
     const isHovered = hoveredIndex === originalIndex;
     const isContextTarget = contextMenu?.type === "note" && contextMenu.index === originalIndex;
@@ -433,8 +496,13 @@ export function Sidebar({
           slideUpFromIndex >= 0 && originalIndex >= slideUpFromIndex && styles.docItemSlideUp,
           isInExpandingGroup && styles.groupChildExpand,
           isInRemovingGroup && styles.groupCollapseOut,
+          isSearching && searchIndex !== undefined && styles.searchResultFadeIn,
         )}
-        style={expandStagger > 0 ? { animationDelay: `${expandStagger}s` } : undefined}
+        style={
+          isSearching && searchIndex !== undefined
+            ? { animationDelay: `${searchIndex * 0.03}s` }
+            : expandStagger > 0 ? { animationDelay: `${expandStagger}s` } : undefined
+        }
         onPointerDown={(e) => handleDragPointerDown(e, doc.id)}
         onMouseEnter={() => setHoveredIndex(originalIndex)}
         onMouseLeave={() => setHoveredIndex(null)}
@@ -507,7 +575,16 @@ export function Sidebar({
               }}
               size="small"
             >
-              <span className={styles.docName}>{doc.fileName}</span>
+              {isSearching && snippet ? (
+                <div className={styles.searchResultContent}>
+                  <span className={styles.docName}>{doc.fileName}</span>
+                  <span className={styles.searchSnippet}>
+                    {snippet.before}<mark className={styles.snippetHighlight}>{snippet.match}</mark>{snippet.after}
+                  </span>
+                </div>
+              ) : (
+                <span className={styles.docName}>{doc.fileName}</span>
+              )}
               <span className={mergeClasses(
                 styles.docTrailing,
                 (isHovered || isContextTarget) && styles.docTrailingHidden,
@@ -679,11 +756,11 @@ export function Sidebar({
         </Button>
 
         {groupItems.length === 0 && noteItems.length === 0 && !exitingDoc ? (
-          <span className={styles.empty}>{sidebarSearchQuery ? "" : i("sidebar.empty")}</span>
+          <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : sidebarSearchQuery ? "" : i("sidebar.empty")}</span>
         ) : (
           <>
             {/* Groups section */}
-            {!sidebarSearchQuery && (
+            {!isSearching && (
               <div className={mergeClasses(styles.groupsSection, groups.length === 0 && styles.groupsSectionHidden)}>
                 <div className={styles.groupsSectionInner}>
                   <span className={styles.sectionLabel}>{i("sidebar.groupsLabel")}</span>
@@ -697,7 +774,7 @@ export function Sidebar({
 
             {/* Notes section */}
             <div data-notes-section>
-              {!sidebarSearchQuery && (noteItems.length > 0 || exitingDoc) && (
+              {!isSearching && (noteItems.length > 0 || exitingDoc) && (
                 <span className={styles.sectionLabel}>{i("sidebar.notesLabel")}</span>
               )}
               {exitingDoc && exitingDoc.index === 0 && (
@@ -709,7 +786,7 @@ export function Sidebar({
               )}
               {noteItems.map((item, idx) => {
                 if (item.kind !== "note") return null;
-                const elements = [renderNoteItem(item.doc, item.originalIndex, item.indented)];
+                const elements = [renderNoteItem(item.doc, item.originalIndex, item.indented, item.snippet, isSearching ? idx : undefined)];
                 if (exitingDoc && exitingDoc.index === idx + 1) {
                   elements.unshift(
                     <div key={`exit-${exitingDoc.doc.id}`} className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}>
