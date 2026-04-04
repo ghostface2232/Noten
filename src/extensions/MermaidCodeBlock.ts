@@ -13,6 +13,9 @@ const EDGE_LABEL_PILL_MIN_TRACK_MULTIPLIER = 3.8;
 const EDGE_LABEL_PILL_MIN_WIDTH_PX = 56;
 const EDGE_LABEL_PILL_MIN_SIDE_CAP_PX = 14;
 const MERMAID_TOGGLE_ICON_UP = '<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M10.53 7.22a.75.75 0 0 0-1.06 0L5.22 11.47a.75.75 0 1 0 1.06 1.06L10 8.81l3.72 3.72a.75.75 0 0 0 1.06-1.06l-4.25-4.25Z"/></svg>';
+const COPY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const CHECK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="20 6 9 17 4 12"/></svg>';
+const COPY_FEEDBACK_MS = 1000;
 type MermaidApi = typeof import("mermaid")["default"];
 type Rect = { x: number; y: number; width: number; height: number };
 
@@ -92,12 +95,14 @@ class MermaidCodeBlockView implements NodeView {
   private readonly preElement: HTMLPreElement;
   private readonly codeBody: HTMLDivElement;
   private readonly codeElement: HTMLElement;
+  private readonly copyButton: HTMLButtonElement;
   private readonly toggleButton: HTMLButtonElement;
   private readonly previewElement: HTMLDivElement;
   private readonly errorElement: HTMLDivElement;
   private codeCollapsed = false;
   private renderToken = 0;
   private renderTimeout: number | null = null;
+  private copyFeedbackTimeout: number | null = null;
   private lastRenderKey = "";
 
   constructor(node: ProseMirrorNode) {
@@ -112,6 +117,15 @@ class MermaidCodeBlockView implements NodeView {
     this.codeElement = document.createElement("code");
     this.codeBody.append(this.codeElement);
     this.preElement.append(this.codeBody);
+
+    this.copyButton = document.createElement("button");
+    this.copyButton.type = "button";
+    this.copyButton.className = "noten-code-copy";
+    this.copyButton.innerHTML = COPY_ICON;
+    this.copyButton.setAttribute("aria-label", "Copy code");
+    this.copyButton.setAttribute("title", "Copy code");
+    this.copyButton.addEventListener("click", this.handleCopyClick);
+    this.preElement.append(this.copyButton);
 
     this.toggleButton = document.createElement("button");
     this.toggleButton.type = "button";
@@ -158,6 +172,7 @@ class MermaidCodeBlockView implements NodeView {
       mutation.target === this.dom ||
       mutation.target === this.preElement ||
       mutation.target === this.codeBody ||
+      this.copyButton.contains(mutation.target) ||
       this.toggleButton.contains(mutation.target)
     ) {
       return true;
@@ -172,12 +187,16 @@ class MermaidCodeBlockView implements NodeView {
       return false;
     }
 
-    return this.toggleButton.contains(target);
+    return this.copyButton.contains(target) || this.toggleButton.contains(target);
   }
 
   destroy() {
     this.renderToken += 1;
     this.clearRenderTimeout();
+    if (this.copyFeedbackTimeout !== null) {
+      window.clearTimeout(this.copyFeedbackTimeout);
+    }
+    this.copyButton.removeEventListener("click", this.handleCopyClick);
     this.toggleButton.removeEventListener("click", this.handleToggleClick);
     this.toggleButton.removeEventListener("keydown", this.handleToggleKeyDown);
   }
@@ -234,6 +253,27 @@ class MermaidCodeBlockView implements NodeView {
     window.clearTimeout(this.renderTimeout);
     this.renderTimeout = null;
   }
+
+  private readonly handleCopyClick = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void navigator.clipboard.writeText(this.node.textContent).then(() => {
+      this.copyButton.innerHTML = CHECK_ICON;
+      this.copyButton.classList.add("is-copied");
+      if (this.copyFeedbackTimeout !== null) {
+        window.clearTimeout(this.copyFeedbackTimeout);
+      }
+      this.copyFeedbackTimeout = window.setTimeout(() => {
+        this.copyButton.innerHTML = COPY_ICON;
+        this.copyButton.classList.remove("is-copied");
+        this.copyButton.classList.add("is-restoring");
+        requestAnimationFrame(() => {
+          setTimeout(() => this.copyButton.classList.remove("is-restoring"), 150);
+        });
+        this.copyFeedbackTimeout = null;
+      }, COPY_FEEDBACK_MS);
+    });
+  };
 
   private readonly handleToggleClick = (event: MouseEvent) => {
     event.preventDefault();

@@ -173,6 +173,44 @@
   letter-spacing: 0.05em;
 }
 
+.ProseMirror pre .noten-code-copy {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem 0.55rem;
+  border: none;
+  background: transparent;
+  color: var(--editor-color-text-secondary);
+  cursor: pointer;
+}
+
+.ProseMirror pre .noten-code-copy:hover {
+  color: var(--editor-color-text);
+}
+
+.ProseMirror pre .noten-code-copy svg {
+  width: 14px;
+  height: 14px;
+  transition: opacity 0.15s ease;
+}
+
+@keyframes noten-copy-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.ProseMirror pre .noten-code-copy.is-copied svg,
+.ProseMirror pre .noten-code-copy.is-restoring svg {
+  animation: noten-copy-fade-in 0.15s ease;
+}
+
+.ProseMirror pre .noten-code-copy.is-copied {
+  color: var(--editor-color-text-secondary);
+}
+
 .ProseMirror pre code {
   display: block;
   padding: 1rem;
@@ -202,7 +240,11 @@
   display: flex;
   align-items: center;
   line-height: 1;
-  padding-right: 2.9rem;
+  padding-right: 4.5rem;
+}
+
+.ProseMirror .noten-code-block.is-mermaid pre .noten-code-copy {
+  right: 1.8rem;
 }
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle {
