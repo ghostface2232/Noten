@@ -315,7 +315,10 @@
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .node :is(rect, circle, ellipse, polygon, path),
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .cluster rect,
-.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .note rect {
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .note rect,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .actor,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .labelBox,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .loopLine {
   fill: var(--editor-color-bg-subtle) !important;
   stroke: var(--editor-color-border) !important;
   stroke-width: 1.1px !important;
@@ -329,9 +332,20 @@
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edgePath .path,
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .flowchart-link,
-.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .relationshipLine {
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .relationshipLine,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .messageLine0,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .messageLine1 {
   stroke: var(--editor-color-text-secondary) !important;
   stroke-width: 1.6px !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .actor-line {
+  stroke: var(--editor-color-border) !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg :is(.activation0, .activation1, .activation2) {
+  fill: var(--editor-color-bg-subtle) !important;
+  stroke: var(--editor-color-border) !important;
 }
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .arrowheadPath,
@@ -381,6 +395,141 @@
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .cluster-label text,
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edgeLabel text {
   fill: var(--editor-color-text-secondary) !important;
+}
+
+/* ── Mindmap ── */
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edge {
+  filter: brightness(0.85);
+}
+
+/* ── Journey ── */
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .task-line {
+  stroke: var(--editor-color-text-secondary) !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg rect.journey-section,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg rect[class*="task-type-"] {
+  stroke: var(--editor-color-border) !important;
+  stroke-width: 1.1px !important;
+  rx: 6px;
+  ry: 6px;
+  filter: brightness(2.0);
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .labelBox {
+  fill: var(--editor-color-bg-subtle) !important;
+  stroke: var(--editor-color-border) !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .face {
+  stroke: var(--editor-color-border) !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .mouth {
+  stroke: var(--editor-color-text-secondary) !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg line[marker-end] {
+  stroke: var(--editor-color-text-secondary) !important;
+}
+
+/* ── Timeline ── */
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .node-bkg {
+  stroke: var(--editor-color-border) !important;
+  stroke-width: 1.1px !important;
+  filter: brightness(2.0);
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg [class*="node-line-"] {
+  stroke: var(--editor-color-border) !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .lineWrapper line {
+  stroke: var(--editor-color-text-secondary) !important;
+}
+
+/* ── Quadrant chart ── */
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .quadrant rect {
+  stroke: var(--editor-color-border) !important;
+  stroke-width: 0.5px !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .border line {
+  stroke: var(--editor-color-border) !important;
+}
+
+/* ── Gantt ── */
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .taskText {
+  fill: #fff !important;
+}
+
+/* ── C4 ── */
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .person-man text {
+  fill: var(--editor-color-text) !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .person-man > rect {
+  fill: var(--editor-color-bg-subtle) !important;
+  stroke: var(--editor-color-border) !important;
+  stroke-width: 1.1px !important;
+  rx: 6px;
+  ry: 6px;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .person-man > path:not([fill="none"]) {
+  fill: var(--editor-color-bg-subtle) !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .person-man > path {
+  stroke: var(--editor-color-border) !important;
+  stroke-width: 1.1px !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg rect[stroke-dasharray] {
+  stroke: var(--editor-color-border) !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg line[marker-start] {
+  stroke: var(--editor-color-text-secondary) !important;
+}
+
+/* ── Packet ── */
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .packetBlock {
+  fill: var(--editor-color-bg-subtle) !important;
+  stroke: var(--editor-color-border) !important;
+  stroke-width: 1.1px !important;
+}
+
+/* ── Pie chart ── */
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .pieTitleText {
+  fill: var(--editor-color-text) !important;
+  font-size: 1.4em !important;
+  font-weight: 600 !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .pieCircle {
+  stroke: var(--editor-color-code-bg) !important;
+  stroke-width: 2px !important;
+  filter: brightness(1.25);
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .pieOuterCircle {
+  stroke: var(--editor-color-border) !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .slice {
+  fill: var(--editor-color-text) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  stroke: none !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .legend text {
+  fill: var(--editor-color-text) !important;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .legend rect {
+  filter: brightness(1.25);
 }
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-error {
@@ -848,15 +997,29 @@
 
 [data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .node :is(rect, circle, ellipse, polygon, path),
 [data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .cluster rect,
-[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .note rect {
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .note rect,
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .actor,
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .labelBox,
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .loopLine {
   fill: #262626 !important;
   stroke: #4a4a4a !important;
 }
 
 [data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edgePath .path,
 [data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .flowchart-link,
-[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .relationshipLine {
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .relationshipLine,
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .messageLine0,
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .messageLine1 {
   stroke: #9e9e9e !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .actor-line {
+  stroke: #4a4a4a !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg :is(.activation0, .activation1, .activation2) {
+  fill: #262626 !important;
+  stroke: #4a4a4a !important;
 }
 
 [data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .arrowheadPath,
@@ -883,6 +1046,136 @@
 [data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .cluster-label text,
 [data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .edgeLabel text {
   fill: #9e9e9e !important;
+}
+
+/* ── Journey (dark) ── */
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg rect.journey-section,
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg rect[class*="task-type-"] {
+  filter: brightness(0.5) saturate(0.85);
+  stroke: #4a4a4a !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .task-line {
+  stroke: #4a4a4a !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .labelBox {
+  fill: #262626 !important;
+  stroke: #4a4a4a !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .face {
+  fill: #3d3826 !important;
+  stroke: #666 !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .mouth {
+  stroke: #9e9e9e !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg line[marker-end] {
+  stroke: #9e9e9e !important;
+}
+
+/* ── Timeline (dark) ── */
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .node-bkg {
+  filter: brightness(0.5) saturate(0.85);
+  stroke: #4a4a4a !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg [class*="node-line-"] {
+  stroke: #4a4a4a !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .lineWrapper line {
+  stroke: #9e9e9e !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .eventWrapper {
+  filter: none !important;
+}
+
+/* ── Quadrant chart (dark) ── */
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .quadrant rect {
+  filter: brightness(0.5) saturate(0.85);
+  stroke: #4a4a4a !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .border line {
+  stroke: #4a4a4a !important;
+}
+
+/* ── Gantt (dark) ── */
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .taskText {
+  fill: #fff !important;
+}
+
+/* ── C4 (dark) ── */
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .person-man text {
+  fill: #e0e0e0 !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .person-man > rect {
+  fill: #262626 !important;
+  stroke: #4a4a4a !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .person-man > path:not([fill="none"]) {
+  fill: #262626 !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .person-man > path {
+  stroke: #4a4a4a !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg rect[stroke-dasharray] {
+  stroke: #666 !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg line[marker-start] {
+  stroke: #9e9e9e !important;
+}
+
+/* ── Sankey (dark) ── */
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .link {
+  mix-blend-mode: screen !important;
+}
+
+/* ── XY chart (dark) ── */
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .background {
+  fill: #1a1a1a !important;
+}
+
+/* ── Packet (dark) ── */
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .packetBlock {
+  fill: #262626 !important;
+  stroke: #4a4a4a !important;
+}
+
+/* ── Pie chart (dark) ── */
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .pieTitleText {
+  fill: #e0e0e0 !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .pieCircle {
+  stroke: #1a1a1a !important;
+  filter: brightness(0.5) saturate(0.85);
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .pieOuterCircle {
+  stroke: #4a4a4a !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .slice {
+  fill: #e0e0e0 !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .legend text {
+  fill: #e0e0e0 !important;
+}
+
+[data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-svg .legend rect {
+  filter: brightness(0.5) saturate(0.85);
 }
 
 [data-theme="dark"] .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-error {
