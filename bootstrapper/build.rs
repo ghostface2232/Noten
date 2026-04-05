@@ -1,4 +1,7 @@
 fn main() {
+    const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+    println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=../src-tauri/icons/icon.ico");
     println!("cargo:rerun-if-changed=assets/nsis-payload.exe");
 
@@ -7,7 +10,7 @@ fn main() {
         res.set_icon("../src-tauri/icons/icon.ico");
         res.set("ProductName", "Noten");
         res.set("FileDescription", "Noten Setup");
-        res.set("ProductVersion", "0.1.5");
+        res.set("ProductVersion", PACKAGE_VERSION);
         res.set("LegalCopyright", "\u{00a9} 2026 Mingwan Bae");
         res.compile().expect("Failed to compile Windows resources");
     }
