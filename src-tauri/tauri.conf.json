@@ -15,7 +15,7 @@
         "title": "Noten",
         "width": 800,
         "height": 600,
-        "minWidth": 800,
+        "minWidth": 600,
         "minHeight": 620,
         "decorations": false,
         "transparent": true,

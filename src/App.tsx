@@ -14,7 +14,7 @@ import {
   PanelLeftRegular,
   SearchRegular,
 } from "@fluentui/react-icons";
-import { getCurrentWindow, Effect } from "@tauri-apps/api/window";
+import { getCurrentWindow, Effect, LogicalSize, LogicalPosition } from "@tauri-apps/api/window";
 import { useMarkdownState } from "./hooks/useMarkdownState";
 import { getCurrentMarkdown, useFileSystem } from "./hooks/useFileSystem";
 import { saveManifest, sortNotes, useNotesLoader, getNotesDir, setNotesDir, resetNotesDir, setMigrationInProgress } from "./hooks/useNotesLoader";
@@ -49,6 +49,12 @@ import "./App.css";
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 400;
 const SIDEBAR_DEFAULT = 260;
+// Minimum logical width the editor area needs so the toolbar (two-row mode)
+// shows every icon with comfortable breathing room. Tools strip now measures
+// ~487px; with the 46px sidebar-toggle overlay (when the sidebar is closed)
+// plus grid padding this leaves >50px margin on either side.
+const EDITOR_MIN_WIDTH = 600;
+const WINDOW_MIN_HEIGHT = 620;
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     try { return localStorage.getItem("sidebar-open") === "true"; } catch { return false; }
@@ -58,6 +64,60 @@ function App() {
   });
   useEffect(() => { try { localStorage.setItem("sidebar-open", String(sidebarOpen)); } catch {} }, [sidebarOpen]);
   useEffect(() => { try { localStorage.setItem("sidebar-width", String(sidebarWidth)); } catch {} }, [sidebarWidth]);
+  // Keep the OS-level window minimum wide enough to fit the toolbar alongside
+  // the current sidebar. When the sidebar is opened or dragged wider past the
+  // current window's capacity, we grow the window leftward (anchoring the
+  // right edge) in a short animation that matches the sidebar's CSS transition
+  // so the two motions read as one.
+  useEffect(() => {
+    const effectiveSidebar = sidebarOpen ? sidebarWidth : 0;
+    const minWidth = EDITOR_MIN_WIDTH + effectiveSidebar;
+    let cancelled = false;
+    (async () => {
+      try {
+        const win = getCurrentWindow();
+        await win.setMinSize(new LogicalSize(minWidth, WINDOW_MIN_HEIGHT));
+        if (cancelled) return;
+        const scale = await win.scaleFactor();
+        const size = await win.innerSize();
+        const currentLogicalW = size.width / scale;
+        const currentLogicalH = size.height / scale;
+        if (currentLogicalW >= minWidth - 1) return;
+
+        const pos = await win.outerPosition();
+        if (cancelled) return;
+        const fromX = pos.x / scale;
+        const fromW = currentLogicalW;
+        const toW = minWidth;
+        const toX = fromX - (toW - fromW);
+
+        // Animate to match the sidebar's ~300ms CSS transition.
+        const DURATION = 280;
+        const startTime = performance.now();
+        let lastW = fromW;
+        const tick = () => {
+          if (cancelled) return;
+          const elapsed = performance.now() - startTime;
+          const t = Math.min(1, elapsed / DURATION);
+          // easeOutCubic — fast start, gentle finish, matches the sidebar curve
+          const e = 1 - Math.pow(1 - t, 3);
+          const w = fromW + (toW - fromW) * e;
+          const x = fromX + (toX - fromX) * e;
+          // Skip sub-physical-pixel frames to avoid IPC flooding near the tail.
+          if (t >= 1 || Math.abs(w - lastW) * scale >= 1) {
+            lastW = w;
+            void Promise.all([
+              win.setPosition(new LogicalPosition(x, pos.y / scale)),
+              win.setSize(new LogicalSize(w, currentLogicalH)),
+            ]).catch(() => {});
+          }
+          if (t < 1) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      } catch { /* no-op */ }
+    })();
+    return () => { cancelled = true; };
+  }, [sidebarOpen, sidebarWidth]);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [docSearchOpen, setDocSearchOpen] = useState(false);
