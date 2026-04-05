@@ -14,7 +14,7 @@ export const useStyles = makeStyles({
   },
   sidebarFixed: {
     flexShrink: 0,
-    paddingTop: "58px",
+    paddingTop: "55px",
     paddingLeft: SIDE_PADDING,
     paddingRight: SIDE_PADDING,
   },

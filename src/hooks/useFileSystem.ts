@@ -300,6 +300,11 @@ export function useFileSystem(
     const didPersistCurrentDoc = await leaveCurrentDoc();
     const baseDocs = didPersistCurrentDoc ? markDocClean(liveDocs, activeDocId) : liveDocs;
 
+    // If the active note lives in a group, the new note inherits that group.
+    const inheritedGroupId = activeDocId
+      ? (groupsRef.current?.find((g) => g.noteIds.includes(activeDocId))?.id ?? null)
+      : null;
+
     // Check if current note is empty and should be replaced
     const currentDoc = baseDocs[currentActiveIndex];
     const currentContent = currentDoc?.content.trim() ?? "";
@@ -307,15 +312,19 @@ export function useFileSystem(
 
     // Remove current empty note (first render — sidebar sees deletion)
     let prunedDocs = baseDocs;
+    // Track groups across the pruning step so we can fold the new note in
+    // atomically with sortAndPersistDocs's saveManifest call.
+    let workingGroups: NoteGroup[] | undefined = groupsRef.current;
     if (willReplace) {
       if (currentDoc.filePath) {
         try { markOwnWrite(currentDoc.filePath); remove(currentDoc.filePath).catch(() => {}); } catch {}
       }
       cancelDocSaveRef?.current?.(currentDoc.id);
       const leavingId = currentDoc.id;
-      setGroups?.((prev) =>
-        prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }))
-          .filter((g) => g.noteIds.length > 0));
+      workingGroups = workingGroups
+        ?.map((g) => ({ ...g, noteIds: g.noteIds.filter((noteId) => noteId !== leavingId) }))
+        .filter((g) => g.id === inheritedGroupId || g.noteIds.length > 0);
+      setGroups?.(workingGroups ?? []);
       prunedDocs = baseDocs.filter((d) => d.id !== currentDoc.id);
       setDocs(prunedDocs);
     }
@@ -343,7 +352,22 @@ export function useFileSystem(
 
     const addNewDoc = () => {
       const nextDocs = [...prunedDocs, newDoc];
-      sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
+      // Fold the new note into the inherited group atomically so the
+      // manifest saveManifest emits in sortAndPersistDocs is consistent.
+      let nextGroups = workingGroups;
+      if (inheritedGroupId && nextGroups) {
+        const targetExists = nextGroups.some((g) => g.id === inheritedGroupId);
+        if (targetExists) {
+          nextGroups = nextGroups.map((g) =>
+            g.id === inheritedGroupId && !g.noteIds.includes(id)
+              ? { ...g, noteIds: [...g.noteIds, id] }
+              : g,
+          );
+          setGroups?.(nextGroups);
+          emitGroupsUpdated(nextGroups);
+        }
+      }
+      sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, locale, setDocs, setActiveIndex, nextGroups);
       emitDocCreated(newDoc);
       resetDocState(state, tiptapRef, filePath, "");
       notifyActiveDocRef?.current?.(id, filePath);
