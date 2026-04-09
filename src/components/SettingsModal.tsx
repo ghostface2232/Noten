@@ -615,27 +615,33 @@ export function SettingsModal({ open, onClose, settings, onUpdate, currentNotesD
 
                   {/* Version notes */}
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.6</div>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.7</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · Mermaid 다이어그램 다크 모드 시인성 개선 및 시각 품질 통일<br />
-                          · 사이드바 검색을 본문 포함 전역 검색으로 확장<br />
-                          · 코드 블럭에 코드 복사 버튼 추가<br />
-                          · 검색 바에 바꾸기 / 전체 바꾸기 기능 추가 (Ctrl+H)<br />
-                          · 행 이동(Ctrl+G) 인디케이터 추가 및 동작 개선<br />
-                          · 사이드바 문서 목록 스크롤 클리핑 및 그라디언트 적용<br />
-                          · 노트 서식 정리 및 체크박스 정렬 보정
+                          · CodeMirror 마크다운 에디터 제거 및 TipTap v3 단일 에디터로 리팩토링 (마크다운은 디스크 저장 형식으로만 유지)<br />
+                          · 이미지 첨부 방식을 base64에서 노트별 .assets/&lt;noteId&gt;/&lt;hash&gt;.&lt;ext&gt; 상대 경로로 전환, 기존 base64 이미지는 시작 시 1회 자동 마이그레이션<br />
+                          · 이미지 동작 전면 개선: 옆 여백 클릭 시 같은 줄 이미지 선택, ESC·사이드바·타이틀바 클릭으로 포커스 해제, 선택 중 캐럿 숨김, 둥근 외곽선 복원, 위·아래 여백 확대<br />
+                          · 코드 블럭 상단 타이틀바 정렬·간격 정리 및 텍스트 에디터 디테일 다듬기<br />
+                          · tiptap-editor.css의 Mermaid 관련 규칙을 mermaid-theme.css 별도 파일로 분리<br />
+                          · 사이드바 정렬 안정화: 단순히 문서를 선택했다는 이유만으로 목록 최상단으로 올라오던 현상 수정<br />
+                          · 자동 제목 추출 시 체크박스 마커([ ], [x]) 제거<br />
+                          · 문서별 Undo 히스토리 격리 및 윈도우 간 동기화 라우팅 견고화<br />
+                          · 행 이동 툴바 아이콘을 더 직관적인 아이콘으로 교체<br />
+                          · 사이드바 상단 아이콘을 툴바와 정렬하고 새 노트 생성 시 현재 그룹을 상속
                         </>
                       ) : (
                         <>
-                          · Improved Mermaid diagram dark mode visibility and visual consistency<br />
-                          · Extended sidebar search to full-text across all notes<br />
-                          · Added copy button to code blocks<br />
-                          · Added find and replace / replace all to search bar (Ctrl+H)<br />
-                          · Added go-to-line (Ctrl+G) indicator and improved behavior<br />
-                          · Added scroll clipping and gradient fade to sidebar document list<br />
-                          · Cleaned up note formatting and fixed checkbox alignment
+                          · Removed the CodeMirror Markdown surface and collapsed to a single TipTap v3 editor (Markdown remains the on-disk format)<br />
+                          · Switched image attachments from base64 to per-note .assets/&lt;noteId&gt;/&lt;hash&gt;.&lt;ext&gt; relative paths, with one-time auto-migration of existing base64 images on startup<br />
+                          · Reworked image behavior: blank-space clicks select the same-line image, ESC / sidebar / title bar clicks clear focus, caret hides during selection, rounded outline restored on session restore, more generous vertical margin<br />
+                          · Cleaned up the code block title bar alignment, spacing, and other text editor polish<br />
+                          · Split Mermaid CSS rules out of tiptap-editor.css into a dedicated mermaid-theme.css<br />
+                          · Sidebar ordering: selecting a document no longer bumps it to the top of the list<br />
+                          · Auto-derived titles now strip task list checkbox markers ([ ], [x])<br />
+                          · Per-document undo history isolation and hardened cross-window sync routing<br />
+                          · Replaced the go-to-line toolbar icon with a more intuitive one<br />
+                          · Aligned sidebar top icons with the toolbar and inherit the current group on new notes
                         </>
                       )}
                     </div>
