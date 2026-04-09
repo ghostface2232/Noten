@@ -519,7 +519,9 @@ function stripBlockMarkers(line: string): string {
     .replace(/^#+\s*/, "")
     .replace(/^(?:>\s*)+/, "")
     .replace(/^[-*+]\s+/, "")
-    .replace(/^\d+\.\s+/, "");
+    .replace(/^\d+\.\s+/, "")
+    // task list checkbox: [ ], [x], [X] (with optional trailing whitespace)
+    .replace(/^\[[ xX]\]\s*/, "");
 }
 
 export function deriveTitle(content: string): string {

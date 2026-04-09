@@ -135,6 +135,15 @@ export function useFileSystem(
       return { docs: baseDocs, activeDocId: null as string | null, activeIndex: currentActiveIndex };
     }
 
+    // Only capture editor state into the snapshot when the user has actually
+    // dirtied the doc. Otherwise, parse/serialize round-tripping in Tiptap can
+    // make `editor.getMarkdown()` differ from the on-disk text in trivial ways
+    // (trailing newlines, escape normalization, etc.), which would otherwise
+    // stamp `updatedAt: Date.now()` on every doc switch and reorder the sidebar.
+    if (!state.isDirty) {
+      return { docs: baseDocs, activeDocId: activeDoc.id, activeIndex: currentActiveIndex };
+    }
+
     const content = getCurrentMarkdown(tiptapRef);
     const fileName = activeDoc.customName
       ? activeDoc.fileName
