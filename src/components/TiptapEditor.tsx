@@ -9,7 +9,8 @@ import {
 } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { Extension, type Editor } from "@tiptap/core";
-import { Plugin, PluginKey, NodeSelection, TextSelection, EditorState } from "@tiptap/pm/state";
+import { Plugin, PluginKey, NodeSelection, TextSelection, EditorState, Selection } from "@tiptap/pm/state";
+import { GapCursor } from "@tiptap/pm/gapcursor";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import { closeHistory } from "@tiptap/pm/history";
 import StarterKit from "@tiptap/starter-kit";
@@ -190,6 +191,77 @@ function isPointInExpandedRect(x: number, y: number, rect: DOMRect, expandBy: nu
     && y >= rect.top - expandBy
     && y <= rect.bottom + expandBy
   );
+}
+
+function isImageNodeSelection(selection: unknown): selection is NodeSelection {
+  return selection instanceof NodeSelection && selection.node.type.name === "image";
+}
+
+function createSelectionAfterImage(editor: Editor, imageAfterPos: number): Selection {
+  const resolved = editor.state.doc.resolve(imageAfterPos);
+  if (resolved.parent.inlineContent) {
+    return TextSelection.create(editor.state.doc, imageAfterPos);
+  }
+
+  const gapCursorCtor = GapCursor as unknown as {
+    findFrom?: ($pos: unknown, dir: number, mustMove?: boolean) => Selection | null;
+    valid?: ($pos: unknown) => boolean;
+    new ($pos: unknown): Selection;
+  };
+
+  if (typeof gapCursorCtor.findFrom === "function") {
+    const found = gapCursorCtor.findFrom(resolved, 1, false);
+    if (found) return found;
+  }
+
+  if (typeof gapCursorCtor.valid === "function" && gapCursorCtor.valid(resolved)) {
+    return new GapCursor(resolved);
+  }
+
+  return TextSelection.near(resolved, -1);
+}
+
+function moveSelectionAfterSelectedImage(editor: Editor): boolean {
+  const { state, view } = editor;
+  const { selection } = state;
+  if (!isImageNodeSelection(selection)) return false;
+
+  const imageAfterPos = Math.min(selection.from + selection.node.nodeSize, state.doc.content.size);
+  const nextSelection = createSelectionAfterImage(editor, imageAfterPos);
+  view.dispatch(state.tr.setSelection(nextSelection));
+  return true;
+}
+
+function moveSelectionAfterAdjacentImageAtCoords(editor: Editor, x: number, y: number): boolean {
+  const targetPos = editor.view.posAtCoords({ left: x, top: y })?.pos;
+  if (typeof targetPos !== "number") return false;
+
+  const resolved = editor.state.doc.resolve(targetPos);
+  const imageBefore = resolved.nodeBefore?.type.name === "image" ? resolved.nodeBefore : null;
+  const imageAfter = resolved.nodeAfter?.type.name === "image" ? resolved.nodeAfter : null;
+
+  let imagePos: number | null = null;
+  let imageNodeSize = 0;
+  if (imageBefore) {
+    imageNodeSize = imageBefore.nodeSize;
+    imagePos = targetPos - imageNodeSize;
+  } else if (imageAfter) {
+    imageNodeSize = imageAfter.nodeSize;
+    imagePos = targetPos;
+  } else {
+    return false;
+  }
+
+  const imageDom = editor.view.nodeDOM(imagePos) as HTMLElement | null;
+  if (!imageDom) return false;
+  const rect = imageDom.getBoundingClientRect();
+  const clickedInsideImage = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+  if (clickedInsideImage) return false;
+
+  const cursorPos = Math.min(imagePos + imageNodeSize, editor.state.doc.content.size);
+  const nextSelection = createSelectionAfterImage(editor, cursorPos);
+  editor.view.dispatch(editor.state.tr.setSelection(nextSelection));
+  return true;
 }
 
 const MarkdownPaste = Extension.create({
@@ -703,6 +775,11 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       const currentKey = currentSessionKeyRef.current;
       const sameSession = !!nextKey && nextKey === currentKey;
 
+      // NodeView image source resolution needs current document context
+      // before state/content replacement to avoid initial broken images.
+      editor.storage.documentContext.noteId = noteId;
+      editor.storage.documentContext.filePath = filePath;
+
       if (!sameSession) {
         storeCurrentDocumentSession();
       }
@@ -747,8 +824,6 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         editor.storage.readonlyGuard.readonly = wasReadonly;
       }
 
-      editor.storage.documentContext.noteId = noteId;
-      editor.storage.documentContext.filePath = filePath;
       dirtyRef.current = false;
 
       const resolvedKey = nextKey ?? buildDocumentSessionKey(noteId, filePath);
@@ -1063,6 +1138,30 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       return () => window.removeEventListener("mousedown", handleMouseDown, true);
     }, [closeLinkHoverPopover, linkHoverPopoverOpen]);
 
+    useEffect(() => {
+      if (!editor) return;
+
+      const handleKeyDown = (event: KeyboardEvent) => {
+        if (event.key !== "Escape") return;
+        if (!editor.isFocused) return;
+        if (!moveSelectionAfterSelectedImage(editor)) return;
+        event.preventDefault();
+      };
+
+      const handleMouseDown = (event: MouseEvent) => {
+        const target = event.target as Node | null;
+        if (target && editor.view.dom.contains(target)) return;
+        moveSelectionAfterSelectedImage(editor);
+      };
+
+      window.addEventListener("keydown", handleKeyDown, true);
+      window.addEventListener("mousedown", handleMouseDown, true);
+      return () => {
+        window.removeEventListener("keydown", handleKeyDown, true);
+        window.removeEventListener("mousedown", handleMouseDown, true);
+      };
+    }, [editor]);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -1114,12 +1213,22 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           if (!editor || event.button !== 0) return;
           const target = event.target as HTMLElement | null;
           const isLinkClick = !!target?.closest("a");
+          const isImageDirectClick = !!target?.closest("img") || !!target?.closest("[data-corner]");
 
           if (!isLinkClick) {
             onChromeActivate?.();
           }
 
           if (!editable || isLinkClick) return;
+          if (!isImageDirectClick) {
+            const moved = moveSelectionAfterAdjacentImageAtCoords(editor, event.clientX, event.clientY);
+            if (moved) {
+              event.preventDefault();
+              event.stopPropagation();
+              editor.view.focus();
+              return;
+            }
+          }
           if (!isBelowTiptapDocumentEnd(editor, event.clientY)) return;
           event.preventDefault();
           moveTiptapSelectionToEnd(editor);
