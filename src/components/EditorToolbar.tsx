@@ -193,6 +193,7 @@ export function EditorToolbar({
    * 레이아웃 확정 후 barHeight만 state로 전달한다.
    */
   const BREAKPOINT = 740;
+  const TWO_ROW_LEFT_COMPENSATION = 36; // 46px(collapsed grid left) - 10px(default grid left)
 
   const applyLayout = useCallback((t: HTMLElement, twoRows: boolean) => {
     if (twoRows) {
@@ -200,13 +201,17 @@ export function EditorToolbar({
       t.style.gridRow = "2";
       t.style.justifySelf = "stretch";
       t.style.justifyContent = "space-between";
+      t.style.marginLeft = sidebarOpen ? "" : `-${TWO_ROW_LEFT_COMPENSATION}px`;
+      t.style.width = sidebarOpen ? "" : `calc(100% + ${TWO_ROW_LEFT_COMPENSATION}px)`;
     } else {
       t.style.gridColumn = "2";
       t.style.gridRow = "1";
       t.style.justifySelf = "center";
       t.style.justifyContent = "";
+      t.style.marginLeft = "";
+      t.style.width = "";
     }
-  }, []);
+  }, [sidebarOpen]);
 
   const measure = useCallback(() => {
     const g = gridRef.current;
