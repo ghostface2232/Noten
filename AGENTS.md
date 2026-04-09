@@ -102,9 +102,32 @@ Do not use old community-package APIs such as `editor.storage.markdown.getMarkdo
 
 ## Local Dev Workflow
 
-- Use `npm run tauri:dev` for normal local development. It runs `scripts/prepare-helper.ps1`, prepares `src-tauri/resources/maintenance-helper.exe`, and then starts `tauri dev`.
-- Use `scripts/prepare-helper.ps1 -Release` only when you need a release-built helper without running the full release pipeline.
-- Use `scripts/build-release.ps1` only for the full Windows release flow (helper, Tauri bundle, NSIS payload, bootstrapper, final setup exe).
+- `npm run tauri:dev` for normal development. It runs `scripts/prepare-helper.ps1` to prepare `src-tauri/resources/maintenance-helper.exe`, then starts `tauri dev`.
+- `scripts/prepare-helper.ps1 -Release` builds only a release-mode helper, without bundling.
+- `scripts/build-release.ps1` is a **local smoke test only** — does not sign and is not what ships. It also fails at the Tauri step without `TAURI_SIGNING_PRIVATE_KEY` in env, because `bundle.createUpdaterArtifacts` is on. Real releases go through CI.
+
+## Release Process
+
+Releases are fully automated by `.github/workflows/release.yml`, triggered by pushing any `v*` tag. Do not build shippable installers locally.
+
+To cut a release:
+
+1. Bump the version everywhere it appears: `package.json`, `package-lock.json` (root + root package entry), `src-tauri/tauri.conf.json`, the four `Cargo.toml` (`src-tauri`, `bootstrapper`, `maintenance-helper`, `noten-splash-ui`), our entries in `Cargo.lock` + `src-tauri/Cargo.lock`, and the `v…` label in `SettingsModal.tsx`.
+2. Rewrite the SettingsModal changelog block (Korean + English).
+3. Commit, `git push origin main`, then `git tag -a vX.Y.Z <commit> -m …` and `git push origin vX.Y.Z`.
+
+CI then builds the helper, runs `tauri-action@v0` (signs updater artifacts using `TAURI_SIGNING_PRIVATE_KEY`/`_PASSWORD` secrets and creates a **draft** release with the NSIS bundle, `.sig`, and `latest.json`), copies the NSIS into `bootstrapper/assets/nsis-payload.exe`, builds `noten-setup.exe`, Authenticode-signs it via `signtool` with `CODE_SIGN_PFX`/`_PASSWORD`, and uploads the signed bootstrapper to the same draft release.
+
+The draft must be reviewed and **manually published** on GitHub — only then does the in-app updater see it.
+
+Required secrets: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `CODE_SIGN_PFX`, `CODE_SIGN_PFX_PASSWORD`. The Tauri pubkey in `tauri.conf.json` must stay paired with the private key — rotating one without the other breaks updates for existing installs.
+
+## Updater
+
+- Uses `tauri-plugin-updater`, configured in `tauri.conf.json` under `plugins.updater`.
+- Endpoint is `https://github.com/<org>/Noten/releases/latest/download/latest.json` — GitHub resolves `latest` to the most recent **published** release, so draft releases are invisible. Publishing the draft is what actually rolls out an update.
+- `installMode: quiet` on Windows: download in background, install on next launch via `Update.installAndRestart()` from the SettingsModal "Check for updates" UI.
+- Two installers exist on each release: `noten-setup.exe` (the bootstrapper, what fresh-install downloads should link to) and `Noten_X.Y.Z_x64-setup.exe` (the raw NSIS bundle, present only because `latest.json` points at it as the update payload).
 
 ## Tiptap v3 Import Rules
 
