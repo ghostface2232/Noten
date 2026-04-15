@@ -1,4 +1,4 @@
-import { mkdir, readDir, copyFile, readTextFile, writeTextFile, exists } from "@tauri-apps/plugin-fs";
+import { mkdir, readDir, copyFile, readTextFile, writeTextFile, exists, remove } from "@tauri-apps/plugin-fs";
 
 interface ManifestNote {
   id: string;
@@ -34,6 +34,48 @@ export interface MigrationResult {
 
 function normalizeSep(dir: string): string {
   return dir.endsWith("/") || dir.endsWith("\\") ? dir : `${dir}/`;
+}
+
+async function copyDirRecursive(srcDir: string, destDir: string): Promise<void> {
+  let entries;
+  try {
+    entries = await readDir(srcDir);
+  } catch {
+    // Source directory doesn't exist — nothing to copy
+    return;
+  }
+  await mkdir(destDir, { recursive: true });
+  const srcBase = normalizeSep(srcDir);
+  const destBase = normalizeSep(destDir);
+  for (const entry of entries) {
+    if (!entry.name) continue;
+    const srcPath = `${srcBase}${entry.name}`;
+    const destPath = `${destBase}${entry.name}`;
+    if (entry.isDirectory) {
+      await copyDirRecursive(srcPath, destPath);
+    } else if (entry.isFile) {
+      await copyFile(srcPath, destPath);
+    }
+  }
+}
+
+async function clearDirContents(dir: string): Promise<void> {
+  let entries;
+  try {
+    entries = await readDir(dir);
+  } catch {
+    return;
+  }
+  const base = normalizeSep(dir);
+  for (const entry of entries) {
+    if (!entry.name) continue;
+    const target = `${base}${entry.name}`;
+    try {
+      await remove(target, { recursive: true });
+    } catch {
+      // Best-effort cleanup — ignore locked / in-use files
+    }
+  }
 }
 
 function getFileName(filePath: string): string {
@@ -147,9 +189,18 @@ export async function migrateNotesDir(
       }
     } catch { /* .trash directory may not exist — skip */ }
 
+    // Copy .assets directory (images) recursively
+    const fromAssets = `${normalizeSep(fromDir)}.assets`;
+    const toAssets = `${normalizeSep(toDir)}.assets`;
+    try {
+      await copyDirRecursive(fromAssets, toAssets);
+    } catch { /* .assets may not exist — skip */ }
+
     // Handle manifest
     const sourceManifest = await readManifestFile(fromDir);
     if (!sourceManifest) {
+      // No manifest in source — still clear whatever we just copied over
+      await clearDirContents(fromDir);
       return { success: true };
     }
 
@@ -175,6 +226,11 @@ export async function migrateNotesDir(
         JSON.stringify(rewritten, null, 2),
       );
     }
+
+    // Clear contents of source directory (but keep the folder itself),
+    // so the old AppData notes folder remains available for future reset
+    // without leaving stale copies behind.
+    await clearDirContents(fromDir);
 
     return { success: true };
   } catch (err) {
