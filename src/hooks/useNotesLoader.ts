@@ -136,13 +136,11 @@ export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<Tr
   const now = Date.now();
   const kept: TrashedNote[] = [];
   let notesDir: string | null = null;
+  try { notesDir = await getNotesDir(); } catch { /* ignore */ }
 
   for (const note of trashedNotes) {
     if (now - note.trashedAt > TRASH_RETENTION_MS) {
       try { await remove(note.trashFilePath); } catch { /* file may already be gone */ }
-      if (notesDir === null) {
-        try { notesDir = await getNotesDir(); } catch { notesDir = ""; }
-      }
       if (notesDir) await removeNoteAssetDir(notesDir, note.id);
     } else {
       kept.push(note);

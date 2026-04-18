@@ -215,9 +215,6 @@ export function useFileWatcher(
       // the old index silently re-targets a different doc while Tiptap still
       // holds the stale session. Key off id instead (matches doc-deleted path).
       const prevActiveId = getRoutedActiveDocId();
-      const prevActiveIdx = prevActiveId
-        ? docsRef.current.findIndex((d) => d.id === prevActiveId)
-        : -1;
       const activeStillExists = prevActiveId !== null
         && reconciledDocs.some((d) => d.id === prevActiveId);
 
@@ -237,6 +234,9 @@ export function useFileWatcher(
       } else {
         // Active doc was deleted externally — pick the replacement at the same
         // position (clamped) and switch the editor over, mirroring doc-deleted.
+        const prevActiveIdx = prevActiveId
+          ? docsRef.current.findIndex((d) => d.id === prevActiveId)
+          : -1;
         const replacementIdx = Math.min(
           Math.max(prevActiveIdx, 0),
           reconciledDocs.length - 1,
