@@ -87,10 +87,9 @@ export function useFileWatcher(
 
       const currentDocs = docsRef.current;
 
-      // Sync groups
-      if (manifest.groups) {
-        setGroups(manifest.groups);
-      }
+      // Sync groups — manifest is authoritative; `undefined` means "no groups"
+      // (saveManifest omits the field when groups is empty), so clear unconditionally.
+      setGroups(manifest.groups ?? []);
 
       // Discover new notes from manifest that we don't have
       const currentIds = new Set(currentDocs.map((d) => d.id));
@@ -211,17 +210,55 @@ export function useFileWatcher(
     );
 
     if (changed) {
+      // Capture the previously-active doc by id *before* committing new state.
+      // activeIndex is positional, so if the active file was externally removed,
+      // the old index silently re-targets a different doc while Tiptap still
+      // holds the stale session. Key off id instead (matches doc-deleted path).
+      const prevActiveId = getRoutedActiveDocId();
+      const prevActiveIdx = prevActiveId
+        ? docsRef.current.findIndex((d) => d.id === prevActiveId)
+        : -1;
+      const activeStillExists = prevActiveId !== null
+        && reconciledDocs.some((d) => d.id === prevActiveId);
+
       setDocs(reconciledDocs);
       setGroups(reconciledGroups);
 
-      // Adjust activeIndex if it's now out of bounds
-      if (activeIndexRef.current >= reconciledDocs.length) {
-        setActiveIndex(Math.max(0, reconciledDocs.length - 1));
+      let nextActiveId: string | null;
+
+      if (activeStillExists) {
+        nextActiveId = prevActiveId;
+        const newIdx = reconciledDocs.findIndex((d) => d.id === prevActiveId);
+        if (newIdx !== activeIndexRef.current) setActiveIndex(newIdx);
+      } else if (reconciledDocs.length === 0) {
+        nextActiveId = null;
+        setActiveIndex(0);
+        if (prevActiveId) tiptapRef.current?.invalidateDocumentSession?.(prevActiveId, null);
+      } else {
+        // Active doc was deleted externally — pick the replacement at the same
+        // position (clamped) and switch the editor over, mirroring doc-deleted.
+        const replacementIdx = Math.min(
+          Math.max(prevActiveIdx, 0),
+          reconciledDocs.length - 1,
+        );
+        const replacement = reconciledDocs[replacementIdx];
+        nextActiveId = replacement.id;
+        setActiveIndex(replacementIdx);
+
+        if (prevActiveId) tiptapRef.current?.invalidateDocumentSession?.(prevActiveId, null);
+        tiptapRef.current?.openDocument?.({
+          noteId: replacement.id,
+          filePath: replacement.filePath,
+          markdown: replacement.content,
+          reason: "file-watch",
+        });
+        onActiveDocChangedRef.current?.({
+          filePath: replacement.filePath,
+          content: replacement.content,
+        });
       }
 
-      // Persist reconciled state
-      const activeDoc = reconciledDocs[activeIndexRef.current];
-      await saveManifest(reconciledDocs, activeDoc?.id ?? null, reconciledGroups).catch(() => {});
+      await saveManifest(reconciledDocs, nextActiveId, reconciledGroups).catch(() => {});
     }
   }, [getRoutedActiveDocId, locale, setDocs, setGroups, setActiveIndex, tiptapRef]);
 
