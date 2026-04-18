@@ -1,74 +1,11 @@
 import { useRef, useCallback } from "react";
 import { flushSync } from "react-dom";
 import type { NoteGroup } from "./useNotesLoader";
+import { captureSidebarRowTops, playSidebarRowsFLIP } from "../utils/sidebarFlip";
 
 const DRAG_THRESHOLD = 5;
 const SCROLL_EDGE = 40;
 const SCROLL_SPEED = 8;
-const REORDER_ANIM_MS = 280;
-const REORDER_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
-
-// Capture screen-space top for every row rendered in the groups section —
-// both group headers and the expanded notes under them. Used by the FLIP
-// pass on commit: subtracting old-top from new-top yields the delta each
-// row needs to slide through as it settles into its new position.
-function captureGroupsSectionRowTops(): Map<string, number> {
-  const map = new Map<string, number>();
-  const section = document.querySelector<HTMLElement>("[data-groups-section]");
-  if (!section) return map;
-  section.querySelectorAll<HTMLElement>("[data-group-item][data-group-id]").forEach((el) => {
-    const id = el.dataset.groupId;
-    if (id) map.set(`g:${id}`, el.getBoundingClientRect().top);
-  });
-  section.querySelectorAll<HTMLElement>("[data-doc-item][data-note-id]").forEach((el) => {
-    const id = el.dataset.noteId;
-    if (id) map.set(`n:${id}`, el.getBoundingClientRect().top);
-  });
-  return map;
-}
-
-function playReorderFLIP(oldTops: Map<string, number>) {
-  const newTops = captureGroupsSectionRowTops();
-  const targets: HTMLElement[] = [];
-
-  for (const [key, oldTop] of oldTops) {
-    const newTop = newTops.get(key);
-    if (newTop === undefined) continue;
-    const dy = oldTop - newTop;
-    if (Math.abs(dy) < 0.5) continue;
-
-    const [type, id] = [key.slice(0, 1), key.slice(2)];
-    const selector = type === "g"
-      ? `[data-group-item][data-group-id="${CSS.escape(id)}"]`
-      : `[data-doc-item][data-note-id="${CSS.escape(id)}"]`;
-    const el = document.querySelector<HTMLElement>(selector);
-    if (!el) continue;
-
-    // Place the element visually at its OLD position without a transition.
-    el.style.transition = "none";
-    el.style.transform = `translateY(${dy}px)`;
-    targets.push(el);
-  }
-
-  if (targets.length === 0) return;
-
-  // Flush the inverse transform into the browser before starting the glide.
-  // Reading offsetHeight forces a synchronous layout on each element.
-  for (const el of targets) void el.offsetHeight;
-
-  requestAnimationFrame(() => {
-    for (const el of targets) {
-      el.style.transition = `transform ${REORDER_ANIM_MS}ms ${REORDER_EASING}`;
-      el.style.transform = "";
-    }
-    window.setTimeout(() => {
-      for (const el of targets) {
-        el.style.transition = "";
-        el.style.transform = "";
-      }
-    }, REORDER_ANIM_MS + 40);
-  });
-}
 
 interface DragSession {
   sourceGroupId: string;
@@ -130,11 +67,14 @@ export function useSidebarGroupDrag(opts: UseSidebarGroupDragOptions) {
       // rows slide in/out of the gap left by the moved group.
       const fromIdx = s.sourceIndex;
       const toIdx = s.targetInsertIndex;
-      const oldTops = captureGroupsSectionRowTops();
+      // Restore source opacity before FLIP so the reordered header doesn't
+      // flash from dimmed to full on the first post-commit paint.
+      if (s.dimmedEl) s.dimmedEl.style.opacity = "";
+      const oldTops = captureSidebarRowTops();
       flushSync(() => {
         o.onReorderGroups(fromIdx, toIdx);
       });
-      playReorderFLIP(oldTops);
+      playSidebarRowsFLIP(oldTops);
     }
     cleanup();
   }, [cleanup]);
