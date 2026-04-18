@@ -17,6 +17,7 @@ import type { MarkdownState } from "./useMarkdownState";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
+import { removeNoteAssetDir } from "../utils/imageAssetUtils";
 import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsUpdated, emitTrashUpdated } from "./useWindowSync";
 import { markOwnWrite } from "./ownWriteTracker";
 import { t } from "../i18n";
@@ -686,6 +687,10 @@ export function useFileSystem(
     if (!trashed) return;
 
     try { await remove(trashed.trashFilePath); } catch { /* already gone */ }
+    try {
+      const notesDir = await getNotesDir();
+      await removeNoteAssetDir(notesDir, trashed.id);
+    } catch { /* ignore */ }
 
     if (setTrashedNotes) {
       setTrashedNotes((prev) => prev.filter((n) => n.id !== trashedNoteId));
@@ -698,8 +703,12 @@ export function useFileSystem(
   }, [setTrashedNotes, tiptapRef]);
 
   const emptyTrash = useCallback(async () => {
-    for (const trashed of trashedNotesRef.current ?? []) {
+    const trashedSnapshot = trashedNotesRef.current ?? [];
+    let notesDir: string | null = null;
+    try { notesDir = await getNotesDir(); } catch { /* ignore */ }
+    for (const trashed of trashedSnapshot) {
       try { await remove(trashed.trashFilePath); } catch { /* ignore */ }
+      if (notesDir) await removeNoteAssetDir(notesDir, trashed.id);
     }
 
     if (setTrashedNotes) {

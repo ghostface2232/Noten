@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
+import { mkdir, readFile, remove, writeFile } from "@tauri-apps/plugin-fs";
 import { bytesToDataUrl, dataUrlToUint8Array, mimeFromDataUrl, mimeFromExt, mimeToExt } from "./imageUtils";
 
 export interface DocumentImageContext {
@@ -70,6 +70,17 @@ export function getNoteIdFromFilePath(filePath: string | null): string | null {
 
 export function buildAssetRelativePath(noteId: string, filename: string): string {
   return `.assets/${noteId}/${filename}`;
+}
+
+export async function removeNoteAssetDir(notesDir: string, noteId: string): Promise<void> {
+  if (!notesDir || !noteId) return;
+  const sep = notesDir.endsWith("/") || notesDir.endsWith("\\") ? "" : "/";
+  const dir = `${notesDir}${sep}.assets/${noteId}`;
+  try {
+    await remove(dir, { recursive: true });
+  } catch {
+    // Directory may not exist (note had no images) — ignore
+  }
 }
 
 export function resolveAssetAbsolutePath(src: string, noteFilePath: string | null): string | null {

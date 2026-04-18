@@ -6,6 +6,7 @@ import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { getFileTimestamps } from "../utils/fileTimestamps";
 import { migrateDataUrlImagesToAssets } from "../utils/migrateImageAssets";
+import { removeNoteAssetDir } from "../utils/imageAssetUtils";
 
 export interface NoteDoc {
   id: string;
@@ -134,10 +135,15 @@ const TRASH_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<TrashedNote[]> {
   const now = Date.now();
   const kept: TrashedNote[] = [];
+  let notesDir: string | null = null;
 
   for (const note of trashedNotes) {
     if (now - note.trashedAt > TRASH_RETENTION_MS) {
       try { await remove(note.trashFilePath); } catch { /* file may already be gone */ }
+      if (notesDir === null) {
+        try { notesDir = await getNotesDir(); } catch { notesDir = ""; }
+      }
+      if (notesDir) await removeNoteAssetDir(notesDir, note.id);
     } else {
       kept.push(note);
     }
