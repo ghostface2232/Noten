@@ -16,6 +16,7 @@ import type { NoteDoc, NoteGroup } from "../hooks/useNotesLoader";
 import { stripMarkdownContent } from "../hooks/useNotesLoader";
 import type { Locale, NotesSortOrder } from "../hooks/useSettings";
 import { useSidebarDrag } from "../hooks/useSidebarDrag";
+import { useSidebarGroupDrag } from "../hooks/useSidebarGroupDrag";
 import { useSidebarAnimations } from "../hooks/useSidebarAnimations";
 import { useStyles } from "./Sidebar.styles";
 import { SidebarContextMenus, FolderSubtractRegular } from "./SidebarContextMenus";
@@ -95,6 +96,7 @@ interface SidebarProps {
   onRemoveNoteFromGroup: (noteId: string) => void;
   onMoveNotesToGroup: (noteIds: string[], groupId: string) => void;
   onToggleGroupCollapsed: (groupId: string) => void;
+  onReorderGroups: (fromIndex: number, insertionIndex: number) => void;
   onDeleteNotes: (indices: number[]) => void;
   /* ─── Select mode (controlled from App) ─── */
   selectMode: boolean;
@@ -130,6 +132,7 @@ export function Sidebar({
   onRemoveNoteFromGroup,
   onMoveNotesToGroup,
   onToggleGroupCollapsed,
+  onReorderGroups,
   onDeleteNotes,
   selectMode,
   onSelectModeChange,
@@ -174,6 +177,15 @@ export function Sidebar({
     onAddNoteToGroup,
     onMoveNotesToGroup,
     onToggleGroupCollapsed,
+  });
+
+  const { handleGroupDragPointerDown, isDraggingGroup } = useSidebarGroupDrag({
+    groups,
+    searchActive: !!sidebarSearchQuery,
+    editingIndex,
+    editingGroupId,
+    sidebarBodyRef,
+    onReorderGroups,
   });
 
   // Focus sidebar search input and scroll to top when opened
@@ -643,15 +655,22 @@ export function Sidebar({
           newGroupIds.has(group.id) && styles.docItemNew,
           isRemoving && styles.groupCollapseOut,
         )}
+        onPointerDown={(e) => handleGroupDragPointerDown(e, group.id)}
         onMouseEnter={() => setHoveredGroupId(group.id)}
         onMouseLeave={() => setHoveredGroupId(null)}
-        onContextMenu={(e) => handleGroupContextMenu(group.id, e)}
+        onContextMenu={(e) => {
+          if (isDraggingGroup.current) { e.preventDefault(); return; }
+          handleGroupContextMenu(group.id, e);
+        }}
       >
         <Button
           appearance="subtle"
           className={styles.groupHeader}
           size="small"
-          onClick={() => { if (!isEditing) onToggleGroupCollapsed(group.id); }}
+          onClick={() => {
+            if (isDraggingGroup.current) return;
+            if (!isEditing) onToggleGroupCollapsed(group.id);
+          }}
         >
           <span className={mergeClasses(
             styles.groupChevron,
@@ -773,7 +792,10 @@ export function Sidebar({
           <>
             {/* Groups section */}
             {!isSearching && (
-              <div className={mergeClasses(styles.groupsSection, groups.length === 0 && styles.groupsSectionHidden)}>
+              <div
+                data-groups-section
+                className={mergeClasses(styles.groupsSection, groups.length === 0 && styles.groupsSectionHidden)}
+              >
                 <div className={styles.groupsSectionInner}>
                   <span className={styles.sectionLabel}>{i("sidebar.groupsLabel")}</span>
                   {groupItems.map((item) => {

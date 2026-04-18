@@ -154,6 +154,16 @@ body {
   border-radius: 6px;
 }
 
+.sidebar-group-drop-indicator {
+  position: fixed;
+  height: 2px;
+  background: #0078d4;
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 10000;
+  transform: translateY(-1px);
+}
+
 
 /* ─── 사이드바 문서 애니메이션 ─── */
 @keyframes docSlideIn {

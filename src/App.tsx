@@ -687,6 +687,7 @@ function App() {
               onRemoveNoteFromGroup={noteGroups.removeNoteFromGroup}
               onMoveNotesToGroup={noteGroups.moveNotesToGroup}
               onToggleGroupCollapsed={noteGroups.toggleGroupCollapsed}
+              onReorderGroups={noteGroups.reorderGroups}
               onDeleteNotes={handleDeleteNotes}
               selectMode={selectMode}
               onSelectModeChange={setSelectMode}

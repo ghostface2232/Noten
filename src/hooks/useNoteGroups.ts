@@ -151,6 +151,21 @@ export function useNoteGroups(
     [groups, persist],
   );
 
+  // `insertionIndex` uses "gap" semantics: 0 = before first group, groups.length = after last.
+  // No-op when the gap is the source's current position (equal to fromIndex or fromIndex + 1).
+  const reorderGroups = useCallback(
+    (fromIndex: number, insertionIndex: number) => {
+      if (fromIndex < 0 || fromIndex >= groups.length) return;
+      if (insertionIndex === fromIndex || insertionIndex === fromIndex + 1) return;
+      const next = [...groups];
+      const [moved] = next.splice(fromIndex, 1);
+      const insertAt = insertionIndex > fromIndex ? insertionIndex - 1 : insertionIndex;
+      next.splice(insertAt, 0, moved);
+      persist(next);
+    },
+    [groups, persist],
+  );
+
   const createGroupFromSelection = useCallback(
     (noteIds: string[], name: string) => {
       return createGroup(name, noteIds);
@@ -191,6 +206,7 @@ export function useNoteGroups(
     reorderNoteInGroup,
     insertNoteInGroup,
     toggleGroupCollapsed,
+    reorderGroups,
     createGroupFromSelection,
     cleanupDeletedNote,
     getGroupForNote,
