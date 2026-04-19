@@ -698,14 +698,16 @@ export function useFileSystem(
       return { ...entry, content: updated, updatedAt: now };
     });
 
-    for (const write of diskWrites) {
-      try {
-        markOwnWrite(write.filePath);
-        await writeTextFile(write.filePath, write.content);
-      } catch {
-        console.warn("Failed to rewrite wiki links in note:", write.filePath);
-      }
-    }
+    await Promise.all(
+      diskWrites.map(async (write) => {
+        try {
+          markOwnWrite(write.filePath);
+          await writeTextFile(write.filePath, write.content);
+        } catch {
+          console.warn("Failed to rewrite wiki links in note:", write.filePath);
+        }
+      }),
+    );
 
     if (activeRewrittenContent !== null) {
       const activeDoc = liveDocs[currentActiveIndex];

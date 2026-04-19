@@ -125,6 +125,11 @@ export function useWindowSync(
           setDocs((prev) => {
             const idx = prev.findIndex((d) => d.id === docId);
             if (idx < 0) return prev;
+            // Mirror useFileWatcher's guard: a locally-dirty doc means the
+            // user is actively editing here, so refuse to overwrite content
+            // and keep the dirty flag. Last-write-wins on the disk side
+            // (our own autosave) resolves conflicts, not remote events.
+            if (prev[idx].isDirty) return prev;
             const updated = [...prev];
             updated[idx] = { ...updated[idx], content, fileName, updatedAt, isDirty: false };
 
