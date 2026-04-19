@@ -44,6 +44,7 @@ import TextContextMenu, {
 import { SearchHighlight } from "../extensions/SearchHighlight";
 import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
+import { isSafeLinkHref, normalizeLinkHref } from "../utils/linkHref";
 import "../styles/tiptap-editor.css";
 import "../styles/mermaid-theme.css";
 import "../styles/wiki-link.css";
@@ -188,17 +189,6 @@ function getSelectionRect(editor: Editor, range: TextRange): DOMRect {
     const rect = editor.view.dom.getBoundingClientRect();
     return new DOMRect(rect.left, rect.top, Math.max(1, rect.width), Math.max(1, rect.height));
   }
-}
-
-function normalizeLinkHref(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) || trimmed.startsWith("/") || trimmed.startsWith("#")) {
-    return trimmed;
-  }
-
-  return `https://${trimmed}`;
 }
 
 function isPointInExpandedRect(x: number, y: number, rect: DOMRect, expandBy: number): boolean {
@@ -853,6 +843,11 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           linkOnPaste: true,
           openOnClick: false,
           defaultProtocol: "https",
+          // Intersect Tiptap's default validator (handles whitespace/edge
+          // cases) with our scheme allow-list so every write path — popover
+          // save, paste, autolink, render — honours the same rules.
+          isAllowedUri: (url, { defaultValidate }) =>
+            defaultValidate(url) && isSafeLinkHref(url),
         }),
         MermaidCodeBlock.configure({ lowlight }),
         Image.configure({ allowBase64: true }).extend({
