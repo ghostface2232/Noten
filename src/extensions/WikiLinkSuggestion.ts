@@ -56,6 +56,9 @@ function updatePosition(popup: HTMLDivElement, props: SuggestionProps) {
 function findWikiMatch({ $position }: { $position: ResolvedPos }) {
   const nodeBefore = $position.nodeBefore;
   if (!nodeBefore?.isText || !nodeBefore.text) return null;
+  if (nodeBefore.marks.some((mark) => mark.type.name === "wikiLink")) {
+    return null;
+  }
 
   const text = nodeBefore.text;
   const lastOpen = text.lastIndexOf(TRIGGER);
@@ -151,9 +154,8 @@ const WikiLinkSuggestion = Extension.create({
             if (trailing === "]]") to += 2;
           }
 
-          const text = `[[${title}]]`;
           const mark = markType.create({ target: title });
-          const node = editor.schema.text(text, [mark]);
+          const node = editor.schema.text(title, [mark]);
 
           const { tr } = state;
           tr.replaceRangeWith(range.from, to, node);

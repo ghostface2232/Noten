@@ -6,6 +6,8 @@ import type {
   MarkdownToken,
 } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import type { EditorState } from "@tiptap/pm/state";
+import type { Mark as ProseMirrorMark } from "@tiptap/pm/model";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { NoteDoc } from "../hooks/useNotesLoader";
 import type { Locale } from "../hooks/useSettings";
@@ -27,6 +29,11 @@ export interface WikiLinkAttributes {
 
 const WIKI_LINK_DECORATION_KEY = new PluginKey("wikiLinkDecorations");
 
+interface CompleteWikiLinkRun {
+  from: number;
+  to: number;
+}
+
 function normalizeTitle(value: string): string {
   return value.normalize("NFC").trim().toLowerCase();
 }
@@ -35,6 +42,40 @@ export function findDocByTitle(docs: NoteDoc[], title: string): NoteDoc | null {
   const needle = normalizeTitle(title);
   if (!needle) return null;
   return docs.find((doc) => normalizeTitle(doc.fileName) === needle) ?? null;
+}
+
+function getWikiLinkMarkTarget(mark: ProseMirrorMark): string {
+  return String((mark.attrs as WikiLinkAttributes).target ?? "");
+}
+
+function isCompleteWikiLinkText(text: string, mark: ProseMirrorMark): boolean {
+  const target = getWikiLinkMarkTarget(mark);
+  return !!target && text === target;
+}
+
+function findCompleteWikiLinkBeforeOrInside(
+  state: EditorState,
+  pos: number,
+): CompleteWikiLinkRun | null {
+  let hit: CompleteWikiLinkRun | null = null;
+
+  state.doc.descendants((node, nodePos) => {
+    if (hit) return false;
+    if (!node.isText) return true;
+
+    const mark = node.marks.find((m) => m.type.name === "wikiLink");
+    if (!mark || !isCompleteWikiLinkText(node.text ?? "", mark)) return false;
+
+    const from = nodePos;
+    const to = nodePos + node.nodeSize;
+    if (pos > from && pos <= to) {
+      hit = { from, to };
+    }
+
+    return false;
+  });
+
+  return hit;
 }
 
 const WikiLink = Mark.create<unknown, WikiLinkStorage>({
@@ -110,22 +151,25 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
     helpers: MarkdownParseHelpers,
   ) {
     const target = String(token.target ?? "").trim();
-    const text = typeof token.raw === "string" ? token.raw : `[[${target}]]`;
     return helpers.applyMark(
       "wikiLink",
-      [helpers.createTextNode(text)],
+      [helpers.createTextNode(target)],
       { target },
     );
   },
 
-  // The text node already contains the full `[[Title]]`. The mark itself
-  // contributes no opening/closing syntax — the placeholder maps back to
-  // the text verbatim.
+  // The editor model stores only the visible title. Markdown serialization
+  // adds the wiki-link brackets so there are no hidden bracket positions for
+  // the caret to enter after a completed link.
   renderMarkdown(
     node: JSONContent,
     helpers: MarkdownRendererHelpers,
   ) {
-    return helpers.renderChildren(node);
+    const renderedText = helpers.renderChildren(node);
+    const target = String(
+      (node.attrs as WikiLinkAttributes | undefined)?.target ?? renderedText,
+    );
+    return target ? `[[${target}]]` : "";
   },
 
   addInputRules() {
@@ -139,14 +183,12 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
           const markType = state.schema.marks.wikiLink;
           if (!markType) return null;
 
-          // The input-rule handler runs *before* the typed character is
-          // inserted: `range.to` equals the pre-insertion cursor, so
-          // `range.from..range.to` only covers `[[Foo]` (the already-typed
-          // opening and body). Replace that entire range with a freshly
-          // marked `[[Foo]]` text node so the rule itself produces the
-          // closing bracket and the wikiLink mark spans the whole thing.
+          // The input-rule handler runs before the final `]` is inserted:
+          // `range.from..range.to` covers `[[Foo]`. Replace that source text
+          // with only the visible title; renderMarkdown restores `[[Foo]]`
+          // for the file format.
           const markedText = state.schema.text(
-            `[[${target}]]`,
+            target,
             [markType.create({ target })],
           );
           const { tr } = state;
@@ -214,32 +256,70 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
           },
         },
       }),
-      // Atomicity + content integrity for the wikiLink mark.
-      //
-      // With brackets hidden, the doc position "just before `]]`" and "just
-      // after `]]`" render at the same pixel. Arrow keys and clicks can
-      // drop the caret inside the mark, and subsequent typing would extend
-      // the link (PM's `inclusive: false` is unreliable once the mark sits
-      // in storedMarks). This plugin handles three things per transaction:
+      // Atomicity + content integrity for the wikiLink mark. Completed links
+      // store only the visible title, and the brackets exist only when
+      // serializing markdown. This keeps caret positions out of hidden
+      // syntax and makes the mark behave like a single link run.
       //
       //   1. storedMarks hygiene — never let wikiLink sit in storedMarks,
       //      so the next typed character can't inherit it regardless of
       //      where the caret sits.
       //
       //   2. Content integrity — when a wikiLink run's text still contains
-      //      the canonical `[[target]]` substring but has extra characters
-      //      at either end (a leaked extension), trim the mark back to
-      //      exactly that substring. We deliberately do NOT strip the mark
-      //      wholesale when the pattern is absent — that path would flash
-      //      the brackets visible while the user is mid-typing.
+      //      the canonical target substring but has extra characters at
+      //      either end, trim the mark back to exactly that substring.
       //
-      //   3. Caret atomicity — if the caret ends up *inside* a wikiLink
-      //      mark on a pure selection change (click / arrow key, not
-      //      typing), snap it out to the nearest boundary in the
-      //      direction the user was moving. Skip during typing so the
-      //      text the user just inserted isn't yanked under their caret.
+      //   3. Caret atomicity — if the caret ends up *inside* a complete
+      //      wikiLink mark, snap it out to the nearest boundary in the
+      //      direction the user was moving. Completed links only re-enter
+      //      bracket-edit mode through the explicit hover popover.
       new Plugin({
         key: new PluginKey("wikiLinkAtomicity"),
+        props: {
+          handleTextInput: (view, from, to, text) => {
+            const markType = view.state.schema.marks.wikiLink;
+            if (!markType || from !== to || !text) return false;
+
+            const run = findCompleteWikiLinkBeforeOrInside(view.state, from);
+            if (!run) return false;
+
+            const activeMarks = (
+              view.state.storedMarks ?? view.state.selection.$from.marks()
+            ).filter((mark) => mark.type !== markType);
+            const textNode = view.state.schema.text(text, activeMarks);
+            const tr = view.state.tr.insert(run.to, textNode);
+            tr.removeStoredMark(markType);
+            tr.setSelection(TextSelection.create(tr.doc, run.to + text.length));
+            view.dispatch(tr);
+            return true;
+          },
+          handleKeyDown: (view, event) => {
+            if (
+              event.key !== "Backspace"
+              || event.altKey
+              || event.ctrlKey
+              || event.metaKey
+              || !view.state.selection.empty
+            ) {
+              return false;
+            }
+
+            const markType = view.state.schema.marks.wikiLink;
+            if (!markType) return false;
+
+            const run = findCompleteWikiLinkBeforeOrInside(
+              view.state,
+              view.state.selection.from,
+            );
+            if (!run) return false;
+
+            event.preventDefault();
+            const tr = view.state.tr.delete(run.from, run.to);
+            tr.removeStoredMark(markType);
+            view.dispatch(tr);
+            return true;
+          },
+        },
         appendTransaction: (transactions, oldState, newState) => {
           const markType = newState.schema.marks.wikiLink;
           if (!markType) return null;
@@ -264,7 +344,7 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
             mutated = true;
           }
 
-          // (2) Trim leaked extensions on either side of `[[target]]`.
+          // (2) Trim leaked extensions on either side of the target text.
           if (docChanged) {
             newState.doc.descendants((node, pos) => {
               if (!node.isText) return;
@@ -275,16 +355,10 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
               const target = (mark.attrs as WikiLinkAttributes).target ?? "";
               if (!target) return;
 
-              const expected = `[[${target}]]`;
+              const expected = target;
               if (text === expected) return;
 
               const expectedIdx = text.indexOf(expected);
-              // Pattern entirely missing — the user has deleted into the
-              // link. Leave the mark alone here; the bracket-hide
-              // decoration only kicks in for well-formed `[[...]]` text,
-              // so brackets will naturally reappear and the user can keep
-              // editing. Stripping aggressively here caused benign
-              // end-of-link typing to flash into edit mode.
               if (expectedIdx < 0) return;
 
               const from = pos;
@@ -302,25 +376,26 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
             });
           }
 
-          // (3) Caret snap — only on non-typing selection changes so we
-          // don't yank the caret away from fresh input.
-          if (!docChanged && selChanged) {
+          // (3) Caret snap. Completed links can only be edited by converting
+          // the mark back to bracket text through the hover popover.
+          if (docChanged || selChanged) {
             const sel = newState.selection;
             if (sel.empty) {
-              const $caret = sel.$anchor;
-              const node = $caret.parent.maybeChild($caret.index());
-              const insideWiki = !!node?.isText
-                && $caret.textOffset > 0
-                && node.marks.some((m) => m.type.name === "wikiLink");
-
-              if (insideWiki && node) {
-                const caretPos = $caret.pos;
-                const markFrom = caretPos - $caret.textOffset;
-                const markTo = markFrom + node.nodeSize;
-
+              const caretPos = sel.$anchor.pos;
+              const run = findCompleteWikiLinkBeforeOrInside(
+                newState,
+                caretPos,
+              );
+              if (run && caretPos > run.from && caretPos < run.to) {
                 const oldPos = oldState.selection.$anchor.pos;
                 const movingForward = caretPos >= oldPos;
-                const snapTo = movingForward ? markTo : markFrom;
+                const snapTo = docChanged
+                  ? (
+                    caretPos - run.from <= run.to - caretPos
+                      ? run.from
+                      : run.to
+                  )
+                  : (movingForward ? run.to : run.from);
 
                 tr.setSelection(TextSelection.create(newState.doc, snapTo));
                 mutated = true;
@@ -348,19 +423,6 @@ function buildMissingDecorations(
 
     const from = pos;
     const to = pos + node.nodeSize;
-    const text = node.text ?? "";
-
-    // Hide the framing `[[` / `]]` — they remain in the document (and on
-    // disk) so markdown round-trips are lossless, but visually the link
-    // reads as plain text until the user triggers an edit mode.
-    if (text.length >= 4 && text.startsWith("[[") && text.endsWith("]]")) {
-      decorations.push(
-        Decoration.inline(from, from + 2, { class: "wiki-link-bracket" }),
-      );
-      decorations.push(
-        Decoration.inline(to - 2, to, { class: "wiki-link-bracket" }),
-      );
-    }
 
     const target = (wikiMark.attrs as WikiLinkAttributes).target ?? "";
     const exists = !!findDocByTitle(docs, target);

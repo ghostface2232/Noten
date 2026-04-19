@@ -1152,10 +1152,9 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       openLinkPopoverAtRange({ from, to }, currentUrl);
     }, [closeLinkHoverPopover, editor, linkHoverPos, openLinkPopoverAtRange]);
 
-    // Drop the wikiLink mark over the hovered range and park the caret just
-    // before the closing `]]`. The Suggestion plugin's matcher then re-reads
-    // `[[Title` from the live text and re-opens the dropdown — no extra
-    // wiring needed to switch "rendered" → "editing" mode.
+    // Convert the atomic wikiLink mark back into bracket text and park the
+    // caret just before the closing `]]`. Suggestion then handles retargeting
+    // from the normal editable `[[Title` text.
     const editHoveredWikiLink = useCallback(() => {
       if (!editor || wikiHoverPos == null) return;
       const markType = editor.schema.marks.wikiLink;
@@ -1165,12 +1164,17 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       const { from, to, empty } = editor.state.selection;
       if (empty || from === to) return;
 
+      const attrs = editor.getAttributes("wikiLink") as { target?: unknown };
+      const target = typeof attrs.target === "string"
+        ? attrs.target
+        : editor.state.doc.textBetween(from, to, "\n", "\ufffc");
+      if (!target) return;
+
       const tr = editor.state.tr;
-      tr.removeMark(from, to, markType);
+      const editText = `[[${target}]]`;
+      tr.replaceWith(from, to, editor.state.schema.text(editText));
       tr.removeStoredMark(markType);
-      // Place caret inside the brackets, just before `]]`, so the user can
-      // keep typing or pick a different note from the dropdown.
-      const caretPos = Math.max(from, to - 2);
+      const caretPos = from + 2 + target.length;
       tr.setSelection(TextSelection.create(tr.doc, caretPos));
       editor.view.dispatch(tr);
       closeWikiHoverPopover();
