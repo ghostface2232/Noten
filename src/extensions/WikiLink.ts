@@ -5,7 +5,7 @@ import type {
   MarkdownRendererHelpers,
   MarkdownToken,
 } from "@tiptap/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { NoteDoc } from "../hooks/useNotesLoader";
 import type { Locale } from "../hooks/useSettings";
@@ -139,15 +139,21 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
           const markType = state.schema.marks.wikiLink;
           if (!markType) return null;
 
+          // The input-rule handler runs *before* the typed character is
+          // inserted: `range.to` equals the pre-insertion cursor, so
+          // `range.from..range.to` only covers `[[Foo]` (the already-typed
+          // opening and body). Replace that entire range with a freshly
+          // marked `[[Foo]]` text node so the rule itself produces the
+          // closing bracket and the wikiLink mark spans the whole thing.
+          const markedText = state.schema.text(
+            `[[${target}]]`,
+            [markType.create({ target })],
+          );
           const { tr } = state;
-          // Guard against re-entry: if the range is already fully covered by
-          // a wikiLink mark with the same target, skip.
-          const alreadyMarked = state.doc.rangeHasMark(range.from, range.to, markType);
-          if (!alreadyMarked) {
-            tr.addMark(range.from, range.to, markType.create({ target }));
-          }
+          tr.replaceWith(range.from, range.to, markedText);
           tr.removeStoredMark(markType);
-          return null;
+          // Fall through without an explicit return so Tiptap's input-rule
+          // runtime actually dispatches our transaction.
         },
       }),
     ];
@@ -178,6 +184,15 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
               return false;
             }
 
+            // `posAtCoords` happily maps clicks in the trailing gutter of a
+            // line to the position just past the last character — whose
+            // marks still include any wiki-link at the end of the line. Gate
+            // the handler on the actual DOM target to avoid misfires when
+            // the user clicks empty space beside (not on) a wiki-link.
+            const domTarget = event.target as HTMLElement | null;
+            const wikiEl = domTarget?.closest(".wiki-link");
+            if (!wikiEl || !view.dom.contains(wikiEl)) return false;
+
             const $pos = view.state.doc.resolve(pos);
             const marks = $pos.marks();
             const wikiMark = marks.find((mark) => mark.type.name === "wikiLink");
@@ -199,6 +214,123 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
           },
         },
       }),
+      // Atomicity + content integrity for the wikiLink mark.
+      //
+      // With brackets hidden, the doc position "just before `]]`" and "just
+      // after `]]`" render at the same pixel. Arrow keys and clicks can
+      // drop the caret inside the mark, and subsequent typing would extend
+      // the link (PM's `inclusive: false` is unreliable once the mark sits
+      // in storedMarks). This plugin handles three things per transaction:
+      //
+      //   1. storedMarks hygiene — never let wikiLink sit in storedMarks,
+      //      so the next typed character can't inherit it regardless of
+      //      where the caret sits.
+      //
+      //   2. Content integrity — when a wikiLink run's text still contains
+      //      the canonical `[[target]]` substring but has extra characters
+      //      at either end (a leaked extension), trim the mark back to
+      //      exactly that substring. We deliberately do NOT strip the mark
+      //      wholesale when the pattern is absent — that path would flash
+      //      the brackets visible while the user is mid-typing.
+      //
+      //   3. Caret atomicity — if the caret ends up *inside* a wikiLink
+      //      mark on a pure selection change (click / arrow key, not
+      //      typing), snap it out to the nearest boundary in the
+      //      direction the user was moving. Skip during typing so the
+      //      text the user just inserted isn't yanked under their caret.
+      new Plugin({
+        key: new PluginKey("wikiLinkAtomicity"),
+        appendTransaction: (transactions, oldState, newState) => {
+          const markType = newState.schema.marks.wikiLink;
+          if (!markType) return null;
+
+          const docChanged = transactions.some((tr) => tr.docChanged);
+          const selChanged = transactions.some(
+            (tr) => tr.selectionSet && !tr.docChanged,
+          );
+          if (!docChanged && !selChanged) return null;
+
+          const tr = newState.tr;
+          let mutated = false;
+
+          // (1) Purge wikiLink from storedMarks. If PM ever parks the mark
+          // in the stored set (via `inheritMarks` or a stale rule), the
+          // next keystroke would absorb into the link despite
+          // `inclusive: false`. Strip it proactively.
+          const stored = newState.storedMarks;
+          if (stored && stored.some((m) => m.type.name === "wikiLink")) {
+            const filtered = stored.filter((m) => m.type.name !== "wikiLink");
+            tr.setStoredMarks(filtered.length > 0 ? filtered : null);
+            mutated = true;
+          }
+
+          // (2) Trim leaked extensions on either side of `[[target]]`.
+          if (docChanged) {
+            newState.doc.descendants((node, pos) => {
+              if (!node.isText) return;
+              const mark = node.marks.find((m) => m.type.name === "wikiLink");
+              if (!mark) return;
+
+              const text = node.text ?? "";
+              const target = (mark.attrs as WikiLinkAttributes).target ?? "";
+              if (!target) return;
+
+              const expected = `[[${target}]]`;
+              if (text === expected) return;
+
+              const expectedIdx = text.indexOf(expected);
+              // Pattern entirely missing — the user has deleted into the
+              // link. Leave the mark alone here; the bracket-hide
+              // decoration only kicks in for well-formed `[[...]]` text,
+              // so brackets will naturally reappear and the user can keep
+              // editing. Stripping aggressively here caused benign
+              // end-of-link typing to flash into edit mode.
+              if (expectedIdx < 0) return;
+
+              const from = pos;
+              const to = pos + node.nodeSize;
+              const keepFrom = from + expectedIdx;
+              const keepTo = keepFrom + expected.length;
+              if (keepFrom > from) {
+                tr.removeMark(from, keepFrom, markType);
+                mutated = true;
+              }
+              if (keepTo < to) {
+                tr.removeMark(keepTo, to, markType);
+                mutated = true;
+              }
+            });
+          }
+
+          // (3) Caret snap — only on non-typing selection changes so we
+          // don't yank the caret away from fresh input.
+          if (!docChanged && selChanged) {
+            const sel = newState.selection;
+            if (sel.empty) {
+              const $caret = sel.$anchor;
+              const node = $caret.parent.maybeChild($caret.index());
+              const insideWiki = !!node?.isText
+                && $caret.textOffset > 0
+                && node.marks.some((m) => m.type.name === "wikiLink");
+
+              if (insideWiki && node) {
+                const caretPos = $caret.pos;
+                const markFrom = caretPos - $caret.textOffset;
+                const markTo = markFrom + node.nodeSize;
+
+                const oldPos = oldState.selection.$anchor.pos;
+                const movingForward = caretPos >= oldPos;
+                const snapTo = movingForward ? markTo : markFrom;
+
+                tr.setSelection(TextSelection.create(newState.doc, snapTo));
+                mutated = true;
+              }
+            }
+          }
+
+          return mutated ? tr : null;
+        },
+      }),
     ];
   },
 });
@@ -214,15 +346,29 @@ function buildMissingDecorations(
     const wikiMark = node.marks.find((m) => m.type.name === "wikiLink");
     if (!wikiMark) return;
 
-    const target = (wikiMark.attrs as WikiLinkAttributes).target ?? "";
-    const exists = !!findDocByTitle(docs, target);
-    if (exists) return;
-
     const from = pos;
     const to = pos + node.nodeSize;
-    decorations.push(
-      Decoration.inline(from, to, { class: "wiki-link-missing" }),
-    );
+    const text = node.text ?? "";
+
+    // Hide the framing `[[` / `]]` — they remain in the document (and on
+    // disk) so markdown round-trips are lossless, but visually the link
+    // reads as plain text until the user triggers an edit mode.
+    if (text.length >= 4 && text.startsWith("[[") && text.endsWith("]]")) {
+      decorations.push(
+        Decoration.inline(from, from + 2, { class: "wiki-link-bracket" }),
+      );
+      decorations.push(
+        Decoration.inline(to - 2, to, { class: "wiki-link-bracket" }),
+      );
+    }
+
+    const target = (wikiMark.attrs as WikiLinkAttributes).target ?? "";
+    const exists = !!findDocByTitle(docs, target);
+    if (!exists) {
+      decorations.push(
+        Decoration.inline(from, to, { class: "wiki-link-missing" }),
+      );
+    }
   });
 
   return DecorationSet.create(doc, decorations);

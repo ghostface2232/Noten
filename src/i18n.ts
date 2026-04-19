@@ -66,6 +66,7 @@ const dict = {
 
   /* ─── Wiki links ─── */
   "wiki.createNew": { en: "Create new note", ko: "새 노트 만들기" },
+  "wiki.hover.edit": { en: "Edit wiki link", ko: "위키 링크 편집" },
 
   /* ─── Image context menu ─── */
   "image.save": { en: "Save image", ko: "이미지 저장" },

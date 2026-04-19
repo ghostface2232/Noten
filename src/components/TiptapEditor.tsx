@@ -697,6 +697,9 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     const [linkHoverHref, setLinkHoverHref] = useState("");
     const [linkHoverAnchorEl, setLinkHoverAnchorEl] = useState<HTMLAnchorElement | null>(null);
     const [linkHoverPos, setLinkHoverPos] = useState<number | null>(null);
+    const [wikiHoverPopoverOpen, setWikiHoverPopoverOpen] = useState(false);
+    const [wikiHoverAnchorEl, setWikiHoverAnchorEl] = useState<HTMLElement | null>(null);
+    const [wikiHoverPos, setWikiHoverPos] = useState<number | null>(null);
     const localeRef = useRef(locale);
     localeRef.current = locale;
     const spellcheckRef = useRef(spellcheck);
@@ -709,6 +712,10 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     const linkHoverPopoverCleanupRef = useRef<(() => void) | null>(null);
     const linkHoverCloseTimerRef = useRef<number | null>(null);
     const linkHoverClientXRef = useRef<number | null>(null);
+    const wikiHoverPopoverRef = useRef<HTMLDivElement | null>(null);
+    const wikiHoverPopoverCleanupRef = useRef<(() => void) | null>(null);
+    const wikiHoverCloseTimerRef = useRef<number | null>(null);
+    const wikiHoverClientXRef = useRef<number | null>(null);
     const editorStyle = {
       "--editor-paragraph-spacing": `${paragraphSpacing / 50}em`,
     } as CSSProperties;
@@ -781,6 +788,33 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       if (linkHoverCloseTimerRef.current !== null) {
         window.clearTimeout(linkHoverCloseTimerRef.current);
         linkHoverCloseTimerRef.current = null;
+      }
+    }, []);
+
+    const closeWikiHoverPopover = useCallback(() => {
+      if (wikiHoverCloseTimerRef.current !== null) {
+        window.clearTimeout(wikiHoverCloseTimerRef.current);
+        wikiHoverCloseTimerRef.current = null;
+      }
+      setWikiHoverPopoverOpen(false);
+      setWikiHoverAnchorEl(null);
+      setWikiHoverPos(null);
+      wikiHoverClientXRef.current = null;
+      wikiHoverPopoverCleanupRef.current?.();
+      wikiHoverPopoverCleanupRef.current = null;
+    }, []);
+
+    const scheduleCloseWikiHoverPopover = useCallback(() => {
+      if (wikiHoverCloseTimerRef.current !== null) return;
+      wikiHoverCloseTimerRef.current = window.setTimeout(() => {
+        closeWikiHoverPopover();
+      }, LINK_HOVER_CLOSE_DELAY_MS);
+    }, [closeWikiHoverPopover]);
+
+    const clearWikiHoverCloseTimer = useCallback(() => {
+      if (wikiHoverCloseTimerRef.current !== null) {
+        window.clearTimeout(wikiHoverCloseTimerRef.current);
+        wikiHoverCloseTimerRef.current = null;
       }
     }, []);
 
@@ -1118,6 +1152,31 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       openLinkPopoverAtRange({ from, to }, currentUrl);
     }, [closeLinkHoverPopover, editor, linkHoverPos, openLinkPopoverAtRange]);
 
+    // Drop the wikiLink mark over the hovered range and park the caret just
+    // before the closing `]]`. The Suggestion plugin's matcher then re-reads
+    // `[[Title` from the live text and re-opens the dropdown — no extra
+    // wiring needed to switch "rendered" → "editing" mode.
+    const editHoveredWikiLink = useCallback(() => {
+      if (!editor || wikiHoverPos == null) return;
+      const markType = editor.schema.marks.wikiLink;
+      if (!markType) return;
+
+      editor.chain().focus().setTextSelection(wikiHoverPos).extendMarkRange("wikiLink").run();
+      const { from, to, empty } = editor.state.selection;
+      if (empty || from === to) return;
+
+      const tr = editor.state.tr;
+      tr.removeMark(from, to, markType);
+      tr.removeStoredMark(markType);
+      // Place caret inside the brackets, just before `]]`, so the user can
+      // keep typing or pick a different note from the dropdown.
+      const caretPos = Math.max(from, to - 2);
+      tr.setSelection(TextSelection.create(tr.doc, caretPos));
+      editor.view.dispatch(tr);
+      closeWikiHoverPopover();
+      editor.commands.focus();
+    }, [closeWikiHoverPopover, editor, wikiHoverPos]);
+
     useEffect(() => {
       if (editor && onReady) onReady();
     }, [editor, onReady]);
@@ -1129,13 +1188,14 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           dirtyRef.current = false;
           closeLinkPopover();
           closeLinkHoverPopover();
+          closeWikiHoverPopover();
           // Note quiet 상태 전환 시 이미지 선택/핸들/아웃라인 해제
           if (editor.state.selection instanceof NodeSelection) {
             editor.commands.setTextSelection(0);
           }
         }
       }
-    }, [closeLinkHoverPopover, closeLinkPopover, editor, editable]);
+    }, [closeLinkHoverPopover, closeLinkPopover, closeWikiHoverPopover, editor, editable]);
 
     useEffect(() => {
       if (editor?.storage.slashCommands) {
@@ -1169,8 +1229,12 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       if (linkHoverCloseTimerRef.current !== null) {
         window.clearTimeout(linkHoverCloseTimerRef.current);
       }
+      if (wikiHoverCloseTimerRef.current !== null) {
+        window.clearTimeout(wikiHoverCloseTimerRef.current);
+      }
       linkHoverPopoverCleanupRef.current?.();
       linkPopoverCleanupRef.current?.();
+      wikiHoverPopoverCleanupRef.current?.();
     }, []);
 
     useEffect(() => {
@@ -1312,6 +1376,67 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       return () => window.removeEventListener("mousedown", handleMouseDown, true);
     }, [closeLinkHoverPopover, linkHoverPopoverOpen]);
 
+    // Wiki-link hover popover: mirrors the Link hover popover's positioning,
+    // outside-click dismissal, and mutual-exclusion with the link edit dialog.
+    useEffect(() => {
+      if (linkPopoverOpen) {
+        closeWikiHoverPopover();
+      }
+    }, [closeWikiHoverPopover, linkPopoverOpen]);
+
+    useEffect(() => {
+      if (!wikiHoverPopoverOpen) return;
+      const popoverEl = wikiHoverPopoverRef.current;
+      const anchorEl = wikiHoverAnchorEl;
+      if (!editor || !popoverEl || !anchorEl) return;
+
+      const reference = {
+        contextElement: editor.view.dom,
+        getBoundingClientRect: () => {
+          const anchorRect = anchorEl.getBoundingClientRect();
+          const x = wikiHoverClientXRef.current ?? (anchorRect.left + anchorRect.right) / 2;
+          return new DOMRect(x, anchorRect.top, 0, Math.max(1, anchorRect.height));
+        },
+      };
+
+      const updatePosition = () => {
+        void computePosition(reference, popoverEl, {
+          strategy: "fixed",
+          placement: "top-start",
+          middleware: [offset(6), flip(), shift({ padding: 8 })],
+        }).then(({ x, y }) => {
+          popoverEl.style.left = `${x}px`;
+          popoverEl.style.top = `${y}px`;
+        });
+      };
+
+      const cleanup = autoUpdate(reference, popoverEl, updatePosition, { animationFrame: true });
+      wikiHoverPopoverCleanupRef.current = cleanup;
+      updatePosition();
+
+      return () => {
+        cleanup();
+        if (wikiHoverPopoverCleanupRef.current === cleanup) {
+          wikiHoverPopoverCleanupRef.current = null;
+        }
+      };
+    }, [editor, wikiHoverAnchorEl, wikiHoverPopoverOpen]);
+
+    useEffect(() => {
+      if (!wikiHoverPopoverOpen) return;
+
+      const handleMouseDown = (event: MouseEvent) => {
+        const target = event.target as Node | null;
+        if (target && wikiHoverPopoverRef.current?.contains(target)) {
+          return;
+        }
+        closeWikiHoverPopover();
+      };
+
+      window.addEventListener("mousedown", handleMouseDown, true);
+      return () => window.removeEventListener("mousedown", handleMouseDown, true);
+    }, [closeWikiHoverPopover, wikiHoverPopoverOpen]);
+
     useEffect(() => {
       if (!editor) return;
 
@@ -1429,6 +1554,40 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           const mouseX = event.clientX;
           const mouseY = event.clientY;
 
+          // Wiki-link hover — evaluated first so a wiki-link doesn't
+          // accidentally trigger the URL-link popover when the two are
+          // adjacent.
+          if (wikiHoverPopoverOpen) {
+            const popoverRect = wikiHoverPopoverRef.current?.getBoundingClientRect();
+            if (popoverRect && isPointInExpandedRect(mouseX, mouseY, popoverRect, LINK_HOVER_SAFE_ZONE_PX)) {
+              clearWikiHoverCloseTimer();
+              return;
+            }
+          }
+
+          const targetEl = event.target as HTMLElement | null;
+          const wikiEl = targetEl?.closest(".wiki-link") as HTMLElement | null;
+          if (wikiEl && editor.view.dom.contains(wikiEl)) {
+            const wikiPos = editor.view.posAtCoords({ left: mouseX, top: mouseY })?.pos;
+            if (typeof wikiPos === "number") {
+              clearWikiHoverCloseTimer();
+              if (!wikiHoverPopoverOpen) {
+                wikiHoverClientXRef.current = mouseX;
+                setWikiHoverPopoverOpen(true);
+                setWikiHoverAnchorEl(wikiEl);
+                setWikiHoverPos(wikiPos);
+              } else if (wikiHoverAnchorEl !== wikiEl) {
+                scheduleCloseWikiHoverPopover();
+              } else if (wikiHoverPos == null) {
+                setWikiHoverPos(wikiPos);
+              }
+              // Wiki-link hover takes precedence — skip the URL-link path.
+              return;
+            }
+          } else if (wikiHoverPopoverOpen) {
+            scheduleCloseWikiHoverPopover();
+          }
+
           if (linkHoverPopoverOpen) {
             const popoverRect = linkHoverPopoverRef.current?.getBoundingClientRect();
             if (popoverRect && isPointInExpandedRect(mouseX, mouseY, popoverRect, LINK_HOVER_SAFE_ZONE_PX)) {
@@ -1437,8 +1596,7 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
             }
           }
 
-          const target = event.target as HTMLElement | null;
-          const anchor = target?.closest("a") as HTMLAnchorElement | null;
+          const anchor = targetEl?.closest("a") as HTMLAnchorElement | null;
           if (!anchor || !editor.view.dom.contains(anchor)) {
             if (linkHoverPopoverOpen) {
               scheduleCloseLinkHoverPopover();
@@ -1485,6 +1643,9 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           if (linkHoverPopoverOpen) {
             scheduleCloseLinkHoverPopover();
           }
+          if (wikiHoverPopoverOpen) {
+            scheduleCloseWikiHoverPopover();
+          }
         }}
       >
         <EditorContent editor={editor} />
@@ -1514,6 +1675,27 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
               className="tiptap-link-hover-button"
               aria-label={t("link.hover.edit", locale)}
               onClick={editHoveredLink}
+            >
+              <RenameRegular fontSize={16} />
+              <span className="tiptap-link-hover-label">{t("link.hover.editShort", locale)}</span>
+            </button>
+          </div>
+        )}
+        {wikiHoverPopoverOpen && !linkPopoverOpen && (
+          <div
+            ref={wikiHoverPopoverRef}
+            className="tiptap-link-hover-popover"
+            role="toolbar"
+            aria-label={t("wiki.hover.edit", locale)}
+            onMouseDown={(event) => event.stopPropagation()}
+            onMouseEnter={clearWikiHoverCloseTimer}
+            onMouseLeave={scheduleCloseWikiHoverPopover}
+          >
+            <button
+              type="button"
+              className="tiptap-link-hover-button"
+              aria-label={t("wiki.hover.edit", locale)}
+              onClick={editHoveredWikiLink}
             >
               <RenameRegular fontSize={16} />
               <span className="tiptap-link-hover-label">{t("link.hover.editShort", locale)}</span>

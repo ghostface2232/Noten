@@ -319,11 +319,19 @@ function App() {
       const idx = docs.findIndex(
         (doc) => doc.fileName.normalize("NFC").toLowerCase() === needle,
       );
-      if (idx >= 0) void fs.switchDocument(idx);
+      if (idx < 0) return;
+      // Reveal the target note's group in the sidebar so the user can see
+      // where they just landed. Collapsed groups would otherwise hide the
+      // active row entirely.
+      const targetGroup = groups.find((g) => g.noteIds.includes(docs[idx].id));
+      if (targetGroup?.collapsed) {
+        noteGroups.toggleGroupCollapsed(targetGroup.id);
+      }
+      void fs.switchDocument(idx);
     };
     storage.createNoteWithTitle = (title: string) => fs.createNoteWithTitle(title);
     refreshWikiLinkDecorations(tiptapEditor);
-  }, [tiptapEditor, docs, locale, fs.switchDocument, fs.createNoteWithTitle]);
+  }, [tiptapEditor, docs, locale, groups, noteGroups.toggleGroupCollapsed, fs.switchDocument, fs.createNoteWithTitle]);
 
   useEffect(() => {
     if (!settingsLoaded || docs.length < 2) return;

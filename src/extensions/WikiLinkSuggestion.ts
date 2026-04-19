@@ -139,12 +139,24 @@ const WikiLinkSuggestion = Extension.create({
           const title = props.title;
           if (!title) return;
 
+          // In edit mode the original `]]` sits just past the cursor; the
+          // Suggestion-reported range only covers `[[` + query. Absorb the
+          // trailing `]]` when present so the replacement doesn't leave
+          // orphan brackets behind (`[[Foo]]]]`).
+          let to = range.to;
+          const { state } = editor;
+          const docSize = state.doc.content.size;
+          if (to + 2 <= docSize) {
+            const trailing = state.doc.textBetween(to, to + 2, "\n", "\ufffc");
+            if (trailing === "]]") to += 2;
+          }
+
           const text = `[[${title}]]`;
           const mark = markType.create({ target: title });
           const node = editor.schema.text(text, [mark]);
 
-          const { tr } = editor.state;
-          tr.replaceRangeWith(range.from, range.to, node);
+          const { tr } = state;
+          tr.replaceRangeWith(range.from, to, node);
           tr.removeStoredMark(markType);
           editor.view.dispatch(tr);
 

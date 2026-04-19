@@ -268,6 +268,19 @@ export function useFileWatcher(
     let unwatchFn: (() => void) | null = null;
     let cancelled = false;
 
+    // `window.location.reload()` (our hidden dev shortcut) and Tauri window
+    // reloads don't give React a chance to run effect cleanups. Without an
+    // explicit unwatch, the Rust watcher keeps firing into a Channel whose
+    // JS callback is already gone, logging "Couldn't find callback id" on
+    // every filesystem event. Hook `beforeunload` to close the watcher
+    // best-effort before the page tears down.
+    const teardown = () => {
+      unwatchFn?.();
+      unwatchFn = null;
+    };
+    const beforeUnload = () => teardown();
+    window.addEventListener("beforeunload", beforeUnload);
+
     (async () => {
       const dir = await getNotesDir();
       if (cancelled) return;
@@ -290,7 +303,8 @@ export function useFileWatcher(
 
     return () => {
       cancelled = true;
-      unwatchFn?.();
+      window.removeEventListener("beforeunload", beforeUnload);
+      teardown();
     };
   }, [enabled, handleWatchEvent]);
 }
