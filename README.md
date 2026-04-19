@@ -2,15 +2,15 @@
   <img src="public/Noten_icon.png" alt="Noten" width="128" height="128" />
 </p>
 
-[![License](https://img.shields.io/github/license/ghostface2232/Noten?style=flat-square)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/ghostface2232/Noten?style=flat-square)](https://github.com/ghostface2232/Noten/releases)
-![Platform](https://img.shields.io/badge/platform-Windows-blue?style=flat-square)
-
 # Noten
 
 <p>
  <img width="2059" height="1450" alt="0 1 9" src="https://github.com/user-attachments/assets/ca0e7cd1-11ce-47f0-a165-3483e0a2dd5f" />
 </p>
+
+[![License](https://img.shields.io/github/license/ghostface2232/Noten?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/ghostface2232/Noten?style=flat-square)](https://github.com/ghostface2232/Noten/releases)
+![Platform](https://img.shields.io/badge/platform-Windows-blue?style=flat-square)
 
 A clean, fast and modern Markdown note-taking app for Windows.
 Powered by [Tiptap](https://tiptap.dev/), edited as WYSIWYM with Markdown as the on-disk format.
