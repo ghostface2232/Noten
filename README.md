@@ -10,6 +10,7 @@
 
 <img width="2059" height="1450" alt="0 1 9" src="https://github.com/user-attachments/assets/ca0e7cd1-11ce-47f0-a165-3483e0a2dd5f" />
 
+
 A clean, fast and modern Markdown note-taking app for Windows.
 Powered by [Tiptap](https://tiptap.dev/), edited as WYSIWYM with Markdown as the on-disk format.
 
