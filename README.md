@@ -9,7 +9,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-blue?style=flat-square)
 
 <p>
-  <img src="[public/Noten_icon.png](https://i.imgur.com/QKdorId.jpeg)" alt="NotenScreenCapture" width="512" />
+  <img src="https://i.imgur.com/QKdorId.jpeg" alt="NotenScreenCapture" width="512" />
 </p>
 
 A clean, fast and modern Markdown note-taking app for Windows.
