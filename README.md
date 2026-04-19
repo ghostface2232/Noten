@@ -25,8 +25,6 @@ Powered by [Tiptap](https://tiptap.dev/), edited as WYSIWYM with Markdown as the
 - **Multi-window** - Open notes in separate windows with real-time cross-window sync
 - **Mica theme** - Native Windows 11 Mica material with dark/light mode
 - **Export** - Save notes as Markdown, PDF, or Rich Text
-- **Auto-update** - In-app update checking via GitHub Releases
-- **i18n** - English and Korean
 
 ## Tech Stack
 
