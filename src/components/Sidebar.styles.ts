@@ -1,6 +1,7 @@
 import { makeStyles, tokens } from "@fluentui/react-components";
 
 export const SIDE_PADDING = "6px";
+const LIST_SIDE_PADDING = "8px";
 
 export const useStyles = makeStyles({
   sidebar: {
@@ -20,9 +21,11 @@ export const useStyles = makeStyles({
   },
   body: {
     flex: 1,
-    overflow: "auto",
-    paddingLeft: SIDE_PADDING,
-    paddingRight: SIDE_PADDING,
+    overflowX: "hidden",
+    overflowY: "auto",
+    scrollbarGutter: "stable",
+    paddingLeft: LIST_SIDE_PADDING,
+    paddingRight: LIST_SIDE_PADDING,
     display: "flex",
     flexDirection: "column",
     gap: "2px",

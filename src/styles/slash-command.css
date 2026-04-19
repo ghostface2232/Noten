@@ -1,5 +1,6 @@
 /* ─── Slash Command 메뉴 ─── */
 .slash-command-menu {
+  --slash-command-scrollbar-inset: 6px;
   display: flex;
   flex-direction: column;
   min-width: 240px;
@@ -15,6 +16,32 @@
     0 4px 16px rgba(0, 0, 0, 0.10),
     0 1px 4px rgba(0, 0, 0, 0.06);
   font-family: var(--editor-font-family-sans);
+}
+
+.slash-command-menu::-webkit-scrollbar {
+  width: 10px;
+}
+
+.slash-command-menu::-webkit-scrollbar-track {
+  margin-block: var(--slash-command-scrollbar-inset);
+}
+
+.slash-command-menu::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--editor-color-text-secondary) 38%, transparent);
+  background-clip: content-box;
+}
+
+.slash-command-menu.slash-command-menu:hover::-webkit-scrollbar-thumb,
+.slash-command-menu.slash-command-menu::-webkit-scrollbar-thumb:hover,
+.slash-command-menu.slash-command-menu::-webkit-scrollbar-thumb:active,
+[data-theme="dark"] .slash-command-menu.slash-command-menu:hover::-webkit-scrollbar-thumb,
+[data-theme="dark"] .slash-command-menu.slash-command-menu::-webkit-scrollbar-thumb:hover,
+[data-theme="dark"] .slash-command-menu.slash-command-menu::-webkit-scrollbar-thumb:active {
+  border: 3px solid transparent;
+  background: color-mix(in srgb, var(--editor-color-text-secondary) 38%, transparent);
+  background-clip: content-box;
 }
 
 .slash-command-item {

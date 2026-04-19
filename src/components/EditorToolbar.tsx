@@ -95,6 +95,10 @@ const useStyles = makeStyles({
     alignItems: "center",
     gap: "2px",
   },
+  searchIconNudge: {
+    display: "inline-flex",
+    transform: "translateY(-1px)",
+  },
   divider: {
     height: "20px",
     marginLeft: "4px",
@@ -382,7 +386,12 @@ export function EditorToolbar({
         )}
 
         <div className={styles.search}>
-          {tb(i("tool.search"), <SearchRegular />, onOpenSearch, false)}
+          {tb(
+            i("tool.search"),
+            <span className={styles.searchIconNudge}><SearchRegular /></span>,
+            onOpenSearch,
+            false,
+          )}
           {tb(i("tool.gotoLine"), <TextFirstLineRegular />, onOpenGoToLine, false)}
         </div>
       </div>
