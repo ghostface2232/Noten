@@ -624,7 +624,8 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                           · 노트 이름 변경 시 위키링크 전체 rewrite를 병렬 디스크 쓰기로 전환 (대량 rename 체감 개선)<br />
                           · 링크 href scheme 검증을 공용 allow-list로 단일화 (popover·paste·autolink 동일 규칙)<br />
                           · 현재 보고 있는 노트의 그룹이 collapsed일 때 헤더에 선택 배경 표시 (expand 시 자동 해제)<br />
-                          · 그룹 expand/collapse 애니메이션이 매니페스트 비동기 로드 이후부터 재생되지 않던 문제 수정
+                          · 그룹 expand/collapse 애니메이션이 매니페스트 비동기 로드 이후부터 재생되지 않던 문제 수정<br />
+                          · 긴 그룹(6+ 노트) collapse 시 끝부분 stagger가 잘리던 문제와 짧은 그룹 종료 직전 gap 잔여가 튀던 문제 정리
                         </>
                       ) : (
                         <>
@@ -632,7 +633,8 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                           · Parallelized per-file disk writes during rename's wiki-link rewrite for faster mass renames<br />
                           · Centralized link href scheme validation behind a shared allow-list so the popover, paste, and autolink paths all honour the same rules<br />
                           · Collapsed group headers now carry the active-selection background when the currently-open note lives inside, falling off as soon as the group re-expands<br />
-                          · Fixed group expand/collapse animation going silent after the manifest finished loading asynchronously (transition-detector ref was never seeded for groups added post-mount)
+                          · Fixed group expand/collapse animation going silent after the manifest finished loading asynchronously (transition-detector ref was never seeded for groups added post-mount)<br />
+                          · Smoothed the collapse animation on both ends: the stagger tail no longer truncates on longer groups, and the residual flex gap no longer pops at unmount on shorter ones
                         </>
                       )}
                     </div>

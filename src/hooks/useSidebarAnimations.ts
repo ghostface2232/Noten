@@ -133,20 +133,45 @@ export function useSidebarAnimations({ docs, groups }: UseSidebarAnimationsOptio
     }
   }
 
-  // Clear the in-flight animation sets after the animation finishes.
-  // 420ms ≈ 280ms duration + up to ~5 notes of 30ms stagger; for larger
-  // groups the tail is invisible (opacity 0) so running slightly long is fine.
+  // Clear the in-flight animation sets after every staggered note has
+  // finished. The visible duration is `groupChildExpand` / `groupCollapseOut`
+  // (280ms) plus a per-note stagger of 30ms assigned in renderNoteItem,
+  // so the last note finishes at 280 + (noteCount - 1) × 30 ms. A fixed
+  // 420ms cut off the tail of any group with 6+ notes — the bottom notes
+  // got unmounted mid-animation, which read as a visible stutter. Compute
+  // the timeout from the largest active group so the whole stagger lands
+  // before cleanup.
+  //
+  // Keep the 280 / 30 constants in sync with the animation-duration in
+  // Sidebar.styles.ts and the stagger multipliers in Sidebar.renderNoteItem.
+  const ANIMATION_DURATION_MS = 280;
+  const STAGGER_STEP_MS = 30;
+  const FRAME_BUFFER_MS = 50;
+  const cleanupDurationFor = (active: Set<string>): number => {
+    let maxNotes = 0;
+    for (const g of groups) {
+      if (active.has(g.id) && g.noteIds.length > maxNotes) {
+        maxNotes = g.noteIds.length;
+      }
+    }
+    return ANIMATION_DURATION_MS + Math.max(0, maxNotes - 1) * STAGGER_STEP_MS + FRAME_BUFFER_MS;
+  };
+
   useEffect(() => {
     if (expandedGroupIds.size === 0) return;
-    const timer = setTimeout(() => setExpandedGroupIds(new Set()), 420);
+    const timer = setTimeout(() => setExpandedGroupIds(new Set()), cleanupDurationFor(expandedGroupIds));
     return () => clearTimeout(timer);
-  }, [expandedGroupIds]);
+    // `groups` dep keeps the timer honest if a group's note count changes
+    // mid-animation (rare — animation is < 1s — but correct).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedGroupIds, groups]);
 
   useEffect(() => {
     if (collapsingGroupIds.size === 0) return;
-    const timer = setTimeout(() => setCollapsingGroupIds(new Set()), 420);
+    const timer = setTimeout(() => setCollapsingGroupIds(new Set()), cleanupDurationFor(collapsingGroupIds));
     return () => clearTimeout(timer);
-  }, [collapsingGroupIds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapsingGroupIds, groups]);
 
   // Detect newly created groups (for slide-in). Effect is fine here — notes
   // appear on mount so the class just needs to be applied post-render.

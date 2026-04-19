@@ -184,14 +184,18 @@ body {
   100% { opacity: 0; max-height: 0px; }
 }
 
+/* `margin-top: -2px` cancels the sidebar body's `gap: 2px` during the
+   animation, so a collapsing note doesn't leave a residual gap slot that
+   would snap closed at unmount (the visible "pop"). Keep the value in
+   sync with Sidebar.styles.ts → `body.gap`. */
 @keyframes groupChildExpand {
-  from { opacity: 0; max-height: 0px; }
-  to   { opacity: 1; max-height: 34px; }
+  from { opacity: 0; max-height: 0px; margin-top: -2px; }
+  to   { opacity: 1; max-height: 34px; margin-top: 0; }
 }
 
 @keyframes groupCollapseOut {
-  from { opacity: 1; max-height: 34px; }
-  to   { opacity: 0; max-height: 0px; overflow: hidden; }
+  from { opacity: 1; max-height: 34px; margin-top: 0; }
+  to   { opacity: 0; max-height: 0px; margin-top: -2px; overflow: hidden; }
 }
 
 @keyframes searchResultFadeIn {
