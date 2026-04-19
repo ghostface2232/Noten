@@ -67,8 +67,8 @@ function App() {
   useEffect(() => { try { localStorage.setItem("sidebar-width", String(sidebarWidth)); } catch {} }, [sidebarWidth]);
   // Keep the OS-level window minimum wide enough to fit the toolbar alongside
   // the current sidebar. When the sidebar is opened or dragged wider past the
-  // current window's capacity, we grow the window leftward (anchoring the
-  // right edge) in a short animation that matches the sidebar's CSS transition
+  // current window's capacity, we grow the window rightward (anchoring the
+  // left edge) in a short animation that matches the sidebar's CSS transition
   // so the two motions read as one.
   useEffect(() => {
     const effectiveSidebar = sidebarOpen ? sidebarWidth : 0;
@@ -90,7 +90,7 @@ function App() {
         const fromX = pos.x / scale;
         const fromW = currentLogicalW;
         const toW = minWidth;
-        const toX = fromX - (toW - fromW);
+        const toX = fromX;
 
         // Animate to match the sidebar's ~300ms CSS transition.
         const DURATION = 280;
