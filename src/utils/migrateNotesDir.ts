@@ -69,7 +69,16 @@ async function copyDirRecursive(srcDir: string, destDir: string): Promise<void> 
   }
 }
 
-async function clearDirContents(dir: string): Promise<void> {
+function isManagedEntry(name: string): boolean {
+  return (
+    name === "manifest.json" ||
+    name === ".trash" ||
+    name === ".assets" ||
+    name.endsWith(".md")
+  );
+}
+
+async function clearManagedContents(dir: string): Promise<void> {
   let entries;
   try {
     entries = await readDir(dir);
@@ -78,17 +87,12 @@ async function clearDirContents(dir: string): Promise<void> {
   }
   const base = normalizeSep(dir);
   for (const entry of entries) {
-    if (!entry.name) continue;
-    const isManagedRootEntry = entry.name === "manifest.json"
-      || entry.name === ".assets"
-      || entry.name === ".trash"
-      || (entry.isFile && entry.name.endsWith(".md"));
-    if (!isManagedRootEntry) continue;
-    const target = `${base}${entry.name}`;
+    if (!entry.name || !isManagedEntry(entry.name)) continue;
+    if (entry.name.endsWith(".md") && !entry.isFile) continue;
     try {
-      await remove(target, { recursive: true });
+      await remove(`${base}${entry.name}`, { recursive: true });
     } catch {
-      // Best-effort cleanup — ignore locked / in-use files
+      // Best-effort — ignore locked / in-use files
     }
   }
 }
@@ -215,10 +219,7 @@ export async function migrateNotesDir(
     // Handle manifest
     const sourceManifest = await readManifestFile(fromDir);
     if (!sourceManifest) {
-      // No manifest in source — still clear whatever we just copied over
-      if (!destinationIsInsideSource) {
-        await clearDirContents(fromDir);
-      }
+      if (!destinationIsInsideSource) await clearManagedContents(fromDir);
       return { success: true };
     }
 
@@ -245,12 +246,7 @@ export async function migrateNotesDir(
       );
     }
 
-    // Clear contents of source directory (but keep the folder itself),
-    // so the old AppData notes folder remains available for future reset
-    // without leaving stale copies behind.
-    if (!destinationIsInsideSource) {
-      await clearDirContents(fromDir);
-    }
+    if (!destinationIsInsideSource) await clearManagedContents(fromDir);
 
     return { success: true };
   } catch (err) {
