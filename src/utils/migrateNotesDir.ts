@@ -80,8 +80,12 @@ async function clearDirContents(dir: string): Promise<void> {
   for (const entry of entries) {
     if (!entry.name) continue;
     const isManagedRootEntry = entry.name === "manifest.json"
+      || entry.name === "manifest.legacy.json"
+      || entry.name === ".groups.json"
+      || entry.name === "manifest-cache.json"
       || entry.name === ".assets"
       || entry.name === ".trash"
+      || entry.name === ".meta"
       || (entry.isFile && entry.name.endsWith(".md"));
     if (!isManagedRootEntry) continue;
     const target = `${base}${entry.name}`;
@@ -212,6 +216,19 @@ export async function migrateNotesDir(
       await copyDirRecursive(fromAssets, toAssets);
     } catch { /* .assets may not exist — skip */ }
 
+    // Copy v2 metadata sidecars
+    try {
+      await copyDirRecursive(`${normalizeSep(fromDir)}.meta`, `${normalizeSep(toDir)}.meta`);
+    } catch { /* .meta may not exist — skip */ }
+    for (const sidecar of [".groups.json", "manifest-cache.json", "manifest.legacy.json"]) {
+      try {
+        const srcPath = `${normalizeSep(fromDir)}${sidecar}`;
+        if (await exists(srcPath)) {
+          await copyFile(srcPath, `${normalizeSep(toDir)}${sidecar}`);
+        }
+      } catch { /* sidecar may not exist — skip */ }
+    }
+
     // Handle manifest
     const sourceManifest = await readManifestFile(fromDir);
     if (!sourceManifest) {
@@ -260,7 +277,9 @@ export async function migrateNotesDir(
 
 export async function hasManifest(dir: string): Promise<boolean> {
   try {
-    return await exists(`${normalizeSep(dir)}manifest.json`);
+    return await exists(`${normalizeSep(dir)}manifest.json`)
+      || await exists(`${normalizeSep(dir)}.groups.json`)
+      || await exists(`${normalizeSep(dir)}.meta`);
   } catch {
     return false;
   }

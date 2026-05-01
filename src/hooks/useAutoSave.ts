@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { writeTextFile } from "@tauri-apps/plugin-fs";
+import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import type { NoteDoc, NoteGroup } from "./useNotesLoader";
 import { deriveTitle, saveManifest, sortNotes } from "./useNotesLoader";
 import { getCurrentMarkdown } from "./useFileSystem";
@@ -9,6 +9,9 @@ import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { emitDocUpdated } from "./useWindowSync";
 import { markOwnWrite } from "./ownWriteTracker";
+import { getFileTimestamps } from "../utils/fileTimestamps";
+import { conflictDirPath, fileNameFromPath } from "../utils/storagePaths";
+import { sha256Hex } from "../utils/hash";
 
 const DEBOUNCE_MS = 1000;
 
@@ -17,6 +20,31 @@ interface SaveSnapshot {
   filePath: string;
   content: string;
   revision: number;
+}
+
+async function backupExternalDiskVersion(snapshot: SaveSnapshot, knownContent: string, knownUpdatedAt: number): Promise<boolean> {
+  let diskContent = "";
+  try {
+    diskContent = await readTextFile(snapshot.filePath);
+  } catch {
+    return false;
+  }
+  if (diskContent === snapshot.content || diskContent === knownContent) return false;
+
+  const { updatedAt: diskUpdatedAt } = await getFileTimestamps(snapshot.filePath);
+  if (diskUpdatedAt <= knownUpdatedAt + 250) return false;
+
+  const parent = snapshot.filePath.replace(/[\\/][^\\/]+$/, "");
+  const conflictsDir = conflictDirPath(parent);
+  const stamp = Date.now();
+  const backupPath = `${conflictsDir}/${snapshot.docId}-${stamp}.md`;
+  await mkdir(conflictsDir, { recursive: true }).catch(() => {});
+  markOwnWrite(backupPath, await sha256Hex(diskContent));
+  await writeTextFile(backupPath, diskContent);
+  window.dispatchEvent(new CustomEvent("noten-conflict-backup", {
+    detail: { fileName: fileNameFromPath(snapshot.filePath), backupPath },
+  }));
+  return true;
 }
 
 export function useAutoSave(
@@ -104,7 +132,14 @@ export function useAutoSave(
     } = stateRef.current;
 
     try {
-      markOwnWrite(snapshot.filePath);
+      const knownDoc = stateRef.current.docs.find((doc) => doc.id === snapshot.docId);
+      await backupExternalDiskVersion(
+        snapshot,
+        knownDoc?.content ?? "",
+        knownDoc?.updatedAt ?? 0,
+      ).catch(() => {});
+
+      markOwnWrite(snapshot.filePath, await sha256Hex(snapshot.content));
       await writeTextFile(snapshot.filePath, snapshot.content);
 
       if ((latestRevisionByDocRef.current.get(snapshot.docId) ?? 0) !== snapshot.revision) {

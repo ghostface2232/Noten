@@ -123,6 +123,13 @@ const dict = {
   "status.cursorRow": { en: "Line ", ko: "" },
   "status.cursorRowSuffix": { en: "", ko: "행" },
 
+  /* ─── Sync ─── */
+  "sync.conflictBackupTitle": { en: "Sync conflict backed up", ko: "동기화 충돌 백업됨" },
+  "sync.conflictBackupBody": {
+    en: "A newer disk copy of {name} was saved in .conflicts before your edit overwrote it.",
+    ko: "{name}의 더 최신 디스크 사본을 편집 내용으로 덮어쓰기 전에 .conflicts에 저장했습니다.",
+  },
+
   /* ─── Placeholder ─── */
   "placeholder": { en: "Start writing here...", ko: "여기에 글을 작성하세요..." },
 

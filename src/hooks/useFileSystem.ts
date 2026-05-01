@@ -4,6 +4,7 @@ import { mkdir, readTextFile, writeTextFile, remove, copyFile } from "@tauri-app
 import {
   getNotesDir,
   saveManifest,
+  persistActiveNote,
   deriveTitle,
   sortNotes,
   getFileBaseName,
@@ -13,6 +14,7 @@ import {
   type NoteGroup,
   type TrashedNote,
 } from "./useNotesLoader";
+import { removeNoteMeta } from "../utils/metadataIO";
 import type { MarkdownState } from "./useMarkdownState";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import type { Locale, NotesSortOrder } from "./useSettings";
@@ -50,6 +52,7 @@ function sortAndPersistDocs(
 
   setDocs(sortedDocs);
   setActiveIndex(nextActiveIndex);
+  void persistActiveNote(activeId).catch(() => {});
   void saveManifest(sortedDocs, activeId, groups).catch(() => {});
 }
 
@@ -195,6 +198,7 @@ export function useFileSystem(
       try { markOwnWrite(leaving.filePath); remove(leaving.filePath).catch(() => {}); } catch {}
     }
     const leavingId = leaving.id;
+    void getNotesDir().then((dir) => removeNoteMeta(dir, leavingId)).catch(() => {});
     setGroups?.((prev) =>
       prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }))
         .filter((g) => g.noteIds.length > 0));
@@ -347,6 +351,7 @@ export function useFileSystem(
       if (currentDoc.filePath) {
         try { markOwnWrite(currentDoc.filePath); remove(currentDoc.filePath).catch(() => {}); } catch {}
       }
+      void getNotesDir().then((dir) => removeNoteMeta(dir, currentDoc.id)).catch(() => {});
       cancelDocSaveRef?.current?.(currentDoc.id);
       const leavingId = currentDoc.id;
       workingGroups = workingGroups
@@ -809,6 +814,7 @@ export function useFileSystem(
     try {
       const notesDir = await getNotesDir();
       await removeNoteAssetDir(notesDir, trashed.id);
+      await removeNoteMeta(notesDir, trashed.id);
     } catch { /* ignore */ }
 
     if (setTrashedNotes) {
@@ -827,7 +833,10 @@ export function useFileSystem(
     try { notesDir = await getNotesDir(); } catch { /* ignore */ }
     for (const trashed of trashedSnapshot) {
       try { await remove(trashed.trashFilePath); } catch { /* ignore */ }
-      if (notesDir) await removeNoteAssetDir(notesDir, trashed.id);
+      if (notesDir) {
+        await removeNoteAssetDir(notesDir, trashed.id);
+        await removeNoteMeta(notesDir, trashed.id);
+      }
     }
 
     if (setTrashedNotes) {
