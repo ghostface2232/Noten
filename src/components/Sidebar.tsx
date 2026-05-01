@@ -104,6 +104,7 @@ interface SidebarProps {
   onSelectModeChange: (mode: boolean) => void;
   pendingRenameGroupId: string | null;
   onPendingRenameGroupIdClear: () => void;
+  updateAvailable: boolean;
 }
 
 export function Sidebar({
@@ -140,6 +141,7 @@ export function Sidebar({
   onSelectModeChange,
   pendingRenameGroupId,
   onPendingRenameGroupIdClear,
+  updateAvailable,
 }: SidebarProps) {
   const styles = useStyles();
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
@@ -950,6 +952,7 @@ export function Sidebar({
             onClick={onOpenSettings}
           >
             {i("sidebar.settings")}
+            {updateAvailable && <span className={styles.updateDot} />}
           </Button>
         </div>
       )}

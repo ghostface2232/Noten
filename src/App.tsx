@@ -43,6 +43,7 @@ import { useWindowSync } from "./hooks/useWindowSync";
 import { useChromeVisibility } from "./hooks/useChromeVisibility";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useDragDrop } from "./hooks/useDragDrop";
+import { useUpdater } from "./hooks/useUpdater";
 import { open as openDialog, confirm, ask, message } from "@tauri-apps/plugin-dialog";
 import { useStyles } from "./App.styles";
 import "./App.css";
@@ -135,6 +136,7 @@ function App() {
   const [sidebarSearchOpen, setSidebarSearchOpen] = useState(false);
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   const { settings, update: updateSetting, isLoaded: settingsLoaded } = useSettings();
+  const updater = useUpdater();
   const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDark);
   const isDarkMode = settings.themeMode === "system"
     ? systemPrefersDark
@@ -144,6 +146,7 @@ function App() {
   const styles = useStyles();
   const tiptapRef = useRef<TiptapEditorHandle>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const startupUpdateCheckStartedRef = useRef(false);
   const [tiptapEditor, setTiptapEditor] = useState<import("@tiptap/react").Editor | null>(null);
 
   useEffect(() => {
@@ -154,6 +157,12 @@ function App() {
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
+
+  useEffect(() => {
+    if (startupUpdateCheckStartedRef.current) return;
+    startupUpdateCheckStartedRef.current = true;
+    void updater.checkForUpdate();
+  }, [updater.checkForUpdate]);
 
   // 노트 디렉토리 초기화 (settings 로드 → 경로 설정 → 노트 로딩)
   const [notesDirReady, setNotesDirReady] = useState(false);
@@ -743,6 +752,7 @@ function App() {
               onSelectModeChange={setSelectMode}
               pendingRenameGroupId={pendingRenameGroupId}
               onPendingRenameGroupIdClear={() => setPendingRenameGroupId(null)}
+              updateAvailable={updater.state.status === "available" || updater.state.status === "downloading" || updater.state.status === "ready"}
             />
             <div
               className={mergeClasses(
@@ -857,6 +867,10 @@ function App() {
         onRestoreNote={fs.restoreNote}
         onPermanentlyDeleteNote={fs.permanentlyDeleteNote}
         onEmptyTrash={fs.emptyTrash}
+        updaterState={updater.state}
+        onCheckForUpdate={updater.checkForUpdate}
+        onInstallUpdate={updater.installUpdate}
+        onRestartApp={updater.restartApp}
       />
       <div id="portal-root" />
     </FluentProvider>

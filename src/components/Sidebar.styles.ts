@@ -298,6 +298,15 @@ export const useStyles = makeStyles({
     paddingLeft: "8px",
     paddingRight: "8px",
   },
+  updateDot: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "50%",
+    backgroundColor: tokens.colorBrandBackground,
+    marginLeft: "auto",
+    flexShrink: 0,
+    boxShadow: `0 0 0 2px ${tokens.colorNeutralBackground1}`,
+  },
   contextMenu: {
     position: "fixed",
     zIndex: 1000,
