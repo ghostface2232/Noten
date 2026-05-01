@@ -2,35 +2,22 @@ import { useEffect, useRef, useCallback } from "react";
 import { flushSync } from "react-dom";
 import { watch, readTextFile } from "@tauri-apps/plugin-fs";
 import type { WatchEvent } from "@tauri-apps/plugin-fs";
-import { getNotesDir, deriveTitle, saveManifest, migrationInProgress, reconcileFolder } from "./useNotesLoader";
+import { getNotesDir, deriveTitle, saveManifest, migrationInProgress, reconcileFolder, sortNotes } from "./useNotesLoader";
 import type { NoteDoc, NoteGroup } from "./useNotesLoader";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import { isOwnWrite, pruneOwnWrites } from "./ownWriteTracker";
 import { getFileTimestamps } from "../utils/fileTimestamps";
-import type { Locale } from "./useSettings";
+import type { Locale, NotesSortOrder } from "./useSettings";
+import { deriveNoteGroups, readStoredGroups } from "../utils/groupsIO";
+import { metaToNoteDoc, readAllNoteMetas } from "../utils/metadataIO";
+import { readUiState } from "../utils/uiStateIO";
+import { metaDirPath, noteFilePath } from "../utils/storagePaths";
 
 // Re-export markOwnWrite for existing consumers
 export { markOwnWrite } from "./ownWriteTracker";
 
 function normalizePath(p: string): string {
   return p.replace(/\\/g, "/").toLowerCase();
-}
-
-interface ManifestFile {
-  version: 1;
-  notes: Omit<NoteDoc, "isDirty" | "content">[];
-  activeNoteId: string | null;
-  groups?: NoteGroup[];
-}
-
-async function readManifestFile(dir: string): Promise<ManifestFile | null> {
-  try {
-    const sep = dir.endsWith("/") || dir.endsWith("\\") ? "" : "/";
-    const raw = await readTextFile(`${dir}${sep}manifest.json`);
-    return JSON.parse(raw) as ManifestFile;
-  } catch {
-    return null;
-  }
 }
 
 // ── File watcher hook ──
@@ -45,6 +32,7 @@ export function useFileWatcher(
   setActiveIndex: React.Dispatch<React.SetStateAction<number>>,
   tiptapRef: React.RefObject<TiptapEditorHandle | null>,
   locale: Locale,
+  notesSortOrder: NotesSortOrder,
   enabled: boolean,
   onActiveDocChanged?: (doc: { filePath: string; content: string }) => void,
 ) {
@@ -71,62 +59,39 @@ export function useFileWatcher(
     const dirNorm = normalizePath(dir);
 
     const affectedPaths = event.paths.map(normalizePath);
-    const isManifestChange = affectedPaths.some(
-      (p) => p.endsWith("/manifest.json") && p.startsWith(dirNorm) && !isOwnWrite(p),
+    const isIgnoredPath = (path: string) =>
+      path.endsWith(".tmp")
+      || path.includes("/.assets/")
+      || path.includes("/.trash/")
+      || path.includes("/.conflicts/");
+    const isMetadataChange = affectedPaths.some(
+      (p) => !isIgnoredPath(p)
+        && p.startsWith(dirNorm)
+        && (p.endsWith("/.groups.json") || p.includes("/.meta/"))
+        && !isOwnWrite(p),
     );
     const mdChanges = affectedPaths.filter(
-      (p) => p.endsWith(".md") && p.startsWith(dirNorm) && !isOwnWrite(p),
+      (p) => p.endsWith(".md") && p.startsWith(dirNorm) && !isIgnoredPath(p) && !isOwnWrite(p),
     );
 
-    if (!isManifestChange && mdChanges.length === 0) return;
+    if (!isMetadataChange && mdChanges.length === 0) return;
 
-    // ── Handle manifest.json changes (groups, note metadata from other device) ──
-    if (isManifestChange) {
-      const manifest = await readManifestFile(dir);
-      if (!manifest) return;
-
-      const currentDocs = docsRef.current;
-
-      // Sync groups — manifest is authoritative; `undefined` means "no groups"
-      // (saveManifest omits the field when groups is empty), so clear unconditionally.
-      setGroups(manifest.groups ?? []);
-
-      // Discover new notes from manifest that we don't have
-      const currentIds = new Set(currentDocs.map((d) => d.id));
-      const newEntries = manifest.notes.filter((n) => !currentIds.has(n.id));
-
-      if (newEntries.length > 0) {
-        const newDocs = await Promise.all(
-          newEntries.map(async (entry) => {
-            let content = "";
-            try { content = await readTextFile(entry.filePath); } catch { /* file may not be synced yet */ }
-            return { ...entry, isDirty: false, content } as NoteDoc;
-          }),
-        );
-        setDocs((prev) => {
-          const ids = new Set(prev.map((d) => d.id));
-          const toAdd = newDocs.filter((d) => !ids.has(d.id));
-          return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
-        });
+    if (isMetadataChange) {
+      const metas = await readAllNoteMetas(dir);
+      const liveMetas = metas.filter((meta) => !meta.trashedAt);
+      const docsFromMeta = await Promise.all(
+        liveMetas.map(async (meta) => metaToNoteDoc(meta, dir, await readTextFile(noteFilePath(dir, meta.id)).catch(() => ""))),
+      );
+      const uiState = await readUiState();
+      const nextGroups = deriveNoteGroups(await readStoredGroups(dir), metas, uiState.groupCollapsed);
+      const sortedDocs = sortNotes(docsFromMeta, notesSortOrder, locale);
+      const activeId = getRoutedActiveDocId();
+      setDocs(sortedDocs);
+      setGroups(nextGroups);
+      if (activeId) {
+        const nextIndex = sortedDocs.findIndex((doc) => doc.id === activeId);
+        if (nextIndex >= 0 && nextIndex !== activeIndexRef.current) setActiveIndex(nextIndex);
       }
-
-      // Update metadata (fileName, etc.) for existing notes from manifest
-      const manifestMap = new Map(manifest.notes.map((n) => [n.id, n]));
-      setDocs((prev) => {
-        let changed = false;
-        const next = prev.map((d) => {
-          const remote = manifestMap.get(d.id);
-          if (!remote) return d;
-          // Only update if remote is newer and doc is not locally dirty
-          if (!d.isDirty && remote.updatedAt > d.updatedAt) {
-            changed = true;
-            return { ...d, fileName: remote.fileName, updatedAt: remote.updatedAt };
-          }
-          return d;
-        });
-        return changed ? next : prev;
-      });
-
     }
 
     // ── Handle .md file changes ──
@@ -260,12 +225,12 @@ export function useFileWatcher(
 
       await saveManifest(reconciledDocs, nextActiveId, reconciledGroups).catch(() => {});
     }
-  }, [getRoutedActiveDocId, locale, setDocs, setGroups, setActiveIndex, tiptapRef]);
+  }, [getRoutedActiveDocId, locale, notesSortOrder, setDocs, setGroups, setActiveIndex, tiptapRef]);
 
   useEffect(() => {
     if (!enabled) return;
 
-    let unwatchFn: (() => void) | null = null;
+    let unwatchFns: Array<() => void> = [];
     let cancelled = false;
 
     // `window.location.reload()` (our hidden dev shortcut) and Tauri window
@@ -275,8 +240,8 @@ export function useFileWatcher(
     // every filesystem event. Hook `beforeunload` to close the watcher
     // best-effort before the page tears down.
     const teardown = () => {
-      unwatchFn?.();
-      unwatchFn = null;
+      unwatchFns.forEach((unwatch) => unwatch());
+      unwatchFns = [];
     };
     const beforeUnload = () => teardown();
     window.addEventListener("beforeunload", beforeUnload);
@@ -286,15 +251,21 @@ export function useFileWatcher(
       if (cancelled) return;
 
       try {
-        const unwatch = await watch(
+        const unwatchRoot = await watch(
           dir,
           handleWatchEvent,
           { recursive: false, delayMs: 1500 },
         );
+        const unwatchMeta = await watch(
+          metaDirPath(dir),
+          handleWatchEvent,
+          { recursive: false, delayMs: 1500 },
+        ).catch(() => null);
         if (cancelled) {
-          unwatch();
+          unwatchRoot();
+          unwatchMeta?.();
         } else {
-          unwatchFn = unwatch;
+          unwatchFns = [unwatchRoot, ...(unwatchMeta ? [unwatchMeta] : [])];
         }
       } catch (err) {
         console.warn("File watcher setup failed:", err);
@@ -305,6 +276,31 @@ export function useFileWatcher(
       cancelled = true;
       window.removeEventListener("beforeunload", beforeUnload);
       teardown();
+    };
+  }, [enabled, handleWatchEvent]);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const triggerReconcile = () => {
+      void getNotesDir().then((dir) => {
+        void handleWatchEvent({ paths: [`${dir}/.meta/__reconcile__.json`] } as WatchEvent);
+      });
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") triggerReconcile();
+    };
+
+    window.addEventListener("focus", triggerReconcile);
+    document.addEventListener("visibilitychange", handleVisibility);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") triggerReconcile();
+    }, 60_000);
+
+    return () => {
+      window.removeEventListener("focus", triggerReconcile);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.clearInterval(timer);
     };
   }, [enabled, handleWatchEvent]);
 }

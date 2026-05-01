@@ -12,6 +12,7 @@ export const useStyles = makeStyles({
     backgroundColor: "transparent",
     flexShrink: 0,
     userSelect: "none",
+    "--update-dot-color": tokens.colorBrandBackground,
   },
   sidebarFixed: {
     flexShrink: 0,
@@ -297,6 +298,16 @@ export const useStyles = makeStyles({
     minHeight: "36px",
     paddingLeft: "8px",
     paddingRight: "8px",
+  },
+  updateDot: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "50%",
+    backgroundColor: "var(--update-dot-color)",
+    marginLeft: "auto",
+    marginRight: "6px",
+    flexShrink: 0,
+    boxShadow: "0 0 4px var(--update-dot-color), 0 0 7px var(--update-dot-color)",
   },
   contextMenu: {
     position: "fixed",

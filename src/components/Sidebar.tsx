@@ -104,6 +104,8 @@ interface SidebarProps {
   onSelectModeChange: (mode: boolean) => void;
   pendingRenameGroupId: string | null;
   onPendingRenameGroupIdClear: () => void;
+  updateAvailable: boolean;
+  isDarkMode: boolean;
 }
 
 export function Sidebar({
@@ -140,6 +142,8 @@ export function Sidebar({
   onSelectModeChange,
   pendingRenameGroupId,
   onPendingRenameGroupIdClear,
+  updateAvailable,
+  isDarkMode,
 }: SidebarProps) {
   const styles = useStyles();
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
@@ -746,7 +750,15 @@ export function Sidebar({
   };
 
   return (
-    <div className={styles.sidebar} data-sidebar tabIndex={-1} style={{ outline: "none" }}>
+    <div
+      className={styles.sidebar}
+      data-sidebar
+      tabIndex={-1}
+      style={{
+        outline: "none",
+        "--update-dot-color": isDarkMode ? tokens.colorBrandForeground1 : tokens.colorBrandBackground,
+      } as React.CSSProperties}
+    >
       <div className={styles.sidebarFixed}>
         <div className={mergeClasses(styles.searchBoxWrapper, sidebarSearchOpen && styles.searchBoxWrapperOpen)}>
           <div className={styles.searchBox}>
@@ -950,6 +962,7 @@ export function Sidebar({
             onClick={onOpenSettings}
           >
             {i("sidebar.settings")}
+            {updateAvailable && <span className={styles.updateDot} />}
           </Button>
         </div>
       )}

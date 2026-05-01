@@ -1,12 +1,30 @@
 import { useState, useEffect, useRef } from "react";
 import { appDataDir } from "@tauri-apps/api/path";
-import { mkdir, readTextFile, writeTextFile, readDir, remove } from "@tauri-apps/plugin-fs";
+import { exists, mkdir, readTextFile, writeTextFile, readDir, remove, rename } from "@tauri-apps/plugin-fs";
 import { markOwnWrite } from "./ownWriteTracker";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { getFileTimestamps } from "../utils/fileTimestamps";
 import { migrateDataUrlImagesToAssets } from "../utils/migrateImageAssets";
 import { removeNoteAssetDir } from "../utils/imageAssetUtils";
+import { deriveNoteGroups, groupsToStored, readStoredGroups, writeStoredGroups } from "../utils/groupsIO";
+import {
+  ensureMetaDir,
+  metaToNoteDoc,
+  metaToTrashedNote,
+  noteDocToMeta,
+  readAllNoteMetas,
+  readNoteMeta,
+  removeNoteMeta,
+  writeNoteMeta,
+  type NoteMeta,
+} from "../utils/metadataIO";
+import { getMachineId } from "../utils/machineId";
+import { readUiState, updateUiState } from "../utils/uiStateIO";
+import { writeManifestCache } from "../utils/manifestCacheIO";
+import { joinPath, noteFilePath } from "../utils/storagePaths";
+import { detectConflictFile } from "../utils/conflictFileDetector";
+import { decomposeLegacyManifest } from "../utils/legacyManifestMigration";
 
 export interface NoteDoc {
   id: string;
@@ -50,7 +68,6 @@ interface Manifest {
 const UI_STATE_STORAGE_KEY = "markdown-studio-ui-state";
 
 let notesDirCache: string | null = null;
-let imageAssetMigrationV1CompletedAtCache: number | null = null;
 
 // --- Module-level trashedNotes cache (avoids disk I/O in saveManifest) ---
 
@@ -58,7 +75,7 @@ let trashedNotesCache: TrashedNote[] = [];
 export function getTrashedNotesCache(): TrashedNote[] { return trashedNotesCache; }
 export function setTrashedNotesCache(notes: TrashedNote[]) { trashedNotesCache = notes; }
 
-/** Migration in progress — blocks saveManifest writes */
+/** Migration in progress — blocks metadata writes */
 export let migrationInProgress = false;
 export function setMigrationInProgress(v: boolean) { migrationInProgress = v; }
 
@@ -150,23 +167,15 @@ export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<Tr
   return kept;
 }
 
-// --- File-based manifest ---
+// --- Legacy manifest migration ---
 
-async function readManifestFromFile(dir: string): Promise<Manifest | null> {
+async function readLegacyManifestFromFile(dir: string): Promise<Manifest | null> {
   try {
-    const sep = dir.endsWith("/") || dir.endsWith("\\") ? "" : "/";
-    const raw = await readTextFile(`${dir}${sep}manifest.json`);
+    const raw = await readTextFile(joinPath(dir, "manifest.json"));
     return JSON.parse(raw) as Manifest;
   } catch {
     return null;
   }
-}
-
-async function writeManifestToFile(dir: string, manifest: Manifest): Promise<void> {
-  const sep = dir.endsWith("/") || dir.endsWith("\\") ? "" : "/";
-  const manifestPath = `${dir}${sep}manifest.json`;
-  markOwnWrite(manifestPath);
-  await writeTextFile(manifestPath, JSON.stringify(manifest, null, 2));
 }
 
 // --- localStorage fallback (backup / migration source) ---
@@ -181,48 +190,128 @@ function readStoredManifest(): Manifest | null {
   }
 }
 
-function writeStoredManifest(manifest: Manifest) {
-  localStorage.setItem(UI_STATE_STORAGE_KEY, JSON.stringify(manifest));
-}
-
-// --- Unified manifest read/write ---
-
-async function readManifest(dir: string): Promise<Manifest | null> {
-  // Primary: file-based manifest
-  const fileManifest = await readManifestFromFile(dir);
-  if (fileManifest) {
-    imageAssetMigrationV1CompletedAtCache = fileManifest.imageAssetMigrationV1CompletedAt ?? null;
-    return fileManifest;
-  }
-
-  // Fallback: localStorage (one-time migration)
-  const lsManifest = readStoredManifest();
-  if (lsManifest) {
-    // Migrate to file-based
-    try {
-      await writeManifestToFile(dir, lsManifest);
-    } catch {
-      console.warn("Failed to migrate manifest from localStorage to file.");
-    }
-    imageAssetMigrationV1CompletedAtCache = lsManifest.imageAssetMigrationV1CompletedAt ?? null;
-    return lsManifest;
-  }
-
-  return null;
-}
-
-async function writeManifest(dir: string, manifest: Manifest): Promise<void> {
-  imageAssetMigrationV1CompletedAtCache = manifest.imageAssetMigrationV1CompletedAt ?? null;
-  await writeManifestToFile(dir, manifest);
-  // Also write to localStorage as backup
-  writeStoredManifest(manifest);
-}
-
 async function readFileContent(path: string): Promise<string> {
   try {
     return await readTextFile(path);
   } catch {
     return "";
+  }
+}
+
+function groupIdByNote(groups: NoteGroup[] = []): Map<string, string | null> {
+  const map = new Map<string, string | null>();
+  for (const group of groups) {
+    for (const noteId of group.noteIds) map.set(noteId, group.id);
+  }
+  return map;
+}
+
+export async function persistDocMeta(doc: NoteDoc, groups: NoteGroup[] = []): Promise<void> {
+  const dir = await getNotesDir();
+  const machineId = await getMachineId();
+  await writeNoteMeta(dir, noteDocToMeta(doc, groupIdByNote(groups).get(doc.id) ?? null, machineId));
+}
+
+export async function persistGroups(groups: NoteGroup[]): Promise<void> {
+  const dir = await getNotesDir();
+  const previous = await readStoredGroups(dir);
+  await writeStoredGroups(dir, groupsToStored(groups, previous));
+}
+
+export async function persistActiveNote(activeId: string | null): Promise<void> {
+  await updateUiState((state) => ({
+    ...state,
+    activeNoteId: activeId,
+    lastOpenedNoteId: activeId ?? state.lastOpenedNoteId,
+  }));
+}
+
+export async function persistGroupCollapsed(groups: NoteGroup[]): Promise<void> {
+  await updateUiState((state) => {
+    const groupCollapsed = { ...state.groupCollapsed };
+    for (const group of groups) groupCollapsed[group.id] = group.collapsed;
+    return { ...state, groupCollapsed };
+  });
+}
+
+async function migrateLegacyManifestIfNeeded(dir: string): Promise<void> {
+  const fileLegacy = await readLegacyManifestFromFile(dir);
+  const legacy = fileLegacy ?? readStoredManifest();
+  if (!legacy) return;
+
+  const machineId = await getMachineId();
+  const decomposed = decomposeLegacyManifest(legacy, machineId);
+  if (decomposed.groups.length > 0) await writeStoredGroups(dir, decomposed.groups);
+  await Promise.all(decomposed.metas.map((meta) => writeNoteMeta(dir, meta)));
+  await updateUiState(() => decomposed.uiState);
+
+  if (fileLegacy) {
+    const legacyPath = joinPath(dir, "manifest.json");
+    const renamedPath = joinPath(dir, "manifest.legacy.json");
+    try {
+      if (await exists(legacyPath)) {
+        markOwnWrite(legacyPath, null);
+        await rename(legacyPath, renamedPath);
+      }
+    } catch {
+      // Leave the source in place; loader remains idempotent.
+    }
+  } else {
+    // Consumed the localStorage fallback — clear it so the next launch doesn't
+    // reapply this stale snapshot on top of newer per-file metadata.
+    try { localStorage.removeItem(UI_STATE_STORAGE_KEY); } catch { /* ignore */ }
+  }
+}
+
+async function ensureMetaForMarkdownFile(dir: string, entryName: string, locale: Locale): Promise<NoteMeta | null> {
+  const id = entryName.replace(/\.md$/, "");
+  const existing = await readNoteMeta(dir, id);
+  if (existing) return existing;
+
+  const filePath = noteFilePath(dir, id);
+  let content = "";
+  try { content = await readTextFile(filePath); } catch { return null; }
+  const { createdAt, updatedAt } = await getFileTimestamps(filePath);
+  const meta: NoteMeta = {
+    version: 2,
+    id,
+    fileName: deriveTitle(content) || getDefaultDocumentTitle(locale),
+    createdAt,
+    updatedAt,
+    groupId: null,
+    lastWriterMachineId: await getMachineId(),
+  };
+  await writeNoteMeta(dir, meta);
+  return meta;
+}
+
+async function absorbConflictFiles(dir: string, locale: Locale): Promise<void> {
+  const entries = await readDir(dir).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.name) continue;
+    const detected = detectConflictFile(entry.name);
+    if (!detected) continue;
+
+    const sourcePath = joinPath(dir, entry.name);
+    if (detected.kind === "note") {
+      const content = await readTextFile(sourcePath).catch(() => "");
+      const id = crypto.randomUUID();
+      const filePath = noteFilePath(dir, id);
+      const now = Date.now();
+      markOwnWrite(filePath);
+      await writeTextFile(filePath, content).catch(() => {});
+      await writeNoteMeta(dir, {
+        version: 2,
+        id,
+        fileName: `${deriveTitle(content) || getDefaultDocumentTitle(locale)} (${detected.marker})`,
+        customName: true,
+        createdAt: now,
+        updatedAt: now,
+        groupId: null,
+        lastWriterMachineId: await getMachineId(),
+      });
+      await remove(sourcePath).catch(() => {});
+    }
   }
 }
 
@@ -304,28 +393,59 @@ export async function saveManifest(
 ): Promise<void> {
   if (migrationInProgress) return;
 
-  const trashed = trashedNotesCache;
-  const manifest: Manifest = {
-    version: 1,
-    notes: docs.map(({ id, filePath, fileName, createdAt, updatedAt, customName }) => ({
-      id,
-      filePath,
-      fileName,
-      createdAt,
-      updatedAt,
-      ...(customName ? { customName } : {}),
-    })),
-    activeNoteId: activeId,
-    groups: groups && groups.length > 0 ? groups : undefined,
-    trashedNotes: trashed.length > 0 ? trashed : undefined,
-    imageAssetMigrationV1CompletedAt: imageAssetMigrationV1CompletedAtCache ?? undefined,
-  };
-
   try {
     const dir = await getNotesDir();
-    await writeManifest(dir, manifest);
+    const machineId = await getMachineId();
+    const noteGroups = groups ?? [];
+    const groupMap = groupIdByNote(noteGroups);
+    await Promise.all(docs.map((doc) => writeNoteMeta(
+      dir,
+      noteDocToMeta(doc, groupMap.get(doc.id) ?? null, machineId),
+    )));
+
+    await Promise.all(trashedNotesCache.map(async (note) => {
+      const existing = await readNoteMeta(dir, note.id);
+      await writeNoteMeta(dir, {
+        version: 2,
+        id: note.id,
+        fileName: note.fileName,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt,
+        groupId: note.groupId,
+        trashedAt: note.trashedAt,
+        lastWriterMachineId: existing?.lastWriterMachineId ?? machineId,
+        imageAssetMigrationV1CompletedAt: existing?.imageAssetMigrationV1CompletedAt,
+      });
+    }));
+
+    // Remove orphan .meta/<id>.json for ids that no longer appear in either set
+    // — e.g. when a .md file was deleted externally and reconcileFolder dropped
+    // the doc. Otherwise readAllNoteMetas would resurrect it as an empty note.
+    const validIds = new Set<string>([
+      ...docs.map((d) => d.id),
+      ...trashedNotesCache.map((t) => t.id),
+    ]);
+    const metaDir = await ensureMetaDir(dir);
+    const metaEntries = await readDir(metaDir).catch(() => []);
+    await Promise.all(metaEntries.map(async (entry) => {
+      const name = entry.name;
+      if (!name?.endsWith(".json") || name.endsWith(".tmp")) return;
+      const id = name.replace(/\.json$/, "");
+      if (!validIds.has(id)) await removeNoteMeta(dir, id);
+    }));
+
+    if (groups) {
+      await persistGroups(groups);
+      await persistGroupCollapsed(groups);
+    }
+    await persistActiveNote(activeId);
+    await writeManifestCache(dir, {
+      metas: await readAllNoteMetas(dir),
+      groups: groups ?? [],
+      trashedNotes: trashedNotesCache,
+    }).catch(() => {});
   } catch {
-    console.warn("Failed to persist UI state manifest.");
+    console.warn("Failed to persist note metadata.");
   }
 }
 
@@ -364,122 +484,73 @@ export function useNotesLoader(
     (async () => {
       try {
         const dir = await ensureNotesDir();
-        let manifest = await readManifest(dir);
+        await migrateLegacyManifestIfNeeded(dir);
+        await absorbConflictFiles(dir, locale);
 
-        if (!imageAssetMigrationV1CompletedAtCache) {
-          setMigrationInProgress(true);
-          try {
-            let noteFilePaths: string[] = [];
-            if (manifest && manifest.notes.length > 0) {
-              noteFilePaths = manifest.notes
-                .map((entry) => entry.filePath)
-                .filter(Boolean);
-            } else {
-              const entries = await readDir(dir).catch(() => []);
-              noteFilePaths = entries
-                .filter((entry) => entry.name?.endsWith(".md"))
-                .map((entry) => `${dir}/${entry.name}`);
+        const entries = await readDir(dir).catch(() => []);
+        const markdownEntries = entries.filter((entry) => entry.name?.endsWith(".md") && !entry.name.endsWith(".tmp"));
+        await Promise.all(markdownEntries.map((entry) => ensureMetaForMarkdownFile(dir, entry.name!, locale)));
+
+        let metas = await readAllNoteMetas(dir);
+        const liveMetas = metas.filter((meta) => !meta.trashedAt);
+        let foundNotes = await Promise.all(
+          liveMetas.map(async (meta) => {
+            const filePath = noteFilePath(dir, meta.id);
+            const content = await readFileContent(filePath);
+            if (!meta.imageAssetMigrationV1CompletedAt) {
+              setMigrationInProgress(true);
+              try {
+                await migrateDataUrlImagesToAssets([filePath]);
+                meta.imageAssetMigrationV1CompletedAt = Date.now();
+                await writeNoteMeta(dir, meta);
+              } finally {
+                setMigrationInProgress(false);
+              }
             }
+            return metaToNoteDoc(meta, dir, content);
+          }),
+        );
 
-            await migrateDataUrlImagesToAssets(Array.from(new Set(noteFilePaths)));
-            imageAssetMigrationV1CompletedAtCache = Date.now();
-
-            if (manifest) {
-              manifest = {
-                ...manifest,
-                imageAssetMigrationV1CompletedAt: imageAssetMigrationV1CompletedAtCache,
-              };
-              await writeManifest(dir, manifest).catch(() => {});
-            }
-          } finally {
-            setMigrationInProgress(false);
-          }
+        if (foundNotes.length === 0) {
+          const id = crypto.randomUUID();
+          const filePath = noteFilePath(dir, id);
+          const timestamp = Date.now();
+          markOwnWrite(filePath);
+          await writeTextFile(filePath, "");
+          const meta: NoteMeta = {
+            version: 2,
+            id,
+            fileName: getDefaultDocumentTitle(locale),
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            groupId: null,
+            lastWriterMachineId: await getMachineId(),
+          };
+          await writeNoteMeta(dir, meta);
+          foundNotes = [metaToNoteDoc(meta, dir, "")];
+          metas = [meta];
         }
 
-        // Auto-purge expired trash on startup
-        const rawTrashed = manifest?.trashedNotes ?? [];
+        const rawTrashed = metas
+          .map((meta) => metaToTrashedNote(meta, dir))
+          .filter((note): note is TrashedNote => note !== null);
         const purgedTrashed = await purgeExpiredTrash(rawTrashed);
-        const trashChanged = purgedTrashed.length !== rawTrashed.length;
         setTrashedNotes(purgedTrashed);
 
-        if (manifest && manifest.notes.length > 0) {
-          const loaded = await Promise.all(
-            manifest.notes.map(async (entry) => {
-              const content = await readFileContent(entry.filePath);
-              return { ...entry, isDirty: false, content } as NoteDoc;
-            }),
-          );
+        const uiState = await readUiState();
+        const storedGroups = await readStoredGroups(dir);
+        const finalGroups = deriveNoteGroups(storedGroups, metas, uiState.groupCollapsed);
+        const sorted = sortNotes(foundNotes, notesSortOrder, locale);
+        setDocs(sorted);
+        setGroups(finalGroups);
 
-          // Reconcile: pick up new .md files not in manifest, drop missing ones
-          const { docs: reconciled, groups: reconciledGroups, changed: reconcileChanged } =
-            await reconcileFolder(dir, loaded, manifest.groups ?? [], locale);
-
-          const finalDocs = reconcileChanged ? reconciled : loaded;
-          const finalGroups = reconcileChanged ? reconciledGroups : (manifest.groups ?? []);
-
-          const sorted = sortNotes(finalDocs, notesSortOrder, locale);
-          setDocs(sorted);
-          setGroups(finalGroups);
-
-          const activeId = manifest.activeNoteId ?? sorted[0]?.id ?? null;
-          const nextActiveIndex = activeId
-            ? sorted.findIndex((doc) => doc.id === activeId)
-            : 0;
-          setActiveIndex(nextActiveIndex >= 0 ? nextActiveIndex : 0);
-
-          // Persist if reconciliation or trash purge made changes
-          if (reconcileChanged || trashChanged) {
-            const aid = sorted[nextActiveIndex >= 0 ? nextActiveIndex : 0]?.id ?? null;
-            await saveManifest(sorted, aid, finalGroups).catch(() => {});
-          }
-        } else {
-          let foundNotes: NoteDoc[] = [];
-
-          try {
-            const entries = await readDir(dir);
-            const markdownEntries = entries.filter((entry) => entry.name?.endsWith(".md"));
-            foundNotes = await Promise.all(
-              markdownEntries.map(async (entry) => {
-                const id = entry.name!.replace(/\.md$/, "");
-                const filePath = `${dir}/${entry.name}`;
-                const content = await readFileContent(filePath);
-                const { createdAt, updatedAt } = await getFileTimestamps(filePath);
-                return {
-                  id,
-                  filePath,
-                  fileName: deriveTitle(content) || getDefaultDocumentTitle(locale),
-                  isDirty: false,
-                  content,
-                  createdAt,
-                  updatedAt,
-                } as NoteDoc;
-              }),
-            );
-          } catch {
-            console.warn("Failed to scan notes directory.");
-          }
-
-          if (foundNotes.length === 0) {
-            const id = crypto.randomUUID();
-            const filePath = `${dir}/${id}.md`;
-            const timestamp = Date.now();
-            await writeTextFile(filePath, "");
-            foundNotes = [{
-              id,
-              filePath,
-              fileName: getDefaultDocumentTitle(locale),
-              isDirty: false,
-              content: "",
-              createdAt: timestamp,
-              updatedAt: timestamp,
-            }];
-          }
-
-          const sorted = sortNotes(foundNotes, notesSortOrder, locale);
-          setDocs(sorted);
-          setActiveIndex(0);
-          await saveManifest(sorted, sorted[0]?.id ?? null);
-        }
+        const activeId = uiState.activeNoteId ?? uiState.lastOpenedNoteId ?? sorted[0]?.id ?? null;
+        const nextActiveIndex = activeId
+          ? sorted.findIndex((doc) => doc.id === activeId)
+          : 0;
+        const safeActiveIndex = nextActiveIndex >= 0 ? nextActiveIndex : 0;
+        setActiveIndex(safeActiveIndex);
+        await saveManifest(sorted, sorted[safeActiveIndex]?.id ?? null, finalGroups).catch(() => {});
       } catch (err) {
         console.warn("Notes loader failed:", err);
         const timestamp = Date.now();

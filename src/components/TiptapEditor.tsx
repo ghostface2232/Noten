@@ -26,7 +26,9 @@ import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
-import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
+import { usePopoverAnchor, type PopoverReference } from "../hooks/usePopoverAnchor";
+import { useHoverDismissTimer } from "../hooks/useHoverDismissTimer";
+import { HOVER_SAFE_ZONE_PX, isPointInExpandedRect } from "../utils/popoverGeometry";
 import { CopySelectRegular, RenameRegular } from "@fluentui/react-icons";
 import { common, createLowlight } from "lowlight";
 import MermaidCodeBlock from "../extensions/MermaidCodeBlock";
@@ -61,8 +63,6 @@ declare module "@tiptap/core" {
 
 const MD_PATTERN = /^#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|^>\s|^```|^\|.+\||\[.+\]\(.+\)/m;
 type TextRange = { from: number; to: number };
-const LINK_HOVER_CLOSE_DELAY_MS = 300;
-const LINK_HOVER_SAFE_ZONE_PX = 16;
 const DOC_SESSION_CACHE_LIMIT = 20;
 
 function computeMarkdownSignature(markdown: string): string {
@@ -191,14 +191,6 @@ function getSelectionRect(editor: Editor, range: TextRange): DOMRect {
   }
 }
 
-function isPointInExpandedRect(x: number, y: number, rect: DOMRect, expandBy: number): boolean {
-  return (
-    x >= rect.left - expandBy
-    && x <= rect.right + expandBy
-    && y >= rect.top - expandBy
-    && y <= rect.bottom + expandBy
-  );
-}
 
 function isImageNodeSelection(selection: unknown): selection is NodeSelection {
   return selection instanceof NodeSelection && selection.node.type.name === "image";
@@ -697,15 +689,13 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     const linkPopoverRef = useRef<HTMLDivElement | null>(null);
     const linkInputRef = useRef<HTMLInputElement | null>(null);
     const linkRangeRef = useRef<TextRange | null>(null);
-    const linkPopoverCleanupRef = useRef<(() => void) | null>(null);
+    const linkPopoverTeardownRef = useRef<(() => void) | null>(null);
     const linkHoverPopoverRef = useRef<HTMLDivElement | null>(null);
-    const linkHoverPopoverCleanupRef = useRef<(() => void) | null>(null);
-    const linkHoverCloseTimerRef = useRef<number | null>(null);
     const linkHoverClientXRef = useRef<number | null>(null);
+    const linkHoverTeardownRef = useRef<(() => void) | null>(null);
     const wikiHoverPopoverRef = useRef<HTMLDivElement | null>(null);
-    const wikiHoverPopoverCleanupRef = useRef<(() => void) | null>(null);
-    const wikiHoverCloseTimerRef = useRef<number | null>(null);
     const wikiHoverClientXRef = useRef<number | null>(null);
+    const wikiHoverTeardownRef = useRef<(() => void) | null>(null);
     const editorStyle = {
       "--editor-paragraph-spacing": `${paragraphSpacing / 50}em`,
     } as CSSProperties;
@@ -749,64 +739,37 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       setLinkPopoverOpen(false);
       setLinkHasValue(false);
       linkRangeRef.current = null;
-      linkPopoverCleanupRef.current?.();
-      linkPopoverCleanupRef.current = null;
+      linkPopoverTeardownRef.current?.();
     }, []);
 
-    const closeLinkHoverPopover = useCallback(() => {
-      if (linkHoverCloseTimerRef.current !== null) {
-        window.clearTimeout(linkHoverCloseTimerRef.current);
-        linkHoverCloseTimerRef.current = null;
-      }
-      setLinkHoverPopoverOpen(false);
-      setLinkHoverHref("");
-      setLinkHoverAnchorEl(null);
-      setLinkHoverPos(null);
-      linkHoverClientXRef.current = null;
-      linkHoverPopoverCleanupRef.current?.();
-      linkHoverPopoverCleanupRef.current = null;
-    }, []);
+    const {
+      schedule: scheduleCloseLinkHoverPopover,
+      clear: clearLinkHoverCloseTimer,
+      closeNow: closeLinkHoverPopover,
+    } = useHoverDismissTimer({
+      onClose: () => {
+        setLinkHoverPopoverOpen(false);
+        setLinkHoverHref("");
+        setLinkHoverAnchorEl(null);
+        setLinkHoverPos(null);
+        linkHoverClientXRef.current = null;
+        linkHoverTeardownRef.current?.();
+      },
+    });
 
-    const scheduleCloseLinkHoverPopover = useCallback(() => {
-      if (linkHoverCloseTimerRef.current !== null) return;
-      linkHoverCloseTimerRef.current = window.setTimeout(() => {
-        closeLinkHoverPopover();
-      }, LINK_HOVER_CLOSE_DELAY_MS);
-    }, [closeLinkHoverPopover]);
-
-    const clearLinkHoverCloseTimer = useCallback(() => {
-      if (linkHoverCloseTimerRef.current !== null) {
-        window.clearTimeout(linkHoverCloseTimerRef.current);
-        linkHoverCloseTimerRef.current = null;
-      }
-    }, []);
-
-    const closeWikiHoverPopover = useCallback(() => {
-      if (wikiHoverCloseTimerRef.current !== null) {
-        window.clearTimeout(wikiHoverCloseTimerRef.current);
-        wikiHoverCloseTimerRef.current = null;
-      }
-      setWikiHoverPopoverOpen(false);
-      setWikiHoverAnchorEl(null);
-      setWikiHoverPos(null);
-      wikiHoverClientXRef.current = null;
-      wikiHoverPopoverCleanupRef.current?.();
-      wikiHoverPopoverCleanupRef.current = null;
-    }, []);
-
-    const scheduleCloseWikiHoverPopover = useCallback(() => {
-      if (wikiHoverCloseTimerRef.current !== null) return;
-      wikiHoverCloseTimerRef.current = window.setTimeout(() => {
-        closeWikiHoverPopover();
-      }, LINK_HOVER_CLOSE_DELAY_MS);
-    }, [closeWikiHoverPopover]);
-
-    const clearWikiHoverCloseTimer = useCallback(() => {
-      if (wikiHoverCloseTimerRef.current !== null) {
-        window.clearTimeout(wikiHoverCloseTimerRef.current);
-        wikiHoverCloseTimerRef.current = null;
-      }
-    }, []);
+    const {
+      schedule: scheduleCloseWikiHoverPopover,
+      clear: clearWikiHoverCloseTimer,
+      closeNow: closeWikiHoverPopover,
+    } = useHoverDismissTimer({
+      onClose: () => {
+        setWikiHoverPopoverOpen(false);
+        setWikiHoverAnchorEl(null);
+        setWikiHoverPos(null);
+        wikiHoverClientXRef.current = null;
+        wikiHoverTeardownRef.current?.();
+      },
+    });
 
     const openLinkPopoverAtRange = useCallback((range: TextRange, href: string) => {
       linkRangeRef.current = range;
@@ -1225,56 +1188,31 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       if (spellcheckRefreshFrameRef.current !== null) {
         cancelAnimationFrame(spellcheckRefreshFrameRef.current);
       }
-      if (linkHoverCloseTimerRef.current !== null) {
-        window.clearTimeout(linkHoverCloseTimerRef.current);
-      }
-      if (wikiHoverCloseTimerRef.current !== null) {
-        window.clearTimeout(wikiHoverCloseTimerRef.current);
-      }
-      linkHoverPopoverCleanupRef.current?.();
-      linkPopoverCleanupRef.current?.();
-      wikiHoverPopoverCleanupRef.current?.();
     }, []);
 
-    useEffect(() => {
-      if (!linkPopoverOpen) return;
-      const popoverEl = linkPopoverRef.current;
+    const linkPopoverGetReference = useCallback((): PopoverReference | null => {
       const range = linkRangeRef.current;
-      if (!editor || !popoverEl || !range) return;
-
-      const reference = {
+      if (!editor || !range) return null;
+      return {
         contextElement: editor.view.dom,
         getBoundingClientRect: () => getSelectionRect(editor, range),
       };
+    }, [editor]);
 
-      const updatePosition = () => {
-        void computePosition(reference, popoverEl, {
-          strategy: "fixed",
-          placement: "top",
-          middleware: [offset(10), flip(), shift({ padding: 8 })],
-        }).then(({ x, y }) => {
-          popoverEl.style.left = `${x}px`;
-          popoverEl.style.top = `${y}px`;
-        });
-      };
-
-      const cleanup = autoUpdate(reference, popoverEl, updatePosition, { animationFrame: true });
-      linkPopoverCleanupRef.current = cleanup;
-      updatePosition();
-
-      requestAnimationFrame(() => {
+    const { teardownNow: teardownLinkPopover } = usePopoverAnchor({
+      open: linkPopoverOpen,
+      popoverRef: linkPopoverRef,
+      getReference: linkPopoverGetReference,
+      placement: "top",
+      offsetPx: 10,
+      onPositioned: () => {
         linkInputRef.current?.focus();
         linkInputRef.current?.select();
         updateLinkInputFades();
-      });
-
-      return () => {
-        cleanup();
-        if (linkPopoverCleanupRef.current === cleanup) {
-          linkPopoverCleanupRef.current = null;
-        }
-      };
-    }, [editor, linkPopoverOpen, updateLinkInputFades]);
+      },
+      onOutsideMouseDown: closeLinkPopover,
+    });
+    linkPopoverTeardownRef.current = teardownLinkPopover;
 
     useEffect(() => {
       if (!linkPopoverOpen) {
@@ -1302,33 +1240,15 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     }, [linkPopoverOpen, linkUrl, updateLinkInputFades]);
 
     useEffect(() => {
-      if (!linkPopoverOpen) return;
-
-      const handleMouseDown = (event: MouseEvent) => {
-        const target = event.target as Node | null;
-        if (target && linkPopoverRef.current?.contains(target)) {
-          return;
-        }
-        closeLinkPopover();
-      };
-
-      window.addEventListener("mousedown", handleMouseDown, true);
-      return () => window.removeEventListener("mousedown", handleMouseDown, true);
-    }, [closeLinkPopover, linkPopoverOpen]);
-
-    useEffect(() => {
       if (linkPopoverOpen) {
         closeLinkHoverPopover();
       }
     }, [closeLinkHoverPopover, linkPopoverOpen]);
 
-    useEffect(() => {
-      if (!linkHoverPopoverOpen) return;
-      const popoverEl = linkHoverPopoverRef.current;
+    const linkHoverPopoverGetReference = useCallback((): PopoverReference | null => {
+      if (!editor || !linkHoverAnchorEl) return null;
       const anchorEl = linkHoverAnchorEl;
-      if (!editor || !popoverEl || !anchorEl) return;
-
-      const reference = {
+      return {
         contextElement: editor.view.dom,
         getBoundingClientRect: () => {
           const anchorRect = anchorEl.getBoundingClientRect();
@@ -1336,44 +1256,17 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           return new DOMRect(x, anchorRect.top, 0, Math.max(1, anchorRect.height));
         },
       };
+    }, [editor, linkHoverAnchorEl]);
 
-      const updatePosition = () => {
-        void computePosition(reference, popoverEl, {
-          strategy: "fixed",
-          placement: "top-start",
-          middleware: [offset(6), flip(), shift({ padding: 8 })],
-        }).then(({ x, y }) => {
-          popoverEl.style.left = `${x}px`;
-          popoverEl.style.top = `${y}px`;
-        });
-      };
-
-      const cleanup = autoUpdate(reference, popoverEl, updatePosition, { animationFrame: true });
-      linkHoverPopoverCleanupRef.current = cleanup;
-      updatePosition();
-
-      return () => {
-        cleanup();
-        if (linkHoverPopoverCleanupRef.current === cleanup) {
-          linkHoverPopoverCleanupRef.current = null;
-        }
-      };
-    }, [editor, linkHoverAnchorEl, linkHoverPopoverOpen]);
-
-    useEffect(() => {
-      if (!linkHoverPopoverOpen) return;
-
-      const handleMouseDown = (event: MouseEvent) => {
-        const target = event.target as Node | null;
-        if (target && linkHoverPopoverRef.current?.contains(target)) {
-          return;
-        }
-        closeLinkHoverPopover();
-      };
-
-      window.addEventListener("mousedown", handleMouseDown, true);
-      return () => window.removeEventListener("mousedown", handleMouseDown, true);
-    }, [closeLinkHoverPopover, linkHoverPopoverOpen]);
+    const { teardownNow: teardownLinkHoverPopover } = usePopoverAnchor({
+      open: linkHoverPopoverOpen,
+      popoverRef: linkHoverPopoverRef,
+      getReference: linkHoverPopoverGetReference,
+      placement: "top-start",
+      offsetPx: 6,
+      onOutsideMouseDown: closeLinkHoverPopover,
+    });
+    linkHoverTeardownRef.current = teardownLinkHoverPopover;
 
     // Wiki-link hover popover: mirrors the Link hover popover's positioning,
     // outside-click dismissal, and mutual-exclusion with the link edit dialog.
@@ -1383,13 +1276,10 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       }
     }, [closeWikiHoverPopover, linkPopoverOpen]);
 
-    useEffect(() => {
-      if (!wikiHoverPopoverOpen) return;
-      const popoverEl = wikiHoverPopoverRef.current;
+    const wikiPopoverGetReference = useCallback((): PopoverReference | null => {
+      if (!editor || !wikiHoverAnchorEl) return null;
       const anchorEl = wikiHoverAnchorEl;
-      if (!editor || !popoverEl || !anchorEl) return;
-
-      const reference = {
+      return {
         contextElement: editor.view.dom,
         getBoundingClientRect: () => {
           const anchorRect = anchorEl.getBoundingClientRect();
@@ -1397,44 +1287,17 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           return new DOMRect(x, anchorRect.top, 0, Math.max(1, anchorRect.height));
         },
       };
+    }, [editor, wikiHoverAnchorEl]);
 
-      const updatePosition = () => {
-        void computePosition(reference, popoverEl, {
-          strategy: "fixed",
-          placement: "top-start",
-          middleware: [offset(6), flip(), shift({ padding: 8 })],
-        }).then(({ x, y }) => {
-          popoverEl.style.left = `${x}px`;
-          popoverEl.style.top = `${y}px`;
-        });
-      };
-
-      const cleanup = autoUpdate(reference, popoverEl, updatePosition, { animationFrame: true });
-      wikiHoverPopoverCleanupRef.current = cleanup;
-      updatePosition();
-
-      return () => {
-        cleanup();
-        if (wikiHoverPopoverCleanupRef.current === cleanup) {
-          wikiHoverPopoverCleanupRef.current = null;
-        }
-      };
-    }, [editor, wikiHoverAnchorEl, wikiHoverPopoverOpen]);
-
-    useEffect(() => {
-      if (!wikiHoverPopoverOpen) return;
-
-      const handleMouseDown = (event: MouseEvent) => {
-        const target = event.target as Node | null;
-        if (target && wikiHoverPopoverRef.current?.contains(target)) {
-          return;
-        }
-        closeWikiHoverPopover();
-      };
-
-      window.addEventListener("mousedown", handleMouseDown, true);
-      return () => window.removeEventListener("mousedown", handleMouseDown, true);
-    }, [closeWikiHoverPopover, wikiHoverPopoverOpen]);
+    const { teardownNow: teardownWikiHoverPopover } = usePopoverAnchor({
+      open: wikiHoverPopoverOpen,
+      popoverRef: wikiHoverPopoverRef,
+      getReference: wikiPopoverGetReference,
+      placement: "top-start",
+      offsetPx: 6,
+      onOutsideMouseDown: closeWikiHoverPopover,
+    });
+    wikiHoverTeardownRef.current = teardownWikiHoverPopover;
 
     useEffect(() => {
       if (!editor) return;
@@ -1558,7 +1421,7 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           // adjacent.
           if (wikiHoverPopoverOpen) {
             const popoverRect = wikiHoverPopoverRef.current?.getBoundingClientRect();
-            if (popoverRect && isPointInExpandedRect(mouseX, mouseY, popoverRect, LINK_HOVER_SAFE_ZONE_PX)) {
+            if (popoverRect && isPointInExpandedRect(mouseX, mouseY, popoverRect, HOVER_SAFE_ZONE_PX)) {
               clearWikiHoverCloseTimer();
               return;
             }
@@ -1589,7 +1452,7 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
 
           if (linkHoverPopoverOpen) {
             const popoverRect = linkHoverPopoverRef.current?.getBoundingClientRect();
-            if (popoverRect && isPointInExpandedRect(mouseX, mouseY, popoverRect, LINK_HOVER_SAFE_ZONE_PX)) {
+            if (popoverRect && isPointInExpandedRect(mouseX, mouseY, popoverRect, HOVER_SAFE_ZONE_PX)) {
               clearLinkHoverCloseTimer();
               return;
             }

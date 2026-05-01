@@ -37,7 +37,7 @@ import {
 } from "@fluentui/react-icons";
 import { getVersion } from "@tauri-apps/api/app";
 import { t } from "../i18n";
-import { useUpdater } from "../hooks/useUpdater";
+import type { UpdaterState } from "../hooks/useUpdater";
 import type {
   FontFamily,
   Locale,
@@ -131,6 +131,15 @@ const useStyles = makeStyles({
     ":hover": {
       backgroundColor: "var(--settings-nav-hover)",
     },
+  },
+  navUpdateDot: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "50%",
+    backgroundColor: "var(--update-dot-color)",
+    marginLeft: "auto",
+    flexShrink: 0,
+    boxShadow: "0 0 4px var(--update-dot-color), 0 0 7px var(--update-dot-color)",
   },
   content: {
     flex: 1,
@@ -235,6 +244,10 @@ interface SettingsModalProps {
   onRestoreNote: (id: string) => Promise<void>;
   onPermanentlyDeleteNote: (id: string) => Promise<void>;
   onEmptyTrash: () => Promise<void>;
+  updaterState: UpdaterState;
+  onCheckForUpdate: () => Promise<void>;
+  onInstallUpdate: () => Promise<void>;
+  onRestartApp: () => Promise<void>;
 }
 
 const SORT_ORDER_LABELS: Record<NotesSortOrder, Parameters<typeof t>[0]> = {
@@ -259,14 +272,14 @@ function settingItemClass(
   return mergeClasses(styles.settingItem, isFirst && styles.settingItemFirst);
 }
 
-export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, currentNotesDir, onChangeNotesDir, onResetNotesDir, trashedNotes, onRestoreNote, onPermanentlyDeleteNote, onEmptyTrash }: SettingsModalProps) {
+export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, currentNotesDir, onChangeNotesDir, onResetNotesDir, trashedNotes, onRestoreNote, onPermanentlyDeleteNote, onEmptyTrash, updaterState, onCheckForUpdate, onInstallUpdate, onRestartApp }: SettingsModalProps) {
   const styles = useStyles();
   const locale = settings.locale;
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
   const [tab, setTab] = useState<TabId>("general");
   const [appVersion, setAppVersion] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const { state: updaterState, checkForUpdate, installUpdate, restartApp } = useUpdater();
+  const updateAvailable = updaterState.status === "available" || updaterState.status === "downloading" || updaterState.status === "ready";
   const subtleBtnStyle: React.CSSProperties = { fontSize: "13px", fontWeight: 500, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" };
 
   useEffect(() => {
@@ -326,6 +339,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
             className={styles.nav}
             style={{
               "--settings-nav-hover": themeStyles.navHover,
+              "--update-dot-color": isDarkMode ? tokens.colorBrandForeground1 : tokens.colorBrandBackground,
             } as React.CSSProperties}
           >
             <span className={styles.navTitle}>{i("settings.title")}</span>
@@ -339,6 +353,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   onClick={() => setTab(item.id)}
                 >
                   {i(item.labelKey)}
+                  {item.id === "about" && updateAvailable && <span className={styles.navUpdateDot} />}
                 </button>
               );
             })}
@@ -605,7 +620,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                       <Button
                         size="medium"
                         appearance="subtle"
-                        onClick={checkForUpdate}
+                        onClick={onCheckForUpdate}
                         disabled={updaterState.status === "checking"}
                         style={subtleBtnStyle}
                       >
@@ -670,7 +685,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                             {updaterState.body}
                           </div>
                         )}
-                        <Button appearance="primary" size="medium" onClick={installUpdate} style={{ borderRadius: "6px" }}>
+                        <Button appearance="primary" size="medium" onClick={onInstallUpdate} style={{ borderRadius: "6px" }}>
                           {i("about.install")}
                         </Button>
                       </div>
@@ -686,7 +701,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     )}
 
                     {updaterState.status === "ready" && (
-                      <Button appearance="primary" size="medium" onClick={restartApp} style={{ borderRadius: "6px" }}>
+                      <Button appearance="primary" size="medium" onClick={onRestartApp} style={{ borderRadius: "6px" }}>
                         {i("about.restart")}
                       </Button>
                     )}
