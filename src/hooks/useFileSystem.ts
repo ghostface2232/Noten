@@ -20,6 +20,7 @@ import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { removeNoteAssetDir } from "../utils/imageAssetUtils";
 import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsUpdated, emitTrashUpdated } from "./useWindowSync";
 import { markOwnWrite } from "./ownWriteTracker";
+import { removeMeta as removeMetaFile } from "../utils/metadataIO";
 import { t } from "../i18n";
 
 export type { NoteDoc } from "./useNotesLoader";
@@ -219,7 +220,7 @@ export function useFileSystem(
       targetPath = selected;
     }
 
-    markOwnWrite(targetPath);
+    markOwnWrite(targetPath, markdown);
     await writeTextFile(targetPath, markdown);
 
     const nextDocs = docs.map((entry, index) => {
@@ -249,7 +250,7 @@ export function useFileSystem(
     const defaultName = doc?.filePath ? getFileName(doc.filePath) : "untitled.md";
     const selected = await save({ title: t("dialog.export", locale), filters: MD_FILTERS, defaultPath: defaultName });
     if (!selected) return;
-    markOwnWrite(selected);
+    markOwnWrite(selected, markdown);
     await writeTextFile(selected, markdown);
   }, [activeIndex, docs, locale, tiptapRef]);
 
@@ -285,7 +286,7 @@ export function useFileSystem(
         const notesDir = await getNotesDir();
         await mkdir(notesDir, { recursive: true }).catch(() => {});
         filePath = `${notesDir}/${id}.md`;
-        markOwnWrite(filePath);
+        markOwnWrite(filePath, content);
         await writeTextFile(filePath, content);
       } catch (error) {
         console.warn("Failed to write imported note file:", error);
@@ -400,7 +401,7 @@ export function useFileSystem(
       resetDocState(state, tiptapRef, id, filePath, "");
       notifyActiveDocRef?.current?.(id, filePath);
       if (filePath) {
-        markOwnWrite(filePath);
+        markOwnWrite(filePath, "");
         writeTextFile(filePath, "").catch(() => {});
       }
     };
@@ -434,7 +435,7 @@ export function useFileSystem(
       const notesDir = await getNotesDir();
       await mkdir(notesDir, { recursive: true }).catch(() => {});
       filePath = `${notesDir}/${id}.md`;
-      markOwnWrite(filePath);
+      markOwnWrite(filePath, "");
       await writeTextFile(filePath, "");
     } catch (error) {
       console.warn("Failed to create note for wiki link:", error);
@@ -560,7 +561,7 @@ export function useFileSystem(
       try {
         const notesDir = await getNotesDir();
         filePath = `${notesDir}/${id}.md`;
-        markOwnWrite(filePath);
+        markOwnWrite(filePath, "");
         await writeTextFile(filePath, "");
       } catch { /* ignore */ }
 
@@ -630,7 +631,7 @@ export function useFileSystem(
 
     if (filePath) {
       try {
-        markOwnWrite(filePath);
+        markOwnWrite(filePath, content);
         await writeTextFile(filePath, content);
       } catch {
         console.warn("Failed to write duplicated note file.");
@@ -701,7 +702,7 @@ export function useFileSystem(
     await Promise.all(
       diskWrites.map(async (write) => {
         try {
-          markOwnWrite(write.filePath);
+          markOwnWrite(write.filePath, write.content);
           await writeTextFile(write.filePath, write.content);
         } catch {
           console.warn("Failed to rewrite wiki links in note:", write.filePath);
@@ -713,7 +714,7 @@ export function useFileSystem(
       const activeDoc = liveDocs[currentActiveIndex];
       if (activeDoc?.filePath) {
         try {
-          markOwnWrite(activeDoc.filePath);
+          markOwnWrite(activeDoc.filePath, activeRewrittenContent);
           await writeTextFile(activeDoc.filePath, activeRewrittenContent);
         } catch {
           console.warn("Failed to persist rewritten wiki links for active note.");
@@ -809,6 +810,7 @@ export function useFileSystem(
     try {
       const notesDir = await getNotesDir();
       await removeNoteAssetDir(notesDir, trashed.id);
+      await removeMetaFile(notesDir, trashed.id);
     } catch { /* ignore */ }
 
     if (setTrashedNotes) {
@@ -827,7 +829,10 @@ export function useFileSystem(
     try { notesDir = await getNotesDir(); } catch { /* ignore */ }
     for (const trashed of trashedSnapshot) {
       try { await remove(trashed.trashFilePath); } catch { /* ignore */ }
-      if (notesDir) await removeNoteAssetDir(notesDir, trashed.id);
+      if (notesDir) {
+        await removeNoteAssetDir(notesDir, trashed.id);
+        await removeMetaFile(notesDir, trashed.id);
+      }
     }
 
     if (setTrashedNotes) {

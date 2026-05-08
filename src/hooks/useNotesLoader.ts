@@ -1,12 +1,49 @@
 import { useState, useEffect, useRef } from "react";
 import { appDataDir } from "@tauri-apps/api/path";
-import { mkdir, readTextFile, writeTextFile, readDir, remove } from "@tauri-apps/plugin-fs";
+import {
+  mkdir,
+  readTextFile,
+  writeTextFile,
+  readDir,
+  remove,
+  copyFile,
+} from "@tauri-apps/plugin-fs";
 import { markOwnWrite } from "./ownWriteTracker";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { getFileTimestamps } from "../utils/fileTimestamps";
 import { migrateDataUrlImagesToAssets } from "../utils/migrateImageAssets";
 import { removeNoteAssetDir } from "../utils/imageAssetUtils";
+import {
+  metaPathFor,
+  metaDirFor,
+  readAllMeta,
+  writeMeta as writeMetaFile,
+  removeMeta as removeMetaFile,
+} from "../utils/metadataIO";
+import {
+  groupsPathFor,
+  readGroupsFile,
+  writeGroupsWithMerge,
+  genOrderKeyAfter,
+  type SharedGroupEntry,
+} from "../utils/groupsIO";
+import { getMachineId, getMachineIdCached } from "../utils/machineId";
+import {
+  ensureSharedDirs,
+  retireLegacyManifest,
+  scanAndAbsorbConflicts,
+} from "../utils/conflictFileDetector";
+import { setKnownDiskContent, resetKnownDiskContent } from "../utils/conflictBackup";
+import {
+  getUiStateCached,
+  setActiveNoteIdPersisted,
+  setGroupCollapsedPersisted,
+} from "./useUiState";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
 
 export interface NoteDoc {
   id: string;
@@ -25,6 +62,12 @@ export interface NoteGroup {
   noteIds: string[];
   collapsed: boolean;
   createdAt: number;
+  /** Fractional index used to sort groups in the sidebar — synced across PCs. */
+  orderKey?: string;
+  /** updatedAt for orderKey alone (independent of name updates). */
+  orderUpdatedAt?: number;
+  /** updatedAt for name and other shared fields. */
+  updatedAt?: number;
 }
 
 export interface TrashedNote {
@@ -38,29 +81,117 @@ export interface TrashedNote {
   updatedAt: number;
 }
 
-interface Manifest {
-  version: 1;
+/**
+ * Per-machine cache that lets us paint the sidebar quickly on next launch.
+ * NOT a source of truth: it is rebuilt from `.meta/*.json` + `.groups.json`
+ * + `ui-state.json` after the first scan.
+ */
+interface LocalCache {
+  version: 2;
   notes: Omit<NoteDoc, "isDirty" | "content">[];
-  activeNoteId: string | null;
   groups?: NoteGroup[];
   trashedNotes?: TrashedNote[];
   imageAssetMigrationV1CompletedAt?: number;
 }
 
-const UI_STATE_STORAGE_KEY = "markdown-studio-ui-state";
+// ─────────────────────────────────────────────────────────────────────────────
+// Module-level caches
+// ─────────────────────────────────────────────────────────────────────────────
 
 let notesDirCache: string | null = null;
 let imageAssetMigrationV1CompletedAtCache: number | null = null;
-
-// --- Module-level trashedNotes cache (avoids disk I/O in saveManifest) ---
-
 let trashedNotesCache: TrashedNote[] = [];
 export function getTrashedNotesCache(): TrashedNote[] { return trashedNotesCache; }
 export function setTrashedNotesCache(notes: TrashedNote[]) { trashedNotesCache = notes; }
 
-/** Migration in progress — blocks saveManifest writes */
+/** Migration in progress — blocks saveManifest writes. */
 export let migrationInProgress = false;
 export function setMigrationInProgress(v: boolean) { migrationInProgress = v; }
+
+/**
+ * Last-written snapshot of per-note meta. Lets `saveManifest` write only the
+ * meta files that actually changed instead of touching all of them.
+ */
+interface MetaSnapshot {
+  fileName: string;
+  customName: boolean;
+  createdAt: number;
+  updatedAt: number;
+  groupId: string | null;
+  trashedAt: number | null;
+}
+const writtenMetaSnapshot = new Map<string, MetaSnapshot>();
+
+interface SharedGroupSnapshot {
+  name: string;
+  orderKey: string;
+  orderUpdatedAt: number;
+  updatedAt: number;
+}
+const writtenGroupsSnapshot = new Map<string, SharedGroupSnapshot>();
+
+function resetWriteSnapshots() {
+  writtenMetaSnapshot.clear();
+  writtenGroupsSnapshot.clear();
+}
+
+/**
+ * Populate the diff snapshots from on-disk state so subsequent `saveManifest`
+ * calls can:
+ *   - skip rewriting unchanged meta files
+ *   - detect group deletions and emit tombstones into `.groups.json`
+ *
+ * Without this seeding, deleting a group that existed before the session
+ * starts would NOT produce a tombstone and the read-merge-write in
+ * `writeGroupsWithMerge` would resurrect it.
+ */
+async function seedWriteSnapshots(dir: string): Promise<void> {
+  resetWriteSnapshots();
+
+  const allMeta = await readAllMeta(dir);
+  for (const m of allMeta.values()) {
+    writtenMetaSnapshot.set(m.id, {
+      fileName: m.fileName,
+      customName: !!m.customName,
+      createdAt: m.createdAt,
+      updatedAt: m.updatedAt,
+      groupId: m.groupId ?? null,
+      trashedAt: m.trashedAt ?? null,
+    });
+  }
+
+  await syncGroupsSnapshotFromDisk(dir);
+}
+
+/**
+ * Refresh `writtenGroupsSnapshot` from `.groups.json`. Called when the watcher
+ * sees an external write so that subsequent local deletions of remotely-created
+ * groups still emit tombstones (otherwise the deletion is silently lost in the
+ * read-merge-write cycle).
+ */
+export async function syncGroupsSnapshotFromDisk(dir: string): Promise<void> {
+  const groupsFile = await readGroupsFile(dir);
+  // Forget entries that no longer exist on disk so we don't keep emitting
+  // tombstones for already-tombstoned groups.
+  const liveOnDisk = new Set<string>();
+  for (const g of Object.values(groupsFile.groups)) {
+    if (g.deletedAt != null) continue;
+    liveOnDisk.add(g.id);
+    writtenGroupsSnapshot.set(g.id, {
+      name: g.name,
+      orderKey: g.orderKey,
+      orderUpdatedAt: g.orderUpdatedAt,
+      updatedAt: g.updatedAt,
+    });
+  }
+  for (const id of Array.from(writtenGroupsSnapshot.keys())) {
+    if (!liveOnDisk.has(id)) writtenGroupsSnapshot.delete(id);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sorting & title helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function sortNotes(docs: NoteDoc[], order: NotesSortOrder, locale: Locale = "en"): NoteDoc[] {
   const sorted = [...docs];
@@ -92,6 +223,10 @@ export function sortNotes(docs: NoteDoc[], order: NotesSortOrder, locale: Locale
   return sorted;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Notes directory
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function getNotesDir(): Promise<string> {
   if (notesDirCache) return notesDirCache;
   const base = await appDataDir();
@@ -100,14 +235,17 @@ export async function getNotesDir(): Promise<string> {
   return notesDirCache;
 }
 
-/** Set the notes directory to a custom path */
 export function setNotesDir(dir: string) {
   notesDirCache = dir;
+  // Path changed → previous diff snapshot and conflict baseline are meaningless.
+  resetWriteSnapshots();
+  resetKnownDiskContent();
 }
 
-/** Reset notes directory cache so getNotesDir() recomputes the default */
 export function resetNotesDir() {
   notesDirCache = null;
+  resetWriteSnapshots();
+  resetKnownDiskContent();
 }
 
 async function ensureNotesDir(): Promise<string> {
@@ -116,7 +254,9 @@ async function ensureNotesDir(): Promise<string> {
   return dir;
 }
 
-// --- Trash directory ---
+// ─────────────────────────────────────────────────────────────────────────────
+// Trash directory
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function getTrashDir(): Promise<string> {
   const notesDir = await getNotesDir();
@@ -141,7 +281,10 @@ export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<Tr
   for (const note of trashedNotes) {
     if (now - note.trashedAt > TRASH_RETENTION_MS) {
       try { await remove(note.trashFilePath); } catch { /* file may already be gone */ }
-      if (notesDir) await removeNoteAssetDir(notesDir, note.id);
+      if (notesDir) {
+        await removeNoteAssetDir(notesDir, note.id);
+        await removeMetaFile(notesDir, note.id);
+      }
     } else {
       kept.push(note);
     }
@@ -150,73 +293,49 @@ export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<Tr
   return kept;
 }
 
-// --- File-based manifest ---
+// ─────────────────────────────────────────────────────────────────────────────
+// Local cache file (per-machine, fast-boot)
+// ─────────────────────────────────────────────────────────────────────────────
 
-async function readManifestFromFile(dir: string): Promise<Manifest | null> {
+let localCachePathPromise: Promise<string> | null = null;
+
+async function getLocalCachePath(): Promise<string> {
+  if (!localCachePathPromise) {
+    localCachePathPromise = (async () => {
+      const base = await appDataDir();
+      await mkdir(base, { recursive: true }).catch(() => {});
+      const sep = base.endsWith("/") || base.endsWith("\\") ? "" : "/";
+      return `${base}${sep}manifest-cache.json`;
+    })();
+  }
+  return localCachePathPromise;
+}
+
+async function readLocalCache(): Promise<LocalCache | null> {
   try {
-    const sep = dir.endsWith("/") || dir.endsWith("\\") ? "" : "/";
-    const raw = await readTextFile(`${dir}${sep}manifest.json`);
-    return JSON.parse(raw) as Manifest;
+    const path = await getLocalCachePath();
+    const raw = await readTextFile(path);
+    const parsed = JSON.parse(raw) as LocalCache;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.version !== 2) return null;
+    if (!Array.isArray(parsed.notes)) return null;
+    imageAssetMigrationV1CompletedAtCache = parsed.imageAssetMigrationV1CompletedAt ?? null;
+    return parsed;
   } catch {
     return null;
   }
 }
 
-async function writeManifestToFile(dir: string, manifest: Manifest): Promise<void> {
-  const sep = dir.endsWith("/") || dir.endsWith("\\") ? "" : "/";
-  const manifestPath = `${dir}${sep}manifest.json`;
-  markOwnWrite(manifestPath);
-  await writeTextFile(manifestPath, JSON.stringify(manifest, null, 2));
-}
-
-// --- localStorage fallback (backup / migration source) ---
-
-function readStoredManifest(): Manifest | null {
+async function writeLocalCache(cache: LocalCache): Promise<void> {
   try {
-    const raw = localStorage.getItem(UI_STATE_STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as Manifest;
-  } catch {
-    return null;
-  }
+    const path = await getLocalCachePath();
+    await writeTextFile(path, JSON.stringify(cache, null, 2));
+  } catch { /* best-effort */ }
 }
 
-function writeStoredManifest(manifest: Manifest) {
-  localStorage.setItem(UI_STATE_STORAGE_KEY, JSON.stringify(manifest));
-}
-
-// --- Unified manifest read/write ---
-
-async function readManifest(dir: string): Promise<Manifest | null> {
-  // Primary: file-based manifest
-  const fileManifest = await readManifestFromFile(dir);
-  if (fileManifest) {
-    imageAssetMigrationV1CompletedAtCache = fileManifest.imageAssetMigrationV1CompletedAt ?? null;
-    return fileManifest;
-  }
-
-  // Fallback: localStorage (one-time migration)
-  const lsManifest = readStoredManifest();
-  if (lsManifest) {
-    // Migrate to file-based
-    try {
-      await writeManifestToFile(dir, lsManifest);
-    } catch {
-      console.warn("Failed to migrate manifest from localStorage to file.");
-    }
-    imageAssetMigrationV1CompletedAtCache = lsManifest.imageAssetMigrationV1CompletedAt ?? null;
-    return lsManifest;
-  }
-
-  return null;
-}
-
-async function writeManifest(dir: string, manifest: Manifest): Promise<void> {
-  imageAssetMigrationV1CompletedAtCache = manifest.imageAssetMigrationV1CompletedAt ?? null;
-  await writeManifestToFile(dir, manifest);
-  // Also write to localStorage as backup
-  writeStoredManifest(manifest);
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function readFileContent(path: string): Promise<string> {
   try {
@@ -226,11 +345,273 @@ async function readFileContent(path: string): Promise<string> {
   }
 }
 
-// --- Startup reconciliation: folder ↔ manifest ---
-
 export function getFileBaseName(filePath: string): string {
   return filePath.replace(/\\/g, "/").split("/").pop() ?? "";
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function fileNameToId(name: string): string {
+  // Drop ".md" suffix; legacy notes may have non-UUID stems — preserve them.
+  return name.replace(/\.md$/i, "");
+}
+
+function normalizeSep(dir: string): string {
+  return dir.endsWith("/") || dir.endsWith("\\") ? dir : `${dir}/`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Decomposed-state I/O
+//   (replaces the old monolithic manifest.json read/write)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface DecomposedState {
+  docs: NoteDoc[];
+  groups: NoteGroup[];
+  trashedNotes: TrashedNote[];
+  activeNoteId: string | null;
+}
+
+/** Build the in-memory NoteGroup list from `.groups.json` + per-note groupId. */
+function buildGroupsFromShared(
+  shared: Record<string, SharedGroupEntry>,
+  metaByGroup: Map<string, string[]>,
+  collapsedMap: Record<string, boolean>,
+): NoteGroup[] {
+  const out: NoteGroup[] = [];
+  for (const entry of Object.values(shared)) {
+    if (entry.deletedAt != null) continue;
+    out.push({
+      id: entry.id,
+      name: entry.name,
+      noteIds: metaByGroup.get(entry.id) ?? [],
+      collapsed: !!collapsedMap[entry.id],
+      createdAt: entry.createdAt,
+      orderKey: entry.orderKey,
+      orderUpdatedAt: entry.orderUpdatedAt,
+      updatedAt: entry.updatedAt,
+    });
+  }
+  out.sort((a, b) => {
+    const ak = a.orderKey ?? "";
+    const bk = b.orderKey ?? "";
+    if (ak === bk) return a.createdAt - b.createdAt;
+    return ak < bk ? -1 : 1;
+  });
+  return out;
+}
+
+async function loadDecomposedState(dir: string): Promise<DecomposedState> {
+  const base = normalizeSep(dir);
+  const trashBase = `${base}.trash/`;
+
+  const allMeta = await readAllMeta(dir);
+  const sharedGroupsFile = await readGroupsFile(dir);
+  const uiState = getUiStateCached();
+
+  const metaByGroup = new Map<string, string[]>();
+  for (const meta of allMeta.values()) {
+    if (meta.trashedAt != null) continue;
+    if (meta.groupId) {
+      const arr = metaByGroup.get(meta.groupId) ?? [];
+      arr.push(meta.id);
+      metaByGroup.set(meta.groupId, arr);
+    }
+  }
+
+  const groups = buildGroupsFromShared(
+    sharedGroupsFile.groups,
+    metaByGroup,
+    uiState.groupCollapsed,
+  );
+
+  const docs: NoteDoc[] = [];
+  const trashed: TrashedNote[] = [];
+
+  for (const meta of allMeta.values()) {
+    if (meta.trashedAt != null) {
+      const fileName = getFileBaseName(meta.trashedFromPath ?? `${base}${meta.id}.md`);
+      const trashFilePath = `${trashBase}${meta.id}.md`;
+      trashed.push({
+        id: meta.id,
+        fileName: meta.fileName,
+        originalFilePath: meta.trashedFromPath ?? `${base}${fileName}`,
+        trashFilePath,
+        trashedAt: meta.trashedAt,
+        groupId: meta.groupId ?? null,
+        createdAt: meta.createdAt,
+        updatedAt: meta.updatedAt,
+      });
+    } else {
+      docs.push({
+        id: meta.id,
+        filePath: `${base}${meta.id}.md`,
+        fileName: meta.fileName,
+        isDirty: false,
+        content: "",
+        createdAt: meta.createdAt,
+        updatedAt: meta.updatedAt,
+        customName: meta.customName,
+      });
+    }
+  }
+
+  const docIds = new Set(docs.map((d) => d.id));
+  let activeId: string | null = null;
+  if (uiState.activeNoteId && docIds.has(uiState.activeNoteId)) {
+    activeId = uiState.activeNoteId;
+  } else if (uiState.lastOpenedNoteId && docIds.has(uiState.lastOpenedNoteId)) {
+    activeId = uiState.lastOpenedNoteId;
+  } else {
+    activeId = docs[0]?.id ?? null;
+  }
+
+  return { docs, groups, trashedNotes: trashed, activeNoteId: activeId };
+}
+
+async function attachDocContents(docs: NoteDoc[]): Promise<NoteDoc[]> {
+  return Promise.all(
+    docs.map(async (d) => {
+      const content = await readFileContent(d.filePath);
+      // Seed the conflict-backup baseline so the first local autosave knows
+      // what disk looked like at boot.
+      if (d.filePath) setKnownDiskContent(d.filePath, content);
+      return { ...d, content } as NoteDoc;
+    }),
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Legacy `manifest.json` migration (one-shot)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface LegacyManifestNote {
+  id: string;
+  filePath: string;
+  fileName: string;
+  customName?: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface LegacyManifestGroup {
+  id: string;
+  name: string;
+  noteIds: string[];
+  collapsed?: boolean;
+  createdAt?: number;
+}
+
+interface LegacyManifestTrashed {
+  id: string;
+  fileName: string;
+  originalFilePath: string;
+  trashFilePath: string;
+  trashedAt: number;
+  groupId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface LegacyManifest {
+  version?: number;
+  notes?: LegacyManifestNote[];
+  activeNoteId?: string | null;
+  groups?: LegacyManifestGroup[];
+  trashedNotes?: LegacyManifestTrashed[];
+  imageAssetMigrationV1CompletedAt?: number;
+}
+
+async function readLegacyManifestFile(dir: string): Promise<LegacyManifest | null> {
+  try {
+    const raw = await readTextFile(`${normalizeSep(dir)}manifest.json`);
+    return JSON.parse(raw) as LegacyManifest;
+  } catch {
+    return null;
+  }
+}
+
+async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): Promise<void> {
+  const machineId = await getMachineId();
+
+  // 1. groups → .groups.json
+  const sharedGroups: Record<string, SharedGroupEntry> = {};
+  let lastKey: string | undefined = undefined;
+  const collapsedMap: Record<string, boolean> = {};
+  const noteIdToGroupId = new Map<string, string>();
+  const now = Date.now();
+
+  for (const g of manifest.groups ?? []) {
+    if (!g.id) continue;
+    const orderKey = genOrderKeyAfter(lastKey);
+    lastKey = orderKey;
+    sharedGroups[g.id] = {
+      id: g.id,
+      name: g.name ?? "",
+      orderKey,
+      orderUpdatedAt: now,
+      updatedAt: now,
+      createdAt: g.createdAt ?? now,
+      deletedAt: null,
+    };
+    if (g.collapsed) collapsedMap[g.id] = true;
+    for (const noteId of g.noteIds ?? []) {
+      noteIdToGroupId.set(noteId, g.id);
+    }
+  }
+
+  if (Object.keys(sharedGroups).length > 0) {
+    await writeGroupsWithMerge(dir, sharedGroups);
+  }
+
+  // 2. live notes → .meta/{id}.json
+  for (const n of manifest.notes ?? []) {
+    if (!n.id) continue;
+    await writeMetaFile(dir, {
+      version: 2,
+      id: n.id,
+      fileName: n.fileName,
+      customName: n.customName || undefined,
+      createdAt: n.createdAt,
+      updatedAt: n.updatedAt,
+      groupId: noteIdToGroupId.get(n.id) ?? null,
+      trashedAt: null,
+    }, machineId);
+  }
+
+  // 3. trashed notes → .meta with trashedAt
+  for (const t of manifest.trashedNotes ?? []) {
+    if (!t.id) continue;
+    await writeMetaFile(dir, {
+      version: 2,
+      id: t.id,
+      fileName: t.fileName,
+      customName: undefined,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+      groupId: t.groupId ?? null,
+      trashedAt: t.trashedAt,
+      trashedFromPath: t.originalFilePath,
+    }, machineId);
+  }
+
+  // 4. activeNoteId + collapsed → ui-state.json (per-machine)
+  if (manifest.activeNoteId) {
+    await setActiveNoteIdPersisted(manifest.activeNoteId);
+  }
+  for (const [gid, collapsed] of Object.entries(collapsedMap)) {
+    if (collapsed) await setGroupCollapsedPersisted(gid, true);
+  }
+
+  // 5. imageAssetMigrationV1CompletedAt → local cache
+  if (manifest.imageAssetMigrationV1CompletedAt) {
+    imageAssetMigrationV1CompletedAtCache = manifest.imageAssetMigrationV1CompletedAt;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// reconcileFolder — pick up new files, drop missing ones, repair meta
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function reconcileFolder(
   dir: string,
@@ -238,65 +619,177 @@ export async function reconcileFolder(
   groups: NoteGroup[],
   locale: Locale,
 ): Promise<{ docs: NoteDoc[]; groups: NoteGroup[]; changed: boolean }> {
-  let entries: { name?: string }[];
+  let entries: { name?: string; isFile?: boolean; isDirectory?: boolean }[];
   try {
     entries = await readDir(dir);
   } catch {
     return { docs, groups, changed: false };
   }
 
-  const mdFiles = entries.filter((e) => e.name?.endsWith(".md"));
-  const folderFileNames = new Set(mdFiles.map((e) => e.name!));
-  const docFileNames = new Set(docs.map((d) => getFileBaseName(d.filePath)));
+  const machineId = getMachineIdCached();
+  const base = normalizeSep(dir);
+  const trashBase = `${base}.trash/`;
+
+  const mdEntries = entries.filter((e) => e.name?.endsWith(".md") && e.isFile);
+  const folderFileNames = new Set(mdEntries.map((e) => e.name!));
+  const allMeta = await readAllMeta(dir);
+  const trashedIds = new Set(
+    Array.from(allMeta.values()).filter((m) => m.trashedAt != null).map((m) => m.id),
+  );
 
   let changed = false;
   let nextDocs = [...docs];
-  let nextGroups = [...groups];
+  const docById = new Map(nextDocs.map((d) => [d.id, d]));
 
-  // Add files in folder but missing from manifest
-  for (const entry of mdFiles) {
+  // ── Add files in folder but missing from in-memory docs ──
+  for (const entry of mdEntries) {
     const name = entry.name!;
-    if (docFileNames.has(name)) continue;
+    const id = fileNameToId(name);
+    if (docById.has(id)) continue;
+    if (trashedIds.has(id)) continue; // handled in mismatch branch below
 
-    const filePath = `${dir}/${name}`;
-    let content = "";
-    try { content = await readTextFile(filePath); } catch { continue; }
+    const filePath = `${base}${name}`;
+    const content = await readFileContent(filePath);
 
-    const id = name.replace(/\.md$/, "");
-    const { createdAt, updatedAt } = await getFileTimestamps(filePath);
-    nextDocs.push({
+    let meta = allMeta.get(id);
+    const fts = await getFileTimestamps(filePath);
+
+    if (!meta) {
+      meta = {
+        version: 2,
+        id,
+        fileName: deriveTitle(content) || getDefaultDocumentTitle(locale),
+        customName: !UUID_RE.test(id) ? true : undefined,
+        createdAt: fts.createdAt,
+        updatedAt: fts.updatedAt,
+        groupId: null,
+        trashedAt: null,
+      };
+      try { await writeMetaFile(dir, meta, machineId); } catch { /* ignore */ }
+    }
+
+    const newDoc: NoteDoc = {
       id,
       filePath,
-      fileName: deriveTitle(content) || getDefaultDocumentTitle(locale),
+      fileName: meta.fileName,
       isDirty: false,
       content,
-      createdAt,
-      updatedAt,
-    });
+      createdAt: meta.createdAt,
+      updatedAt: meta.updatedAt,
+      customName: meta.customName,
+    };
+    nextDocs.push(newDoc);
+    docById.set(id, newDoc);
     changed = true;
   }
 
-  // Remove docs whose files no longer exist
-  const beforeLen = nextDocs.length;
+  // ── Resolve state mismatches: meta says trashed but root .md exists ──
+  for (const meta of allMeta.values()) {
+    if (meta.trashedAt == null) continue;
+    const rootName = `${meta.id}.md`;
+    if (!folderFileNames.has(rootName)) continue;
+
+    const rootPath = `${base}${rootName}`;
+    let rootMtime = 0;
+    try { rootMtime = (await getFileTimestamps(rootPath)).updatedAt; } catch { /* fall back */ }
+
+    if (rootMtime > meta.trashedAt) {
+      try {
+        await writeMetaFile(dir, { ...meta, trashedAt: null, trashedFromPath: null }, machineId);
+      } catch { /* ignore */ }
+      changed = true;
+    } else {
+      try {
+        await mkdir(`${base}.trash`, { recursive: true });
+        const trashPath = `${trashBase}${rootName}`;
+        markOwnWrite(rootPath);
+        await copyFile(rootPath, trashPath);
+        await remove(rootPath);
+      } catch { /* ignore */ }
+      const beforeLen = nextDocs.length;
+      nextDocs = nextDocs.filter((d) => d.id !== meta.id);
+      if (nextDocs.length !== beforeLen) changed = true;
+    }
+  }
+
+  // ── Remove docs whose root .md no longer exists ──
+  // Crucially, keep dirty docs even if disk is gone: the user may be actively
+  // editing in the editor, and their next autosave will recreate the file.
+  // Dropping them here would silently destroy unsaved work.
+  const beforeRemoveLen = nextDocs.length;
   const removedIds = new Set<string>();
   nextDocs = nextDocs.filter((d) => {
     if (!d.filePath) return true;
     const name = getFileBaseName(d.filePath);
     if (folderFileNames.has(name)) return true;
+    if (d.isDirty) return true;
     removedIds.add(d.id);
     return false;
   });
-  if (nextDocs.length !== beforeLen) {
-    changed = true;
-    nextGroups = nextGroups.map((g) => ({
-      ...g,
-      noteIds: g.noteIds.filter((id) => !removedIds.has(id)),
-    })).filter((g) => g.noteIds.length > 0);
+  if (nextDocs.length !== beforeRemoveLen) changed = true;
+
+  const nextGroups = removedIds.size > 0
+    ? groups.map((g) => ({
+        ...g,
+        noteIds: g.noteIds.filter((id) => !removedIds.has(id)),
+      }))
+    : groups;
+
+  // ── Orphan meta cleanup: meta with trashedAt=null but no root .md ──
+  for (const meta of allMeta.values()) {
+    if (meta.trashedAt != null) continue;
+    const rootName = `${meta.id}.md`;
+    if (folderFileNames.has(rootName)) continue;
+    try { await removeMetaFile(dir, meta.id); } catch { /* ignore */ }
   }
+
+  // ── Trashed body integrity: meta says trashed but .trash file missing ──
+  let trashEntries: { name?: string; isFile?: boolean }[] = [];
+  try { trashEntries = await readDir(`${base}.trash`); } catch { trashEntries = []; }
+  const trashFileNames = new Set(
+    trashEntries.filter((e) => e.name?.endsWith(".md") && e.isFile).map((e) => e.name!),
+  );
+  for (const meta of allMeta.values()) {
+    if (meta.trashedAt == null) continue;
+    if (!trashFileNames.has(`${meta.id}.md`)) {
+      try { await removeMetaFile(dir, meta.id); } catch { /* ignore */ }
+    }
+  }
+
+  // locale used only by getDefaultDocumentTitle above; suppress unused warning otherwise
+  void locale;
 
   return { docs: nextDocs, groups: nextGroups, changed };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// saveManifest — public API preserved, internals decomposed
+// ─────────────────────────────────────────────────────────────────────────────
+
+function metaSnapshotEqual(a: MetaSnapshot, b: MetaSnapshot): boolean {
+  return a.fileName === b.fileName
+    && a.customName === b.customName
+    && a.createdAt === b.createdAt
+    && a.updatedAt === b.updatedAt
+    && a.groupId === b.groupId
+    && a.trashedAt === b.trashedAt;
+}
+
+function groupSnapshotEqual(a: SharedGroupSnapshot, b: SharedGroupSnapshot): boolean {
+  return a.name === b.name
+    && a.orderKey === b.orderKey
+    && a.orderUpdatedAt === b.orderUpdatedAt
+    && a.updatedAt === b.updatedAt;
+}
+
+/**
+ * Persist all in-memory state. Signature preserved for compatibility; under
+ * the hood writes:
+ *   - `.meta/{id}.json` for any doc/trashed entry whose snapshot changed
+ *   - shared `.groups.json` (read-merge-write against on-disk content)
+ *   - local `ui-state.json` (activeNoteId)
+ *   - local `manifest-cache.json` for next-launch fast paint
+ */
 export async function saveManifest(
   docs: NoteDoc[],
   activeId: string | null,
@@ -304,30 +797,166 @@ export async function saveManifest(
 ): Promise<void> {
   if (migrationInProgress) return;
 
+  const dir = await getNotesDir();
+  const machineId = getMachineIdCached();
   const trashed = trashedNotesCache;
-  const manifest: Manifest = {
-    version: 1,
-    notes: docs.map(({ id, filePath, fileName, createdAt, updatedAt, customName }) => ({
-      id,
-      filePath,
-      fileName,
-      createdAt,
+
+  // Build a noteId → groupId index from the in-memory groups array.
+  const noteIdToGroupId = new Map<string, string>();
+  for (const g of groups ?? []) {
+    if (!g.id) continue;
+    for (const nid of g.noteIds) noteIdToGroupId.set(nid, g.id);
+  }
+
+  // ── 1. Per-note meta diffs ──
+  const metaWrites: Promise<unknown>[] = [];
+  for (const doc of docs) {
+    const snap: MetaSnapshot = {
+      fileName: doc.fileName,
+      customName: !!doc.customName,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt,
+      groupId: noteIdToGroupId.get(doc.id) ?? null,
+      trashedAt: null,
+    };
+    const prev = writtenMetaSnapshot.get(doc.id);
+    if (prev && metaSnapshotEqual(prev, snap)) continue;
+
+    metaWrites.push(
+      writeMetaFile(dir, {
+        version: 2,
+        id: doc.id,
+        fileName: snap.fileName,
+        customName: snap.customName || undefined,
+        createdAt: snap.createdAt,
+        updatedAt: snap.updatedAt,
+        groupId: snap.groupId,
+        trashedAt: null,
+      }, machineId).catch(() => {}),
+    );
+    writtenMetaSnapshot.set(doc.id, snap);
+  }
+
+  for (const t of trashed) {
+    const snap: MetaSnapshot = {
+      fileName: t.fileName,
+      customName: false,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+      groupId: t.groupId ?? null,
+      trashedAt: t.trashedAt,
+    };
+    const prev = writtenMetaSnapshot.get(t.id);
+    if (prev && metaSnapshotEqual(prev, snap)) continue;
+
+    metaWrites.push(
+      writeMetaFile(dir, {
+        version: 2,
+        id: t.id,
+        fileName: snap.fileName,
+        customName: undefined,
+        createdAt: snap.createdAt,
+        updatedAt: snap.updatedAt,
+        groupId: snap.groupId,
+        trashedAt: snap.trashedAt,
+        trashedFromPath: t.originalFilePath,
+      }, machineId).catch(() => {}),
+    );
+    writtenMetaSnapshot.set(t.id, snap);
+  }
+
+  // ── 2. Shared groups diff ──
+  const localGroupsMap: Record<string, SharedGroupEntry> = {};
+  let lastOrderKey: string | undefined = undefined;
+  const orderedGroups = [...(groups ?? [])].sort((a, b) => {
+    const ak = a.orderKey ?? "";
+    const bk = b.orderKey ?? "";
+    if (ak === bk) return a.createdAt - b.createdAt;
+    return ak < bk ? -1 : 1;
+  });
+  const now = Date.now();
+  let groupsChanged = false;
+  for (const g of orderedGroups) {
+    if (!g.id) continue;
+    let orderKey = g.orderKey;
+    let orderUpdatedAt = g.orderUpdatedAt ?? 0;
+    if (!orderKey) {
+      orderKey = genOrderKeyAfter(lastOrderKey);
+      orderUpdatedAt = now;
+    }
+    lastOrderKey = orderKey;
+
+    const updatedAt = g.updatedAt ?? now;
+    const snap: SharedGroupSnapshot = {
+      name: g.name,
+      orderKey,
+      orderUpdatedAt,
       updatedAt,
+    };
+    const prev = writtenGroupsSnapshot.get(g.id);
+    if (!prev || !groupSnapshotEqual(prev, snap)) groupsChanged = true;
+    writtenGroupsSnapshot.set(g.id, snap);
+
+    localGroupsMap[g.id] = {
+      id: g.id,
+      name: g.name,
+      orderKey,
+      orderUpdatedAt,
+      updatedAt,
+      createdAt: g.createdAt,
+      deletedAt: null,
+    };
+  }
+
+  // Detect deletions: groups previously written that aren't in the current list.
+  const currentIds = new Set(orderedGroups.map((g) => g.id));
+  for (const id of Array.from(writtenGroupsSnapshot.keys())) {
+    if (!currentIds.has(id)) {
+      writtenGroupsSnapshot.delete(id);
+      localGroupsMap[id] = {
+        id,
+        name: "",
+        orderKey: "z",
+        orderUpdatedAt: now,
+        updatedAt: now,
+        createdAt: now,
+        deletedAt: now,
+      };
+      groupsChanged = true;
+    }
+  }
+
+  const groupsPromise = groupsChanged
+    ? writeGroupsWithMerge(dir, localGroupsMap).catch(() => {})
+    : Promise.resolve();
+
+  // ── 3. Active note id (per-machine) ──
+  const activePromise = setActiveNoteIdPersisted(activeId).catch(() => {});
+
+  // ── 4. Local cache for next-boot quick paint ──
+  const localCache: LocalCache = {
+    version: 2,
+    notes: docs.map(({ id, filePath, fileName, createdAt, updatedAt, customName }) => ({
+      id, filePath, fileName, createdAt, updatedAt,
       ...(customName ? { customName } : {}),
     })),
-    activeNoteId: activeId,
     groups: groups && groups.length > 0 ? groups : undefined,
     trashedNotes: trashed.length > 0 ? trashed : undefined,
     imageAssetMigrationV1CompletedAt: imageAssetMigrationV1CompletedAtCache ?? undefined,
   };
+  const cachePromise = writeLocalCache(localCache);
 
-  try {
-    const dir = await getNotesDir();
-    await writeManifest(dir, manifest);
-  } catch {
-    console.warn("Failed to persist UI state manifest.");
-  }
+  await Promise.all([
+    Promise.all(metaWrites),
+    groupsPromise,
+    activePromise,
+    cachePromise,
+  ]);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// useNotesLoader hook
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function useNotesLoader(
   locale: Locale,
@@ -342,18 +971,19 @@ export function useNotesLoader(
   const [isLoading, setIsLoading] = useState(true);
   const initialized = useRef(false);
 
-  // Keep module-level cache in sync — updated synchronously (not deferred by React batching)
-  const setTrashedNotes = (updater: TrashedNote[] | ((prev: TrashedNote[]) => TrashedNote[])) => {
+  const setTrashedNotes = (
+    updater: TrashedNote[] | ((prev: TrashedNote[]) => TrashedNote[]),
+  ) => {
     const next = typeof updater === "function" ? updater(trashedNotesCache) : updater;
     setTrashedNotesCache(next);
     setTrashedNotesState(next);
   };
 
-  // Reset initialized when reloadKey changes so the effect re-runs
   useEffect(() => {
     if (reloadKey > 0) {
       initialized.current = false;
       setIsLoading(true);
+      resetWriteSnapshots();
     }
   }, [reloadKey]);
 
@@ -363,122 +993,121 @@ export function useNotesLoader(
 
     (async () => {
       try {
-        const dir = await ensureNotesDir();
-        let manifest = await readManifest(dir);
+        await getMachineId();
 
-        if (!imageAssetMigrationV1CompletedAtCache) {
+        const dir = await ensureNotesDir();
+        await ensureSharedDirs(dir);
+
+        // ── Quick-paint from local cache while we scan disk ──
+        const cache = await readLocalCache();
+        if (cache && cache.notes.length > 0) {
+          const cachedDocs: NoteDoc[] = cache.notes.map((n) => ({
+            ...n,
+            isDirty: false,
+            content: "",
+          } as NoteDoc));
+          setDocs(sortNotes(cachedDocs, notesSortOrder, locale));
+          if (cache.groups) setGroups(cache.groups);
+        }
+
+        // ── Migrate legacy `manifest.json` if present ──
+        const legacy = await readLegacyManifestFile(dir);
+        if (legacy && Array.isArray(legacy.notes)) {
           setMigrationInProgress(true);
           try {
-            let noteFilePaths: string[] = [];
-            if (manifest && manifest.notes.length > 0) {
-              noteFilePaths = manifest.notes
-                .map((entry) => entry.filePath)
-                .filter(Boolean);
-            } else {
-              const entries = await readDir(dir).catch(() => []);
-              noteFilePaths = entries
-                .filter((entry) => entry.name?.endsWith(".md"))
-                .map((entry) => `${dir}/${entry.name}`);
-            }
-
-            await migrateDataUrlImagesToAssets(Array.from(new Set(noteFilePaths)));
-            imageAssetMigrationV1CompletedAtCache = Date.now();
-
-            if (manifest) {
-              manifest = {
-                ...manifest,
-                imageAssetMigrationV1CompletedAt: imageAssetMigrationV1CompletedAtCache,
-              };
-              await writeManifest(dir, manifest).catch(() => {});
-            }
+            await decomposeLegacyManifest(dir, legacy);
+            await retireLegacyManifest(dir);
           } finally {
             setMigrationInProgress(false);
           }
         }
 
-        // Auto-purge expired trash on startup
-        const rawTrashed = manifest?.trashedNotes ?? [];
-        const purgedTrashed = await purgeExpiredTrash(rawTrashed);
-        const trashChanged = purgedTrashed.length !== rawTrashed.length;
+        // ── Absorb OneDrive/Dropbox conflict copies ──
+        try {
+          await scanAndAbsorbConflicts(dir);
+        } catch { /* best-effort */ }
+
+        // ── Load decomposed state from disk ──
+        const state = await loadDecomposedState(dir);
+        await seedWriteSnapshots(dir);
+        let docsLoaded = await attachDocContents(state.docs);
+
+        // ── Image asset URL → file migration (one-time, per-machine) ──
+        if (!imageAssetMigrationV1CompletedAtCache) {
+          setMigrationInProgress(true);
+          try {
+            const noteFilePaths = docsLoaded.map((d) => d.filePath).filter(Boolean);
+            await migrateDataUrlImagesToAssets(Array.from(new Set(noteFilePaths)));
+            imageAssetMigrationV1CompletedAtCache = Date.now();
+          } finally {
+            setMigrationInProgress(false);
+          }
+        }
+
+        // ── Auto-purge expired trash ──
+        const purgedTrashed = await purgeExpiredTrash(state.trashedNotes);
+        const trashChanged = purgedTrashed.length !== state.trashedNotes.length;
         setTrashedNotes(purgedTrashed);
 
-        if (manifest && manifest.notes.length > 0) {
-          const loaded = await Promise.all(
-            manifest.notes.map(async (entry) => {
-              const content = await readFileContent(entry.filePath);
-              return { ...entry, isDirty: false, content } as NoteDoc;
-            }),
-          );
+        // ── Reconcile folder ↔ meta sidecars ──
+        const { docs: reconciled, groups: reconciledGroups, changed: reconcileChanged } =
+          await reconcileFolder(dir, docsLoaded, state.groups, locale);
 
-          // Reconcile: pick up new .md files not in manifest, drop missing ones
-          const { docs: reconciled, groups: reconciledGroups, changed: reconcileChanged } =
-            await reconcileFolder(dir, loaded, manifest.groups ?? [], locale);
+        let finalDocs = reconcileChanged ? reconciled : docsLoaded;
+        let finalGroups = reconcileChanged ? reconciledGroups : state.groups;
 
-          const finalDocs = reconcileChanged ? reconciled : loaded;
-          const finalGroups = reconcileChanged ? reconciledGroups : (manifest.groups ?? []);
+        // ── Bootstrap empty folder with a starter note ──
+        if (finalDocs.length === 0) {
+          const id = crypto.randomUUID();
+          const filePath = `${dir}/${id}.md`;
+          const timestamp = Date.now();
+          markOwnWrite(filePath, "");
+          await writeTextFile(filePath, "");
+          await writeMetaFile(dir, {
+            version: 2,
+            id,
+            fileName: getDefaultDocumentTitle(locale),
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            groupId: null,
+            trashedAt: null,
+          }, getMachineIdCached());
+          finalDocs = [{
+            id,
+            filePath,
+            fileName: getDefaultDocumentTitle(locale),
+            isDirty: false,
+            content: "",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          }];
+        }
 
-          const sorted = sortNotes(finalDocs, notesSortOrder, locale);
-          setDocs(sorted);
-          setGroups(finalGroups);
+        const sorted = sortNotes(finalDocs, notesSortOrder, locale);
+        setDocs(sorted);
+        setGroups(finalGroups);
 
-          const activeId = manifest.activeNoteId ?? sorted[0]?.id ?? null;
-          const nextActiveIndex = activeId
-            ? sorted.findIndex((doc) => doc.id === activeId)
-            : 0;
-          setActiveIndex(nextActiveIndex >= 0 ? nextActiveIndex : 0);
+        const activeId = state.activeNoteId && sorted.some((d) => d.id === state.activeNoteId)
+          ? state.activeNoteId
+          : sorted[0]?.id ?? null;
+        const nextActiveIndex = activeId
+          ? Math.max(sorted.findIndex((d) => d.id === activeId), 0)
+          : 0;
+        setActiveIndex(nextActiveIndex);
 
-          // Persist if reconciliation or trash purge made changes
-          if (reconcileChanged || trashChanged) {
-            const aid = sorted[nextActiveIndex >= 0 ? nextActiveIndex : 0]?.id ?? null;
-            await saveManifest(sorted, aid, finalGroups).catch(() => {});
-          }
+        if (reconcileChanged || trashChanged) {
+          await saveManifest(sorted, activeId, finalGroups).catch(() => {});
         } else {
-          let foundNotes: NoteDoc[] = [];
-
-          try {
-            const entries = await readDir(dir);
-            const markdownEntries = entries.filter((entry) => entry.name?.endsWith(".md"));
-            foundNotes = await Promise.all(
-              markdownEntries.map(async (entry) => {
-                const id = entry.name!.replace(/\.md$/, "");
-                const filePath = `${dir}/${entry.name}`;
-                const content = await readFileContent(filePath);
-                const { createdAt, updatedAt } = await getFileTimestamps(filePath);
-                return {
-                  id,
-                  filePath,
-                  fileName: deriveTitle(content) || getDefaultDocumentTitle(locale),
-                  isDirty: false,
-                  content,
-                  createdAt,
-                  updatedAt,
-                } as NoteDoc;
-              }),
-            );
-          } catch {
-            console.warn("Failed to scan notes directory.");
-          }
-
-          if (foundNotes.length === 0) {
-            const id = crypto.randomUUID();
-            const filePath = `${dir}/${id}.md`;
-            const timestamp = Date.now();
-            await writeTextFile(filePath, "");
-            foundNotes = [{
-              id,
-              filePath,
-              fileName: getDefaultDocumentTitle(locale),
-              isDirty: false,
-              content: "",
-              createdAt: timestamp,
-              updatedAt: timestamp,
-            }];
-          }
-
-          const sorted = sortNotes(foundNotes, notesSortOrder, locale);
-          setDocs(sorted);
-          setActiveIndex(0);
-          await saveManifest(sorted, sorted[0]?.id ?? null);
+          await writeLocalCache({
+            version: 2,
+            notes: sorted.map(({ id, filePath, fileName, createdAt, updatedAt, customName }) => ({
+              id, filePath, fileName, createdAt, updatedAt,
+              ...(customName ? { customName } : {}),
+            })),
+            groups: finalGroups.length > 0 ? finalGroups : undefined,
+            trashedNotes: purgedTrashed.length > 0 ? purgedTrashed : undefined,
+            imageAssetMigrationV1CompletedAt: imageAssetMigrationV1CompletedAtCache ?? undefined,
+          });
         }
       } catch (err) {
         console.warn("Notes loader failed:", err);
@@ -502,22 +1131,18 @@ export function useNotesLoader(
   return { docs, setDocs, activeIndex, setActiveIndex, groups, setGroups, trashedNotes, setTrashedNotes, isLoading };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Markdown helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function stripInlineMarkdown(text: string): string {
   let s = text;
-  // wiki links: [[Title]] → Title (must run before the regular link strip so
-  // the outer brackets of the wiki-link syntax don't get treated as markdown
-  // link text).
   s = s.replace(/\[\[([^\[\]\n]+)\]\]/g, "$1");
-  // links: [text](url) → text
   s = s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
-  // inline code
   s = s.replace(/`([^`]*)`/g, "$1");
-  // bold/italic (order matters: longest markers first)
   s = s.replace(/\*{1,3}(.*?)\*{1,3}/g, "$1");
   s = s.replace(/_{1,3}(.*?)_{1,3}/g, "$1");
-  // strikethrough
   s = s.replace(/~~(.*?)~~/g, "$1");
-  // HTML entities
   s = s.replace(/&[a-zA-Z]+;|&#\d+;/g, " ");
   return s.trim();
 }
@@ -528,7 +1153,6 @@ function stripBlockMarkers(line: string): string {
     .replace(/^(?:>\s*)+/, "")
     .replace(/^[-*+]\s+/, "")
     .replace(/^\d+\.\s+/, "")
-    // task list checkbox: [ ], [x], [X] (with optional trailing whitespace)
     .replace(/^\[[ xX]\]\s*/, "");
 }
 
@@ -569,3 +1193,9 @@ export function stripMarkdownContent(content: string): string {
 
   return result.join(" ").replace(/\s+/g, " ").trim();
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Re-exports for callers
+// ─────────────────────────────────────────────────────────────────────────────
+
+export { metaPathFor, metaDirFor, groupsPathFor };

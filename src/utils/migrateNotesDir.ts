@@ -1,9 +1,28 @@
-import { mkdir, readDir, copyFile, readTextFile, writeTextFile, exists, remove } from "@tauri-apps/plugin-fs";
+import { mkdir, readDir, copyFile, readTextFile, writeTextFile, exists, remove, rename } from "@tauri-apps/plugin-fs";
+import {
+  ensureMetaDir,
+  metaDirFor,
+  metaPathFor,
+  readAllMeta,
+  readMeta,
+  writeMeta,
+  type NoteMeta,
+} from "./metadataIO";
+import {
+  groupsPathFor,
+  readGroupsFile,
+  writeGroupsWithMerge,
+  genOrderKeyAfter,
+  mergeGroupMaps,
+  type SharedGroupEntry,
+} from "./groupsIO";
+import { getMachineId } from "./machineId";
 
 interface ManifestNote {
   id: string;
   filePath: string;
   fileName: string;
+  customName?: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -19,12 +38,21 @@ interface TrashedNoteEntry {
   updatedAt: number;
 }
 
-interface Manifest {
+interface LegacyGroup {
+  id: string;
+  name: string;
+  noteIds?: string[];
+  collapsed?: boolean;
+  createdAt?: number;
+}
+
+interface LegacyManifest {
   version: 1;
   notes: ManifestNote[];
   activeNoteId: string | null;
-  groups?: unknown[];
+  groups?: LegacyGroup[];
   trashedNotes?: TrashedNoteEntry[];
+  imageAssetMigrationV1CompletedAt?: number;
 }
 
 export interface MigrationResult {
@@ -51,7 +79,6 @@ async function copyDirRecursive(srcDir: string, destDir: string): Promise<void> 
   try {
     entries = await readDir(srcDir);
   } catch {
-    // Source directory doesn't exist — nothing to copy
     return;
   }
   await mkdir(destDir, { recursive: true });
@@ -80,188 +107,290 @@ async function clearDirContents(dir: string): Promise<void> {
   for (const entry of entries) {
     if (!entry.name) continue;
     const isManagedRootEntry = entry.name === "manifest.json"
+      || entry.name === "manifest.legacy.json"
+      || entry.name === ".groups.json"
+      || entry.name === ".meta"
       || entry.name === ".assets"
       || entry.name === ".trash"
+      || entry.name === ".conflicts"
       || (entry.isFile && entry.name.endsWith(".md"));
     if (!isManagedRootEntry) continue;
     const target = `${base}${entry.name}`;
     try {
       await remove(target, { recursive: true });
     } catch {
-      // Best-effort cleanup — ignore locked / in-use files
+      /* best-effort */
     }
   }
 }
 
-function getFileName(filePath: string): string {
-  return filePath.split(/[\\/]/).pop() ?? "";
-}
-
-function rewriteFilePaths(manifest: Manifest, toDir: string): Manifest {
-  const base = normalizeSep(toDir);
-  const trashBase = `${base}.trash/`;
-  return {
-    ...manifest,
-    notes: manifest.notes.map((n) => ({
-      ...n,
-      filePath: `${base}${getFileName(n.filePath)}`,
-    })),
-    trashedNotes: manifest.trashedNotes?.map((n) => ({
-      ...n,
-      originalFilePath: `${base}${getFileName(n.originalFilePath)}`,
-      trashFilePath: `${trashBase}${getFileName(n.trashFilePath)}`,
-    })),
-  };
-}
-
-async function readManifestFile(dir: string): Promise<Manifest | null> {
+async function readLegacyManifestFile(dir: string): Promise<LegacyManifest | null> {
   try {
     const path = `${normalizeSep(dir)}manifest.json`;
     const raw = await readTextFile(path);
-    return JSON.parse(raw) as Manifest;
+    return JSON.parse(raw) as LegacyManifest;
   } catch {
     return null;
   }
 }
 
-function mergeManifests(source: Manifest, dest: Manifest, toDir: string): Manifest {
-  const base = normalizeSep(toDir);
-  const trashBase = `${base}.trash/`;
+/**
+ * Decompose a legacy `manifest.json` (notes/groups/trashedNotes/activeNoteId)
+ * into per-note `.meta/{id}.json` plus a shared `.groups.json` in `dir`.
+ * Pre-existing `.meta` / `.groups.json` files are merged in (newer wins).
+ */
+async function decomposeLegacyIntoDir(
+  dir: string,
+  manifest: LegacyManifest,
+  machineId: string,
+): Promise<void> {
+  await ensureMetaDir(dir);
 
-  // Merge notes: destination first, source overwrites by ID
-  const noteMap = new Map<string, ManifestNote>();
-  for (const n of dest.notes) {
-    noteMap.set(n.id, { ...n, filePath: `${base}${getFileName(n.filePath)}` });
+  const noteIdToGroupId = new Map<string, string>();
+  const sharedGroups: Record<string, SharedGroupEntry> = {};
+  const now = Date.now();
+  let lastKey: string | undefined;
+
+  for (const g of manifest.groups ?? []) {
+    if (!g.id) continue;
+    const orderKey = genOrderKeyAfter(lastKey);
+    lastKey = orderKey;
+    sharedGroups[g.id] = {
+      id: g.id,
+      name: g.name ?? "",
+      orderKey,
+      orderUpdatedAt: now,
+      updatedAt: now,
+      createdAt: g.createdAt ?? now,
+      deletedAt: null,
+    };
+    for (const noteId of g.noteIds ?? []) {
+      noteIdToGroupId.set(noteId, g.id);
+    }
   }
-  for (const n of source.notes) {
-    noteMap.set(n.id, { ...n, filePath: `${base}${getFileName(n.filePath)}` });
+  if (Object.keys(sharedGroups).length > 0) {
+    await writeGroupsWithMerge(dir, sharedGroups);
   }
 
-  // Merge groups: destination first, source overwrites by ID
-  const groupMap = new Map<string, unknown>();
-  for (const g of dest.groups ?? []) {
-    const gObj = g as { id: string };
-    groupMap.set(gObj.id, g);
-  }
-  for (const g of source.groups ?? []) {
-    const gObj = g as { id: string };
-    groupMap.set(gObj.id, g);
-  }
-
-  // Merge trashedNotes: destination first, source overwrites by ID
-  const trashMap = new Map<string, TrashedNoteEntry>();
-  for (const n of dest.trashedNotes ?? []) {
-    trashMap.set(n.id, { ...n, originalFilePath: `${base}${getFileName(n.originalFilePath)}`, trashFilePath: `${trashBase}${getFileName(n.trashFilePath)}` });
-  }
-  for (const n of source.trashedNotes ?? []) {
-    trashMap.set(n.id, { ...n, originalFilePath: `${base}${getFileName(n.originalFilePath)}`, trashFilePath: `${trashBase}${getFileName(n.trashFilePath)}` });
+  for (const n of manifest.notes ?? []) {
+    if (!n.id) continue;
+    const meta: NoteMeta = {
+      version: 2,
+      id: n.id,
+      fileName: n.fileName,
+      customName: n.customName || undefined,
+      createdAt: n.createdAt,
+      updatedAt: n.updatedAt,
+      groupId: noteIdToGroupId.get(n.id) ?? null,
+      trashedAt: null,
+    };
+    const existing = await readMeta(dir, n.id);
+    if (existing && existing.updatedAt >= meta.updatedAt) continue;
+    await writeMeta(dir, meta, machineId);
   }
 
-  return {
-    version: 1,
-    notes: Array.from(noteMap.values()),
-    activeNoteId: source.activeNoteId,
-    groups: groupMap.size > 0 ? Array.from(groupMap.values()) : undefined,
-    trashedNotes: trashMap.size > 0 ? Array.from(trashMap.values()) : undefined,
-  };
+  for (const t of manifest.trashedNotes ?? []) {
+    if (!t.id) continue;
+    const meta: NoteMeta = {
+      version: 2,
+      id: t.id,
+      fileName: t.fileName,
+      customName: undefined,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+      groupId: t.groupId ?? null,
+      trashedAt: t.trashedAt,
+      trashedFromPath: t.originalFilePath,
+    };
+    const existing = await readMeta(dir, t.id);
+    if (existing && existing.updatedAt >= meta.updatedAt && existing.trashedAt != null) continue;
+    await writeMeta(dir, meta, machineId);
+  }
 }
 
+async function retireLegacyManifestAt(dir: string): Promise<void> {
+  const base = normalizeSep(dir);
+  const src = `${base}manifest.json`;
+  try {
+    if (!(await exists(src))) return;
+  } catch { return; }
+  const dst = `${base}manifest.legacy.json`;
+  try {
+    if (await exists(dst).catch(() => false)) {
+      await remove(src).catch(() => {});
+      return;
+    }
+    await rename(src, dst);
+  } catch {
+    try {
+      const raw = await readTextFile(src);
+      await writeTextFile(dst, raw);
+      await remove(src);
+    } catch { /* ignore */ }
+  }
+}
+
+/**
+ * Copy `.md` / `.meta` / `.groups.json` / `.trash` / `.assets` from `fromDir`
+ * to `toDir`. Returns nothing — caller is responsible for clearing source.
+ */
+async function copySharedTree(fromDir: string, toDir: string): Promise<void> {
+  const fromBase = normalizeSep(fromDir);
+  const toBase = normalizeSep(toDir);
+
+  await mkdir(toDir, { recursive: true });
+
+  // .md files (root)
+  let entries: { name?: string; isFile?: boolean; isDirectory?: boolean }[] = [];
+  try { entries = await readDir(fromDir); } catch { entries = []; }
+  for (const e of entries) {
+    if (!e.name || !e.isFile) continue;
+    if (!e.name.endsWith(".md")) continue;
+    await copyFile(`${fromBase}${e.name}`, `${toBase}${e.name}`).catch(() => {});
+  }
+
+  // .meta directory (per-note sidecars)
+  try {
+    await copyDirRecursive(`${fromBase}.meta`, `${toBase}.meta`);
+  } catch { /* may not exist */ }
+
+  // .groups.json — copy if present, but if destination has one too, we merge later.
+  try {
+    if (await exists(`${fromBase}.groups.json`)) {
+      // copy to a sibling if destination already has one; the merge below handles consolidation.
+      const destExists = await exists(`${toBase}.groups.json`).catch(() => false);
+      if (!destExists) {
+        await copyFile(`${fromBase}.groups.json`, `${toBase}.groups.json`).catch(() => {});
+      }
+    }
+  } catch { /* ignore */ }
+
+  // .trash directory contents (md files only)
+  try {
+    const trashEntries = await readDir(`${fromBase}.trash`);
+    const trashMd = trashEntries.filter((e) => e.name?.endsWith(".md") && e.isFile);
+    if (trashMd.length > 0) {
+      await mkdir(`${toBase}.trash`, { recursive: true });
+      for (const e of trashMd) {
+        await copyFile(`${fromBase}.trash/${e.name}`, `${toBase}.trash/${e.name}`).catch(() => {});
+      }
+    }
+  } catch { /* may not exist */ }
+
+  // .assets directory recursively
+  try {
+    await copyDirRecursive(`${fromBase}.assets`, `${toBase}.assets`);
+  } catch { /* may not exist */ }
+}
+
+/**
+ * Migrate the notes directory from `fromDir` to `toDir`. Strategy controls
+ * what happens when both directories already contain shared state:
+ *   - "merge": meta sidecars and groups are union-merged (per-id newer wins);
+ *     conflicting `.md` bodies are won by the source file (newer mtime).
+ *   - "overwrite": destination contents are wiped first, then source is copied.
+ */
 export async function migrateNotesDir(
   fromDir: string,
   toDir: string,
   mergeStrategy: "merge" | "overwrite",
 ): Promise<MigrationResult> {
-  // Same directory — nothing to do
   const from = normalizeSep(fromDir).replace(/[\\/]+$/, "");
   const to = normalizeSep(toDir).replace(/[\\/]+$/, "");
   if (from === to) return { success: true };
+
   const destinationIsInsideSource = isSameOrChildPath(fromDir, toDir);
+  const machineId = await getMachineId();
 
   try {
     await mkdir(toDir, { recursive: true });
 
-    // Copy .md files
-    const entries = await readDir(fromDir);
-    const mdFiles = entries.filter((e) => e.name?.endsWith(".md"));
-    for (const entry of mdFiles) {
-      const srcPath = `${normalizeSep(fromDir)}${entry.name}`;
-      const destPath = `${normalizeSep(toDir)}${entry.name}`;
-      await copyFile(srcPath, destPath);
+    // Decompose any legacy manifest.json sitting in source / destination so the
+    // rest of the migration only deals with `.meta` and `.groups.json`.
+    const sourceLegacy = await readLegacyManifestFile(fromDir);
+    if (sourceLegacy) {
+      await decomposeLegacyIntoDir(fromDir, sourceLegacy, machineId);
+      await retireLegacyManifestAt(fromDir);
+    }
+    const destLegacy = await readLegacyManifestFile(toDir);
+    if (destLegacy) {
+      await decomposeLegacyIntoDir(toDir, destLegacy, machineId);
+      await retireLegacyManifestAt(toDir);
     }
 
-    // Copy .trash directory contents
-    const fromTrash = `${normalizeSep(fromDir)}.trash`;
-    try {
-      const trashEntries = await readDir(fromTrash);
-      const trashMdFiles = trashEntries.filter((e) => e.name?.endsWith(".md"));
-      if (trashMdFiles.length > 0) {
-        const toTrash = `${normalizeSep(toDir)}.trash`;
-        await mkdir(toTrash, { recursive: true });
-        for (const entry of trashMdFiles) {
-          const srcPath = `${normalizeSep(fromTrash)}${entry.name}`;
-          const destPath = `${normalizeSep(toTrash)}${entry.name}`;
-          await copyFile(srcPath, destPath);
-        }
-      }
-    } catch { /* .trash directory may not exist — skip */ }
+    if (mergeStrategy === "overwrite") {
+      // Wipe destination managed entries first.
+      await clearDirContents(toDir);
+      await copySharedTree(fromDir, toDir);
 
-    // Copy .assets directory (images) recursively
-    const fromAssets = `${normalizeSep(fromDir)}.assets`;
-    const toAssets = `${normalizeSep(toDir)}.assets`;
-    try {
-      await copyDirRecursive(fromAssets, toAssets);
-    } catch { /* .assets may not exist — skip */ }
-
-    // Handle manifest
-    const sourceManifest = await readManifestFile(fromDir);
-    if (!sourceManifest) {
-      // No manifest in source — still clear whatever we just copied over
       if (!destinationIsInsideSource) {
         await clearDirContents(fromDir);
       }
       return { success: true };
     }
 
-    if (mergeStrategy === "merge") {
-      const destManifest = await readManifestFile(toDir);
-      if (destManifest) {
-        const merged = mergeManifests(sourceManifest, destManifest, toDir);
-        await writeTextFile(
-          `${normalizeSep(toDir)}manifest.json`,
-          JSON.stringify(merged, null, 2),
-        );
-      } else {
-        const rewritten = rewriteFilePaths(sourceManifest, toDir);
-        await writeTextFile(
-          `${normalizeSep(toDir)}manifest.json`,
-          JSON.stringify(rewritten, null, 2),
-        );
+    // merge strategy ──
+    // Build a snapshot of source meta + groups before copying so we can merge
+    // with destination state without losing per-id information.
+    const sourceMeta = await readAllMeta(fromDir);
+    const sourceGroupsFile = await readGroupsFile(fromDir);
+
+    await copySharedTree(fromDir, toDir);
+
+    // Merge meta: destination already has the source meta files copied. For
+    // any id where destination meta existed prior, pick the newer.
+    // Implementation: re-read both, write merged.
+    const destMetaAfter = await readAllMeta(toDir);
+    for (const [id, src] of sourceMeta) {
+      const dest = destMetaAfter.get(id);
+      if (!dest) {
+        // copy-step already wrote it; nothing to do.
+        continue;
       }
-    } else {
-      const rewritten = rewriteFilePaths(sourceManifest, toDir);
-      await writeTextFile(
-        `${normalizeSep(toDir)}manifest.json`,
-        JSON.stringify(rewritten, null, 2),
-      );
+      const winner = src.updatedAt > dest.updatedAt ? src : dest;
+      // If the winner is `src` and dest currently holds something newer, restore winner.
+      if (winner === src && dest.updatedAt < src.updatedAt) {
+        await writeMeta(toDir, src, machineId);
+      } else if (winner === dest) {
+        await writeMeta(toDir, dest, machineId);
+      }
     }
 
-    // Clear contents of source directory (but keep the folder itself),
-    // so the old AppData notes folder remains available for future reset
-    // without leaving stale copies behind.
+    // Merge .groups.json: union with newer-wins per group entry.
+    const destGroupsFile = await readGroupsFile(toDir);
+    const merged = mergeGroupMaps(destGroupsFile.groups, sourceGroupsFile.groups);
+    if (Object.keys(merged).length > 0) {
+      await writeGroupsWithMerge(toDir, merged);
+    }
+
     if (!destinationIsInsideSource) {
       await clearDirContents(fromDir);
     }
-
     return { success: true };
   } catch (err) {
     return { success: false, error: String(err) };
   }
 }
 
+/**
+ * Returns true if a given directory contains *any* recognised Noten state
+ * (live `.meta` sidecars, a legacy `manifest.json`, or `.groups.json`).
+ * Used by the App's path-change flow to decide whether to prompt for merge.
+ */
 export async function hasManifest(dir: string): Promise<boolean> {
+  const base = normalizeSep(dir);
   try {
-    return await exists(`${normalizeSep(dir)}manifest.json`);
-  } catch {
-    return false;
-  }
+    if (await exists(`${base}manifest.json`)) return true;
+  } catch { /* ignore */ }
+  try {
+    if (await exists(`${base}.groups.json`)) return true;
+  } catch { /* ignore */ }
+  try {
+    const metaEntries = await readDir(`${base}.meta`);
+    if (metaEntries.some((e) => e.name?.endsWith(".json"))) return true;
+  } catch { /* ignore */ }
+  return false;
 }
+
+// Path helpers used by callers that just need them.
+export { metaDirFor, metaPathFor, groupsPathFor };
