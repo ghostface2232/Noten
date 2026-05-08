@@ -880,20 +880,24 @@ function groupSnapshotEqual(a: SharedGroupSnapshot, b: SharedGroupSnapshot): boo
 }
 
 /**
- * Persist all in-memory state. Signature preserved for compatibility; under
- * the hood writes:
+ * Internal persistence: writes decomposed state to disk.
  *   - `.meta/{id}.json` for any doc/trashed entry whose snapshot changed
  *   - shared `.groups.json` (read-merge-write against on-disk content)
  *   - local `ui-state.json` (activeNoteId)
  *   - local `manifest-cache.json` for next-launch fast paint
+ *
+ * This function is intentionally ungated by `migrationInProgress`. Callers
+ * that should respect the migration guard go through `saveManifest` instead;
+ * `useNotesLoader`'s own load can call this directly because it already owns
+ * the guard window and needs to persist reconciled state without releasing
+ * it. Splitting the gate out lets us avoid the previous "release-then-
+ * reacquire" workaround that opened a tiny input window inside the load.
  */
-export async function saveManifest(
+async function persistDecomposedState(
   docs: NoteDoc[],
   activeId: string | null,
   groups?: NoteGroup[],
 ): Promise<void> {
-  if (migrationInProgress) return;
-
   const dir = await getNotesDir();
   const machineId = getMachineIdCached();
   const trashed = trashedNotesCache;
@@ -1065,6 +1069,22 @@ export async function saveManifest(
   ]);
 }
 
+/**
+ * Public persistence entry point. Skips writing while a notes-directory
+ * migration / reload is in flight (autosave, useNoteGroups, useFileSystem
+ * etc. all funnel through here). The internal `persistDecomposedState` is
+ * the actual writer; callers inside the loader's own migration window
+ * should invoke that directly.
+ */
+export async function saveManifest(
+  docs: NoteDoc[],
+  activeId: string | null,
+  groups?: NoteGroup[],
+): Promise<void> {
+  if (migrationInProgress) return;
+  return persistDecomposedState(docs, activeId, groups);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // useNotesLoader hook
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1204,21 +1224,13 @@ export function useNotesLoader(
           : 0;
         setActiveIndex(nextActiveIndex);
 
-        // The cache / saveManifest writes below intentionally happen *before*
-        // releasing the migration guard so they aren't filtered out by their
-        // own `if (migrationInProgress) return` check. They use the
-        // bookkeeping primitives (`writeLocalCache`, `writeMeta`, etc.)
-        // directly, not the gated `saveManifest`, so they'll proceed.
+        // Inside the load we own the migration guard (set true at the top of
+        // this effect). Call the ungated internal writer directly so we
+        // don't have to flip the global flag — the previous "release ->
+        // saveManifest -> reacquire" pattern opened a tiny input window in
+        // which an autosave timer could schedule against the OLD path.
         if (reconcileChanged || trashChanged) {
-          // Temporarily release the gate so saveManifest can do its work,
-          // then re-acquire. Safe because the surrounding finally still owns
-          // the final release.
-          setMigrationInProgress(false);
-          try {
-            await saveManifest(sorted, activeId, finalGroups).catch(() => {});
-          } finally {
-            setMigrationInProgress(true);
-          }
+          await persistDecomposedState(sorted, activeId, finalGroups).catch(() => {});
         } else {
           await writeLocalCache({
             version: 2,
