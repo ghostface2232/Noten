@@ -449,11 +449,24 @@ function App() {
       strategy = merge ? "merge" : "overwrite";
     }
 
+    // Flush any in-flight autosave to the OLD directory FIRST so the user's
+    // most recent edits are included in the migration. The autosave's gating
+    // on `migrationInProgress` (set immediately after) then prevents new
+    // writes to the old path while migrate runs and the subsequent reload
+    // re-binds doc paths.
+    await flushAutoSaveRef.current?.().catch(() => {});
+
     setMigrationInProgress(true);
-    const result = await migrateNotesDir(oldDir, newDir, strategy);
-    setMigrationInProgress(false);
+    let result;
+    try {
+      result = await migrateNotesDir(oldDir, newDir, strategy);
+    } catch (err) {
+      setMigrationInProgress(false);
+      throw err;
+    }
 
     if (!result.success) {
+      setMigrationInProgress(false);
       await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
       return;
     }
@@ -462,6 +475,11 @@ function App() {
     setNotesDir(newDir);
     setCurrentNotesDir(newDir);
     setReloadKey((k) => k + 1);
+    // Don't release `migrationInProgress` here — the reload-triggered
+    // useNotesLoader effect re-acquires it at the top and releases it in
+    // its own finally. Releasing here would briefly open a window during
+    // which the about-to-run effect's awaits could be preempted by an
+    // autosave for an already-stale `snapshot.filePath`.
   }, [locale, updateSetting]);
 
   const handleResetNotesDir = useCallback(async () => {
@@ -472,15 +490,26 @@ function App() {
 
     const oldDir = await getNotesDir();
 
+    // Flush before any path manipulation so pending edits land in OLD dir.
+    await flushAutoSaveRef.current?.().catch(() => {});
+
     // Compute default directory
     resetNotesDir();
     const defaultDir = await getNotesDir();
 
     setMigrationInProgress(true);
-    const result = await migrateNotesDir(oldDir, defaultDir, "overwrite");
-    setMigrationInProgress(false);
+    let result;
+    try {
+      result = await migrateNotesDir(oldDir, defaultDir, "overwrite");
+    } catch (err) {
+      setMigrationInProgress(false);
+      // Restore the custom dir so the user isn't stranded
+      setNotesDir(oldDir);
+      throw err;
+    }
 
     if (!result.success) {
+      setMigrationInProgress(false);
       // Restore the custom dir on failure
       setNotesDir(oldDir);
       await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
@@ -490,6 +519,7 @@ function App() {
     updateSetting("notesDirectory", "");
     setCurrentNotesDir(defaultDir);
     setReloadKey((k) => k + 1);
+    // Same as handleChangeNotesDir — release is owned by the reload effect.
   }, [locale, settings.notesDirectory, updateSetting]);
 
   const {

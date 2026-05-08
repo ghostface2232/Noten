@@ -7,6 +7,7 @@ import {
   readDir,
   remove,
   copyFile,
+  exists,
 } from "@tauri-apps/plugin-fs";
 import { markOwnWrite } from "./ownWriteTracker";
 import type { Locale, NotesSortOrder } from "./useSettings";
@@ -34,7 +35,11 @@ import {
   retireLegacyManifest,
   scanAndAbsorbConflicts,
 } from "../utils/conflictFileDetector";
-import { setKnownDiskContent, resetKnownDiskContent } from "../utils/conflictBackup";
+import {
+  setKnownDiskContent,
+  resetKnownDiskContent,
+  backupRemoteVersion,
+} from "../utils/conflictBackup";
 import {
   getUiStateCached,
   setActiveNoteIdPersisted,
@@ -734,24 +739,55 @@ export async function reconcileFolder(
   }
 
   // ── Resolve state mismatches: meta says trashed but root .md exists ──
+  // Three-way state when `.trash/{id}.md` *also* exists is the dangerous
+  // case — the previous implementation copied root over trash unconditionally
+  // and silently destroyed whichever body wasn't the survivor. We now read
+  // both bodies and, if they differ, copy the loser into `.conflicts/`
+  // before applying the resolution.
   for (const meta of allMeta.values()) {
     if (meta.trashedAt == null) continue;
     const rootName = `${meta.id}.md`;
     if (!folderFileNames.has(rootName)) continue;
 
     const rootPath = `${base}${rootName}`;
+    const trashPath = `${trashBase}${rootName}`;
     let rootMtime = 0;
     try { rootMtime = (await getFileTimestamps(rootPath)).updatedAt; } catch { /* fall back */ }
 
+    // Read the existing trash body (if any) and the root body so we can
+    // detect content divergence before either is overwritten or removed.
+    let trashBody: string | null = null;
+    try {
+      if (await exists(trashPath)) {
+        trashBody = await readTextFile(trashPath);
+      }
+    } catch { /* trash unreadable; treat as absent */ }
+
+    let rootBody = "";
+    try { rootBody = await readTextFile(rootPath); } catch { /* unreadable root */ }
+
     if (rootMtime > meta.trashedAt) {
+      // Restore branch: meta becomes non-trashed. The trash body is now
+      // redundant. If it has content distinct from root, preserve it under
+      // `.conflicts/{id}-{ts}.md` before deleting so the user can recover.
+      if (trashBody !== null && trashBody !== rootBody && trashBody.length > 0) {
+        try { await backupRemoteVersion(dir, meta.id, trashBody); } catch { /* best-effort */ }
+      }
+      if (trashBody !== null) {
+        try { markOwnWrite(trashPath); await remove(trashPath); } catch { /* ignore */ }
+      }
       try {
         await writeMetaFile(dir, { ...meta, trashedAt: null, trashedFromPath: null }, machineId);
       } catch { /* ignore */ }
       changed = true;
     } else {
+      // Move-to-trash branch: root will be copied over trash. If a distinct
+      // trash body already exists, back it up before we clobber it.
+      if (trashBody !== null && trashBody !== rootBody && trashBody.length > 0) {
+        try { await backupRemoteVersion(dir, meta.id, trashBody); } catch { /* best-effort */ }
+      }
       try {
         await mkdir(`${base}.trash`, { recursive: true });
-        const trashPath = `${trashBase}${rootName}`;
         markOwnWrite(rootPath);
         await copyFile(rootPath, trashPath);
         await remove(rootPath);
@@ -785,20 +821,31 @@ export async function reconcileFolder(
       }))
     : groups;
 
-  // ── Orphan meta cleanup: meta with trashedAt=null but no root .md ──
-  for (const meta of allMeta.values()) {
-    if (meta.trashedAt != null) continue;
-    const rootName = `${meta.id}.md`;
-    if (folderFileNames.has(rootName)) continue;
-    try { await removeMetaFile(dir, meta.id); } catch { /* ignore */ }
-  }
-
-  // ── Trashed body integrity: meta says trashed but .trash file missing ──
+  // Read the trash directory once up front so subsequent integrity checks
+  // can reference it without re-stat'ing.
   let trashEntries: { name?: string; isFile?: boolean }[] = [];
   try { trashEntries = await readDir(`${base}.trash`); } catch { trashEntries = []; }
   const trashFileNames = new Set(
     trashEntries.filter((e) => e.name?.endsWith(".md") && e.isFile).map((e) => e.name!),
   );
+
+  // ── Orphan meta cleanup: meta with trashedAt=null but no root .md ──
+  // Special case: if a `.trash/{id}.md` body exists for this meta, we are
+  // observing a `deleteNote` operation mid-flight (root removed, meta has
+  // not yet been stamped with `trashedAt`). Treating it as an orphan here
+  // would race against the upcoming `saveManifest` write and either delete
+  // a meta we're about to re-create or temporarily drop the trashed entry
+  // from the in-memory state until the next reconcile rediscovers it.
+  // Leave it alone and let the trash-side update finish.
+  for (const meta of allMeta.values()) {
+    if (meta.trashedAt != null) continue;
+    const rootName = `${meta.id}.md`;
+    if (folderFileNames.has(rootName)) continue;
+    if (trashFileNames.has(rootName)) continue;
+    try { await removeMetaFile(dir, meta.id); } catch { /* ignore */ }
+  }
+
+  // ── Trashed body integrity: meta says trashed but .trash file missing ──
   for (const meta of allMeta.values()) {
     if (meta.trashedAt == null) continue;
     if (!trashFileNames.has(`${meta.id}.md`)) {
@@ -1056,6 +1103,14 @@ export function useNotesLoader(
     initialized.current = true;
 
     (async () => {
+      // Gate the entire load behind `migrationInProgress` so any autosave
+      // timer that fires during the multi-await reload (e.g. the user typed
+      // right before clicking Change Path) skips writing instead of stamping
+      // the OLD `snapshot.filePath` into a now-cleared directory.
+      // Inner legacy / image-asset migrations used to manage this flag
+      // themselves; they no longer need to since the outer wrapper covers
+      // every disk-touching step.
+      setMigrationInProgress(true);
       try {
         await getMachineId();
 
@@ -1077,13 +1132,8 @@ export function useNotesLoader(
         // ── Migrate legacy `manifest.json` if present ──
         const legacy = await readLegacyManifestFile(dir);
         if (legacy && Array.isArray(legacy.notes)) {
-          setMigrationInProgress(true);
-          try {
-            await decomposeLegacyManifest(dir, legacy);
-            await retireLegacyManifest(dir);
-          } finally {
-            setMigrationInProgress(false);
-          }
+          await decomposeLegacyManifest(dir, legacy);
+          await retireLegacyManifest(dir);
         }
 
         // ── Absorb OneDrive/Dropbox conflict copies ──
@@ -1098,14 +1148,9 @@ export function useNotesLoader(
 
         // ── Image asset URL → file migration (one-time, per-machine) ──
         if (!imageAssetMigrationV1CompletedAtCache) {
-          setMigrationInProgress(true);
-          try {
-            const noteFilePaths = docsLoaded.map((d) => d.filePath).filter(Boolean);
-            await migrateDataUrlImagesToAssets(Array.from(new Set(noteFilePaths)));
-            imageAssetMigrationV1CompletedAtCache = Date.now();
-          } finally {
-            setMigrationInProgress(false);
-          }
+          const noteFilePaths = docsLoaded.map((d) => d.filePath).filter(Boolean);
+          await migrateDataUrlImagesToAssets(Array.from(new Set(noteFilePaths)));
+          imageAssetMigrationV1CompletedAtCache = Date.now();
         }
 
         // ── Auto-purge expired trash ──
@@ -1159,8 +1204,21 @@ export function useNotesLoader(
           : 0;
         setActiveIndex(nextActiveIndex);
 
+        // The cache / saveManifest writes below intentionally happen *before*
+        // releasing the migration guard so they aren't filtered out by their
+        // own `if (migrationInProgress) return` check. They use the
+        // bookkeeping primitives (`writeLocalCache`, `writeMeta`, etc.)
+        // directly, not the gated `saveManifest`, so they'll proceed.
         if (reconcileChanged || trashChanged) {
-          await saveManifest(sorted, activeId, finalGroups).catch(() => {});
+          // Temporarily release the gate so saveManifest can do its work,
+          // then re-acquire. Safe because the surrounding finally still owns
+          // the final release.
+          setMigrationInProgress(false);
+          try {
+            await saveManifest(sorted, activeId, finalGroups).catch(() => {});
+          } finally {
+            setMigrationInProgress(true);
+          }
         } else {
           await writeLocalCache({
             version: 2,
@@ -1187,6 +1245,7 @@ export function useNotesLoader(
         }]);
         setActiveIndex(0);
       } finally {
+        setMigrationInProgress(false);
         setIsLoading(false);
       }
     })();

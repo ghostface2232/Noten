@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 import type { NoteDoc, NoteGroup } from "./useNotesLoader";
-import { deriveTitle, saveManifest, sortNotes, getNotesDir } from "./useNotesLoader";
+import { deriveTitle, saveManifest, sortNotes, getNotesDir, migrationInProgress } from "./useNotesLoader";
 import { getCurrentMarkdown } from "./useFileSystem";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import type { MarkdownState } from "./useMarkdownState";
@@ -97,6 +97,14 @@ export function useAutoSave(
   }, []);
 
   const doSave = useCallback(async (snapshot: SaveSnapshot): Promise<boolean> => {
+    // Don't write while a notes-directory migration is in flight: `snapshot.filePath`
+    // points at the OLD directory (captured at scheduleAutoSave time), and
+    // writing there would either survive the post-migration `clearDirContents`
+    // and become an orphan in the OLD dir, or undo a state the migration just
+    // reconciled. The caller is expected to flush+block before kicking off
+    // the migration; this is the defence-in-depth guard.
+    if (migrationInProgress) return false;
+
     const {
       locale: latestLocale,
       notesSortOrder: latestSortOrder,
@@ -195,6 +203,12 @@ export function useAutoSave(
   }, [createSnapshot, doSave]);
 
   const scheduleAutoSave = useCallback(() => {
+    // Don't queue saves during migration: the snapshot path would be in the
+    // OLD directory and `doSave` would refuse to write anyway. Discarding
+    // the in-flight intent here also prevents a stale timer from firing
+    // post-migration with a now-invalid path.
+    if (migrationInProgress) return;
+
     const snapshot = createSnapshot();
     if (!snapshot) return;
 
