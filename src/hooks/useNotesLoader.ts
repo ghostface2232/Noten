@@ -130,9 +130,36 @@ interface SharedGroupSnapshot {
 }
 const writtenGroupsSnapshot = new Map<string, SharedGroupSnapshot>();
 
+/**
+ * Explicit "delete this group" intents queued by user actions. saveManifest
+ * emits a tombstone into `.groups.json` for each id present here that is also
+ * absent from the current `groups` argument. Using an explicit set (instead
+ * of inferring deletions from snapshot-vs-state diffs) prevents a remote
+ * group create from being misread as a local delete: e.g. when the watcher
+ * has just synced a remotely-created group into `writtenGroupsSnapshot` but
+ * a saveManifest call from a stale closure runs before React state catches
+ * up, the diff path would tombstone the new group; the explicit set won't.
+ */
+const pendingGroupTombstones = new Set<string>();
+
+/** Mark a group as deleted. Called from `useNoteGroups.deleteGroup` and from
+ *  the auto-prune paths in `useFileSystem` (empty-group cleanup). The tombstone
+ *  is materialised in `.groups.json` on the next `saveManifest` call that sees
+ *  the group missing from its `groups` argument. */
+export function markGroupAsDeleted(id: string): void {
+  pendingGroupTombstones.add(id);
+}
+
+/** Cancel a pending deletion (e.g. user undid the action before saveManifest
+ *  ran, or a remote write resurrected the group). */
+export function unmarkGroupAsDeleted(id: string): void {
+  pendingGroupTombstones.delete(id);
+}
+
 function resetWriteSnapshots() {
   writtenMetaSnapshot.clear();
   writtenGroupsSnapshot.clear();
+  pendingGroupTombstones.clear();
 }
 
 /**
@@ -370,6 +397,29 @@ interface DecomposedState {
   groups: NoteGroup[];
   trashedNotes: TrashedNote[];
   activeNoteId: string | null;
+}
+
+/**
+ * Read both `.groups.json` and every `.meta/{id}.json` from disk and return
+ * the resulting NoteGroup list. Membership (noteIds) is derived from each
+ * meta's `groupId`, which is the only authoritative source. Use this from
+ * the watcher / reconcile path so we don't accidentally compute membership
+ * from a stale React state snapshot.
+ */
+export async function loadGroupsFromDisk(dir: string): Promise<NoteGroup[]> {
+  const file = await readGroupsFile(dir);
+  const allMeta = await readAllMeta(dir);
+  const collapsedMap = getUiStateCached().groupCollapsed;
+  const metaByGroup = new Map<string, string[]>();
+  for (const m of allMeta.values()) {
+    if (m.trashedAt != null) continue;
+    if (m.groupId) {
+      const arr = metaByGroup.get(m.groupId) ?? [];
+      arr.push(m.id);
+      metaByGroup.set(m.groupId, arr);
+    }
+  }
+  return buildGroupsFromShared(file.groups, metaByGroup, collapsedMap);
 }
 
 /** Build the in-memory NoteGroup list from `.groups.json` + per-note groupId. */
@@ -908,26 +958,40 @@ export async function saveManifest(
     };
   }
 
-  // Detect deletions: groups previously written that aren't in the current list.
+  // Materialise tombstones for explicit delete intents only. Inferring
+  // deletions from "in writtenGroupsSnapshot but not in currentIds" is unsafe:
+  // when the watcher just synced a remotely-created group into the snapshot,
+  // a saveManifest call from a stale closure (that never saw the new group in
+  // its `groups` argument) would emit a tombstone and silently destroy the
+  // remote create. Only ids that were explicitly added to
+  // `pendingGroupTombstones` by the user-action path are tombstoned here.
   const currentIds = new Set(orderedGroups.map((g) => g.id));
-  for (const id of Array.from(writtenGroupsSnapshot.keys())) {
-    if (!currentIds.has(id)) {
-      writtenGroupsSnapshot.delete(id);
-      localGroupsMap[id] = {
-        id,
-        name: "",
-        orderKey: "z",
-        orderUpdatedAt: now,
-        updatedAt: now,
-        createdAt: now,
-        deletedAt: now,
-      };
-      groupsChanged = true;
-    }
+  const tombstoneApplied: string[] = [];
+  for (const id of Array.from(pendingGroupTombstones)) {
+    if (currentIds.has(id)) continue; // user undid the deletion (or this is a stale call) — skip
+    localGroupsMap[id] = {
+      id,
+      name: "",
+      orderKey: "z",
+      orderUpdatedAt: now,
+      updatedAt: now,
+      createdAt: now,
+      deletedAt: now,
+    };
+    writtenGroupsSnapshot.delete(id);
+    tombstoneApplied.push(id);
+    groupsChanged = true;
   }
 
   const groupsPromise = groupsChanged
-    ? writeGroupsWithMerge(dir, localGroupsMap).catch(() => {})
+    ? writeGroupsWithMerge(dir, localGroupsMap).then(
+        () => {
+          // Successful write — drop the consumed intents. If the write fails
+          // we keep them so the next saveManifest retries automatically.
+          for (const id of tombstoneApplied) pendingGroupTombstones.delete(id);
+        },
+        () => { /* keep pending for retry */ },
+      )
     : Promise.resolve();
 
   // ── 3. Active note id (per-machine) ──

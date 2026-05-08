@@ -9,6 +9,7 @@ import {
   getFileBaseName,
   ensureTrashDir,
   getTrashedNotesCache,
+  markGroupAsDeleted,
   type NoteDoc,
   type NoteGroup,
   type TrashedNote,
@@ -196,9 +197,17 @@ export function useFileSystem(
       try { markOwnWrite(leaving.filePath); remove(leaving.filePath).catch(() => {}); } catch {}
     }
     const leavingId = leaving.id;
-    setGroups?.((prev) =>
-      prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }))
-        .filter((g) => g.noteIds.length > 0));
+    setGroups?.((prev) => {
+      const next = prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }));
+      const kept = next.filter((g) => g.noteIds.length > 0);
+      // Record delete intent for any group that auto-prunes to empty so the
+      // tombstone reaches `.groups.json` on the next saveManifest.
+      if (kept.length !== next.length) {
+        const keptIds = new Set(kept.map((g) => g.id));
+        for (const g of next) if (!keptIds.has(g.id)) markGroupAsDeleted(g.id);
+      }
+      return kept;
+    });
     cancelDocSaveRef?.current?.(leavingId);
     tiptapRef.current?.invalidateDocumentSession?.(leavingId, leaving.filePath);
 
@@ -350,9 +359,15 @@ export function useFileSystem(
       }
       cancelDocSaveRef?.current?.(currentDoc.id);
       const leavingId = currentDoc.id;
-      workingGroups = workingGroups
-        ?.map((g) => ({ ...g, noteIds: g.noteIds.filter((noteId) => noteId !== leavingId) }))
-        .filter((g) => g.id === inheritedGroupId || g.noteIds.length > 0);
+      const beforePrune = workingGroups
+        ?.map((g) => ({ ...g, noteIds: g.noteIds.filter((noteId) => noteId !== leavingId) }));
+      workingGroups = beforePrune
+        ?.filter((g) => g.id === inheritedGroupId || g.noteIds.length > 0);
+      // Same auto-prune tombstone tracking as `pruneEmptyCurrentDoc`.
+      if (beforePrune && workingGroups && beforePrune.length !== workingGroups.length) {
+        const keptIds = new Set(workingGroups.map((g) => g.id));
+        for (const g of beforePrune) if (!keptIds.has(g.id)) markGroupAsDeleted(g.id);
+      }
       setGroups?.(workingGroups ?? []);
       prunedDocs = baseDocs.filter((d) => d.id !== currentDoc.id);
       setDocs(prunedDocs);

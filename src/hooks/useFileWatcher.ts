@@ -11,6 +11,7 @@ import {
   metaDirFor,
   groupsPathFor,
   syncGroupsSnapshotFromDisk,
+  loadGroupsFromDisk,
   type NoteDoc,
   type NoteGroup,
 } from "./useNotesLoader";
@@ -18,8 +19,6 @@ import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import { isOwnWrite, isOwnWriteContentMatch, pruneOwnWrites } from "./ownWriteTracker";
 import { getFileTimestamps } from "../utils/fileTimestamps";
 import { readMeta } from "../utils/metadataIO";
-import { readGroupsFile } from "../utils/groupsIO";
-import { getUiStateCached } from "./useUiState";
 import { scanAndAbsorbConflicts } from "../utils/conflictFileDetector";
 import { setKnownDiskContent } from "../utils/conflictBackup";
 import type { Locale } from "./useSettings";
@@ -70,46 +69,19 @@ export function useFileWatcher(
     return editorDocId ?? activeDocIdRef.current;
   }, [tiptapRef]);
 
-  // ── Reload groups from `.groups.json` (merged with current local state) ──
+  // ── Reload groups from disk (`.groups.json` + every `.meta/*.json`) ──
+  // Membership (noteIds) is authoritative from each meta's `groupId`, NOT from
+  // React state — a remote-only move (e.g. PC B reassigned a note's groupId)
+  // would otherwise be invisible because `.groups.json` itself doesn't carry
+  // membership.
   const reloadGroupsFromDisk = useCallback(async () => {
     if (migrationInProgress) return;
     const dir = await getNotesDir();
-    const file = await readGroupsFile(dir);
-    const collapsedMap = getUiStateCached().groupCollapsed;
-    // Keep the saveManifest deletion-detection snapshot aligned with what we
-    // just observed on disk; otherwise deleting a remotely-created group
-    // would silently fail to emit a tombstone.
+    // Keep the saveManifest write-snapshot aligned with what we just observed
+    // on disk so name/orderKey diffs are correctly attributed.
     await syncGroupsSnapshotFromDisk(dir);
-
-    // Build noteIds from current in-memory docs/meta state (cheap, avoids a re-scan).
-    setGroups((prev) => {
-      const noteIdsByGroup = new Map<string, string[]>();
-      for (const g of prev) noteIdsByGroup.set(g.id, g.noteIds);
-
-      const liveIds = new Set<string>();
-      const next: NoteGroup[] = [];
-      for (const e of Object.values(file.groups)) {
-        if (e.deletedAt != null) continue;
-        liveIds.add(e.id);
-        next.push({
-          id: e.id,
-          name: e.name,
-          noteIds: noteIdsByGroup.get(e.id) ?? [],
-          collapsed: !!collapsedMap[e.id],
-          createdAt: e.createdAt,
-          orderKey: e.orderKey,
-          orderUpdatedAt: e.orderUpdatedAt,
-          updatedAt: e.updatedAt,
-        });
-      }
-      next.sort((a, b) => {
-        const ak = a.orderKey ?? "";
-        const bk = b.orderKey ?? "";
-        if (ak === bk) return a.createdAt - b.createdAt;
-        return ak < bk ? -1 : 1;
-      });
-      return next;
-    });
+    const next = await loadGroupsFromDisk(dir);
+    setGroups(next);
   }, [setGroups]);
 
   // ── Apply a single .meta/{id}.json change ──
@@ -135,8 +107,30 @@ export function useFileWatcher(
       return next;
     });
 
-    // Membership changes show up via reloadGroupsFromDisk path; nothing else here.
-  }, [setDocs]);
+    // Propagate group-membership changes. Membership lives in each meta's
+    // `groupId`, so a remote move (group A → group B) is only visible after
+    // we re-read the meta. Without this, the in-memory groups state would
+    // stay stale and the next `saveManifest` would write the old groupId
+    // back into the meta file, undoing the remote change.
+    const targetGroupId = meta.trashedAt != null ? null : (meta.groupId ?? null);
+    setGroups((prev) => {
+      let changed = false;
+      const next = prev.map((g) => {
+        const has = g.noteIds.includes(id);
+        const should = g.id === targetGroupId;
+        if (has && !should) {
+          changed = true;
+          return { ...g, noteIds: g.noteIds.filter((nid) => nid !== id) };
+        }
+        if (!has && should) {
+          changed = true;
+          return { ...g, noteIds: [...g.noteIds, id] };
+        }
+        return g;
+      });
+      return changed ? next : prev;
+    });
+  }, [setDocs, setGroups]);
 
   // ── reconcile shorthand ──
   const runReconcile = useCallback(async () => {
@@ -207,9 +201,16 @@ export function useFileWatcher(
     const groupsPathNorm = normalizePath(groupsPathFor(dir));
 
     const affectedPaths = event.paths.map(normalizePath);
+    // Time-based isOwnWrite is intentionally NOT applied to .md candidates here:
+    // a 2 s grace window over the same path can swallow a real remote write
+    // whose content differs from ours. The hash-based check inside the loop
+    // (`isOwnWriteContentMatch` after reading the file) is the authoritative
+    // own-write decision for `.md`. We still apply the time check to
+    // `.groups.json` since we cannot easily hash-check it (the read-merge-
+    // write cycle creates a moving target).
     const groupsChanged = affectedPaths.some((p) => p === groupsPathNorm && !isOwnWrite(p));
     const mdChanges = affectedPaths.filter(
-      (p) => p.endsWith(".md") && p.startsWith(dirNorm) && !p.includes("/.trash/") && !isOwnWrite(p),
+      (p) => p.endsWith(".md") && p.startsWith(dirNorm) && !p.includes("/.trash/"),
     );
 
     if (groupsChanged) {

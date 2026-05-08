@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { saveManifest, type NoteDoc, type NoteGroup } from "./useNotesLoader";
+import { saveManifest, markGroupAsDeleted, type NoteDoc, type NoteGroup } from "./useNotesLoader";
 import { genOrderKeyAfter, genOrderKeyBefore, genOrderKeyBetween } from "../utils/groupsIO";
 import { setGroupCollapsedPersisted } from "./useUiState";
 import { emitGroupsUpdated } from "./useWindowSync";
@@ -61,8 +61,10 @@ export function useNoteGroups(
 
   const deleteGroup = useCallback(
     (groupId: string) => {
-      // saveManifest detects deletion (group missing from current list) and writes
-      // a tombstone into `.groups.json`, so other PCs don't resurrect it.
+      // Record explicit delete intent so saveManifest emits a tombstone into
+      // `.groups.json`. Without this, deletion would be inferred from
+      // state-vs-snapshot diffs which can mis-fire on remote creates.
+      markGroupAsDeleted(groupId);
       persist(groups.filter((g) => g.id !== groupId));
     },
     [groups, persist],
@@ -70,6 +72,7 @@ export function useNoteGroups(
 
   const ungroupGroup = useCallback(
     (groupId: string) => {
+      markGroupAsDeleted(groupId);
       persist(groups.filter((g) => g.id !== groupId));
     },
     [groups, persist],
