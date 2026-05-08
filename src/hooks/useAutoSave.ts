@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 import type { NoteDoc, NoteGroup } from "./useNotesLoader";
-import { deriveTitle, saveManifest, sortNotes } from "./useNotesLoader";
+import { deriveTitle, saveManifest, sortNotes, getNotesDir, migrationInProgress } from "./useNotesLoader";
 import { getCurrentMarkdown } from "./useFileSystem";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import type { MarkdownState } from "./useMarkdownState";
@@ -9,6 +9,7 @@ import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { emitDocUpdated } from "./useWindowSync";
 import { markOwnWrite } from "./ownWriteTracker";
+import { backupIfRemoteWroteFirst, setKnownDiskContent } from "../utils/conflictBackup";
 
 const DEBOUNCE_MS = 1000;
 
@@ -96,6 +97,14 @@ export function useAutoSave(
   }, []);
 
   const doSave = useCallback(async (snapshot: SaveSnapshot): Promise<boolean> => {
+    // Don't write while a notes-directory migration is in flight: `snapshot.filePath`
+    // points at the OLD directory (captured at scheduleAutoSave time), and
+    // writing there would either survive the post-migration `clearDirContents`
+    // and become an orphan in the OLD dir, or undo a state the migration just
+    // reconciled. The caller is expected to flush+block before kicking off
+    // the migration; this is the defence-in-depth guard.
+    if (migrationInProgress) return false;
+
     const {
       locale: latestLocale,
       notesSortOrder: latestSortOrder,
@@ -104,8 +113,17 @@ export function useAutoSave(
     } = stateRef.current;
 
     try {
-      markOwnWrite(snapshot.filePath);
+      // Pre-write conflict detection: if another PC wrote between our last
+      // observation of disk and now, copy the remote body into `.conflicts/`
+      // before we overwrite it (last-write-wins + backup, per design).
+      try {
+        const dir = await getNotesDir();
+        await backupIfRemoteWroteFirst(dir, snapshot.filePath, snapshot.docId, snapshot.content);
+      } catch { /* best-effort, never block the save */ }
+
+      markOwnWrite(snapshot.filePath, snapshot.content);
       await writeTextFile(snapshot.filePath, snapshot.content);
+      setKnownDiskContent(snapshot.filePath, snapshot.content);
 
       if ((latestRevisionByDocRef.current.get(snapshot.docId) ?? 0) !== snapshot.revision) {
         return false;
@@ -185,6 +203,12 @@ export function useAutoSave(
   }, [createSnapshot, doSave]);
 
   const scheduleAutoSave = useCallback(() => {
+    // Don't queue saves during migration: the snapshot path would be in the
+    // OLD directory and `doSave` would refuse to write anyway. Discarding
+    // the in-flight intent here also prevents a stale timer from firing
+    // post-migration with a now-invalid path.
+    if (migrationInProgress) return;
+
     const snapshot = createSnapshot();
     if (!snapshot) return;
 

@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen } from "@tauri-apps/api/event";
 import type { NoteDoc, NoteGroup, TrashedNote } from "./useNotesLoader";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
-import { setTrashedNotesCache } from "./useNotesLoader";
+import { setTrashedNotesCache, syncGroupsSnapshotFromDisk, getNotesDir } from "./useNotesLoader";
 
 interface DocUpdatedPayload {
   sourceWindow: string;
@@ -222,6 +222,10 @@ export function useWindowSync(
         const { sourceWindow, groups } = event.payload;
         if (sourceWindow === WINDOW_LABEL) return;
         setGroups?.(groups);
+        // Keep saveManifest's deletion-detection snapshot aligned with what
+        // the other window just observed on disk; otherwise deleting a group
+        // here would silently fail to emit a tombstone.
+        void getNotesDir().then((dir) => syncGroupsSnapshotFromDisk(dir)).catch(() => {});
       }),
 
       listen<TrashUpdatedPayload>("trash-updated", (event) => {
