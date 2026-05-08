@@ -113,6 +113,25 @@ export function useFileWatcher(
     // stay stale and the next `saveManifest` would write the old groupId
     // back into the meta file, undoing the remote change.
     const targetGroupId = meta.trashedAt != null ? null : (meta.groupId ?? null);
+
+    // Edge case: the meta references a group we don't yet know about. This
+    // happens when a remote PC creates a group AND moves a note into it in
+    // one operation — the `.meta` and `.groups.json` events are delivered by
+    // separate watches, and meta can arrive first. A surgical setGroups
+    // update would silently drop the membership change because no local
+    // group has the target id. Refresh from disk in that case so the new
+    // group is materialised before we record the membership.
+    if (
+      targetGroupId !== null
+      && !groupsRef.current.some((g) => g.id === targetGroupId)
+    ) {
+      // Best-effort: a transient disk read failure here should not abort the
+      // rename half (already applied via setDocs above). Reconcile / focus /
+      // interval handlers will retry the group reload eventually.
+      await reloadGroupsFromDisk().catch(() => {});
+      return;
+    }
+
     setGroups((prev) => {
       let changed = false;
       const next = prev.map((g) => {
@@ -130,7 +149,7 @@ export function useFileWatcher(
       });
       return changed ? next : prev;
     });
-  }, [setDocs, setGroups]);
+  }, [setDocs, setGroups, reloadGroupsFromDisk]);
 
   // ── reconcile shorthand ──
   const runReconcile = useCallback(async () => {
