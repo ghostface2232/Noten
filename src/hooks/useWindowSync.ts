@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef } from "react";
 import { flushSync } from "react-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen } from "@tauri-apps/api/event";
-import type { NoteDoc, NoteGroup, TrashedNote } from "./useNotesLoader";
+import { sortNotes, type NoteDoc, type NoteGroup, type TrashedNote } from "./useNotesLoader";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import { setTrashedNotesCache, syncGroupsSnapshotFromDisk, getNotesDir } from "./useNotesLoader";
+import type { Locale, NotesSortOrder } from "./useSettings";
 
 interface DocUpdatedPayload {
   sourceWindow: string;
@@ -30,6 +31,13 @@ interface DocDeletedPayload {
 interface DocCreatedPayload {
   sourceWindow: string;
   doc: Omit<NoteDoc, "isDirty">;
+}
+
+interface NotePinnedUpdatedPayload {
+  sourceWindow: string;
+  docId: string;
+  pinned: boolean;
+  updatedAt: number;
 }
 
 interface GroupsUpdatedPayload {
@@ -71,6 +79,12 @@ export function emitDocCreated(doc: NoteDoc) {
   } satisfies DocCreatedPayload).catch(() => {});
 }
 
+export function emitNotePinnedUpdated(docId: string, pinned: boolean, updatedAt: number) {
+  emit("note-pinned-updated", {
+    sourceWindow: WINDOW_LABEL, docId, pinned, updatedAt,
+  } satisfies NotePinnedUpdatedPayload).catch(() => {});
+}
+
 export function emitGroupsUpdated(groups: NoteGroup[]) {
   emit("groups-updated", {
     sourceWindow: WINDOW_LABEL, groups,
@@ -94,6 +108,8 @@ export function useWindowSync(
   setGroups?: React.Dispatch<React.SetStateAction<NoteGroup[]>>,
   setTrashedNotes?: (updater: TrashedNote[] | ((prev: TrashedNote[]) => TrashedNote[])) => void,
   onActiveDocChanged?: (doc: { filePath: string; content: string }) => void,
+  notesSortOrder: NotesSortOrder = "updated-desc",
+  locale: Locale = "en",
 ) {
   // Refs to avoid stale closures in event listeners
   const activeIndexRef = useRef(activeIndex);
@@ -218,6 +234,25 @@ export function useWindowSync(
         });
       }),
 
+      listen<NotePinnedUpdatedPayload>("note-pinned-updated", (event) => {
+        const { sourceWindow, docId, pinned, updatedAt } = event.payload;
+        if (sourceWindow === WINDOW_LABEL) return;
+
+        setDocs((prev) => {
+          const idx = prev.findIndex((d) => d.id === docId);
+          if (idx < 0) return prev;
+          const next = [...prev];
+          next[idx] = { ...next[idx], pinned, updatedAt };
+          const sorted = sortNotes(next, notesSortOrder, locale);
+          const activeId = getRoutedActiveDocId();
+          if (activeId) {
+            const nextActiveIndex = sorted.findIndex((d) => d.id === activeId);
+            if (nextActiveIndex >= 0) setActiveIndex(nextActiveIndex);
+          }
+          return sorted;
+        });
+      }),
+
       listen<GroupsUpdatedPayload>("groups-updated", (event) => {
         const { sourceWindow, groups } = event.payload;
         if (sourceWindow === WINDOW_LABEL) return;
@@ -240,5 +275,5 @@ export function useWindowSync(
     });
 
     return () => { mounted = false; unlisteners.forEach((fn) => fn()); };
-  }, [getRoutedActiveDocId, setDocs, setActiveIndex, tiptapRef, setGroups, setTrashedNotes, onActiveDocChanged]);
+  }, [getRoutedActiveDocId, setDocs, setActiveIndex, tiptapRef, setGroups, setTrashedNotes, onActiveDocChanged, notesSortOrder, locale]);
 }

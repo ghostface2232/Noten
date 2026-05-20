@@ -25,8 +25,10 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 ## Persistence
 
 - App settings are stored in `AppData/Roaming/com.noten.app/settings.json` via Tauri fs plugin.
-- Note manifest (file list, groups, active note) is stored as `manifest.json` in the notes directory (file-based). localStorage is used only as a one-time migration fallback.
-- Manifest includes `imageAssetMigrationV1CompletedAt` to track one-time image asset migration completion per notes directory.
+- Shared note state is decomposed into note bodies (`<noteId>.md`), per-note metadata (`.meta/<noteId>.json`), and shared groups (`.groups.json`). Legacy `manifest.json` is migrated to `manifest.legacy.json`.
+- Note metadata includes title/customName, created/updated timestamps, group membership, trash state, and shared `pinned` state.
+- Active note and group collapsed state are per-machine UI state, not shared sync state.
+- Local cache includes `imageAssetMigrationV1CompletedAt` to track one-time image asset migration completion per notes directory.
 - Sidebar open/close state and width are stored in localStorage.
 - Notes created by the app are stored under the app data `notes` directory.
 - `appDataDir()` may not include a trailing separator; always check before joining paths.
@@ -35,6 +37,8 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 ## External vs Internal Documents
 
 - Internal documents live in the app's `notes` directory and are auto-saved (1s debounce).
+- Shared notes directories such as OneDrive/Dropbox are supported by file-based sync; metadata/group writes are merged so different PCs do not rely on one monolithic manifest.
+- Remote body conflicts are last-write-wins with previous remote body backups under `.conflicts/`.
 - Auto-save uses `activeDocRef` (sync ref) to track the active document, not React state's `activeIndex`, to prevent wrong-doc writes after rapid switching.
 - `notifyActiveDoc(id, filePath)` must be called in every code path that switches the active document (switchDocument, newNote, importFiles, duplicateNote, restoreNote). `deleteNote` does not call it directly because it relies on the subsequent active-index change to flow through normal state.
 - `cancelDocSave(docId)` cancels pending autosave timers for a specific doc. Called in deleteNote to prevent orphan writes.
@@ -45,6 +49,7 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 - Imported notes are treated the same as other internal notes (auto-save enabled, normal delete/duplicate/restore flow).
 - Rename updates the note title metadata (and sets `customName`), not the underlying `.md` file path.
 - `customName` flag on a document means the user manually renamed it; auto-title derivation is permanently disabled for that document.
+- Pinned notes sort before unpinned notes while preserving the selected note sort order within each pinned/unpinned partition. In groups, pinned notes stay at the top of that group; ungrouped pinned notes stay at the top of the ungrouped notes list.
 
 ## Current Settings Model
 
@@ -96,7 +101,7 @@ Do not use old community-package APIs such as `editor.storage.markdown.getMarkdo
 - Toolbar and status bar share the same scroll-driven visibility behavior.
 - Toolbar layout: Undo/Redo in column 1, formatting tools centered in column 2, Search and Go-to-line in column 3; when width < 740px the formatting tools wrap to row 2.
 - Browser/WebView shortcuts that would interfere with app behavior are blocked. This includes reload, DevTools, print, source view, caret browsing, zoom, and browser back/forward. Ctrl+R is unblocked when sidebar has focus (used for rename).
-- Sidebar shortcuts (Ctrl+D, Ctrl+R, F2, Ctrl+Alt+C, Delete) are active when last mousedown was inside the sidebar. Tracked via `data-sidebar-active` attribute on `document.documentElement`.
+- Sidebar shortcuts (Ctrl+D, Ctrl+R, F2, Ctrl+Alt+P, Ctrl+Alt+C, Delete) are active when last mousedown was inside the sidebar. Tracked via `data-sidebar-active` attribute on `document.documentElement`.
 - Editor shortcuts include `Ctrl+Shift+X` for strike-through, `Ctrl+G` for Go to Line, and `Ctrl+H` for Find and Replace. All are handled at the window level via `useKeyboardShortcuts`, not inside individual editor keymaps.
 - Sidebar shortcut hints are displayed in context menus. Shortcut style is unified across all menus (opacity 0.45, 12px, 24px left padding).
 

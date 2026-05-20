@@ -26,6 +26,7 @@ interface ManifestNote {
   customName?: boolean;
   createdAt: number;
   updatedAt: number;
+  pinned?: boolean;
 }
 
 interface TrashedNoteEntry {
@@ -37,6 +38,7 @@ interface TrashedNoteEntry {
   groupId: string | null;
   createdAt: number;
   updatedAt: number;
+  pinned?: boolean;
 }
 
 interface LegacyGroup {
@@ -182,6 +184,7 @@ async function decomposeLegacyIntoDir(
       customName: n.customName || undefined,
       createdAt: n.createdAt,
       updatedAt: n.updatedAt,
+      pinned: n.pinned === true,
       groupId: noteIdToGroupId.get(n.id) ?? null,
       trashedAt: null,
     };
@@ -199,6 +202,7 @@ async function decomposeLegacyIntoDir(
       customName: undefined,
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
+      pinned: t.pinned === true,
       groupId: t.groupId ?? null,
       trashedAt: t.trashedAt,
       trashedFromPath: t.originalFilePath,

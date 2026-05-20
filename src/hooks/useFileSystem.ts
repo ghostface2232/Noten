@@ -19,7 +19,7 @@ import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { removeNoteAssetDir } from "../utils/imageAssetUtils";
-import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsUpdated, emitTrashUpdated } from "./useWindowSync";
+import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsUpdated, emitNotePinnedUpdated, emitTrashUpdated } from "./useWindowSync";
 import { markOwnWrite } from "./ownWriteTracker";
 import { removeMeta as removeMetaFile } from "../utils/metadataIO";
 import { t } from "../i18n";
@@ -98,6 +98,7 @@ export interface FileSystemActions {
   duplicateNote: (index: number) => Promise<void>;
   exportNote: (index: number) => Promise<void>;
   renameNote: (index: number, newName: string) => void;
+  toggleNotePinned: (index: number) => void;
   restoreNote: (trashedNoteId: string) => Promise<void>;
   permanentlyDeleteNote: (trashedNoteId: string) => Promise<void>;
   emptyTrash: () => Promise<void>;
@@ -542,6 +543,7 @@ export function useFileSystem(
           groupId: group?.id ?? null,
           createdAt: doc.createdAt,
           updatedAt: doc.updatedAt,
+          pinned: doc.pinned === true,
         };
 
         if (setTrashedNotes) {
@@ -749,6 +751,23 @@ export function useFileSystem(
     emitDocRenamed(doc.id, doc.filePath, doc.filePath, trimmed);
   }, [getLiveDocsSnapshot, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
 
+  const toggleNotePinned = useCallback((index: number) => {
+    const doc = docsRef.current[index];
+    if (!doc) return;
+
+    const activeId = docsRef.current[activeIndexRef.current]?.id ?? null;
+    const now = Date.now();
+    const nextPinned = !doc.pinned;
+    const nextDocs = docsRef.current.map((entry, i) => (
+      i === index
+        ? { ...entry, pinned: nextPinned, updatedAt: now }
+        : entry
+    ));
+
+    sortAndPersistDocs(nextDocs, activeId, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
+    emitNotePinnedUpdated(doc.id, nextPinned, now);
+  }, [locale, notesSortOrder, setActiveIndex, setDocs]);
+
   const restoreNote = useCallback(async (trashedNoteId: string) => {
     const trashed = trashedNotesRef.current?.find((n) => n.id === trashedNoteId);
     if (!trashed) return;
@@ -778,6 +797,7 @@ export function useFileSystem(
       content,
       createdAt: trashed.createdAt,
       updatedAt: trashed.updatedAt,
+      pinned: trashed.pinned === true,
     };
 
     const { docs: liveDocs, activeDocId } = getLiveDocsSnapshot();
@@ -859,5 +879,5 @@ export function useFileSystem(
     void saveManifest(docsRef.current, docsRef.current[activeIndexRef.current]?.id ?? null, groupsRef.current).catch(() => {});
   }, [setTrashedNotes]);
 
-  return { importFile, importFiles, saveFile, saveFileAs, newNote, createNoteWithTitle, switchDocument, deleteNote, duplicateNote, exportNote, renameNote, restoreNote, permanentlyDeleteNote, emptyTrash };
+  return { importFile, importFiles, saveFile, saveFileAs, newNote, createNoteWithTitle, switchDocument, deleteNote, duplicateNote, exportNote, renameNote, toggleNotePinned, restoreNote, permanentlyDeleteNote, emptyTrash };
 }

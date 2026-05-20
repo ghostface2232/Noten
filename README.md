@@ -20,8 +20,9 @@ Powered by [Tiptap](https://tiptap.dev/), edited as WYSIWYM with Markdown as the
 - **WYSIWYM Markdown editor** - A single always-editable Tiptap surface backed by Markdown on disk
 - **Slash commands** - Type `/` to insert headings, lists, code blocks, images, and more
 - **Image support** - Drag & drop, paste, resize with corner handles, and drag to reorder
-- **Note management** - Sidebar with grouping, multi-select, drag reorder, full-text search, and context menus
+- **Note management** - Sidebar with grouping, pinned notes, multi-select, drag reorder, full-text search, and context menus
 - **Recently deleted** - Soft-delete with 14-day retention and restore
+- **Shared folder sync** - Use OneDrive, Dropbox, or another synced folder to share notes across PCs with metadata merge and conflict backups
 - **Multi-window** - Open notes in separate windows with real-time cross-window sync
 - **Mica theme** - Native Windows 11 Mica material with dark/light mode
 - **Export** - Save notes as Markdown, PDF, or Rich Text
@@ -62,6 +63,7 @@ Powered by [Tiptap](https://tiptap.dev/), edited as WYSIWYM with Markdown as the
 | Rename | `Ctrl+R` / `F2` |
 | Duplicate | `Ctrl+D` |
 | Export | `Ctrl+E` |
+| Pin / unpin | `Ctrl+Alt+P` |
 | Copy content | `Ctrl+Alt+C` |
 | Delete | `Delete` |
 

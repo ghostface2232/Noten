@@ -10,6 +10,8 @@ import {
   FolderAddRegular,
   FolderArrowRightRegular,
   FolderRegular,
+  PinOffRegular,
+  PinRegular,
   RenameRegular,
   WindowNewRegular,
 } from "@fluentui/react-icons";
@@ -47,6 +49,7 @@ interface SidebarContextMenusProps {
   onDeleteNote: (index: number) => void;
   onDuplicateNote: (index: number) => void;
   onExportNote: (index: number) => void;
+  onToggleNotePinned: (index: number) => void;
   onImportFile: () => void;
   onCreateGroup: (name: string, initialNoteIds?: string[]) => string;
   onDeleteGroup: (groupId: string) => void;
@@ -76,6 +79,7 @@ export function SidebarContextMenus({
   onDeleteNote,
   onDuplicateNote,
   onExportNote,
+  onToggleNotePinned,
   onImportFile,
   onCreateGroup,
   onDeleteGroup,
@@ -327,6 +331,15 @@ export function SidebarContextMenus({
 
           {contextMenu.type === "note" && (
             <>
+              <Button
+                appearance="subtle"
+                icon={docs[contextMenu.index]?.pinned ? <PinOffRegular /> : <PinRegular />}
+                className={styles.contextMenuItem}
+                onClick={() => { onToggleNotePinned(contextMenu.index); closeContextMenu(); }}
+                size="small"
+              >
+                {docs[contextMenu.index]?.pinned ? i("sidebar.unpin") : i("sidebar.pin")}<span className={styles.shortcutHint}>Ctrl+Alt+P</span>
+              </Button>
               <Button
                 appearance="subtle"
                 icon={<RenameRegular />}

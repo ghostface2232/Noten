@@ -91,6 +91,8 @@ const dict = {
   "sidebar.newNote": { en: "New document", ko: "새 문서" },
   "sidebar.import": { en: "Open", ko: "열기" },
   "sidebar.settings": { en: "Settings", ko: "설정" },
+  "sidebar.pin": { en: "Pin", ko: "고정" },
+  "sidebar.unpin": { en: "Unpin", ko: "고정 해제" },
   "sidebar.rename": { en: "Rename", ko: "이름 바꾸기" },
   "sidebar.openInNewWindow": { en: "Open in window", ko: "새 창에서 열기" },
   "sidebar.duplicate": { en: "Duplicate", ko: "복제" },

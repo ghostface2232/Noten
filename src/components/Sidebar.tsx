@@ -9,6 +9,7 @@ import {
   FolderAddRegular,
   FolderArrowRightRegular,
   MoreHorizontalRegular,
+  PinRegular,
   SettingsRegular,
 } from "@fluentui/react-icons";
 import { t } from "../i18n";
@@ -25,6 +26,33 @@ import type { ContextMenuState } from "./SidebarContextMenus";
 interface SearchSnippet { before: string; match: string; after: string }
 type MatchType = "title" | "body" | "both";
 const MATCH_TYPE_ORDER: Record<MatchType, number> = { both: 0, title: 1, body: 2 };
+
+function compareNotesForSidebar(a: NoteDoc, b: NoteDoc, order: NotesSortOrder, locale: Locale): number {
+  if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+
+  const desc = order.endsWith("-desc");
+  const byTitle = order.startsWith("title");
+  const byCreated = order.startsWith("created");
+  const dir = desc ? -1 : 1;
+
+  if (byTitle) {
+    const cmp = a.fileName.localeCompare(b.fileName, locale);
+    if (cmp !== 0) return cmp * dir;
+    return b.updatedAt - a.updatedAt;
+  }
+
+  const primary = byCreated
+    ? a.createdAt - b.createdAt
+    : a.updatedAt - b.updatedAt;
+  if (primary !== 0) return primary * dir;
+
+  const secondary = byCreated
+    ? a.updatedAt - b.updatedAt
+    : a.createdAt - b.createdAt;
+  if (secondary !== 0) return secondary * dir;
+
+  return a.fileName.localeCompare(b.fileName, locale);
+}
 
 function extractSnippet(text: string, query: string, windowSize = 80): SearchSnippet | null {
   const lowerText = text.toLowerCase();
@@ -78,6 +106,7 @@ interface SidebarProps {
   onDuplicateNote: (index: number) => void;
   onExportNote: (index: number) => void;
   onRenameNote: (index: number, newName: string) => void;
+  onToggleNotePinned: (index: number) => void;
   onImportFile: () => void;
   notesSortOrder: NotesSortOrder;
   locale: Locale;
@@ -116,6 +145,7 @@ export function Sidebar({
   onDuplicateNote,
   onExportNote,
   onRenameNote,
+  onToggleNotePinned,
   onImportFile,
   notesSortOrder,
   locale,
@@ -251,7 +281,7 @@ export function Sidebar({
   const filteredDocs = useMemo(() => {
     if (!debouncedQuery) return docs.map((doc, index) => ({
       doc, originalIndex: index, matchType: "title" as MatchType, snippet: null as SearchSnippet | null,
-    }));
+    })).sort((a, b) => compareNotesForSidebar(a.doc, b.doc, notesSortOrder, locale));
     const q = debouncedQuery.toLowerCase();
     const results: { doc: NoteDoc; originalIndex: number; matchType: MatchType; snippet: SearchSnippet | null }[] = [];
 
@@ -267,9 +297,14 @@ export function Sidebar({
       results.push({ doc, originalIndex: i, matchType, snippet });
     }
 
-    results.sort((a, b) => MATCH_TYPE_ORDER[a.matchType] - MATCH_TYPE_ORDER[b.matchType]);
+    results.sort((a, b) => {
+      if (!!a.doc.pinned !== !!b.doc.pinned) return a.doc.pinned ? -1 : 1;
+      const matchDiff = MATCH_TYPE_ORDER[a.matchType] - MATCH_TYPE_ORDER[b.matchType];
+      if (matchDiff !== 0) return matchDiff;
+      return compareNotesForSidebar(a.doc, b.doc, notesSortOrder, locale);
+    });
     return results;
-  }, [docs, debouncedQuery, strippedContentMap]);
+  }, [docs, debouncedQuery, strippedContentMap, notesSortOrder, locale]);
 
   // Focus the rename input when editing starts
   useEffect(() => {
@@ -398,6 +433,9 @@ export function Sidebar({
       } else if ((ctrl && e.key === "r") || e.key === "F2") {
         e.preventDefault();
         handleDoubleClick(activeIndex);
+      } else if (ctrl && e.altKey && e.key === "p") {
+        e.preventDefault();
+        onToggleNotePinned(activeIndex);
       } else if (ctrl && e.altKey && e.key === "c") {
         e.preventDefault();
         const content = getDocumentContent(activeIndex);
@@ -409,7 +447,7 @@ export function Sidebar({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeIndex, editingIndex, editingGroupId, getDocumentContent, onDuplicateNote, onExportNote, onDeleteNote, handleDoubleClick]);
+  }, [activeIndex, editingIndex, editingGroupId, getDocumentContent, onDuplicateNote, onExportNote, onToggleNotePinned, onDeleteNote, handleDoubleClick]);
 
   const toggleNoteSelection = useCallback((noteId: string) => {
     setSelectedNoteIds((prev) => {
@@ -447,24 +485,8 @@ export function Sidebar({
     const gItems: RenderItem[] = [];
     const nItems: RenderItem[] = [];
 
-    const desc = notesSortOrder.endsWith("-desc");
-    const byTitle = notesSortOrder.startsWith("title");
-    const byCreated = notesSortOrder.startsWith("created");
-    const dir = desc ? -1 : 1;
-
     const sortGroupNotes = (entries: { doc: NoteDoc; originalIndex: number }[]) => {
-      return [...entries].sort((a, b) => {
-        if (byTitle) {
-          const cmp = a.doc.fileName.localeCompare(b.doc.fileName, locale);
-          if (cmp !== 0) return cmp * dir;
-          return (b.doc.updatedAt - a.doc.updatedAt);
-        }
-        const primary = byCreated
-          ? a.doc.createdAt - b.doc.createdAt
-          : a.doc.updatedAt - b.doc.updatedAt;
-        if (primary !== 0) return primary * dir;
-        return a.doc.fileName.localeCompare(b.doc.fileName, locale);
-      });
+      return [...entries].sort((a, b) => compareNotesForSidebar(a.doc, b.doc, notesSortOrder, locale));
     };
 
     for (const group of groups) {
@@ -563,7 +585,7 @@ export function Sidebar({
         {editingIndex === originalIndex ? (
           <Button
             appearance="subtle"
-            icon={<DocumentRegular />}
+            icon={doc.pinned ? <PinRegular /> : <DocumentRegular />}
             className={mergeClasses(
               originalIndex === activeIndex ? styles.docItemActive : styles.docItem,
               indented && !selectMode && styles.docItemIndented,
@@ -588,7 +610,7 @@ export function Sidebar({
           <>
             <Button
               appearance="subtle"
-              icon={<DocumentRegular />}
+              icon={doc.pinned ? <PinRegular /> : <DocumentRegular />}
               className={mergeClasses(
                 originalIndex === activeIndex ? styles.docItemActive : styles.docItem,
                 indented && !selectMode && styles.docItemIndented,
@@ -966,6 +988,7 @@ export function Sidebar({
         onDeleteNote={onDeleteNote}
         onDuplicateNote={onDuplicateNote}
         onExportNote={onExportNote}
+        onToggleNotePinned={onToggleNotePinned}
         onImportFile={onImportFile}
         onCreateGroup={onCreateGroup}
         onDeleteGroup={onDeleteGroup}

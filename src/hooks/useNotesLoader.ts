@@ -58,6 +58,7 @@ export interface NoteDoc {
   content: string;
   createdAt: number;
   updatedAt: number;
+  pinned?: boolean;
   customName?: boolean;
 }
 
@@ -84,6 +85,7 @@ export interface TrashedNote {
   groupId: string | null;
   createdAt: number;
   updatedAt: number;
+  pinned?: boolean;
 }
 
 /**
@@ -122,6 +124,7 @@ interface MetaSnapshot {
   customName: boolean;
   createdAt: number;
   updatedAt: number;
+  pinned: boolean;
   groupId: string | null;
   trashedAt: number | null;
 }
@@ -187,6 +190,7 @@ async function seedWriteSnapshots(dir: string): Promise<void> {
       customName: !!m.customName,
       createdAt: m.createdAt,
       updatedAt: m.updatedAt,
+      pinned: m.pinned === true,
       groupId: m.groupId ?? null,
       trashedAt: m.trashedAt ?? null,
     });
@@ -233,6 +237,8 @@ export function sortNotes(docs: NoteDoc[], order: NotesSortOrder, locale: Locale
   const byCreated = order.startsWith("created");
 
   sorted.sort((a, b) => {
+    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+
     if (byTitle) {
       const cmp = a.fileName.localeCompare(b.fileName, locale);
       if (cmp !== 0) return cmp * direction;
@@ -496,6 +502,7 @@ async function loadDecomposedState(dir: string): Promise<DecomposedState> {
         groupId: meta.groupId ?? null,
         createdAt: meta.createdAt,
         updatedAt: meta.updatedAt,
+        pinned: meta.pinned === true,
       });
     } else {
       docs.push({
@@ -506,6 +513,7 @@ async function loadDecomposedState(dir: string): Promise<DecomposedState> {
         content: "",
         createdAt: meta.createdAt,
         updatedAt: meta.updatedAt,
+        pinned: meta.pinned === true,
         customName: meta.customName,
       });
     }
@@ -547,6 +555,7 @@ interface LegacyManifestNote {
   customName?: boolean;
   createdAt: number;
   updatedAt: number;
+  pinned?: boolean;
 }
 
 interface LegacyManifestGroup {
@@ -566,6 +575,7 @@ interface LegacyManifestTrashed {
   groupId: string | null;
   createdAt: number;
   updatedAt: number;
+  pinned?: boolean;
 }
 
 interface LegacyManifest {
@@ -629,6 +639,7 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
       customName: n.customName || undefined,
       createdAt: n.createdAt,
       updatedAt: n.updatedAt,
+      pinned: n.pinned === true,
       groupId: noteIdToGroupId.get(n.id) ?? null,
       trashedAt: null,
     }, machineId);
@@ -644,6 +655,7 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
       customName: undefined,
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
+      pinned: t.pinned === true,
       groupId: t.groupId ?? null,
       trashedAt: t.trashedAt,
       trashedFromPath: t.originalFilePath,
@@ -717,6 +729,7 @@ export async function reconcileFolder(
         customName: !UUID_RE.test(id) ? true : undefined,
         createdAt: fts.createdAt,
         updatedAt: fts.updatedAt,
+        pinned: false,
         groupId: null,
         trashedAt: null,
       };
@@ -731,6 +744,7 @@ export async function reconcileFolder(
       content,
       createdAt: meta.createdAt,
       updatedAt: meta.updatedAt,
+      pinned: meta.pinned === true,
       customName: meta.customName,
     };
     nextDocs.push(newDoc);
@@ -868,6 +882,7 @@ function metaSnapshotEqual(a: MetaSnapshot, b: MetaSnapshot): boolean {
     && a.customName === b.customName
     && a.createdAt === b.createdAt
     && a.updatedAt === b.updatedAt
+    && a.pinned === b.pinned
     && a.groupId === b.groupId
     && a.trashedAt === b.trashedAt;
 }
@@ -917,6 +932,7 @@ async function persistDecomposedState(
       customName: !!doc.customName,
       createdAt: doc.createdAt,
       updatedAt: doc.updatedAt,
+      pinned: doc.pinned === true,
       groupId: noteIdToGroupId.get(doc.id) ?? null,
       trashedAt: null,
     };
@@ -931,6 +947,7 @@ async function persistDecomposedState(
         customName: snap.customName || undefined,
         createdAt: snap.createdAt,
         updatedAt: snap.updatedAt,
+        pinned: snap.pinned,
         groupId: snap.groupId,
         trashedAt: null,
       }, machineId).catch(() => {}),
@@ -944,6 +961,7 @@ async function persistDecomposedState(
       customName: false,
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
+      pinned: t.pinned === true,
       groupId: t.groupId ?? null,
       trashedAt: t.trashedAt,
     };
@@ -958,6 +976,7 @@ async function persistDecomposedState(
         customName: undefined,
         createdAt: snap.createdAt,
         updatedAt: snap.updatedAt,
+        pinned: snap.pinned,
         groupId: snap.groupId,
         trashedAt: snap.trashedAt,
         trashedFromPath: t.originalFilePath,
@@ -1051,9 +1070,10 @@ async function persistDecomposedState(
   // ── 4. Local cache for next-boot quick paint ──
   const localCache: LocalCache = {
     version: 2,
-    notes: docs.map(({ id, filePath, fileName, createdAt, updatedAt, customName }) => ({
+    notes: docs.map(({ id, filePath, fileName, createdAt, updatedAt, customName, pinned }) => ({
       id, filePath, fileName, createdAt, updatedAt,
       ...(customName ? { customName } : {}),
+      ...(pinned ? { pinned } : {}),
     })),
     groups: groups && groups.length > 0 ? groups : undefined,
     trashedNotes: trashed.length > 0 ? trashed : undefined,
@@ -1234,9 +1254,10 @@ export function useNotesLoader(
         } else {
           await writeLocalCache({
             version: 2,
-            notes: sorted.map(({ id, filePath, fileName, createdAt, updatedAt, customName }) => ({
+            notes: sorted.map(({ id, filePath, fileName, createdAt, updatedAt, customName, pinned }) => ({
               id, filePath, fileName, createdAt, updatedAt,
               ...(customName ? { customName } : {}),
+              ...(pinned ? { pinned } : {}),
             })),
             groups: finalGroups.length > 0 ? finalGroups : undefined,
             trashedNotes: purgedTrashed.length > 0 ? purgedTrashed : undefined,

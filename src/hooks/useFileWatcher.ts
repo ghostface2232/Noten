@@ -94,14 +94,25 @@ export function useFileWatcher(
       const idx = prev.findIndex((d) => d.id === id);
       if (idx < 0) return prev;
       const cur = prev[idx];
-      // Skip if locally dirty (active edits trump remote rename) or unchanged.
-      if (cur.isDirty) return prev;
-      if (cur.fileName === meta.fileName && cur.updatedAt === meta.updatedAt) return prev;
+      // Active edits trump remote rename/title changes, but Pin is independent
+      // metadata and can safely sync while the body is locally dirty.
+      if (cur.isDirty) {
+        if (cur.pinned === (meta.pinned === true)) return prev;
+        const next = [...prev];
+        next[idx] = { ...cur, pinned: meta.pinned === true, updatedAt: meta.updatedAt };
+        return next;
+      }
+      if (
+        cur.fileName === meta.fileName
+        && cur.updatedAt === meta.updatedAt
+        && cur.pinned === (meta.pinned === true)
+      ) return prev;
       const next = [...prev];
       next[idx] = {
         ...cur,
         fileName: meta.fileName,
         updatedAt: meta.updatedAt,
+        pinned: meta.pinned === true,
         customName: meta.customName,
       };
       return next;

@@ -284,7 +284,18 @@ function App() {
     state.setFilePath(doc.filePath);
     state.setIsDirty(false);
   }, [state]);
-  useWindowSync(setDocs, activeIndex, docs[activeIndex]?.id ?? null, tiptapRef, setActiveIndex, setGroups, setTrashedNotes, handleActiveDocChanged);
+  useWindowSync(
+    setDocs,
+    activeIndex,
+    docs[activeIndex]?.id ?? null,
+    tiptapRef,
+    setActiveIndex,
+    setGroups,
+    setTrashedNotes,
+    handleActiveDocChanged,
+    settings.notesSortOrder,
+    locale,
+  );
 
   // 파일 시스템 감시 (클라우드 동기화 등 외부 변경 감지)
   useFileWatcher(
@@ -749,6 +760,7 @@ function App() {
               onDuplicateNote={fs.duplicateNote}
               onExportNote={fs.exportNote}
               onRenameNote={fs.renameNote}
+              onToggleNotePinned={fs.toggleNotePinned}
               onImportFile={fs.importFile}
               notesSortOrder={settings.notesSortOrder}
               locale={locale}

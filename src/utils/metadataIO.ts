@@ -9,6 +9,7 @@ export interface NoteMeta {
   customName?: boolean;
   createdAt: number;
   updatedAt: number;
+  pinned?: boolean;
   groupId: string | null;
   /** If set, note lives under `.trash/` (body file is `.trash/{id}.md`). */
   trashedAt: number | null;
@@ -54,6 +55,7 @@ export async function readMeta(notesDir: string, noteId: string): Promise<NoteMe
     return {
       ...m,
       version: 2,
+      pinned: m.pinned === true,
       trashedAt: typeof m.trashedAt === "number" ? m.trashedAt : null,
     };
   } catch {
@@ -71,6 +73,7 @@ export async function writeMeta(notesDir: string, meta: NoteMeta, machineId: str
     customName: meta.customName || undefined,
     createdAt: meta.createdAt,
     updatedAt: meta.updatedAt,
+    pinned: meta.pinned === true ? true : undefined,
     groupId: meta.groupId ?? null,
     trashedAt: meta.trashedAt ?? null,
     trashedFromPath: meta.trashedFromPath ?? null,
