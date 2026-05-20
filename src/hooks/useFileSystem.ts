@@ -756,16 +756,13 @@ export function useFileSystem(
     if (!doc) return;
 
     const activeId = docsRef.current[activeIndexRef.current]?.id ?? null;
-    const now = Date.now();
     const nextPinned = !doc.pinned;
     const nextDocs = docsRef.current.map((entry, i) => (
-      i === index
-        ? { ...entry, pinned: nextPinned, updatedAt: now }
-        : entry
+      i === index ? { ...entry, pinned: nextPinned } : entry
     ));
 
     sortAndPersistDocs(nextDocs, activeId, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
-    emitNotePinnedUpdated(doc.id, nextPinned, now);
+    emitNotePinnedUpdated(doc.id, nextPinned);
   }, [locale, notesSortOrder, setActiveIndex, setDocs]);
 
   const restoreNote = useCallback(async (trashedNoteId: string) => {

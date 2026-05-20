@@ -37,7 +37,6 @@ interface NotePinnedUpdatedPayload {
   sourceWindow: string;
   docId: string;
   pinned: boolean;
-  updatedAt: number;
 }
 
 interface GroupsUpdatedPayload {
@@ -79,9 +78,9 @@ export function emitDocCreated(doc: NoteDoc) {
   } satisfies DocCreatedPayload).catch(() => {});
 }
 
-export function emitNotePinnedUpdated(docId: string, pinned: boolean, updatedAt: number) {
+export function emitNotePinnedUpdated(docId: string, pinned: boolean) {
   emit("note-pinned-updated", {
-    sourceWindow: WINDOW_LABEL, docId, pinned, updatedAt,
+    sourceWindow: WINDOW_LABEL, docId, pinned,
   } satisfies NotePinnedUpdatedPayload).catch(() => {});
 }
 
@@ -235,14 +234,14 @@ export function useWindowSync(
       }),
 
       listen<NotePinnedUpdatedPayload>("note-pinned-updated", (event) => {
-        const { sourceWindow, docId, pinned, updatedAt } = event.payload;
+        const { sourceWindow, docId, pinned } = event.payload;
         if (sourceWindow === WINDOW_LABEL) return;
 
         setDocs((prev) => {
           const idx = prev.findIndex((d) => d.id === docId);
           if (idx < 0) return prev;
           const next = [...prev];
-          next[idx] = { ...next[idx], pinned, updatedAt };
+          next[idx] = { ...next[idx], pinned };
           const sorted = sortNotes(next, notesSortOrder, locale);
           const activeId = getRoutedActiveDocId();
           if (activeId) {
