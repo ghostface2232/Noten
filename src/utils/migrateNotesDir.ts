@@ -189,8 +189,9 @@ async function decomposeLegacyIntoDir(
       trashedAt: null,
     };
     const existing = await readMeta(dir, n.id);
-    if (existing && existing.updatedAt >= meta.updatedAt) continue;
-    await writeMeta(dir, meta, machineId);
+    const mergedMeta = mergeMetaForMigration(meta, existing ?? undefined);
+    if (existing && metasEqual(existing, mergedMeta)) continue;
+    await writeMeta(dir, mergedMeta, machineId);
   }
 
   for (const t of manifest.trashedNotes ?? []) {
@@ -208,8 +209,9 @@ async function decomposeLegacyIntoDir(
       trashedFromPath: t.originalFilePath,
     };
     const existing = await readMeta(dir, t.id);
-    if (existing && existing.updatedAt >= meta.updatedAt && existing.trashedAt != null) continue;
-    await writeMeta(dir, meta, machineId);
+    const mergedMeta = mergeMetaForMigration(meta, existing ?? undefined);
+    if (existing && metasEqual(existing, mergedMeta)) continue;
+    await writeMeta(dir, mergedMeta, machineId);
   }
 }
 
@@ -315,6 +317,35 @@ async function readTrashMdMtimes(dir: string): Promise<Map<string, number>> {
     out.set(e.name, ts.updatedAt);
   }
   return out;
+}
+
+function metasEqual(a: NoteMeta, b: NoteMeta): boolean {
+  return a.id === b.id
+    && a.fileName === b.fileName
+    && (a.customName === true) === (b.customName === true)
+    && a.createdAt === b.createdAt
+    && a.updatedAt === b.updatedAt
+    && (a.pinned === true) === (b.pinned === true)
+    && (a.groupId ?? null) === (b.groupId ?? null)
+    && (a.trashedAt ?? null) === (b.trashedAt ?? null)
+    && (a.trashedFromPath ?? null) === (b.trashedFromPath ?? null);
+}
+
+function mergeMetaForMigration(source: NoteMeta, dest: NoteMeta | undefined): NoteMeta {
+  if (!dest) return source;
+
+  const winner = source.updatedAt > dest.updatedAt ? source : dest;
+  const loser = winner === source ? dest : source;
+  const groupId = winner.groupId ?? loser.groupId ?? null;
+
+  return {
+    ...winner,
+    customName: winner.customName || undefined,
+    pinned: winner.pinned === true,
+    groupId,
+    trashedAt: winner.trashedAt ?? null,
+    trashedFromPath: winner.trashedFromPath ?? loser.trashedFromPath ?? null,
+  };
 }
 
 /**
@@ -423,12 +454,16 @@ export async function migrateNotesDir(
     }
     // dest-only .md files were never touched → preserved automatically.
 
-    // 2) `.meta/{id}.json` — per-id `updatedAt` newer-wins.
+    // 2) `.meta/{id}.json` — per-id `updatedAt` newer-wins for title/body
+    // metadata, but preserve non-null group membership. Group moves do not
+    // bump note `updatedAt`, so treating it as a whole-file clock can eject
+    // grouped notes during cloud-folder merges.
     await ensureMetaDir(toDir);
     for (const [id, src] of sourceMeta) {
       const dest = destMetaBefore.get(id);
-      if (dest && dest.updatedAt >= src.updatedAt) continue;
-      await writeMeta(toDir, src, machineId).catch(() => {});
+      const mergedMeta = mergeMetaForMigration(src, dest);
+      if (dest && metasEqual(dest, mergedMeta)) continue;
+      await writeMeta(toDir, mergedMeta, machineId).catch(() => {});
     }
     // dest-only meta ids: still on disk untouched → preserved.
 
