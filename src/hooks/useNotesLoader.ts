@@ -813,8 +813,11 @@ export async function reconcileFolder(
     trashEntries.filter((e) => e.name?.endsWith(".md") && e.isFile).map((e) => e.name!),
   );
 
-  // Bodyless meta can be a cloud-sync race. Delete only after a non-bulk
-  // repeat observation.
+  // A bodyless meta may be a cloud-sync race — the sidecar can arrive before
+  // its body. Deleting it via removeMetaFile propagates to every synced PC,
+  // so two guards gate the delete: skip the whole pass when many metas are
+  // bodyless at once (bulk = likely mid-sync), and require a meta to stay
+  // bodyless across two passes (per-id grace) before removing it.
   const missingBodyIds: string[] = [];
   for (const meta of allMeta.values()) {
     const rootName = `${meta.id}.md`;
@@ -858,6 +861,8 @@ export async function reconcileFolder(
     changed = true;
   }
 
+  // locale is consumed only by getDefaultDocumentTitle above; this reference
+  // keeps the unused-parameter check quiet.
   void locale;
 
   return { docs: nextDocs, groups: nextGroups, changed };

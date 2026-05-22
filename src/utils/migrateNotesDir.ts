@@ -484,6 +484,9 @@ export async function migrateNotesDir(
     const sourceGroupsFile = await readGroupsFile(fromDir);
     const destGroupsBefore = await readGroupsFile(toDir);
 
+    // Root bodies: per-filename mtime newer-wins. Back up a differing
+    // destination body before the source overwrites it. The loop walks only
+    // source files, so destination-only bodies are preserved untouched.
     for (const [name, srcMtime] of sourceMdMtimes) {
       const destMtime = destMdMtimes.get(name);
       if (destMtime === undefined) {
@@ -496,7 +499,9 @@ export async function migrateNotesDir(
       );
       await copyFile(`${fromBase}${name}`, `${toBase}${name}`);
     }
-    // Group membership has its own clock; do not let body/title clocks erase it.
+    // Per-id meta: newer-wins per field, but group membership keeps its own
+    // clock so body/title clocks cannot erase it. Destination-only ids stay
+    // on disk untouched.
     await ensureMetaDir(toDir);
     for (const [id, src] of sourceMeta) {
       const dest = destMetaBefore.get(id);
