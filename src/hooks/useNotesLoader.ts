@@ -49,10 +49,6 @@ import {
   setGroupCollapsedPersisted,
 } from "./useUiState";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
 export interface NoteDoc {
   id: string;
   filePath: string;
@@ -63,7 +59,6 @@ export interface NoteDoc {
   updatedAt: number;
   pinned?: boolean;
   customName?: boolean;
-  /** User-assigned color label (sidebar icon tint). */
   color?: NoteColorId;
 }
 
@@ -73,11 +68,8 @@ export interface NoteGroup {
   noteIds: string[];
   collapsed: boolean;
   createdAt: number;
-  /** Fractional index used to sort groups in the sidebar — synced across PCs. */
   orderKey?: string;
-  /** updatedAt for orderKey alone (independent of name updates). */
   orderUpdatedAt?: number;
-  /** updatedAt for name and other shared fields. */
   updatedAt?: number;
 }
 
@@ -94,11 +86,7 @@ export interface TrashedNote {
   color?: NoteColorId;
 }
 
-/**
- * Per-machine cache that lets us paint the sidebar quickly on next launch.
- * NOT a source of truth: it is rebuilt from `.meta/*.json` + `.groups.json`
- * + `ui-state.json` after the first scan.
- */
+/** Per-machine quick-paint cache. Disk sidecars remain the source of truth. */
 interface LocalCache {
   version: 2;
   notesDirectory?: string;
@@ -108,24 +96,17 @@ interface LocalCache {
   imageAssetMigrationV1CompletedAt?: number;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Module-level caches
-// ─────────────────────────────────────────────────────────────────────────────
-
 let notesDirCache: string | null = null;
 let imageAssetMigrationV1CompletedAtCache: number | null = null;
 let trashedNotesCache: TrashedNote[] = [];
 export function getTrashedNotesCache(): TrashedNote[] { return trashedNotesCache; }
 export function setTrashedNotesCache(notes: TrashedNote[]) { trashedNotesCache = notes; }
 
-/** Migration in progress — blocks saveManifest writes. */
+/** Blocks public persistence while the notes directory is moving or reloading. */
 export let migrationInProgress = false;
 export function setMigrationInProgress(v: boolean) { migrationInProgress = v; }
 
-/**
- * Last-written snapshot of per-note meta. Lets `saveManifest` write only the
- * meta files that actually changed instead of touching all of them.
- */
+/** Last-written per-note meta, used to skip unchanged sidecar writes. */
 interface MetaSnapshot {
   fileName: string;
   customName: boolean;
@@ -163,40 +144,19 @@ interface SharedGroupSnapshot {
 }
 const writtenGroupsSnapshot = new Map<string, SharedGroupSnapshot>();
 
-/**
- * Explicit "delete this group" intents queued by user actions. saveManifest
- * emits a tombstone into `.groups.json` for each id present here that is also
- * absent from the current `groups` argument. Using an explicit set (instead
- * of inferring deletions from snapshot-vs-state diffs) prevents a remote
- * group create from being misread as a local delete: e.g. when the watcher
- * has just synced a remotely-created group into `writtenGroupsSnapshot` but
- * a saveManifest call from a stale closure runs before React state catches
- * up, the diff path would tombstone the new group; the explicit set won't.
- */
+// Only explicit local group deletes become tombstones; stale saves must not
+// convert freshly synced remote groups into deletes.
 const pendingGroupTombstones = new Set<string>();
 
-/** Mark a group as deleted. Called from `useNoteGroups.deleteGroup` and from
- *  the auto-prune paths in `useFileSystem` (empty-group cleanup). The tombstone
- *  is materialised in `.groups.json` on the next `saveManifest` call that sees
- *  the group missing from its `groups` argument. */
 export function markGroupAsDeleted(id: string): void {
   pendingGroupTombstones.add(id);
 }
 
-/** Cancel a pending deletion (e.g. user undid the action before saveManifest
- *  ran, or a remote write resurrected the group). */
 export function unmarkGroupAsDeleted(id: string): void {
   pendingGroupTombstones.delete(id);
 }
 
-/**
- * Per-id count of consecutive `reconcileFolder` passes that observed a meta
- * whose body file (`{id}.md` or `.trash/{id}.md`) was missing. A meta is only
- * deleted as an orphan after it stays bodyless across two passes, so a single
- * mid-sync snapshot of a cloud folder (where the `.meta/{id}.json` sidecar can
- * arrive before its body) cannot trigger metadata loss. Cleared when the body
- * reappears or the notes directory changes.
- */
+// Orphan-meta deletion is delayed so cloud sidecars can arrive before bodies.
 const metaBodyMissingObservations = new Map<string, number>();
 
 function resetWriteSnapshots() {
@@ -207,16 +167,8 @@ function resetWriteSnapshots() {
   metaBodyMissingObservations.clear();
 }
 
-/**
- * Populate the diff snapshots from on-disk state so subsequent `saveManifest`
- * calls can:
- *   - skip rewriting unchanged meta files
- *   - detect group deletions and emit tombstones into `.groups.json`
- *
- * Without this seeding, deleting a group that existed before the session
- * starts would NOT produce a tombstone and the read-merge-write in
- * `writeGroupsWithMerge` would resurrect it.
- */
+// Seed write snapshots from disk so deletions of pre-existing groups can emit
+// tombstones instead of being resurrected by read-merge-write.
 async function seedWriteSnapshots(dir: string): Promise<void> {
   resetWriteSnapshots();
 
@@ -238,16 +190,9 @@ async function seedWriteSnapshots(dir: string): Promise<void> {
   await syncGroupsSnapshotFromDisk(dir);
 }
 
-/**
- * Refresh `writtenGroupsSnapshot` from `.groups.json`. Called when the watcher
- * sees an external write so that subsequent local deletions of remotely-created
- * groups still emit tombstones (otherwise the deletion is silently lost in the
- * read-merge-write cycle).
- */
 export async function syncGroupsSnapshotFromDisk(dir: string): Promise<void> {
   const groupsFile = await readGroupsFile(dir);
-  // Forget entries that no longer exist on disk so we don't keep emitting
-  // tombstones for already-tombstoned groups.
+  // Drop already-tombstoned groups from the local diff snapshot.
   const liveOnDisk = new Set<string>();
   for (const g of Object.values(groupsFile.groups)) {
     if (g.deletedAt != null) continue;
@@ -263,10 +208,6 @@ export async function syncGroupsSnapshotFromDisk(dir: string): Promise<void> {
     if (!liveOnDisk.has(id)) writtenGroupsSnapshot.delete(id);
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Sorting & title helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 export function sortNotes(docs: NoteDoc[], order: NotesSortOrder, locale: Locale = "en"): NoteDoc[] {
   const sorted = [...docs];
@@ -300,10 +241,6 @@ export function sortNotes(docs: NoteDoc[], order: NotesSortOrder, locale: Locale
   return sorted;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Notes directory
-// ─────────────────────────────────────────────────────────────────────────────
-
 export async function getNotesDir(): Promise<string> {
   if (notesDirCache) return notesDirCache;
   const base = await appDataDir();
@@ -315,7 +252,6 @@ export async function getNotesDir(): Promise<string> {
 export function setNotesDir(dir: string) {
   notesDirCache = dir;
   imageAssetMigrationV1CompletedAtCache = null;
-  // Path changed → previous diff snapshot and conflict baseline are meaningless.
   resetWriteSnapshots();
   resetKnownDiskContent();
 }
@@ -332,10 +268,6 @@ async function ensureNotesDir(): Promise<string> {
   await mkdir(dir, { recursive: true }).catch(() => {});
   return dir;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Trash directory
-// ─────────────────────────────────────────────────────────────────────────────
 
 export async function getTrashDir(): Promise<string> {
   const notesDir = await getNotesDir();
@@ -371,10 +303,6 @@ export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<Tr
 
   return kept;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Local cache file (per-machine, fast-boot)
-// ─────────────────────────────────────────────────────────────────────────────
 
 let localCachePathPromise: Promise<string> | null = null;
 
@@ -413,10 +341,6 @@ async function writeLocalCache(cache: LocalCache): Promise<void> {
   } catch { /* best-effort */ }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
 async function readFileContent(path: string): Promise<string> {
   try {
     return await readTextFile(path);
@@ -432,18 +356,13 @@ export function getFileBaseName(filePath: string): string {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function fileNameToId(name: string): string {
-  // Drop ".md" suffix; legacy notes may have non-UUID stems — preserve them.
+  // Legacy notes may have non-UUID stems; preserve them.
   return name.replace(/\.md$/i, "");
 }
 
 function normalizeSep(dir: string): string {
   return dir.endsWith("/") || dir.endsWith("\\") ? dir : `${dir}/`;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Decomposed-state I/O
-//   (replaces the old monolithic manifest.json read/write)
-// ─────────────────────────────────────────────────────────────────────────────
 
 interface DecomposedState {
   docs: NoteDoc[];
@@ -452,13 +371,7 @@ interface DecomposedState {
   activeNoteId: string | null;
 }
 
-/**
- * Read both `.groups.json` and every `.meta/{id}.json` from disk and return
- * the resulting NoteGroup list. Membership (noteIds) is derived from each
- * meta's `groupId`, which is the only authoritative source. Use this from
- * the watcher / reconcile path so we don't accidentally compute membership
- * from a stale React state snapshot.
- */
+/** Load groups from disk; membership is derived from per-note `groupId`. */
 export async function loadGroupsFromDisk(dir: string): Promise<NoteGroup[]> {
   await loadUiState();
   const file = await readGroupsFile(dir);
@@ -476,7 +389,6 @@ export async function loadGroupsFromDisk(dir: string): Promise<NoteGroup[]> {
   return buildGroupsFromShared(file.groups, metaByGroup, collapsedMap);
 }
 
-/** Build the in-memory NoteGroup list from `.groups.json` + per-note groupId. */
 function buildGroupsFromShared(
   shared: Record<string, SharedGroupEntry>,
   metaByGroup: Map<string, string[]>,
@@ -618,17 +530,11 @@ async function attachDocContents(docs: NoteDoc[]): Promise<NoteDoc[]> {
   return Promise.all(
     docs.map(async (d) => {
       const content = await readFileContent(d.filePath);
-      // Seed the conflict-backup baseline so the first local autosave knows
-      // what disk looked like at boot.
       if (d.filePath) setKnownDiskContent(d.filePath, content);
       return { ...d, content } as NoteDoc;
     }),
   );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Legacy `manifest.json` migration (one-shot)
-// ─────────────────────────────────────────────────────────────────────────────
 
 interface LegacyManifestNote {
   id: string;
@@ -683,7 +589,6 @@ async function readLegacyManifestFile(dir: string): Promise<LegacyManifest | nul
 async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): Promise<void> {
   const machineId = await getMachineId();
 
-  // 1. groups → .groups.json
   const sharedGroups: Record<string, SharedGroupEntry> = {};
   let lastKey: string | undefined = undefined;
   const collapsedMap: Record<string, boolean> = {};
@@ -713,7 +618,6 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
     await writeGroupsWithMerge(dir, sharedGroups);
   }
 
-  // 2. live notes → .meta/{id}.json
   for (const n of manifest.notes ?? []) {
     if (!n.id) continue;
     await writeMetaFile(dir, {
@@ -731,7 +635,6 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
     }, machineId);
   }
 
-  // 3. trashed notes → .meta with trashedAt
   for (const t of manifest.trashedNotes ?? []) {
     if (!t.id) continue;
     await writeMetaFile(dir, {
@@ -750,7 +653,6 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
     }, machineId);
   }
 
-  // 4. activeNoteId + collapsed → ui-state.json (per-machine)
   if (manifest.activeNoteId) {
     await setActiveNoteIdPersisted(manifest.activeNoteId);
   }
@@ -758,15 +660,10 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
     if (collapsed) await setGroupCollapsedPersisted(gid, true);
   }
 
-  // 5. imageAssetMigrationV1CompletedAt → local cache
   if (manifest.imageAssetMigrationV1CompletedAt) {
     imageAssetMigrationV1CompletedAtCache = manifest.imageAssetMigrationV1CompletedAt;
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// reconcileFolder — pick up new files, drop missing ones, repair meta
-// ─────────────────────────────────────────────────────────────────────────────
 
 export async function reconcileFolder(
   dir: string,
@@ -796,7 +693,6 @@ export async function reconcileFolder(
   let nextDocs = [...docs];
   const docById = new Map(nextDocs.map((d) => [d.id, d]));
 
-  // ── Add files in folder but missing from in-memory docs ──
   for (const entry of mdEntries) {
     const name = entry.name!;
     const id = fileNameToId(name);
@@ -842,12 +738,8 @@ export async function reconcileFolder(
     changed = true;
   }
 
-  // ── Resolve state mismatches: meta says trashed but root .md exists ──
-  // Three-way state when `.trash/{id}.md` *also* exists is the dangerous
-  // case — the previous implementation copied root over trash unconditionally
-  // and silently destroyed whichever body wasn't the survivor. We now read
-  // both bodies and, if they differ, copy the loser into `.conflicts/`
-  // before applying the resolution.
+  // If root and trash bodies both exist, preserve the losing body before
+  // resolving the mismatch.
   for (const meta of allMeta.values()) {
     if (meta.trashedAt == null) continue;
     const rootName = `${meta.id}.md`;
@@ -858,8 +750,6 @@ export async function reconcileFolder(
     let rootMtime = 0;
     try { rootMtime = (await getFileTimestamps(rootPath)).updatedAt; } catch { /* fall back */ }
 
-    // Read the existing trash body (if any) and the root body so we can
-    // detect content divergence before either is overwritten or removed.
     let trashBody: string | null = null;
     try {
       if (await exists(trashPath)) {
@@ -871,9 +761,6 @@ export async function reconcileFolder(
     try { rootBody = await readTextFile(rootPath); } catch { /* unreadable root */ }
 
     if (rootMtime > meta.trashedAt) {
-      // Restore branch: meta becomes non-trashed. The trash body is now
-      // redundant. If it has content distinct from root, preserve it under
-      // `.conflicts/{id}-{ts}.md` before deleting so the user can recover.
       if (trashBody !== null && trashBody !== rootBody && trashBody.length > 0) {
         try { await backupRemoteVersion(dir, meta.id, trashBody); } catch { /* best-effort */ }
       }
@@ -885,8 +772,6 @@ export async function reconcileFolder(
       } catch { /* ignore */ }
       changed = true;
     } else {
-      // Move-to-trash branch: root will be copied over trash. If a distinct
-      // trash body already exists, back it up before we clobber it.
       if (trashBody !== null && trashBody !== rootBody && trashBody.length > 0) {
         try { await backupRemoteVersion(dir, meta.id, trashBody); } catch { /* best-effort */ }
       }
@@ -902,10 +787,7 @@ export async function reconcileFolder(
     }
   }
 
-  // ── Remove docs whose root .md no longer exists ──
-  // Crucially, keep dirty docs even if disk is gone: the user may be actively
-  // editing in the editor, and their next autosave will recreate the file.
-  // Dropping them here would silently destroy unsaved work.
+  // Keep dirty docs even if disk is gone; autosave can still recreate them.
   const beforeRemoveLen = nextDocs.length;
   const removedIds = new Set<string>();
   nextDocs = nextDocs.filter((d) => {
@@ -925,29 +807,14 @@ export async function reconcileFolder(
       }))
     : groups;
 
-  // Read the trash directory once up front so subsequent integrity checks
-  // can reference it without re-stat'ing.
   let trashEntries: { name?: string; isFile?: boolean }[] = [];
   try { trashEntries = await readDir(`${base}.trash`); } catch { trashEntries = []; }
   const trashFileNames = new Set(
     trashEntries.filter((e) => e.name?.endsWith(".md") && e.isFile).map((e) => e.name!),
   );
 
-  // ── Orphan / missing-body meta handling ──
-  // A meta whose body file is absent is NOT automatically an orphan: on a
-  // cloud folder the `.meta/{id}.json` sidecar routinely syncs down before
-  // its `{id}.md` (or `.trash/{id}.md`) body. Deleting the meta here would
-  // drop group/color/pin/timestamps — and because `removeMetaFile` deletes a
-  // real file in the shared folder, that loss would propagate to every synced
-  // PC. Two cases are still safe to leave alone via `trashFileNames`:
-  //   - mid-flight `deleteNote` (root removed, meta not yet stamped trashed,
-  //     `.trash/{id}.md` already present) — let the trash-side update finish.
-  // Two guards gate the destructive delete:
-  //   • bulk guard — when many metas are bodyless at once the folder view is
-  //     almost certainly mid-sync, so the whole destructive pass is skipped.
-  //   • per-id grace — a meta must already have been observed bodyless on a
-  //     prior non-bulk pass before deletion, so a single mid-sync snapshot
-  //     never deletes.
+  // Bodyless meta can be a cloud-sync race. Delete only after a non-bulk
+  // repeat observation.
   const missingBodyIds: string[] = [];
   for (const meta of allMeta.values()) {
     const rootName = `${meta.id}.md`;
@@ -982,10 +849,7 @@ export async function reconcileFolder(
     }
   }
 
-  // Group membership is stored in `.meta/{noteId}.json` as `groupId`. Rebuild
-  // `noteIds` from disk after reconcile has finished touching meta files; if
-  // we return stale/empty `noteIds`, the loader's follow-up persist can write
-  // those stale memberships back as `groupId: null`.
+  // Rebuild noteIds from sidecars so follow-up persistence cannot erase groupId.
   const liveDocIds = new Set(nextDocs.map((d) => d.id));
   const latestMeta = await readAllMeta(dir);
   const hydratedGroups = hydrateGroupMembershipFromMeta(nextGroups, latestMeta, liveDocIds);
@@ -994,15 +858,10 @@ export async function reconcileFolder(
     changed = true;
   }
 
-  // locale used only by getDefaultDocumentTitle above; suppress unused warning otherwise
   void locale;
 
   return { docs: nextDocs, groups: nextGroups, changed };
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// saveManifest — public API preserved, internals decomposed
-// ─────────────────────────────────────────────────────────────────────────────
 
 function metaSnapshotEqual(a: MetaSnapshot, b: MetaSnapshot): boolean {
   return a.fileName === b.fileName
@@ -1023,20 +882,8 @@ function groupSnapshotEqual(a: SharedGroupSnapshot, b: SharedGroupSnapshot): boo
     && a.updatedAt === b.updatedAt;
 }
 
-/**
- * Internal persistence: writes decomposed state to disk.
- *   - `.meta/{id}.json` for any doc/trashed entry whose snapshot changed
- *   - shared `.groups.json` (read-merge-write against on-disk content)
- *   - local `ui-state.json` (activeNoteId)
- *   - local `manifest-cache.json` for next-launch fast paint
- *
- * This function is intentionally ungated by `migrationInProgress`. Callers
- * that should respect the migration guard go through `saveManifest` instead;
- * `useNotesLoader`'s own load can call this directly because it already owns
- * the guard window and needs to persist reconciled state without releasing
- * it. Splitting the gate out lets us avoid the previous "release-then-
- * reacquire" workaround that opened a tiny input window inside the load.
- */
+// Ungated writer used by the loader while it already owns `migrationInProgress`.
+// External callers should use `saveManifest`.
 async function persistDecomposedState(
   docs: NoteDoc[],
   activeId: string | null,
@@ -1046,7 +893,6 @@ async function persistDecomposedState(
   const machineId = getMachineIdCached();
   const trashed = trashedNotesCache;
 
-  // Build a noteId → groupId index from the in-memory groups array.
   const noteIdToGroupId = new Map<string, string>();
   for (const g of groups ?? []) {
     if (!g.id) continue;
@@ -1077,7 +923,6 @@ async function persistDecomposedState(
     };
   };
 
-  // ── 1. Per-note meta diffs ──
   const metaWrites: Promise<unknown>[] = [];
   for (const doc of docs) {
     const groupSnap = resolveGroupSnapshot(doc.id, noteIdToGroupId.get(doc.id) ?? null);
@@ -1158,7 +1003,6 @@ async function persistDecomposedState(
     );
   }
 
-  // ── 2. Shared groups diff ──
   const localGroupsMap: Record<string, SharedGroupEntry> = {};
   let lastOrderKey: string | undefined = undefined;
   const orderedGroups = [...(groups ?? [])].sort((a, b) => {
@@ -1201,17 +1045,11 @@ async function persistDecomposedState(
     };
   }
 
-  // Materialise tombstones for explicit delete intents only. Inferring
-  // deletions from "in writtenGroupsSnapshot but not in currentIds" is unsafe:
-  // when the watcher just synced a remotely-created group into the snapshot,
-  // a saveManifest call from a stale closure (that never saw the new group in
-  // its `groups` argument) would emit a tombstone and silently destroy the
-  // remote create. Only ids that were explicitly added to
-  // `pendingGroupTombstones` by the user-action path are tombstoned here.
+  // Tombstone only explicit local deletes; stale saves can miss remote groups.
   const currentIds = new Set(orderedGroups.map((g) => g.id));
   const tombstoneApplied: string[] = [];
   for (const id of Array.from(pendingGroupTombstones)) {
-    if (currentIds.has(id)) continue; // user undid the deletion (or this is a stale call) — skip
+    if (currentIds.has(id)) continue;
     localGroupsMap[id] = {
       id,
       name: "",
@@ -1229,18 +1067,14 @@ async function persistDecomposedState(
   const groupsPromise = groupsChanged
     ? writeGroupsWithMerge(dir, localGroupsMap).then(
         () => {
-          // Successful write — drop the consumed intents. If the write fails
-          // we keep them so the next saveManifest retries automatically.
           for (const id of tombstoneApplied) pendingGroupTombstones.delete(id);
         },
         () => { /* keep pending for retry */ },
       )
     : Promise.resolve();
 
-  // ── 3. Active note id (per-machine) ──
   const activePromise = setActiveNoteIdPersisted(activeId).catch(() => {});
 
-  // ── 4. Local cache for next-boot quick paint ──
   const localCache: LocalCache = {
     version: 2,
     notesDirectory: dir,
@@ -1264,13 +1098,6 @@ async function persistDecomposedState(
   ]);
 }
 
-/**
- * Public persistence entry point. Skips writing while a notes-directory
- * migration / reload is in flight (autosave, useNoteGroups, useFileSystem
- * etc. all funnel through here). The internal `persistDecomposedState` is
- * the actual writer; callers inside the loader's own migration window
- * should invoke that directly.
- */
 export async function saveManifest(
   docs: NoteDoc[],
   activeId: string | null,
@@ -1279,10 +1106,6 @@ export async function saveManifest(
   if (migrationInProgress) return;
   return persistDecomposedState(docs, activeId, groups);
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// useNotesLoader hook
-// ─────────────────────────────────────────────────────────────────────────────
 
 export function useNotesLoader(
   locale: Locale,
@@ -1318,26 +1141,15 @@ export function useNotesLoader(
     initialized.current = true;
 
     (async () => {
-      // Gate the entire load behind `migrationInProgress` so any autosave
-      // timer that fires during the multi-await reload (e.g. the user typed
-      // right before clicking Change Path) skips writing instead of stamping
-      // the OLD `snapshot.filePath` into a now-cleared directory.
-      // Inner legacy / image-asset migrations used to manage this flag
-      // themselves; they no longer need to since the outer wrapper covers
-      // every disk-touching step.
+      // Keep autosave out while load/reload paths touch multiple disk files.
       setMigrationInProgress(true);
       try {
         await getMachineId();
-        // Hydrate the per-machine UI-state cache (group collapsed state,
-        // active note) before loadDecomposedState reads it synchronously via
-        // getUiStateCached(). Without this the cache is empty on a cold start
-        // and every group renders expanded.
         await loadUiState();
 
         const dir = await ensureNotesDir();
         await ensureSharedDirs(dir);
 
-        // ── Quick-paint from local cache while we scan disk ──
         const cache = await readLocalCache(dir);
         if (cache && cache.notes.length > 0) {
           const cachedDocs: NoteDoc[] = cache.notes.map((n) => ({
@@ -1349,24 +1161,20 @@ export function useNotesLoader(
           if (cache.groups) setGroups(cache.groups);
         }
 
-        // ── Migrate legacy `manifest.json` if present ──
         const legacy = await readLegacyManifestFile(dir);
         if (legacy && Array.isArray(legacy.notes)) {
           await decomposeLegacyManifest(dir, legacy);
           await retireLegacyManifest(dir);
         }
 
-        // ── Absorb OneDrive/Dropbox conflict copies ──
         try {
           await scanAndAbsorbConflicts(dir);
         } catch { /* best-effort */ }
 
-        // ── Load decomposed state from disk ──
         const state = await loadDecomposedState(dir);
         await seedWriteSnapshots(dir);
         let docsLoaded = await attachDocContents(state.docs);
 
-        // ── Image asset URL → file migration (one-time, per-machine) ──
         if (!imageAssetMigrationV1CompletedAtCache) {
           const noteFilePaths = docsLoaded.map((d) => d.filePath).filter(Boolean);
           const imageMigration = await migrateDataUrlImagesToAssets(Array.from(new Set(noteFilePaths)));
@@ -1376,19 +1184,16 @@ export function useNotesLoader(
           imageAssetMigrationV1CompletedAtCache = Date.now();
         }
 
-        // ── Auto-purge expired trash ──
         const purgedTrashed = await purgeExpiredTrash(state.trashedNotes);
         const trashChanged = purgedTrashed.length !== state.trashedNotes.length;
         setTrashedNotes(purgedTrashed);
 
-        // ── Reconcile folder ↔ meta sidecars ──
         const { docs: reconciled, groups: reconciledGroups, changed: reconcileChanged } =
           await reconcileFolder(dir, docsLoaded, state.groups, locale);
 
         let finalDocs = reconcileChanged ? reconciled : docsLoaded;
         let finalGroups = reconcileChanged ? reconciledGroups : state.groups;
 
-        // ── Bootstrap empty folder with a starter note ──
         if (finalDocs.length === 0) {
           const id = crypto.randomUUID();
           const filePath = `${dir}/${id}.md`;
@@ -1428,11 +1233,7 @@ export function useNotesLoader(
           : 0;
         setActiveIndex(nextActiveIndex);
 
-        // Inside the load we own the migration guard (set true at the top of
-        // this effect). Call the ungated internal writer directly so we
-        // don't have to flip the global flag — the previous "release ->
-        // saveManifest -> reacquire" pattern opened a tiny input window in
-        // which an autosave timer could schedule against the OLD path.
+        // The loader owns the migration guard, so use the ungated writer here.
         if (reconcileChanged || trashChanged) {
           await persistDecomposedState(sorted, activeId, finalGroups).catch(() => {});
         } else {
@@ -1474,10 +1275,6 @@ export function useNotesLoader(
 
   return { docs, setDocs, activeIndex, setActiveIndex, groups, setGroups, trashedNotes, setTrashedNotes, isLoading };
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Markdown helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 export function stripInlineMarkdown(text: string): string {
   let s = text;
@@ -1537,9 +1334,5 @@ export function stripMarkdownContent(content: string): string {
 
   return result.join(" ").replace(/\s+/g, " ").trim();
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Re-exports for callers
-// ─────────────────────────────────────────────────────────────────────────────
 
 export { metaPathFor, metaDirFor, groupsPathFor };

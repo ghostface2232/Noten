@@ -24,7 +24,6 @@ export function useChromeVisibility(
     setToolbarHeight((prev) => (prev === h ? prev : h));
   }, []);
 
-  // 스크롤 기반 크롬(toolbar/statusbar) 가시성 제어
   useEffect(() => {
     const el = contentRef.current;
     if (!el) return;
@@ -64,7 +63,6 @@ export function useChromeVisibility(
     return () => el.removeEventListener("scroll", updateChromeVisibility);
   }, []);
 
-  // 문서 전환 시 리셋
   useEffect(() => {
     requestAnimationFrame(() => {
       const el = contentRef.current;

@@ -54,9 +54,7 @@ export function useKeyboardShortcuts({
         return;
       }
 
-      // 개발자용 비밀 단축키 (차단 규칙보다 먼저 처리해 preventDefault 이전에 통과시킴)
-      // — Ctrl+Alt+Shift+I: 개발자 도구 토글 (release 빌드에서는 no-op)
-      // — Ctrl+Alt+Shift+R: 하드 새로고침 (dev 빌드 전용, release 빌드에서는 차단)
+      // Dev-only shortcuts must run before the browser-shortcut blocker.
       if (ctrl && e.altKey && e.shiftKey && key === "i") {
         e.preventDefault();
         e.stopPropagation();
@@ -70,7 +68,7 @@ export function useKeyboardShortcuts({
         return;
       }
 
-      // 브라우저/WebView 단축키 차단 — 사이드바 포커스 시 Ctrl+R은 rename으로 사용
+      // Block browser/WebView shortcuts; Ctrl+R is sidebar rename when focused.
       if ((ctrl && key === "r" && !sidebarFocused) || (ctrl && e.shiftKey && key === "r")) { e.preventDefault(); return; }
       if (e.key === "F5" || e.key === "F12" || e.key === "F7") { e.preventDefault(); return; }
       if (ctrl && e.shiftKey && (key === "i" || key === "j" || key === "c")) { e.preventDefault(); return; }

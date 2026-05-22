@@ -69,9 +69,6 @@ export function useNoteGroups(
 
   const deleteGroup = useCallback(
     (groupId: string) => {
-      // Record explicit delete intent so saveManifest emits a tombstone into
-      // `.groups.json`. Without this, deletion would be inferred from
-      // state-vs-snapshot diffs which can mis-fire on remote creates.
       markGroupAsDeleted(groupId);
       const noteIds = groups.find((g) => g.id === groupId)?.noteIds ?? [];
       markGroupMembershipChanges(noteIds, null);
@@ -210,10 +207,6 @@ export function useNoteGroups(
     [groups, persist],
   );
 
-  /**
-   * Collapsed state is per-machine — it does not flow into `.groups.json`.
-   * Update local React state and persist only to `ui-state.json`.
-   */
   const toggleGroupCollapsed = useCallback(
     (groupId: string) => {
       let nextCollapsed: boolean | null = null;
@@ -232,21 +225,12 @@ export function useNoteGroups(
     [setGroups],
   );
 
-  /**
-   * Reorder groups using fractional indexing: only the moved group's `orderKey`
-   * is rewritten (plus its `orderUpdatedAt`), so two PCs reordering different
-   * groups concurrently both win their changes.
-   *
-   * `insertionIndex` uses "gap" semantics: 0 = before first group,
-   * groups.length = after last. No-op when the gap is the source's current
-   * position (equal to fromIndex or fromIndex + 1).
-   */
+  // Reorder one group's fractional key; insertionIndex uses gap semantics.
   const reorderGroups = useCallback(
     (fromIndex: number, insertionIndex: number) => {
       if (fromIndex < 0 || fromIndex >= groups.length) return;
       if (insertionIndex === fromIndex || insertionIndex === fromIndex + 1) return;
 
-      // Compute neighbours in the destination position (ignoring the moved item).
       const filtered = groups.filter((_, i) => i !== fromIndex);
       const insertAt = insertionIndex > fromIndex ? insertionIndex - 1 : insertionIndex;
       const before = filtered[insertAt - 1];
@@ -266,7 +250,6 @@ export function useNoteGroups(
         orderUpdatedAt: now,
       };
 
-      // Splice into new position and re-render.
       const next = [...filtered];
       next.splice(insertAt, 0, updated);
       persist(next);

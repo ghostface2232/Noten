@@ -9,7 +9,6 @@ export function startReorder(
   imgEl: HTMLImageElement,
   event: PointerEvent,
 ): void {
-  // [1] 고스트 프리뷰 생성
   const imgRect = imgEl.getBoundingClientRect();
   const scale = 0.85;
   const ghostW = imgRect.width * scale;
@@ -29,18 +28,15 @@ export function startReorder(
   ghost.appendChild(ghostImg);
   document.body.appendChild(ghost);
 
-  // [2] 원본 이미지 반투명 처리 + 커서 변경
   imgEl.style.opacity = "0.3";
   document.body.style.cursor = "move";
 
-  // [3] 드롭 인디케이터 생성
   const indicator = document.createElement("div");
   indicator.className = "image-drop-indicator";
   indicator.style.left = "0";
   indicator.style.top = "0";
   document.body.appendChild(indicator);
 
-  // [4] 콘텐츠 영역 bounds 캐싱
   const pmDom = editor.view.dom;
   const pmRect = pmDom.getBoundingClientRect();
   const pmStyle = getComputedStyle(pmDom);
@@ -49,7 +45,6 @@ export function startReorder(
   const contentLeft = pmRect.left + paddingLeft;
   const contentWidth = pmRect.width - paddingLeft - paddingRight;
 
-  // [5] 상태 변수
   let pendingX = event.clientX;
   let pendingY = event.clientY;
   let rafId: number | null = null;
@@ -57,7 +52,6 @@ export function startReorder(
   let currentInsertPos: number | null = null;
   let cleaned = false;
 
-  // [6] 스크롤 컨테이너 캐싱
   let scrollContainer: HTMLElement | null = null;
   let ancestor = imgEl.parentElement;
   while (ancestor) {
@@ -71,7 +65,6 @@ export function startReorder(
     ancestor = ancestor.parentElement;
   }
 
-  // [7] cleanup 함수
   function cleanup() {
     if (cleaned) return;
     cleaned = true;
@@ -85,15 +78,12 @@ export function startReorder(
     document.removeEventListener("keydown", onKeyDown);
   }
 
-  // [8] tick 함수
   function tick() {
     rafId = null;
     let isScrolling = false;
 
-    // a) 고스트 위치 갱신
     ghost.style.transform = `translate3d(${pendingX - offsetX}px, ${pendingY - offsetY}px, 0)`;
 
-    // b) 삽입 위치 계산
     try {
       const posResult = editor.view.posAtCoords({ left: pendingX, top: pendingY });
       if (!posResult) {
@@ -138,7 +128,6 @@ export function startReorder(
             indicator.style.opacity = "0";
             currentInsertPos = null;
           } else {
-            // c) 인디케이터 위치 갱신 — 이전 프레임과 같으면 DOM 업데이트 스킵
             if (lastInsertPos !== insertPos) {
               indicator.style.left = contentLeft + "px";
               indicator.style.width = contentWidth + "px";
@@ -155,7 +144,6 @@ export function startReorder(
       currentInsertPos = null;
     }
 
-    // d) 자동 스크롤
     if (scrollContainer) {
       const scrollRect = scrollContainer.getBoundingClientRect();
       const EDGE = 40;
@@ -179,7 +167,6 @@ export function startReorder(
     }
   }
 
-  // [9] 이벤트 핸들러
   const onPointerMove = (ev: PointerEvent) => {
     pendingX = ev.clientX;
     pendingY = ev.clientY;
@@ -214,7 +201,6 @@ export function startReorder(
     }
   };
 
-  // [10] 이벤트 리스너 등록
   document.addEventListener("pointermove", onPointerMove);
   document.addEventListener("pointerup", onPointerUp);
   document.addEventListener("keydown", onKeyDown);

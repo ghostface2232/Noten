@@ -2,16 +2,8 @@ import { readTextFile } from "@tauri-apps/plugin-fs";
 import { atomicWriteText } from "./atomicWrite";
 import { markOwnWrite } from "../hooks/ownWriteTracker";
 
-/**
- * Shared `.groups.json` schema — stores only shareable group metadata.
- * Membership (noteIds) is derived at read time from per-note `.meta/*.json` `groupId` fields.
- * Collapsed state is per-machine (lives in ui-state.json), not here.
- *
- * Merge rules:
- *   - name/updatedAt:         larger updatedAt wins
- *   - orderKey/orderUpdatedAt: larger orderUpdatedAt wins (independent of name)
- *   - deletedAt:               any non-null wins; only compacted after TOMBSTONE_TTL
- */
+// `.groups.json` stores shared group metadata only. Membership comes from
+// per-note `groupId`; collapsed state is per-machine UI state.
 
 export interface SharedGroupEntry {
   id: string;
@@ -20,7 +12,6 @@ export interface SharedGroupEntry {
   orderUpdatedAt: number;
   updatedAt: number;
   createdAt: number;
-  /** Set when the group is deleted; kept as tombstone for TOMBSTONE_TTL_MS. */
   deletedAt: number | null;
 }
 
@@ -116,10 +107,6 @@ export function compactTombstones(
   return out;
 }
 
-/**
- * Read existing `.groups.json`, merge in-memory updates, write atomically.
- * Returns the merged map so callers can refresh local state.
- */
 export async function writeGroupsWithMerge(
   notesDir: string,
   localGroups: Record<string, SharedGroupEntry>,
@@ -134,14 +121,8 @@ export async function writeGroupsWithMerge(
   return merged;
 }
 
-// ── Fractional indexing for group order ──
-//
-// Lexicographic ordering over a 36-char alphabet. Pathological insertion
-// patterns (especially involving keys with no headroom against `0`) can grow
-// the string beyond what's useful; `MAX_KEY_LEN` caps the length and any
-// generator that would exceed it falls back to a fresh time-based key. The
-// fallback may temporarily reorder the affected group, but the next save will
-// renormalise it and no data is lost.
+// Fractional group ordering over a 36-char alphabet. Pathological keys fall
+// back to a fresh time key instead of growing without bound.
 
 const FI_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
 const FI_BASE = FI_ALPHABET.length;
@@ -160,8 +141,6 @@ function digitToChar(d: number): string {
 }
 
 function timeKey(): string {
-  // Date.now() in base-36 fits in ~9 chars and grows monotonically — perfect
-  // tie-breaker when fractional indexing runs out of room.
   return Date.now().toString(36);
 }
 
@@ -169,10 +148,6 @@ function clampKey(key: string): string {
   return key.length <= MAX_KEY_LEN ? key : timeKey();
 }
 
-/**
- * Return a string key strictly greater than `after`. If `after` is undefined,
- * returns a default mid-range key.
- */
 export function genOrderKeyAfter(after?: string): string {
   if (!after) return FI_MID;
   const last = after[after.length - 1] ?? FI_ALPHABET[0];
@@ -183,7 +158,6 @@ export function genOrderKeyAfter(after?: string): string {
   return clampKey(`${after}${FI_MID}`);
 }
 
-/** Return a string key strictly less than `before`. */
 export function genOrderKeyBefore(before?: string): string {
   if (!before) return FI_MID;
   const last = before[before.length - 1] ?? FI_ALPHABET[FI_BASE - 1];
@@ -194,12 +168,6 @@ export function genOrderKeyBefore(before?: string): string {
   return clampKey(`${before}${FI_MID}`);
 }
 
-/**
- * Return a string key strictly between `a` and `b` (a < key < b lexicographically).
- * If `a >= b`, falls back to `genOrderKeyAfter(a)`. Bounded in length by
- * `MAX_KEY_LEN`; if a deeper key would be required, falls back to a fresh
- * time-based key.
- */
 export function genOrderKeyBetween(a?: string, b?: string): string {
   if (!a && !b) return FI_MID;
   if (!a) return genOrderKeyBefore(b);
@@ -217,10 +185,7 @@ export function genOrderKeyBetween(a?: string, b?: string): string {
     return clampKey(a.slice(0, i) + digitToChar(mid));
   }
 
-  // Adjacent (or overlapping) at this position — extend a with MID. This may
-  // overshoot `b` in pathological cases (e.g. a="m", b="m0"), but the
-  // alternative is to grow without bound. Callers that need strict ordering
-  // are expected to renormalise periodically.
+  // Adjacent keys: extend and clamp rather than growing without bound.
   const prefix = a.slice(0, i) + (aDigit >= 0 ? digitToChar(aDigit) : "");
   return clampKey(`${prefix}${FI_MID}`);
 }

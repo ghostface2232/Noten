@@ -79,10 +79,7 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
     const o = optsRef.current;
     const t = s.target;
 
-    // Figure out whether this drop mutates state and, if so, run a FLIP
-    // pass so displaced rows slide into their new positions instead of
-    // snapping. We skip FLIP entirely for no-op drops to avoid doing a
-    // flushSync for nothing.
+    // Run FLIP only for mutating drops so displaced rows slide into place.
     let mutate: (() => void) | null = null;
     if (t?.type === "group" && t.groupId !== s.sourceGroupId) {
       mutate = s.allNoteIds.length === 1
@@ -93,9 +90,6 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
     }
 
     if (mutate) {
-      // Restore source opacity before the FLIP pass so the moved node
-      // doesn't flash from dimmed-0.35 to full-1 on the first post-commit
-      // paint. bounding-rect measurement isn't affected by opacity.
       s.dimmedEls.forEach((el) => { el.style.opacity = ""; });
       const oldTops = captureSidebarRowTops();
       flushSync(mutate);
@@ -113,10 +107,8 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
     const x = s.pendingX;
     const y = s.pendingY;
 
-    // Update ghost position
     s.ghost.style.transform = `translate3d(${x - s.offsetX}px, ${y - s.offsetY}px, 0)`;
 
-    // Auto-scroll
     const body = optsRef.current.sidebarBodyRef.current;
     if (body) {
       const rect = body.getBoundingClientRect();
@@ -129,7 +121,6 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
       }
     }
 
-    // Hit-test
     const el = document.elementFromPoint(x, y);
     if (!el) {
       clearTarget(s);
@@ -152,7 +143,6 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
     if (targetGroupId) {
       nextTarget = { type: "group", groupId: targetGroupId };
 
-      // Auto-expand collapsed groups
       const group = optsRef.current.groups.find((g) => g.id === targetGroupId);
       if (group?.collapsed && s.expandGroupId !== targetGroupId) {
         if (s.expandTimer !== null) clearTimeout(s.expandTimer);
@@ -165,15 +155,12 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
         clearAutoExpand(s);
       }
     } else if (notesSection && s.sourceGroupId !== null) {
-      // Dropping a grouped note into the ungrouped section removes it from
-      // its group. Ignored when the source is already ungrouped.
       nextTarget = { type: "ungrouped" };
       clearAutoExpand(s);
     } else {
       clearAutoExpand(s);
     }
 
-    // Update visuals
     applyTarget(nextTarget);
     s.target = nextTarget;
   }, []);
@@ -236,7 +223,6 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
 
     const sourceGroup = o.groups.find((g) => g.noteIds.includes(noteId));
 
-    // Create ghost
     const ghost = document.createElement("div");
     ghost.className = "sidebar-drag-ghost";
     const doc = o.docs.find((d) => d.id === noteId);
@@ -248,7 +234,6 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
     ghost.style.transform = `translate3d(${startX + 8}px, ${startY - 14}px, 0)`;
     document.body.appendChild(ghost);
 
-    // Dim source elements
     const dimmedEls: HTMLElement[] = [];
     for (const id of allNoteIds) {
       const el = document.querySelector<HTMLElement>(`[data-doc-item][data-note-id="${id}"]`);
@@ -258,9 +243,6 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
       }
     }
 
-    // Fade non-drop areas. The notes section is only faded when the source
-    // is already ungrouped — otherwise it's a valid drop target (removes
-    // the note from its group) and must stay interactive.
     const fadedEls: HTMLElement[] = [];
     if (sourceGroup === undefined) {
       const notesSection = document.querySelector<HTMLElement>("[data-notes-section]");

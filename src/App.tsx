@@ -59,10 +59,7 @@ import "./App.css";
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 400;
 const SIDEBAR_DEFAULT = 260;
-// Minimum logical width the editor area needs so the toolbar (two-row mode)
-// shows every icon with comfortable breathing room. Tools strip now measures
-// ~487px; with the 46px sidebar-toggle overlay (when the sidebar is closed)
-// plus grid padding this leaves >50px margin on either side.
+// Enough logical width for the wrapped toolbar and sidebar toggle.
 const EDITOR_MIN_WIDTH = 600;
 const WINDOW_MIN_HEIGHT = 620;
 const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
@@ -89,11 +86,7 @@ function App() {
   });
   useEffect(() => { try { localStorage.setItem("sidebar-open", String(sidebarOpen)); } catch {} }, [sidebarOpen]);
   useEffect(() => { try { localStorage.setItem("sidebar-width", String(sidebarWidth)); } catch {} }, [sidebarWidth]);
-  // Keep the OS-level window minimum wide enough to fit the toolbar alongside
-  // the current sidebar. When the sidebar is opened or dragged wider past the
-  // current window's capacity, we grow the window rightward (anchoring the
-  // left edge) in a short animation that matches the sidebar's CSS transition
-  // so the two motions read as one.
+  // Keep the native window minimum aligned with the current sidebar width.
   useEffect(() => {
     const effectiveSidebar = sidebarOpen ? sidebarWidth : 0;
     const minWidth = EDITOR_MIN_WIDTH + effectiveSidebar;
@@ -116,7 +109,6 @@ function App() {
         const toW = minWidth;
         const toX = fromX;
 
-        // Animate to match the sidebar's ~300ms CSS transition.
         const DURATION = 280;
         const startTime = performance.now();
         let lastW = fromW;
@@ -124,11 +116,9 @@ function App() {
           if (cancelled) return;
           const elapsed = performance.now() - startTime;
           const t = Math.min(1, elapsed / DURATION);
-          // easeOutCubic — fast start, gentle finish, matches the sidebar curve
           const e = 1 - Math.pow(1 - t, 3);
           const w = fromW + (toW - fromW) * e;
           const x = fromX + (toX - fromX) * e;
-          // Skip sub-physical-pixel frames to avoid IPC flooding near the tail.
           if (t >= 1 || Math.abs(w - lastW) * scale >= 1) {
             lastW = w;
             void Promise.all([
@@ -139,7 +129,7 @@ function App() {
           if (t < 1) requestAnimationFrame(tick);
         };
         requestAnimationFrame(tick);
-      } catch { /* no-op */ }
+      } catch {}
     })();
     return () => { cancelled = true; };
   }, [sidebarOpen, sidebarWidth]);
@@ -194,7 +184,6 @@ function App() {
     void updater.checkForUpdate();
   }, [updater.checkForUpdate]);
 
-  // 노트 디렉토리 초기화 (settings 로드 → 경로 설정 → 노트 로딩)
   const [notesDirReady, setNotesDirReady] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [currentNotesDir, setCurrentNotesDir] = useState("");
@@ -213,7 +202,6 @@ function App() {
     })();
   }, [settingsLoaded, settings.notesDirectory]);
 
-  // 노트 로더
   const { docs, setDocs, activeIndex, setActiveIndex, groups, setGroups, trashedNotes, setTrashedNotes, isLoading } = useNotesLoader(
     locale,
     settings.notesSortOrder,
@@ -221,7 +209,7 @@ function App() {
     reloadKey,
   );
 
-  // Refs for values read (but not triggering) in effects
+  // Refs used by async handlers without retriggering effects.
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
   const docsRef = useRef(docs);
@@ -229,14 +217,11 @@ function App() {
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
 
-  // 그룹 관리
   const noteGroups = useNoteGroups(groups, setGroups, docs, activeIndex);
 
-  // Select 모드 & 그룹 생성 후 rename 트리거
   const [selectMode, setSelectMode] = useState(false);
   const [pendingRenameGroupId, setPendingRenameGroupId] = useState<string | null>(null);
 
-  // Color-filter popover (anchored under the sidebar filter button)
   const [filterPopoverPos, setFilterPopoverPos] = useState<{ x: number; y: number } | null>(null);
 
   const initialLoaded = useRef(false);
@@ -261,7 +246,6 @@ function App() {
         state.setFilePath(doc.filePath);
         state.setIsDirty(false);
       }
-      // 콘텐츠 로드 완료 후 창 표시 (새 창 생성 시 visible:false로 시작)
       requestAnimationFrame(() => {
         getCurrentWindow().show().catch(() => {});
       });
@@ -291,7 +275,6 @@ function App() {
     cancelDocSaveRef,
   );
 
-  // 자동 저장
   const { scheduleAutoSave, flushAutoSave, notifyActiveDoc, cancelDocSave } = useAutoSave(
     state,
     tiptapRef,
@@ -307,7 +290,6 @@ function App() {
   notifyActiveDocRef.current = notifyActiveDoc;
   cancelDocSaveRef.current = cancelDocSave;
 
-  // URL 쿼리 파라미터로 전달된 노트 열기 (새 창에서 열기)
   const fileParamHandled = useRef(false);
   useEffect(() => {
     if (fileParamHandled.current || isLoading || docs.length === 0) return;
@@ -322,7 +304,6 @@ function App() {
     }
   }, [isLoading, docs, fs.switchDocument]);
 
-  // 창 간 동기화 (Tauri 이벤트)
   const handleActiveDocChanged = useCallback((doc: { filePath: string; content: string }) => {
     state.primeMarkdown(doc.content);
     state.setFilePath(doc.filePath);
@@ -341,7 +322,6 @@ function App() {
     locale,
   );
 
-  // 파일 시스템 감시 (클라우드 동기화 등 외부 변경 감지)
   useFileWatcher(
     docs, setDocs, groups, setGroups,
     activeIndex, docs[activeIndex]?.id ?? null, setActiveIndex, tiptapRef,
@@ -350,8 +330,7 @@ function App() {
     handleActiveDocChanged,
   );
 
-  // OS Mica 효과 — setTheme("dark")가 Mica를 죽이므로 항상 light 고정
-  // 첫 페인트 후 실행하여 DWM 재구성이 초기 WebView2 렌더와 충돌하지 않도록 함
+  // Keep Tauri's theme light so DWM Mica stays enabled.
   const [micaSupported, setMicaSupported] = useState(true);
   useEffect(() => {
     const raf = requestAnimationFrame(() => {
@@ -380,9 +359,7 @@ function App() {
 
   useEffect(syncEditorRef, [syncEditorRef]);
 
-  // Keep the wiki-link extension's storage in sync with the live docs list
-  // and the app callbacks. The decoration plugin rebuilds when we nudge it
-  // here so missing/existing state reflects newly added or removed notes.
+  // Wiki-link decorations depend on the live docs list and callbacks.
   useEffect(() => {
     if (!tiptapEditor?.storage.wikiLink) return;
     const storage = tiptapEditor.storage.wikiLink;
@@ -395,9 +372,6 @@ function App() {
         (doc) => doc.fileName.normalize("NFC").toLowerCase() === needle,
       );
       if (idx < 0) return;
-      // Reveal the target note's group in the sidebar so the user can see
-      // where they just landed. Collapsed groups would otherwise hide the
-      // active row entirely.
       const targetGroup = groups.find((g) => g.noteIds.includes(docs[idx].id));
       if (targetGroup?.collapsed) {
         noteGroups.toggleGroupCollapsed(targetGroup.id);
@@ -430,7 +404,6 @@ function App() {
     setDocs,
   ]);
 
-  // isDirty → docs 동기화
   useEffect(() => {
     setDocs((prev) => {
       if (activeIndex < 0 || activeIndex >= prev.length) return prev;
@@ -478,10 +451,7 @@ function App() {
     return index === activeIndex ? state.getCachedMarkdown() : doc.content;
   }, [activeIndex, docs, state]);
 
-  // Stable handlers passed to the memoized TitleBar / EditorToolbar. Inline
-  // arrows would be new references each render and defeat their `memo`, so an
-  // unrelated state change (e.g. a sidebar group toggle) would still re-render
-  // the whole editor chrome — the cause of the perceived toggle delay.
+  // Stable handlers preserve memoized editor chrome.
   const handleOpenSettings = useCallback(() => setSettingsOpen(true), []);
 
   const handleUpdateParagraphSpacing = useCallback((v: ParagraphSpacing) => {
@@ -500,7 +470,6 @@ function App() {
     setDocGoToLineOpen(true);
   }, []);
 
-  // 노트 저장 위치 변경
   const handleChangeNotesDir = useCallback(async () => {
     const selected = await openDialog({ directory: true, multiple: false });
     if (!selected) return;
@@ -508,7 +477,6 @@ function App() {
     const newDir = selected as string;
     const oldDir = await getNotesDir();
 
-    // 같은 디렉토리 선택 시 무시
     const normalize = (p: string) => p.replace(/[\\/]+$/, "").replace(/\\/g, "/");
     if (normalize(newDir) === normalize(oldDir)) return;
 
@@ -524,11 +492,7 @@ function App() {
       if (!ok) return;
     }
 
-    // Flush any in-flight autosave to the OLD directory FIRST so the user's
-    // most recent edits are included in the migration. The autosave's gating
-    // on `migrationInProgress` (set immediately after) then prevents new
-    // writes to the old path while migrate runs and the subsequent reload
-    // re-binds doc paths.
+    // Flush before moving paths; later saves are blocked by migrationInProgress.
     await flushAutoSaveRef.current?.().catch(() => {});
     await saveManifest(
       docsRef.current,
@@ -556,20 +520,13 @@ function App() {
     let settingsSaved = await updateSetting("notesDirectory", newDir);
     if (!settingsSaved) settingsSaved = await updateSetting("notesDirectory", newDir); // retry once for transient failures
     if (!settingsSaved) {
-      // Migration already succeeded — the data now lives in `newDir`. A failed
-      // settings write is NOT fatal: returning here would strand
-      // `migrationInProgress` at `true` for the whole session. Fall through to
-      // the same reload sequence as the success path.
+      // Migration already succeeded; reload so the guard is released.
       await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
     }
     setNotesDir(newDir);
     setCurrentNotesDir(newDir);
     setReloadKey((k) => k + 1);
-    // Don't release `migrationInProgress` here — the reload-triggered
-    // useNotesLoader effect re-acquires it at the top and releases it in
-    // its own finally. Releasing here would briefly open a window during
-    // which the about-to-run effect's awaits could be preempted by an
-    // autosave for an already-stale `snapshot.filePath`.
+    // Reload owns releasing migrationInProgress.
   }, [locale, requestNotesDirConflictChoice, updateSetting]);
 
   const handleResetNotesDir = useCallback(async () => {
@@ -580,7 +537,7 @@ function App() {
 
     const oldDir = await getNotesDir();
 
-    // Flush before any path manipulation so pending edits land in OLD dir.
+    // Flush before moving paths.
     await flushAutoSaveRef.current?.().catch(() => {});
     await saveManifest(
       docsRef.current,
@@ -588,7 +545,6 @@ function App() {
       groupsRef.current,
     ).catch(() => {});
 
-    // Compute default directory
     resetNotesDir();
     const defaultDir = await getNotesDir();
 
@@ -598,14 +554,12 @@ function App() {
       result = await migrateNotesDir(oldDir, defaultDir, "overwrite");
     } catch (err) {
       setMigrationInProgress(false);
-      // Restore the custom dir so the user isn't stranded
       setNotesDir(oldDir);
       throw err;
     }
 
     if (!result.success) {
       setMigrationInProgress(false);
-      // Restore the custom dir on failure
       setNotesDir(oldDir);
       await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
       return;
@@ -614,13 +568,12 @@ function App() {
     let settingsSaved = await updateSetting("notesDirectory", "");
     if (!settingsSaved) settingsSaved = await updateSetting("notesDirectory", ""); // retry once for transient failures
     if (!settingsSaved) {
-      // Migration already succeeded — data now lives in the default folder.
-      // Don't return: that would strand `migrationInProgress` at `true`.
+      // Migration already succeeded; reload so the guard is released.
       await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
     }
     setCurrentNotesDir(defaultDir);
     setReloadKey((k) => k + 1);
-    // Same as handleChangeNotesDir — release is owned by the reload effect.
+    // Reload owns releasing migrationInProgress.
   }, [locale, settings.notesDirectory, updateSetting]);
 
   const {
@@ -655,7 +608,6 @@ function App() {
   }, []);
 
 
-  // 마우스 클릭 후 버튼류 요소 자동 blur → Esc/Space 시 포커스 링 방지
   const settingsOpenRef = useRef(settingsOpen);
   settingsOpenRef.current = settingsOpen;
   useEffect(() => {
@@ -678,7 +630,6 @@ function App() {
     return () => window.removeEventListener("mouseup", handleMouseUp);
   }, []);
 
-  // 전역 우클릭 방지 (텍스트 필드·에디터 제외)
   useEffect(() => {
     const handleContextMenu = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -695,7 +646,6 @@ function App() {
   }, []);
 
 
-  // 검색 닫힐 때 하이라이트 정리
   useEffect(() => {
     if (!docSearchOpen && tiptapEditor) {
       const { tr } = tiptapEditor.state;
@@ -704,14 +654,12 @@ function App() {
     }
   }, [docSearchOpen, tiptapEditor]);
 
-  // 문서 전환 시 검색/바꾸기/행이동 바 닫기
   useEffect(() => {
     setDocSearchOpen(false);
     setDocSearchReplace(false);
     setDocGoToLineOpen(false);
   }, [activeDoc?.id]);
 
-  // 창 닫기 — pending autosave flush 후 닫기
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     getCurrentWindow().onCloseRequested(async () => {

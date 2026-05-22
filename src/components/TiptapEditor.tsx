@@ -121,9 +121,7 @@ function getScrollParent(element: HTMLElement | null): HTMLElement | null {
 }
 
 function refreshRenderedContent(editor: Editor) {
-  // Replacing content during IME composition aborts the browser's
-  // composition buffer mid-stream — the already-typed jamo are dropped
-  // and the user sees nothing until they start the next character.
+  // Do not replace content while the browser owns an IME composition buffer.
   if (editor.view.composing) return;
 
   const scrollParent = getScrollParent(editor.view.dom);
@@ -150,12 +148,7 @@ function refreshRenderedContent(editor: Editor) {
 }
 
 function refreshSpellcheckMarkers(editor: Editor, forceFullRefresh = false) {
-  // Toggling the `spellcheck` attribute while the browser is holding an
-  // active IME composition kills the in-progress preview (observed with
-  // Korean IME: typed jamo become invisible until the next character
-  // triggers a commit). Skip here; the IMEGuard extension already toggles
-  // spellcheck around each composition, so the marker refresh isn't needed
-  // mid-IME — see the `imeGuard` plugin below.
+  // IMEGuard handles spellcheck during composition; avoid mid-IME toggles.
   if (editor.view.composing) return;
 
   const dom = editor.view.dom as HTMLElement;
@@ -244,8 +237,7 @@ function moveSelectionAfterSelectedImage(editor: Editor): boolean {
   const { state, view } = editor;
   const { selection } = state;
   if (!isImageNodeSelection(selection)) {
-    // Even if PM state doesn't reflect a NodeSelection, defensively clear any stale
-    // outline left on image NodeViews so the UI never appears stuck.
+    // Clear stale image outlines even if PM skipped NodeSelection updates.
     clearAllImageOutlines(editor);
     return false;
   }
@@ -266,14 +258,12 @@ function selectAdjacentImageAtCoords(editor: Editor, x: number, y: number): bool
   const imageAfterNode = resolved.nodeAfter?.type.name === "image" ? resolved.nodeAfter : null;
   if (!imageBeforeNode && !imageAfterNode) return false;
 
-  // Candidates in priority order: prefer the image BEFORE the click position so that
-  // clicking in the blank space to the right of an image selects that image (not the next).
+  // Prefer the image before the click so right-side whitespace selects it.
   const candidates: { pos: number }[] = [];
   if (imageBeforeNode) candidates.push({ pos: targetPos - imageBeforeNode.nodeSize });
   if (imageAfterNode) candidates.push({ pos: targetPos });
 
-  // If the click landed strictly inside any image rect, let the image NodeView's own
-  // pointerdown handler deal with it (direct click selection).
+  // Direct image clicks are handled by the NodeView.
   for (const cand of candidates) {
     const dom = editor.view.nodeDOM(cand.pos) as HTMLElement | null;
     if (!dom) continue;
@@ -283,7 +273,7 @@ function selectAdjacentImageAtCoords(editor: Editor, x: number, y: number): bool
     }
   }
 
-  // Pick the first candidate that shares the click's vertical row, and select it.
+  // Select the first candidate on the click's vertical row.
   for (const cand of candidates) {
     const dom = editor.view.nodeDOM(cand.pos) as HTMLElement | null;
     if (!dom) continue;
@@ -426,22 +416,8 @@ const LinkPopoverShortcut = Extension.create({
   },
 });
 
-// IME composition guard.
-//
-// Root cause this addresses: with `spellcheck="true"` on the editor, the
-// browser's spellchecker occasionally races the in-progress IME composition
-// preview and the preview never renders — typed Korean jamo stay invisible
-// until the user starts the next syllable, which commits the prior one and
-// makes it appear. Switching to another document fixes it only because the
-// doc-switch path toggles the spellcheck attribute through
-// `scheduleSpellcheckRefresh`, resetting the racing state.
-//
-// The fix disables spellcheck for the duration of each composition (and
-// tags the root with `.ime-composing` for CSS hooks), then restores the
-// user's spellcheck preference on the next frame — deferring the restore
-// so it lands after the browser commits the composed text, not during it.
-// A depth counter keeps rapid back-to-back compositions (e.g. typing
-// "한국어" fluently) from thrashing the attribute.
+// Disable spellcheck during IME composition to avoid browser spellchecker
+// races that can hide the in-progress Korean preview.
 const IMEGuard = Extension.create({
   name: "imeGuard",
 
@@ -480,8 +456,7 @@ const IMEGuard = Extension.create({
               const spellcheckToRestore = savedSpellcheck;
               savedSpellcheck = null;
               requestAnimationFrame(() => {
-                // If a new composition started before the rAF, leave the
-                // guard in place — the next compositionend will handle it.
+                // A new composition started before the restore frame.
                 if (depth > 0) return;
                 if (spellcheckToRestore === null) dom.removeAttribute("spellcheck");
                 else dom.setAttribute("spellcheck", spellcheckToRestore);
@@ -489,11 +464,7 @@ const IMEGuard = Extension.create({
               });
               return false;
             },
-            // Belt-and-suspenders: if the editor loses focus mid-composition
-            // and the browser doesn't synthesize a compositionend (rare but
-            // observed with system-level IME interruptions), `depth` would
-            // stay > 0 and the next compositionstart would skip the save.
-            // Forcibly reset on blur so the plugin self-heals.
+            // Self-heal if focus leaves before compositionend fires.
             blur(view) {
               if (depth === 0 && savedSpellcheck === null) return false;
               restore(view.dom as HTMLElement);
@@ -807,9 +778,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           linkOnPaste: true,
           openOnClick: false,
           defaultProtocol: "https",
-          // Intersect Tiptap's default validator (handles whitespace/edge
-          // cases) with our scheme allow-list so every write path — popover
-          // save, paste, autolink, render — honours the same rules.
+          // Intersect Tiptap validation with our scheme allow-list.
           isAllowedUri: (url, { defaultValidate }) =>
             defaultValidate(url) && isSafeLinkHref(url),
         }),
@@ -942,8 +911,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       const currentKey = currentSessionKeyRef.current;
       const sameSession = !!nextKey && nextKey === currentKey;
 
-      // NodeView image source resolution needs current document context
-      // before state/content replacement to avoid initial broken images.
+      // Image NodeViews need document context before content replacement.
       editor.storage.documentContext.noteId = noteId;
       editor.storage.documentContext.filePath = filePath;
 
@@ -1092,9 +1060,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       if (!href) return;
       try {
         await navigator.clipboard.writeText(href);
-      } catch {
-        // no-op
-      }
+      } catch {}
       closeLinkHoverPopover();
     }, [closeLinkHoverPopover, linkHoverHref]);
 
@@ -1111,9 +1077,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       openLinkPopoverAtRange({ from, to }, currentUrl);
     }, [closeLinkHoverPopover, editor, linkHoverPos, openLinkPopoverAtRange]);
 
-    // Convert the atomic wikiLink mark back into bracket text and park the
-    // caret just before the closing `]]`. Suggestion then handles retargeting
-    // from the normal editable `[[Title` text.
+    // Convert the atomic mark back into editable bracket text.
     const editHoveredWikiLink = useCallback(() => {
       if (!editor || wikiHoverPos == null) return;
       const markType = editor.schema.marks.wikiLink;
@@ -1152,7 +1116,6 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           closeLinkPopover();
           closeLinkHoverPopover();
           closeWikiHoverPopover();
-          // Note quiet 상태 전환 시 이미지 선택/핸들/아웃라인 해제
           if (editor.state.selection instanceof NodeSelection) {
             editor.commands.setTextSelection(0);
           }
@@ -1269,8 +1232,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     });
     linkHoverTeardownRef.current = teardownLinkHoverPopover;
 
-    // Wiki-link hover popover: mirrors the Link hover popover's positioning,
-    // outside-click dismissal, and mutual-exclusion with the link edit dialog.
+    // Wiki-link hover mirrors URL-link popover behavior.
     useEffect(() => {
       if (linkPopoverOpen) {
         closeWikiHoverPopover();
@@ -1303,9 +1265,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     useEffect(() => {
       if (!editor) return;
 
-      // Window-level ESC as a backup to the Tiptap keymap. The Tiptap keymap only fires
-      // when view.dom has native focus (e.g. focus-stealing Fluent buttons with
-      // preventDefault can leave focus ambiguous). The window handler fires regardless.
+      // Backup ESC handler for cases where ProseMirror lacks native focus.
       const handleKeyDown = (event: KeyboardEvent) => {
         if (event.key !== "Escape") return;
         if (!isImageNodeSelection(editor.state.selection)) return;
@@ -1315,9 +1275,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         }
       };
 
-      // Fallback for pointerdown on non-focusable targets (e.g. Tauri drag-region title
-      // bar, Fluent sidebar buttons that preventDefault() mousedown and so never blur
-      // view.dom).
+      // Fallback for non-focusable targets that do not blur view.dom.
       const handlePointerDown = (event: PointerEvent) => {
         const target = event.target as Node | null;
         if (target && editor.view.dom.contains(target)) return;
@@ -1417,9 +1375,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           const mouseX = event.clientX;
           const mouseY = event.clientY;
 
-          // Wiki-link hover — evaluated first so a wiki-link doesn't
-          // accidentally trigger the URL-link popover when the two are
-          // adjacent.
+          // Wiki-link hover takes precedence over URL-link hover.
           if (wikiHoverPopoverOpen) {
             const popoverRect = wikiHoverPopoverRef.current?.getBoundingClientRect();
             if (popoverRect && isPointInExpandedRect(mouseX, mouseY, popoverRect, HOVER_SAFE_ZONE_PX)) {
@@ -1444,7 +1400,6 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
               } else if (wikiHoverPos == null) {
                 setWikiHoverPos(wikiPos);
               }
-              // Wiki-link hover takes precedence — skip the URL-link path.
               return;
             }
           } else if (wikiHoverPopoverOpen) {
@@ -1627,7 +1582,5 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
   },
 );
 
-// Memoized so unrelated App state changes (e.g. a sidebar group toggle) don't
-// re-render the editor wrapper. The ProseMirror instance is managed
-// imperatively, so a skipped parent-driven render has no behavioral effect.
+// ProseMirror is managed imperatively; unrelated App renders can be skipped.
 export const TiptapEditor = memo(TiptapEditorBase);

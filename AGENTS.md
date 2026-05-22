@@ -158,4 +158,7 @@ Required secrets: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWO
 - Extensions: camelCase or PascalCase file names under `src/extensions/`
 - Shared styles: `src/styles/`
 - Shared utilities: `src/utils/`
-- Keep comments short and only where they add real value
+- Comments should explain non-obvious invariants, race/concurrency constraints, data-loss risks, or platform quirks.
+- Do not add comments that restate nearby code, narrate ordinary control flow, or preserve temporary implementation history.
+- Prefer short English comments in complete sentences. Avoid decorative section banners and numbered step comments unless they clarify a long algorithm.
+- Keep JSDoc for exported APIs only when it documents behavior not already clear from the type signature.

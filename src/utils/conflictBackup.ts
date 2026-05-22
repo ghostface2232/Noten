@@ -21,11 +21,7 @@ async function ensureReadme(notesDir: string, conflictsDir: string): Promise<voi
   try { await writeTextFile(path, README_BODY); } catch { /* best-effort */ }
 }
 
-/**
- * The last content we believe is sitting on disk for each note. Updated when
- * we successfully write or when the watcher reloads. Used to detect that the
- * file changed under us (likely from another PC) before we overwrite it.
- */
+// Last known on-disk note bodies, used to detect unseen remote writes.
 const lastKnownDiskContent = new Map<string, string>();
 
 export function noteIdToDiskKey(filePath: string): string {
@@ -44,16 +40,10 @@ export function forgetKnownDiskContent(filePath: string): void {
   lastKnownDiskContent.delete(noteIdToDiskKey(filePath));
 }
 
-/** Clear the entire baseline cache. Used when the notes directory changes. */
 export function resetKnownDiskContent(): void {
   lastKnownDiskContent.clear();
 }
 
-/**
- * Write a backup of `body` into `{notesDir}/.conflicts/{noteId}-{ts}.md`.
- * Idempotent on duplicate calls within the same millisecond (suffix collision
- * is unlikely; if it happens we silently overwrite).
- */
 export async function backupRemoteVersion(
   notesDir: string,
   noteId: string,
@@ -72,13 +62,7 @@ export async function backupRemoteVersion(
   }
 }
 
-/**
- * Pre-write conflict detection. Reads the on-disk content of `filePath` and
- * compares it to the last-known disk content for the same path. If they
- * differ (= another writer changed the file) AND the would-be overwrite
- * differs from disk, the current disk content is backed up under
- * `.conflicts/`. Returns true if a backup was made.
- */
+/** Back up an unseen remote body before overwriting it. */
 export async function backupIfRemoteWroteFirst(
   notesDir: string,
   filePath: string,
@@ -95,20 +79,16 @@ export async function backupIfRemoteWroteFirst(
   if (diskContent === null) return false;
 
   const lastKnown = getKnownDiskContent(filePath);
-  // First save in this session — no baseline to compare to. Treat the current
-  // disk state as our baseline going forward; do NOT back up speculatively.
+  // First save in this session: seed the baseline, don't back up speculatively.
   if (lastKnown === undefined) {
     setKnownDiskContent(filePath, diskContent);
     return false;
   }
 
-  // Disk matches what we last knew — nothing to back up; we're not losing data.
   if (diskContent === lastKnown) return false;
 
-  // Our planned write equals disk — nothing to overwrite.
   if (diskContent === intendedContent) return false;
 
-  // Real conflict: disk has changes we never saw, and we'd overwrite them.
   await backupRemoteVersion(notesDir, noteId, diskContent);
   return true;
 }

@@ -63,7 +63,6 @@ function useEditorStats(editor: Editor | null) {
           lineCount: doc.childCount,
           cursorRow: row,
         };
-        // 변경 없으면 동일 참조 반환 → 불필요한 리렌더 방지
         if (prev.charCount === next.charCount && prev.lineCount === next.lineCount && prev.cursorRow === next.cursorRow) {
           return prev;
         }
@@ -72,7 +71,6 @@ function useEditorStats(editor: Editor | null) {
     };
 
     update();
-    // transaction은 update + selectionUpdate를 모두 포함
     editor.on("transaction", update);
     return () => { editor.off("transaction", update); };
   }, [editor]);

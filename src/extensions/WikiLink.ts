@@ -15,11 +15,7 @@ import type { Locale } from "../hooks/useSettings";
 export interface WikiLinkStorage {
   docs: NoteDoc[];
   locale: Locale;
-  // Navigate to a note by its current title (case-insensitive).
-  // No-op if no exact match; handled by the click dispatcher.
   navigateToTitle: (title: string) => void;
-  // Create a note with the given title and persist it. Does NOT switch the
-  // current document. Returns the new note's id once scheduling succeeds.
   createNoteWithTitle: (title: string) => Promise<string | null>;
 }
 
@@ -81,11 +77,9 @@ function findCompleteWikiLinkBeforeOrInside(
 const WikiLink = Mark.create<unknown, WikiLinkStorage>({
   name: "wikiLink",
 
-  // The mark wraps `[[Title]]` verbatim (brackets included), so it behaves
-  // like a contiguous atomic run even when the user edits around the edges.
+  // Completed wiki links behave as a single non-inclusive run.
   inclusive: false,
   spanning: false,
-  // Prevent Link (and other "_" group marks) from coexisting on the same text.
   excludes: "_",
 
   addAttributes() {
@@ -158,9 +152,7 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
     );
   },
 
-  // The editor model stores only the visible title. Markdown serialization
-  // adds the wiki-link brackets so there are no hidden bracket positions for
-  // the caret to enter after a completed link.
+  // The model stores only the visible title; serialization adds brackets.
   renderMarkdown(
     node: JSONContent,
     helpers: MarkdownRendererHelpers,
@@ -183,10 +175,7 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
           const markType = state.schema.marks.wikiLink;
           if (!markType) return null;
 
-          // The input-rule handler runs before the final `]` is inserted:
-          // `range.from..range.to` covers `[[Foo]`. Replace that source text
-          // with only the visible title; renderMarkdown restores `[[Foo]]`
-          // for the file format.
+          // The final `]` has not landed yet; replace with the title only.
           const markedText = state.schema.text(
             target,
             [markType.create({ target })],
@@ -194,8 +183,6 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
           const { tr } = state;
           tr.replaceWith(range.from, range.to, markedText);
           tr.removeStoredMark(markType);
-          // Fall through without an explicit return so Tiptap's input-rule
-          // runtime actually dispatches our transaction.
         },
       }),
     ];
@@ -226,11 +213,7 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
               return false;
             }
 
-            // `posAtCoords` happily maps clicks in the trailing gutter of a
-            // line to the position just past the last character — whose
-            // marks still include any wiki-link at the end of the line. Gate
-            // the handler on the actual DOM target to avoid misfires when
-            // the user clicks empty space beside (not on) a wiki-link.
+            // Avoid treating trailing-line gutter clicks as link clicks.
             const domTarget = event.target as HTMLElement | null;
             const wikiEl = domTarget?.closest(".wiki-link");
             if (!wikiEl || !view.dom.contains(wikiEl)) return false;
@@ -245,8 +228,6 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
 
             const hit = findDocByTitle(extension.storage.docs, target);
             if (!hit) {
-              // Missing target — let the click fall through so the user can
-              // still place the caret and edit the bracketed text.
               return false;
             }
 
@@ -256,23 +237,8 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
           },
         },
       }),
-      // Atomicity + content integrity for the wikiLink mark. Completed links
-      // store only the visible title, and the brackets exist only when
-      // serializing markdown. This keeps caret positions out of hidden
-      // syntax and makes the mark behave like a single link run.
-      //
-      //   1. storedMarks hygiene — never let wikiLink sit in storedMarks,
-      //      so the next typed character can't inherit it regardless of
-      //      where the caret sits.
-      //
-      //   2. Content integrity — when a wikiLink run's text still contains
-      //      the canonical target substring but has extra characters at
-      //      either end, trim the mark back to exactly that substring.
-      //
-      //   3. Caret atomicity — if the caret ends up *inside* a complete
-      //      wikiLink mark, snap it out to the nearest boundary in the
-      //      direction the user was moving. Completed links only re-enter
-      //      bracket-edit mode through the explicit hover popover.
+      // Keep completed links atomic: strip storedMarks, trim leaked text, and
+      // snap the caret out of marked runs.
       new Plugin({
         key: new PluginKey("wikiLinkAtomicity"),
         props: {
@@ -333,10 +299,6 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
           const tr = newState.tr;
           let mutated = false;
 
-          // (1) Purge wikiLink from storedMarks. If PM ever parks the mark
-          // in the stored set (via `inheritMarks` or a stale rule), the
-          // next keystroke would absorb into the link despite
-          // `inclusive: false`. Strip it proactively.
           const stored = newState.storedMarks;
           if (stored && stored.some((m) => m.type.name === "wikiLink")) {
             const filtered = stored.filter((m) => m.type.name !== "wikiLink");
@@ -344,7 +306,6 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
             mutated = true;
           }
 
-          // (2) Trim leaked extensions on either side of the target text.
           if (docChanged) {
             newState.doc.descendants((node, pos) => {
               if (!node.isText) return;
@@ -376,8 +337,6 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
             });
           }
 
-          // (3) Caret snap. Completed links can only be edited by converting
-          // the mark back to bracket text through the hover popover.
           if (docChanged || selChanged) {
             const sel = newState.selection;
             if (sel.empty) {
@@ -436,7 +395,6 @@ function buildMissingDecorations(
   return DecorationSet.create(doc, decorations);
 }
 
-/** Dispatch a no-op transaction that flags the decoration plugin to rebuild. */
 export function refreshWikiLinkDecorations(editor: import("@tiptap/core").Editor): void {
   const { tr } = editor.state;
   tr.setMeta(WIKI_LINK_DECORATION_KEY, { refresh: true });

@@ -58,16 +58,7 @@ export function useAutoSave(
     groups,
   };
 
-  // Synchronously tracks which doc the editor currently holds.
-  // Two update paths (both required):
-  //   1. Render path (below): keeps ref in sync when React state is committed.
-  //   2. notifyActiveDoc(): called imperatively right after loading a new doc
-  //      into the editor, BEFORE React re-renders. This covers the window
-  //      between setActiveIndex() call and the next render where
-  //      docs[activeIndex] still points to the old doc.
-  // In React 18 automatic batching, notifyActiveDoc and setActiveIndex are
-  // processed in the same batch, so path 1 always sees the correct doc once
-  // the render fires. The two paths converge safely.
+  // Synchronous active-doc ref prevents wrong-doc saves during rapid switches.
   const activeDocRef = useRef<{ id: string; filePath: string } | null>(null);
   const activeTarget = docs[activeIndex];
   if (activeTarget) {
@@ -97,12 +88,7 @@ export function useAutoSave(
   }, []);
 
   const doSave = useCallback(async (snapshot: SaveSnapshot): Promise<boolean> => {
-    // Don't write while a notes-directory migration is in flight: `snapshot.filePath`
-    // points at the OLD directory (captured at scheduleAutoSave time), and
-    // writing there would either survive the post-migration `clearDirContents`
-    // and become an orphan in the OLD dir, or undo a state the migration just
-    // reconciled. The caller is expected to flush+block before kicking off
-    // the migration; this is the defence-in-depth guard.
+    // Snapshots captured before a notes-dir migration point at stale paths.
     if (migrationInProgress) return false;
 
     const {
@@ -113,9 +99,6 @@ export function useAutoSave(
     } = stateRef.current;
 
     try {
-      // Pre-write conflict detection: if another PC wrote between our last
-      // observation of disk and now, copy the remote body into `.conflicts/`
-      // before we overwrite it (last-write-wins + backup, per design).
       try {
         const dir = await getNotesDir();
         await backupIfRemoteWroteFirst(dir, snapshot.filePath, snapshot.docId, snapshot.content);
@@ -184,20 +167,17 @@ export function useAutoSave(
   }, []);
 
   const flushAutoSave = useCallback((): Promise<boolean> => {
-    // Clear all pending timers
     for (const timer of timersRef.current.values()) {
       clearTimeout(timer);
     }
     timersRef.current.clear();
     pendingSnapshotsRef.current.clear();
 
-    // Only save if scheduleAutoSave was called (content actually changed)
     if (!hasPendingChangesRef.current) {
       return Promise.resolve(!stateRef.current.state.isDirty);
     }
     hasPendingChangesRef.current = false;
 
-    // Capture a fresh snapshot from the current editor state
     const freshSnapshot = createSnapshot();
     if (!freshSnapshot) return Promise.resolve(false);
 
@@ -205,10 +185,6 @@ export function useAutoSave(
   }, [createSnapshot, doSave]);
 
   const scheduleAutoSave = useCallback(() => {
-    // Don't queue saves during migration: the snapshot path would be in the
-    // OLD directory and `doSave` would refuse to write anyway. Discarding
-    // the in-flight intent here also prevents a stale timer from firing
-    // post-migration with a now-invalid path.
     if (migrationInProgress) return;
 
     const snapshot = createSnapshot();
@@ -235,7 +211,6 @@ export function useAutoSave(
     timersRef.current.set(snapshot.docId, timer);
   }, [createSnapshot, doSave]);
 
-  // Flush pending save on unmount
   useEffect(() => {
     return () => {
       const pendingEntries = Array.from(pendingSnapshotsRef.current.values());
@@ -252,13 +227,10 @@ export function useAutoSave(
     };
   }, [doSave]);
 
-  /** Immediately update activeDocRef so createSnapshot targets the correct doc.
-   *  Call this right after loading a new doc into the editor, before React re-renders. */
   const notifyActiveDoc = useCallback((id: string, filePath: string) => {
     activeDocRef.current = { id, filePath };
   }, []);
 
-  /** Cancel pending autosave for a specific doc (e.g. before deletion). */
   const cancelDocSave = useCallback((docId: string) => {
     const timer = timersRef.current.get(docId);
     if (timer) clearTimeout(timer);

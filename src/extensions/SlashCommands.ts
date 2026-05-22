@@ -131,7 +131,7 @@ function updatePosition(popup: HTMLDivElement, props: SuggestionProps) {
     MENU_MAX_HEIGHT,
   );
 
-  // 아래 공간이 부족하고 위가 더 넓으면 위로 플립
+  // Flip upward when there is more room above than below.
   if (spaceBelow < menuHeight && spaceAbove > spaceBelow) {
     popup.style.top = "";
     popup.style.bottom = `${window.innerHeight - rect.top + GAP}px`;

@@ -152,7 +152,7 @@ export function GoToLineBar({ editor, onClose, locale }: GoToLineBarProps) {
       try {
         const coords = editor.view.coordsAtPos(pos);
         showIndicator(editor.view.dom, coords);
-      } catch { /* no-op */ }
+      } catch {}
     });
     if (String(clamped) !== rawValue) {
       setLineValue(String(clamped));

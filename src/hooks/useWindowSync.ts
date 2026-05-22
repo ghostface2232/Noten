@@ -58,8 +58,6 @@ interface TrashUpdatedPayload {
 
 const WINDOW_LABEL = getCurrentWindow().label;
 
-/* ── Emit helpers ── */
-
 export function emitDocUpdated(docId: string, content: string, fileName: string) {
   emit("doc-updated", {
     sourceWindow: WINDOW_LABEL, docId, content, fileName, updatedAt: Date.now(),
@@ -109,8 +107,6 @@ export function emitTrashUpdated(trashedNotes: TrashedNote[]) {
   } satisfies TrashUpdatedPayload).catch(() => {});
 }
 
-/* ── Listener hook ── */
-
 export function useWindowSync(
   setDocs: React.Dispatch<React.SetStateAction<NoteDoc[]>>,
   activeIndex: number,
@@ -123,7 +119,6 @@ export function useWindowSync(
   notesSortOrder: NotesSortOrder = "updated-desc",
   locale: Locale = "en",
 ) {
-  // Refs to avoid stale closures in event listeners
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
   const activeDocIdRef = useRef(activeDocId);

@@ -67,7 +67,6 @@ const useStyles = makeStyles({
     transform: "translateY(-18px)",
     opacity: 0,
   },
-  /* tools 기본: 1줄 모드 (grid-column/row 등은 JS에서 직접 설정) */
   tools: {
     display: "flex",
     alignItems: "center",
@@ -182,7 +181,6 @@ function EditorToolbarImpl({
 
   const [barHeight, setBarHeight] = useState(0);
 
-  /* 에디터 transaction 변경 시 툴바 리렌더 (transaction은 selectionUpdate를 포함) */
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!editor) return;
@@ -191,11 +189,7 @@ function EditorToolbarImpl({
     return () => { editor.off("transaction", bump); };
   }, [editor]);
 
-  /**
-   * ResizeObserver 콜백: DOM 직접 조작으로 1줄/2줄 전환.
-   * React state를 건드리지 않으므로 re-render → observer 루프가 발생하지 않는다.
-   * 레이아웃 확정 후 barHeight만 state로 전달한다.
-   */
+  // ResizeObserver mutates layout styles directly to avoid render loops.
   const BREAKPOINT = 740;
   const TWO_ROW_LEFT_COMPENSATION = 36; // 46px(collapsed grid left) - 10px(default grid left)
 
@@ -241,7 +235,7 @@ function EditorToolbarImpl({
     return () => ro.disconnect();
   }, [measure]);
 
-  // toolbar content 변경 시 DOM 렌더 완료 후 measure (이중 rAF로 레이아웃 확정 보장)
+  // Measure after toolbar content has committed to the DOM.
   useEffect(() => {
     requestAnimationFrame(() => requestAnimationFrame(measure));
   }, [measure]);

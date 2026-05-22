@@ -135,7 +135,6 @@ export function useFileSystem(
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
 
-  /** Flush pending auto-save to disk before leaving the current document. */
   const leaveCurrentDoc = useCallback(async () => {
     if (!flushAutoSaveRef?.current) return !state.isDirty;
     return flushAutoSaveRef.current();
@@ -148,11 +147,7 @@ export function useFileSystem(
       return { docs: baseDocs, activeDocId: null as string | null, activeIndex: currentActiveIndex };
     }
 
-    // Only capture editor state into the snapshot when the user has actually
-    // dirtied the doc. Otherwise, parse/serialize round-tripping in Tiptap can
-    // make `editor.getMarkdown()` differ from the on-disk text in trivial ways
-    // (trailing newlines, escape normalization, etc.), which would otherwise
-    // stamp `updatedAt: Date.now()` on every doc switch and reorder the sidebar.
+    // Avoid parse/serialize churn from stamping updatedAt on clean documents.
     if (!state.isDirty) {
       return { docs: baseDocs, activeDocId: activeDoc.id, activeIndex: currentActiveIndex };
     }
@@ -189,8 +184,6 @@ export function useFileSystem(
     ));
   }, []);
 
-  /** Remove the leaving doc if it's empty (no content, no customName, not the last doc).
-   *  Returns the cleaned docs array. */
   const pruneEmptyCurrentDoc = useCallback((baseDocs: NoteDoc[], leavingDocId: string | null): NoteDoc[] => {
     if (!leavingDocId) return baseDocs;
     const leaving = baseDocs.find((d) => d.id === leavingDocId);
@@ -202,15 +195,10 @@ export function useFileSystem(
       try { markOwnWrite(leaving.filePath); remove(leaving.filePath).catch(() => {}); } catch {}
     }
     const leavingId = leaving.id;
-    // Drop the `.meta/{id}.json` sidecar paired with the body we just removed.
-    // Leaving it behind orphans the meta — previously masked by reconcile's
-    // orphan sweep, which is now grace-gated, so the meta must be deleted here.
     void getNotesDir().then((dir) => removeMetaFile(dir, leavingId)).catch(() => {});
     setGroups?.((prev) => {
       const next = prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }));
       const kept = next.filter((g) => g.noteIds.length > 0);
-      // Record delete intent for any group that auto-prunes to empty so the
-      // tombstone reaches `.groups.json` on the next saveManifest.
       if (kept.length !== next.length) {
         const keptIds = new Set(kept.map((g) => g.id));
         for (const g of next) if (!keptIds.has(g.id)) markGroupAsDeleted(g.id);
@@ -349,20 +337,15 @@ export function useFileSystem(
     const didPersistCurrentDoc = await leaveCurrentDoc();
     const baseDocs = didPersistCurrentDoc ? markDocClean(liveDocs, activeDocId) : liveDocs;
 
-    // If the active note lives in a group, the new note inherits that group.
     const inheritedGroupId = activeDocId
       ? (groupsRef.current?.find((g) => g.noteIds.includes(activeDocId))?.id ?? null)
       : null;
 
-    // Check if current note is empty and should be replaced
     const currentDoc = baseDocs[currentActiveIndex];
     const currentContent = currentDoc?.content.trim() ?? "";
     const willReplace = !!currentDoc && !currentContent && !currentDoc.customName;
 
-    // Remove current empty note (first render — sidebar sees deletion)
     let prunedDocs = baseDocs;
-    // Track groups across the pruning step so we can fold the new note in
-    // atomically with sortAndPersistDocs's saveManifest call.
     let workingGroups: NoteGroup[] | undefined = groupsRef.current;
     if (willReplace) {
       if (currentDoc.filePath) {
@@ -370,14 +353,11 @@ export function useFileSystem(
       }
       cancelDocSaveRef?.current?.(currentDoc.id);
       const leavingId = currentDoc.id;
-      // Remove the meta sidecar paired with the pruned empty note's body so it
-      // does not linger as an orphan `.meta/{id}.json`.
       void getNotesDir().then((dir) => removeMetaFile(dir, leavingId)).catch(() => {});
       const beforePrune = workingGroups
         ?.map((g) => ({ ...g, noteIds: g.noteIds.filter((noteId) => noteId !== leavingId) }));
       workingGroups = beforePrune
         ?.filter((g) => g.id === inheritedGroupId || g.noteIds.length > 0);
-      // Same auto-prune tombstone tracking as `pruneEmptyCurrentDoc`.
       if (beforePrune && workingGroups && beforePrune.length !== workingGroups.length) {
         const keptIds = new Set(workingGroups.map((g) => g.id));
         for (const g of beforePrune) if (!keptIds.has(g.id)) markGroupAsDeleted(g.id);
@@ -412,8 +392,6 @@ export function useFileSystem(
 
     const addNewDoc = () => {
       const nextDocs = [...prunedDocs, newDoc];
-      // Fold the new note into the inherited group atomically so the
-      // manifest saveManifest emits in sortAndPersistDocs is consistent.
       let nextGroups = workingGroups;
       if (inheritedGroupId && nextGroups) {
         const targetExists = nextGroups.some((g) => g.id === inheritedGroupId);
@@ -438,18 +416,13 @@ export function useFileSystem(
     };
 
     if (willReplace) {
-      // Delay addition so sidebar renders the deletion first, then the new item slides in
       setTimeout(addNewDoc, 120);
     } else {
       addNewDoc();
     }
   }, [cancelDocSaveRef, getLiveDocsSnapshot, leaveCurrentDoc, locale, markDocClean, notesSortOrder, setActiveIndex, setDocs, setGroups, state, tiptapRef]);
 
-  // Create a note with an explicit title without switching away from the
-  // currently focused document. Used by the wiki-link "create new" path so
-  // the user can keep typing while the new note is provisioned in the
-  // background. If a note with the same (case-insensitive) title already
-  // exists, returns that note's id instead of creating a duplicate.
+  // Wiki-link creation path: provision a titled note without switching focus.
   const createNoteWithTitle = useCallback(async (rawTitle: string): Promise<string | null> => {
     const title = rawTitle.trim();
     if (!title) return null;
@@ -536,10 +509,8 @@ export function useFileSystem(
       ? markDocClean(liveDocs, activeDocId)
       : liveDocs;
 
-    // Capture group before it gets cleaned up below
     const group = getGroupForNote?.(doc.id) ?? null;
 
-    // Move file to .trash — abort entire delete if copy fails
     if (doc.filePath) {
       try {
         const trashDir = await ensureTrashDir();
@@ -548,7 +519,6 @@ export function useFileSystem(
 
         markOwnWrite(doc.filePath);
         await copyFile(doc.filePath, trashPath);
-        // copy succeeded — remove original (orphan in .trash is harmless if this fails)
         try { await remove(doc.filePath); } catch { /* original stays; reconcile picks it up */ }
 
         const trashedNote: TrashedNote = {
@@ -569,7 +539,7 @@ export function useFileSystem(
           emitTrashUpdated(getTrashedNotesCache());
         }
       } catch {
-        // Copy to .trash failed — abort deletion to preserve user data
+        // Abort deletion if the trash copy failed.
         if (import.meta.env.DEV) {
           console.warn("Failed to move note to trash, deletion aborted:", doc.filePath);
         }
@@ -581,7 +551,6 @@ export function useFileSystem(
     tiptapRef.current?.invalidateDocumentSession?.(doc.id, doc.filePath);
     emitDocDeleted(doc.id);
 
-    // Compute cleaned groups atomically (remove note from all groups)
     const cleanedGroups = (groupsRef.current ?? []).map((g) =>
       g.noteIds.includes(doc.id)
         ? { ...g, noteIds: g.noteIds.filter((id) => id !== doc.id) }
@@ -590,7 +559,6 @@ export function useFileSystem(
     setGroups?.(cleanedGroups);
     emitGroupsUpdated(cleanedGroups);
 
-    // If we deleted the last doc, create a fresh one
     if (nextDocs.length === 0) {
       const id = crypto.randomUUID();
       const timestamp = Date.now();
@@ -620,7 +588,6 @@ export function useFileSystem(
       return;
     }
 
-    // Determine the next active document
     const wasActive = index === currentActiveIndex;
     let nextActiveId: string;
 
@@ -791,8 +758,6 @@ export function useFileSystem(
     emitNotePinnedUpdated(doc.id, nextPinned);
   }, [locale, notesSortOrder, setActiveIndex, setDocs]);
 
-  // Bulk pin/unpin for select mode. Unlike `toggleNotePinned`, this SETS a
-  // single target state across every selected note rather than flipping each.
   const setNotesPinned = useCallback((noteIds: string[], pinned: boolean) => {
     const idSet = new Set(noteIds);
     if (!docsRef.current.some((d) => idSet.has(d.id) && (d.pinned === true) !== pinned)) return;
@@ -806,9 +771,7 @@ export function useFileSystem(
     for (const id of idSet) emitNotePinnedUpdated(id, pinned);
   }, [locale, notesSortOrder, setActiveIndex, setDocs]);
 
-  // Color is a label, not a content edit — `updatedAt` is intentionally left
-  // untouched. `metaSnapshotEqual` includes `color`, so the change still
-  // produces exactly one `.meta` write per affected note.
+  // Color labels sync through meta without changing body updatedAt.
   const setNoteColor = useCallback((index: number, color: NoteColorId | null) => {
     const doc = docsRef.current[index];
     if (!doc || doc.color === (color ?? undefined)) return;
@@ -844,7 +807,6 @@ export function useFileSystem(
     const fileName = getFileBaseName(trashed.trashFilePath);
     const restoredPath = `${notesDir}/${fileName}`;
 
-    // Copy from .trash to notes dir — abort if this fails
     markOwnWrite(restoredPath);
     try {
       await copyFile(trashed.trashFilePath, restoredPath);
@@ -854,7 +816,6 @@ export function useFileSystem(
       }
       return;
     }
-    // Remove from .trash — orphan is harmless if this fails (auto-purged after 14d)
     try { await remove(trashed.trashFilePath); } catch { /* ignore */ }
 
     const content = await readTextFile(restoredPath);
@@ -875,15 +836,11 @@ export function useFileSystem(
     const didPersistCurrentDoc = await leaveCurrentDoc();
     const baseDocs = didPersistCurrentDoc ? markDocClean(liveDocs, activeDocId) : liveDocs;
 
-    // Remove from trashed list BEFORE sortAndPersistDocs so saveManifest
-    // reads the updated trashedNotesCache (without the restored note)
     if (setTrashedNotes) {
       setTrashedNotes((prev) => prev.filter((n) => n.id !== trashedNoteId));
       emitTrashUpdated(getTrashedNotesCache());
     }
 
-    // Compute groups with restored note added back atomically
-    // (avoids addNoteToGroup's stale-docs saveManifest overwrite)
     let restoredGroups = groupsRef.current ?? [];
     if (trashed.groupId) {
       const groupExists = restoredGroups.some((g) => g.id === trashed.groupId);
@@ -925,7 +882,6 @@ export function useFileSystem(
     }
     tiptapRef.current?.invalidateDocumentSession?.(trashed.id, trashed.originalFilePath);
 
-    // Persist immediately — trash-only change, no sortAndPersistDocs to trigger it
     void saveManifest(docsRef.current, docsRef.current[activeIndexRef.current]?.id ?? null, groupsRef.current).catch(() => {});
   }, [setTrashedNotes, tiptapRef]);
 
@@ -946,7 +902,6 @@ export function useFileSystem(
       emitTrashUpdated([]);
     }
 
-    // Persist immediately
     void saveManifest(docsRef.current, docsRef.current[activeIndexRef.current]?.id ?? null, groupsRef.current).catch(() => {});
   }, [setTrashedNotes]);
 

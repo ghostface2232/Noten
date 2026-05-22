@@ -63,12 +63,11 @@ export const SlashCommandList = forwardRef<
   const [selectedIndex, setSelectedIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // 아이템 목록 변경 시 인덱스 리셋
   useEffect(() => {
     setSelectedIndex(0);
   }, [items]);
 
-  // 선택 항목이 보이도록 메뉴 내부만 스크롤 (에디터 스크롤 방지)
+  // Scroll only the menu so the editor viewport stays put.
   useLayoutEffect(() => {
     const container = listRef.current;
     const el = container?.children[selectedIndex] as HTMLElement | undefined;

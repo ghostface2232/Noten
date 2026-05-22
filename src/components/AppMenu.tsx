@@ -214,7 +214,6 @@ export function AppMenu({
         <>
           <div className={styles.overlay} onClick={close} />
           <div ref={(el) => { (menuRef as React.MutableRefObject<HTMLDivElement | null>).current = el; if (el) clampMenuToViewport(el); }} className={styles.menu} style={{ left: menuPos.x, top: menuPos.y }}>
-            {/* ── File ── */}
             <div className={styles.groupLabel}>{i("menu.file")}</div>
             <Button appearance="subtle" icon={<DocumentAddRegular />} className={styles.menuItem} onClick={() => act(onNewNote)} size="small">
               <span>{i("menu.newDoc")}</span><span className={styles.shortcut}>Ctrl+N</span>
@@ -226,7 +225,6 @@ export function AppMenu({
               <span>{i("menu.newWindow")}</span><span className={styles.shortcut}>Ctrl+Shift+N</span>
             </Button>
 
-            {/* Export submenu */}
             <div className={styles.subMenuParent} onMouseEnter={(e) => showSubMenu("export", e)} onMouseLeave={() => { if (subMenu === "export") setSubMenu(null); }}>
               <Button appearance="subtle" icon={<ArrowExportUpRegular />} className={styles.menuItemWithSub} size="small">
                 {i("menu.export")}
@@ -247,8 +245,6 @@ export function AppMenu({
               )}
             </div>
 
-            {/* ── Edit ── */}
-
             <div className={styles.groupLabelSpaced}>{i("menu.edit")}</div>
             <Button appearance="subtle" icon={<ArrowUndoRegular />} className={styles.menuItem} onClick={() => act(() => editor?.commands.undo())} size="small" disabled={!editor?.can().undo()}>
               <span>{i("menu.undo")}</span><span className={styles.shortcut}>Ctrl+Z</span>
@@ -256,14 +252,11 @@ export function AppMenu({
             <Button appearance="subtle" icon={<ArrowRedoRegular />} className={styles.menuItem} onClick={() => act(() => editor?.commands.redo())} size="small" disabled={!editor?.can().redo()}>
               <span>{i("menu.redo")}</span><span className={styles.shortcut}>Ctrl+Y</span>
             </Button>
-            {/* ── View ── */}
-
             <div className={styles.groupLabelSpaced}>{i("menu.view")}</div>
             <Button appearance="subtle" icon={isDark ? <WeatherSunnyRegular /> : <WeatherMoonRegular />} className={styles.menuItem} onClick={() => act(onToggleTheme)} size="small">
               {isDark ? i("menu.lightMode") : i("menu.darkMode")}
             </Button>
 
-            {/* Paragraph spacing submenu */}
             <div className={styles.subMenuParent} onMouseEnter={(e) => showSubMenu("spacing", e)} onMouseLeave={() => { if (subMenu === "spacing") setSubMenu(null); }}>
               <Button appearance="subtle" icon={<TextParagraphRegular />} className={styles.menuItemWithSub} size="small">
                 {i("menu.paragraphSpacing")}
@@ -287,8 +280,6 @@ export function AppMenu({
                 </div>
               )}
             </div>
-
-            {/* ── Settings ── */}
 
             <Button appearance="subtle" icon={<SettingsRegular />} className={styles.menuItem} onClick={() => act(onOpenSettings)} size="small">
               {i("menu.settings")}

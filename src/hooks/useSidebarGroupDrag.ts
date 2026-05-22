@@ -61,14 +61,9 @@ export function useSidebarGroupDrag(opts: UseSidebarGroupDragOptions) {
     if (!s) return;
     const o = optsRef.current;
     if (s.targetInsertIndex !== null) {
-      // Snapshot row positions BEFORE the reorder commits, flushSync the
-      // state update so the DOM reflects the new order, then translate each
-      // row back to its old position and let CSS ease it home — all other
-      // rows slide in/out of the gap left by the moved group.
+      // FLIP the reordered rows so they slide into the new order.
       const fromIdx = s.sourceIndex;
       const toIdx = s.targetInsertIndex;
-      // Restore source opacity before FLIP so the reordered header doesn't
-      // flash from dimmed to full on the first post-commit paint.
       if (s.dimmedEl) s.dimmedEl.style.opacity = "";
       const oldTops = captureSidebarRowTops();
       flushSync(() => {
@@ -101,7 +96,6 @@ export function useSidebarGroupDrag(opts: UseSidebarGroupDragOptions) {
       }
     }
 
-    // Collect group-header rects in render order.
     const groups = optsRef.current.groups;
     const rects: { top: number; bottom: number; left: number; width: number }[] = [];
     for (const g of groups) {
@@ -116,10 +110,7 @@ export function useSidebarGroupDrag(opts: UseSidebarGroupDragOptions) {
       return;
     }
 
-    // A group's "block" spans from its header to the next header (or the
-    // groups-section bottom for the last group). Split at the *header*
-    // midpoint so pointer-over-header-top inserts BEFORE, and anywhere
-    // below (header bottom half or the group's expanded notes) inserts AFTER.
+    // Split each group block at the header midpoint for before/after drops.
     const sectionEnd =
       document.querySelector<HTMLElement>("[data-groups-section]")?.getBoundingClientRect().bottom
         ?? rects[rects.length - 1].bottom;
@@ -151,7 +142,6 @@ export function useSidebarGroupDrag(opts: UseSidebarGroupDragOptions) {
       }
     }
 
-    // Hide indicator when the target collapses to the source's current position.
     const isNoOp = insertIdx === s.sourceIndex || insertIdx === s.sourceIndex + 1;
     if (isNoOp) {
       s.targetInsertIndex = null;
@@ -173,7 +163,6 @@ export function useSidebarGroupDrag(opts: UseSidebarGroupDragOptions) {
     const o = optsRef.current;
     if (o.editingIndex !== null || o.editingGroupId !== null || o.searchActive) return;
 
-    // Don't start a drag from interactive children (more-btn, input).
     const target = e.target as HTMLElement;
     if (target.closest("[data-more-btn]")) return;
     if (target.tagName === "INPUT") return;
@@ -247,7 +236,6 @@ export function useSidebarGroupDrag(opts: UseSidebarGroupDragOptions) {
     indicator.style.display = "none";
     document.body.appendChild(indicator);
 
-    // Dim the source header so the drag is visually anchored to the ghost.
     const sourceEl = document.querySelector<HTMLElement>(
       `[data-group-item][data-group-id="${groupId}"]`,
     );
@@ -257,7 +245,6 @@ export function useSidebarGroupDrag(opts: UseSidebarGroupDragOptions) {
       dimmedEl = sourceEl;
     }
 
-    // Fade zones that aren't valid drop targets for group reorder.
     const fadedEls: HTMLElement[] = [];
     const notesSection = document.querySelector<HTMLElement>("[data-notes-section]");
     if (notesSection) { notesSection.style.opacity = "0.45"; notesSection.style.pointerEvents = "none"; fadedEls.push(notesSection); }

@@ -23,7 +23,6 @@ import { scanAndAbsorbConflicts } from "../utils/conflictFileDetector";
 import { setKnownDiskContent } from "../utils/conflictBackup";
 import type { Locale } from "./useSettings";
 
-// Re-export markOwnWrite for existing consumers
 export { markOwnWrite } from "./ownWriteTracker";
 
 function normalizePath(p: string): string {
@@ -33,10 +32,6 @@ function normalizePath(p: string): string {
 const RECONCILE_INTERVAL_MS = 60_000;
 const FOCUS_DEBOUNCE_MS = 500;
 const WATCH_DELAY_MS = 1500;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// useFileWatcher
-// ─────────────────────────────────────────────────────────────────────────────
 
 export function useFileWatcher(
   docs: NoteDoc[],
@@ -69,22 +64,15 @@ export function useFileWatcher(
     return editorDocId ?? activeDocIdRef.current;
   }, [tiptapRef]);
 
-  // ── Reload groups from disk (`.groups.json` + every `.meta/*.json`) ──
-  // Membership (noteIds) is authoritative from each meta's `groupId`, NOT from
-  // React state — a remote-only move (e.g. PC B reassigned a note's groupId)
-  // would otherwise be invisible because `.groups.json` itself doesn't carry
-  // membership.
+  // Group membership is authoritative in per-note meta, not React state.
   const reloadGroupsFromDisk = useCallback(async () => {
     if (migrationInProgress) return;
     const dir = await getNotesDir();
-    // Keep the saveManifest write-snapshot aligned with what we just observed
-    // on disk so name/orderKey diffs are correctly attributed.
     await syncGroupsSnapshotFromDisk(dir);
     const next = await loadGroupsFromDisk(dir);
     setGroups(next);
   }, [setGroups]);
 
-  // ── Apply a single .meta/{id}.json change ──
   const applyMetaChange = useCallback(async (id: string) => {
     const dir = await getNotesDir();
     const meta = await readMeta(dir, id);
@@ -94,8 +82,7 @@ export function useFileWatcher(
       const idx = prev.findIndex((d) => d.id === id);
       if (idx < 0) return prev;
       const cur = prev[idx];
-      // Active edits trump remote rename/title changes, but Pin and Color are
-      // independent metadata and can safely sync while the body is locally dirty.
+      // Pin/color can sync while the body is locally dirty.
       if (cur.isDirty) {
         if (cur.pinned === (meta.pinned === true) && cur.color === meta.color) return prev;
         const next = [...prev];
@@ -120,27 +107,13 @@ export function useFileWatcher(
       return next;
     });
 
-    // Propagate group-membership changes. Membership lives in each meta's
-    // `groupId`, so a remote move (group A → group B) is only visible after
-    // we re-read the meta. Without this, the in-memory groups state would
-    // stay stale and the next `saveManifest` would write the old groupId
-    // back into the meta file, undoing the remote change.
     const targetGroupId = meta.trashedAt != null ? null : (meta.groupId ?? null);
 
-    // Edge case: the meta references a group we don't yet know about. This
-    // happens when a remote PC creates a group AND moves a note into it in
-    // one operation — the `.meta` and `.groups.json` events are delivered by
-    // separate watches, and meta can arrive first. A surgical setGroups
-    // update would silently drop the membership change because no local
-    // group has the target id. Refresh from disk in that case so the new
-    // group is materialised before we record the membership.
+    // Meta can arrive before the referenced remote-created group.
     if (
       targetGroupId !== null
       && !groupsRef.current.some((g) => g.id === targetGroupId)
     ) {
-      // Best-effort: a transient disk read failure here should not abort the
-      // rename half (already applied via setDocs above). Reconcile / focus /
-      // interval handlers will retry the group reload eventually.
       await reloadGroupsFromDisk().catch(() => {});
       return;
     }
@@ -164,7 +137,6 @@ export function useFileWatcher(
     });
   }, [setDocs, setGroups, reloadGroupsFromDisk]);
 
-  // ── reconcile shorthand ──
   const runReconcile = useCallback(async () => {
     if (migrationInProgress) return;
     const dir = await getNotesDir();
@@ -223,7 +195,6 @@ export function useFileWatcher(
     await saveManifest(reconciledDocs, nextActiveId, reconciledGroups).catch(() => {});
   }, [getRoutedActiveDocId, setActiveIndex, setDocs, setGroups, tiptapRef]);
 
-  // ── Root-folder watch handler ──
   const handleRootEvent = useCallback(async (event: WatchEvent) => {
     if (migrationInProgress) return;
     pruneOwnWrites();
@@ -233,25 +204,17 @@ export function useFileWatcher(
     const groupsPathNorm = normalizePath(groupsPathFor(dir));
 
     const affectedPaths = event.paths.map(normalizePath);
-    // Time-based isOwnWrite is intentionally NOT applied to .md candidates here:
-    // a 2 s grace window over the same path can swallow a real remote write
-    // whose content differs from ours. The hash-based check inside the loop
-    // (`isOwnWriteContentMatch` after reading the file) is the authoritative
-    // own-write decision for `.md`. We still apply the time check to
-    // `.groups.json` since we cannot easily hash-check it (the read-merge-
-    // write cycle creates a moving target).
+    // Use content hashes for .md own-write checks; timestamp grace can hide
+    // real remote edits on the same path.
     const groupsChanged = affectedPaths.some((p) => p === groupsPathNorm && !isOwnWrite(p));
     const mdChanges = affectedPaths.filter(
       (p) => p.endsWith(".md") && p.startsWith(dirNorm) && !p.includes("/.trash/"),
     );
 
     if (groupsChanged) {
-      // We can't hash-check the groups file because we may have just done a
-      // read-merge-write — but isOwnWrite handles the typical short window.
       await reloadGroupsFromDisk();
     }
 
-    // ── Handle .md file changes ──
     const currentDocs = docsRef.current;
     for (const changedPath of mdChanges) {
       const docIndex = currentDocs.findIndex(
@@ -266,19 +229,12 @@ export function useFileWatcher(
       try {
         content = await readTextFile(doc.filePath);
       } catch {
-        continue; // file deleted — reconcile handles it
+        continue;
       }
 
-      // Hash-based own-write match: we ignore events whose content matches a
-      // hash we recorded ourselves. Pure-time grace was already filtered above,
-      // so this layer guards against the OneDrive-latency case where a real
-      // remote change would otherwise be swallowed.
       if (await isOwnWriteContentMatch(doc.filePath, content)) continue;
       if (content === doc.content) continue;
 
-      // Register the new disk baseline so a subsequent local autosave can
-      // detect concurrent remote writes against this content (not the stale
-      // one we held before).
       setKnownDiskContent(doc.filePath, content);
 
       const { updatedAt: fileUpdatedAt } = await getFileTimestamps(doc.filePath);
@@ -317,12 +273,9 @@ export function useFileWatcher(
       }
     }
 
-    // Always run reconcile after root-level events: it picks up new files,
-    // drops deletions, and absorbs conflict copies.
     await runReconcile();
   }, [getRoutedActiveDocId, reloadGroupsFromDisk, runReconcile, setDocs, tiptapRef]);
 
-  // ── .meta/ watch handler ──
   const handleMetaEvent = useCallback(async (event: WatchEvent) => {
     if (migrationInProgress) return;
     pruneOwnWrites();
@@ -337,7 +290,6 @@ export function useFileWatcher(
       const id = fileName.replace(/\.json$/i, "");
       if (!id) continue;
 
-      // Hash-based own-write check (event timing race).
       try {
         const raw = await readTextFile(p);
         if (await isOwnWriteContentMatch(p, raw)) continue;
@@ -346,12 +298,9 @@ export function useFileWatcher(
       await applyMetaChange(id);
     }
 
-    // After applying meta changes, reconcile to pick up trashed / restored
-    // notes whose meta moved between trashedAt = null ↔ number.
     await runReconcile();
   }, [applyMetaChange, runReconcile]);
 
-  // ── Watcher setup ──
   useEffect(() => {
     if (!enabled) return;
 
@@ -386,7 +335,6 @@ export function useFileWatcher(
         }
       }
 
-      // Ensure .meta/ exists before watching it (otherwise the watch call fails).
       const metaDir = metaDirFor(dir);
       try { await mkdir(metaDir, { recursive: true }); } catch { /* ignore */ }
 
@@ -412,7 +360,6 @@ export function useFileWatcher(
     };
   }, [enabled, handleRootEvent, handleMetaEvent]);
 
-  // ── Reconcile triggers: focus, visibility, interval ──
   useEffect(() => {
     if (!enabled) return;
 

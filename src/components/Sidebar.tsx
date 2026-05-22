@@ -121,7 +121,6 @@ interface SidebarProps {
   sidebarSearchQuery: string;
   onSidebarSearchQueryChange: (query: string) => void;
   onSidebarSearchClose: () => void;
-  /* ─── Group props ─── */
   groups: NoteGroup[];
   onCreateGroup: (name: string, initialNoteIds?: string[]) => string;
   onRenameGroup: (groupId: string, name: string) => void;
@@ -134,14 +133,12 @@ interface SidebarProps {
   onToggleGroupCollapsed: (groupId: string) => void;
   onReorderGroups: (fromIndex: number, insertionIndex: number) => void;
   onDeleteNotes: (indices: number[]) => void;
-  /* ─── Select mode (controlled from App) ─── */
   selectMode: boolean;
   onSelectModeChange: (mode: boolean) => void;
   pendingRenameGroupId: string | null;
   onPendingRenameGroupIdClear: () => void;
   updateAvailable: boolean;
   isDarkMode: boolean;
-  /** Active color filter — when set, the sidebar shows only matching notes. */
   colorFilter: NoteColorId | null;
 }
 
@@ -200,8 +197,6 @@ export function Sidebar({
   const [editingGroupValue, setEditingGroupValue] = useState("");
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
-  // "All Notes" drill-in view: when true, the body slides to a flat list of
-  // every note (groups ignored, pinned first).
   const [inAllNotes, setInAllNotes] = useState(false);
 
   const sidebarBodyRef = useRef<HTMLDivElement>(null);
@@ -213,7 +208,6 @@ export function Sidebar({
   const groupInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Build grouped note id set
   const groupedNoteIds = useMemo(() => {
     const set = new Set<string>();
     for (const g of groups) for (const id of g.noteIds) set.add(id);
@@ -244,7 +238,6 @@ export function Sidebar({
     onReorderGroups,
   });
 
-  // Focus sidebar search input and scroll to top when opened
   useEffect(() => {
     if (sidebarSearchOpen) {
       sidebarBodyRef.current?.scrollTo({ top: 0 });
@@ -258,7 +251,6 @@ export function Sidebar({
     animateGroupRemoval,
   } = useSidebarAnimations({ docs, groups });
 
-  // Enter rename mode for a newly created group (from header button or context menu)
   useEffect(() => {
     if (!pendingRenameGroupId) return;
     const group = groups.find((g) => g.id === pendingRenameGroupId);
@@ -269,13 +261,11 @@ export function Sidebar({
     }
   }, [pendingRenameGroupId, groups, onPendingRenameGroupIdClear]);
 
-  // Clear selection when exiting select mode
   useEffect(() => {
     if (!selectMode) setSelectedNoteIds(new Set());
   }, [selectMode]);
 
 
-  // Debounced search query (250ms)
   const [debouncedQuery, setDebouncedQuery] = useState("");
   useEffect(() => {
     if (!sidebarSearchQuery) { setDebouncedQuery(""); return; }
@@ -283,7 +273,7 @@ export function Sidebar({
     return () => clearTimeout(timer);
   }, [sidebarSearchQuery]);
 
-  // Incremental stripped-content cache — only re-strips docs whose content changed
+  // Cache stripped note text by content to keep search cheap.
   const strippedCacheRef = useRef(new Map<string, { content: string; stripped: string }>());
   const strippedContentMap = useMemo(() => {
     const cache = strippedCacheRef.current;
@@ -300,7 +290,6 @@ export function Sidebar({
     return cache;
   }, [docs]);
 
-  // Filter docs by color label (if a filter is active) then by search query.
   const filteredDocs = useMemo(() => {
     const colorOk = (doc: NoteDoc) => !colorFilter || doc.color === colorFilter;
     if (!debouncedQuery) return docs.map((doc, index) => ({
@@ -332,7 +321,6 @@ export function Sidebar({
     return results;
   }, [docs, debouncedQuery, strippedContentMap, notesSortOrder, locale, colorFilter]);
 
-  // Focus the rename input when editing starts
   useEffect(() => {
     if (editingIndex !== null && inputRef.current) {
       inputRef.current.focus();
@@ -340,7 +328,6 @@ export function Sidebar({
     }
   }, [editingIndex]);
 
-  // Focus group rename input
   useEffect(() => {
     if (editingGroupId !== null && groupInputRef.current) {
       groupInputRef.current.focus();
@@ -348,7 +335,6 @@ export function Sidebar({
     }
   }, [editingGroupId]);
 
-  /* ─── Callbacks ─── */
 
   const commitRename = useCallback(() => {
     if (editingIndex !== null) {
@@ -370,7 +356,6 @@ export function Sidebar({
     }
   }, [editingGroupId, editingGroupValue, onRenameGroup]);
 
-  // Create group immediately with default name, then enter rename mode
   const handleCreateGroup = useCallback(() => {
     const defaultName = i("sidebar.newGroup");
     const newId = onCreateGroup(defaultName);
@@ -423,8 +408,6 @@ export function Sidebar({
     }
   }, []);
 
-  // Track whether the last mousedown was inside the sidebar
-  // Track whether the last mousedown was inside the sidebar (global flag for App.tsx too)
   const sidebarActiveRef = useRef(false);
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
@@ -437,19 +420,14 @@ export function Sidebar({
     return () => window.removeEventListener("mousedown", onMouseDown, true);
   }, []);
 
-  // Sidebar keyboard shortcuts — only when last click was inside the sidebar
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Skip if editing a note name inline or a group name
       if (editingIndex !== null || editingGroupId !== null) return;
-      // Skip if focus is inside an input/textarea/contenteditable
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       if ((e.target as HTMLElement)?.isContentEditable) return;
-      // Skip if last click was not inside the sidebar
       if (!sidebarActiveRef.current) return;
 
-      // Escape leaves the "All Notes" drill-in view.
       if (e.key === "Escape" && inAllNotes) {
         e.preventDefault();
         setInAllNotes(false);
@@ -495,20 +473,13 @@ export function Sidebar({
     return groups.find((g) => g.noteIds.includes(noteId)) ?? null;
   }, [groups]);
 
-  /* ─── Render helpers ─── */
 
   const isSearching = !!debouncedQuery;
-  // A color filter renders the same flat list as search (groups are flattened).
   const flatListMode = isSearching || colorFilterActive;
 
-  // Flat note rows: ungrouped notes (root view) and search results. Grouped
-  // notes are carried by `GroupRender` below, not here.
   type RenderItem =
     { kind: "note"; doc: NoteDoc; originalIndex: number; indented: boolean; matchType?: MatchType; snippet?: SearchSnippet | null }
 
-  // Each group renders as a header plus a single sliding container holding its
-  // (sorted) notes — see the JSX below. `notes` is empty while the group is
-  // collapsed and not mid-collapse.
   type GroupRender = { group: NoteGroup; notes: { doc: NoteDoc; originalIndex: number }[] };
 
   const { groupRenderList, noteItems } = useMemo(() => {
@@ -530,7 +501,6 @@ export function Sidebar({
     };
 
     for (const group of groups) {
-      // Keep notes mounted during a collapse so the block can slide out.
       const showNotes = !group.collapsed || collapsingGroupIds.has(group.id);
       let notes: { doc: NoteDoc; originalIndex: number }[] = [];
       if (showNotes) {
@@ -563,10 +533,6 @@ export function Sidebar({
     const isHovered = hoveredIndex === originalIndex;
     const isContextTarget = contextMenu?.type === "note" && contextMenu.index === originalIndex;
 
-    // `groupId` (the owning group, passed in by the caller) only feeds the
-    // `data-group-id` attribute that drag hit-testing reads. Expand/collapse
-    // motion is handled by the group's sliding container, not per note.
-
     return (
       <div
         key={doc.id}
@@ -591,7 +557,6 @@ export function Sidebar({
         onContextMenu={(e) => {
           if (isDragging.current) { e.preventDefault(); return; }
           if (selectMode) {
-            // In select mode, auto-select this note if not already, then show bulk menu
             if (!selectedNoteIds.has(doc.id)) toggleNoteSelection(doc.id);
             e.preventDefault();
             e.stopPropagation();
@@ -715,9 +680,6 @@ export function Sidebar({
     const isContextTarget = contextMenu?.type === "group" && contextMenu.groupId === group.id;
     const noteCount = group.noteIds.filter((id) => docs.some((d) => d.id === id)).length;
     const isRemoving = removingGroupIds.has(group.id);
-    // When the group is collapsed the active note's row isn't visible, so
-    // surface the selection on the header instead. Expanding the group
-    // brings the row back and this condition goes false automatically.
     const activeDocId = docs[activeIndex]?.id ?? null;
     const isActiveGroup =
       !!activeDocId && group.collapsed && group.noteIds.includes(activeDocId);
@@ -857,7 +819,7 @@ export function Sidebar({
 
       <div className={styles.bodyArea}>
         <div className={mergeClasses(styles.viewTrack, inAllNotes && styles.viewTrackShifted)}>
-          {/* ── Pane 1: groups + ungrouped notes (root view) ── */}
+          {/* Root view */}
           <div
             ref={sidebarBodyRef}
             className={styles.body}
@@ -895,7 +857,6 @@ export function Sidebar({
               <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : sidebarSearchQuery ? "" : colorFilterActive ? i("sidebar.colorFilterEmpty") : i("sidebar.empty")}</span>
             ) : (
               <>
-                {/* Groups section */}
                 {!flatListMode && (
                   <div
                     data-groups-section
@@ -904,9 +865,6 @@ export function Sidebar({
                     <div className={styles.groupsSectionInner}>
                       <span className={styles.sectionLabel}>{i("sidebar.groupsLabel")}</span>
                       {groupRenderList.map(({ group, notes }) => {
-                        // The whole note block slides as one unit via the grid
-                        // `1fr`/`0fr` trick — collapsed groups (and groups being
-                        // removed) clip their container to zero height.
                         const collapsed = group.collapsed || removingGroupIds.has(group.id);
                         return (
                           <Fragment key={`grp-${group.id}`}>
@@ -929,7 +887,6 @@ export function Sidebar({
                   </div>
                 )}
 
-                {/* Notes section */}
                 <div data-notes-section className={styles.notesSection}>
                   {!flatListMode && (noteItems.length > 0 || exitingDoc) && (
                     <span className={styles.sectionLabel}>{i("sidebar.notesLabel")}</span>
@@ -959,7 +916,7 @@ export function Sidebar({
             )}
           </div>
 
-          {/* ── Pane 2: flat list of every note ── */}
+          {/* All Notes view */}
           <div className={styles.allNotesPane} inert={!inAllNotes}>
             <Button
               appearance="subtle"
@@ -1003,7 +960,6 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* Multi-select toolbar */}
       {selectMode && (
         <div className={styles.selectToolbar}>
           <span className={styles.selectInfo}>

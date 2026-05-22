@@ -24,7 +24,7 @@ import { clampMenuToViewport } from "../utils/clampMenuPosition";
 import { ColorSwatchRow } from "./NoteColorPicker";
 import { useStyles } from "./Sidebar.styles";
 
-/* FolderAddRegular의 + 를 − 로 바꾼 커스텀 아이콘 */
+/* FolderAddRegular variant with a minus glyph. */
 export const FolderSubtractRegular = () => (
   <svg fill="currentColor" aria-hidden="true" width="1em" height="1em" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
     <path d="M4.5 3A2.5 2.5 0 0 0 2 5.5v9A2.5 2.5 0 0 0 4.5 17h5.1c-.16-.32-.3-.65-.4-1H4.5A1.5 1.5 0 0 1 3 14.5V8h4.09c.4 0 .78-.16 1.06-.44L9.7 6h5.79c.83 0 1.5.67 1.5 1.5v2.1c.36.18.7.4 1 .66V7.5A2.5 2.5 0 0 0 15.5 5H9.7L8.23 3.51A1.75 1.75 0 0 0 6.98 3H4.5ZM3 5.5C3 4.67 3.67 4 4.5 4h2.48c.2 0 .4.08.53.22L8.8 5.5 7.44 6.85a.5.5 0 0 1-.35.15H3V5.5Zm16 9a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Zm-6.5-.5a.5.5 0 0 0 0 1h4.5a.5.5 0 0 0 0-1h-4.5Z" fill="currentColor" />
@@ -151,7 +151,6 @@ export function SidebarContextMenus({
     closeContextMenu();
   }, [closeContextMenu, getDocumentContent]);
 
-  /* ─── Submenu position calculation ─── */
   const showSubmenu = useCallback(() => {
     if (submenuTimerRef.current) clearTimeout(submenuTimerRef.current);
     setSubmenuOpen(true);

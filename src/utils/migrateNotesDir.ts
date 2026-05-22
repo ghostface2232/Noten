@@ -161,11 +161,7 @@ async function readLegacyManifestFile(dir: string): Promise<LegacyManifest | nul
   }
 }
 
-/**
- * Decompose a legacy `manifest.json` (notes/groups/trashedNotes/activeNoteId)
- * into per-note `.meta/{id}.json` plus a shared `.groups.json` in `dir`.
- * Pre-existing `.meta` / `.groups.json` files are merged in (newer wins).
- */
+/** Decompose a legacy manifest into sidecars, merging existing shared state. */
 async function decomposeLegacyIntoDir(
   dir: string,
   manifest: LegacyManifest,
@@ -265,19 +261,13 @@ async function retireLegacyManifestAt(dir: string): Promise<void> {
   }
 }
 
-/**
- * Copy `.md` / `.meta` / `.groups.json` / `.trash` / `.assets` from `fromDir`
- * to `toDir` UNCONDITIONALLY (source overwrites destination on collision).
- * Used only by the "overwrite" strategy — merge runs the snapshot-based
- * `mergeMigrate` path which makes per-id / per-name newer-wins decisions.
- */
+/** Copy all managed shared state for the overwrite strategy. */
 async function copySharedTreeForOverwrite(fromDir: string, toDir: string): Promise<void> {
   const fromBase = normalizeSep(fromDir);
   const toBase = normalizeSep(toDir);
 
   await mkdir(toDir, { recursive: true });
 
-  // .md files (root)
   let entries: { name?: string; isFile?: boolean; isDirectory?: boolean }[] = [];
   try { entries = await readDir(fromDir); } catch { entries = []; }
   for (const e of entries) {
@@ -286,17 +276,14 @@ async function copySharedTreeForOverwrite(fromDir: string, toDir: string): Promi
     await copyFile(`${fromBase}${e.name}`, `${toBase}${e.name}`);
   }
 
-  // .meta directory (per-note sidecars)
   if (await exists(`${fromBase}.meta`).catch(() => false)) {
     await copyDirRecursive(`${fromBase}.meta`, `${toBase}.meta`);
   }
 
-  // .groups.json — overwrite copies; merge path handles its own union write.
   if (await exists(`${fromBase}.groups.json`).catch(() => false)) {
     await copyFile(`${fromBase}.groups.json`, `${toBase}.groups.json`);
   }
 
-  // .trash directory contents (md files only)
   if (await exists(`${fromBase}.trash`).catch(() => false)) {
     const trashEntries = await readDir(`${fromBase}.trash`);
     const trashMd = trashEntries.filter((e) => e.name?.endsWith(".md") && e.isFile);
@@ -308,13 +295,10 @@ async function copySharedTreeForOverwrite(fromDir: string, toDir: string): Promi
     }
   }
 
-  // .assets directory recursively
   if (await exists(`${fromBase}.assets`).catch(() => false)) {
     await copyDirRecursive(`${fromBase}.assets`, `${toBase}.assets`);
   }
 
-  // .conflicts directory — multi-device recovery backups. Best-effort: a
-  // failure to carry backups must never abort the notes migration itself.
   if (await exists(`${fromBase}.conflicts`).catch(() => false)) {
     try {
       await copyDirRecursive(`${fromBase}.conflicts`, `${toBase}.conflicts`);
@@ -322,9 +306,6 @@ async function copySharedTreeForOverwrite(fromDir: string, toDir: string): Promi
   }
 }
 
-// ── Helpers used only by the merge path ────────────────────────────────────
-
-/** filename → mtime (ms) for every `.md` file directly inside `dir`. */
 async function readMdMtimes(dir: string, required = false): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   let entries: { name?: string; isFile?: boolean }[] = [];
@@ -341,7 +322,6 @@ async function readMdMtimes(dir: string, required = false): Promise<Map<string, 
   return out;
 }
 
-/** filename → mtime (ms) for every `.md` file inside `dir/.trash`. */
 async function readTrashMdMtimes(dir: string, required = false): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   const trashDir = `${normalizeSep(dir)}.trash`;
@@ -392,8 +372,7 @@ function mergeMetaForMigration(source: NoteMeta, dest: NoteMeta | undefined): No
     ...bodyWinner,
     customName: bodyWinner.customName || undefined,
     createdAt: Math.min(source.createdAt, dest.createdAt),
-    // pinned/color do not bump `updatedAt`; preserve non-empty independent
-    // metadata instead of letting the body clock erase it during folder merges.
+    // pinned/color use independent clocks from body/title updates.
     pinned: source.pinned === true || dest.pinned === true,
     color: bodyWinnerColor ?? otherColor ?? undefined,
     groupId: groupWinner.groupId ?? null,
@@ -403,17 +382,8 @@ function mergeMetaForMigration(source: NoteMeta, dest: NoteMeta | undefined): No
   };
 }
 
-/**
- * Recursively copy every file from `srcDir` into `destDir`, skipping any file
- * that already exists at the destination (never overwrite). Safe for trees
- * whose filenames are immutable by construction:
- *   - `.assets/{noteId}/{hash}.{ext}` — SHA-256 content hash, so a same-named
- *     destination file is byte-identical.
- *   - `.conflicts/{noteId}-{ts}.md`  — timestamped point-in-time backups.
- */
+/** Union-copy immutable-name trees such as `.assets/` and `.conflicts/`. */
 async function unionCopyMissing(srcDir: string, destDir: string): Promise<void> {
-  // readDir throws if srcDir is unreadable — let it propagate. Callers that
-  // treat this copy as best-effort wrap the call in their own try/catch.
   const entries = await readDir(srcDir);
   await mkdir(destDir, { recursive: true }).catch(() => {});
   const srcBase = normalizeSep(srcDir);
@@ -432,12 +402,7 @@ async function unionCopyMissing(srcDir: string, destDir: string): Promise<void> 
   }
 }
 
-/**
- * Before a merge overwrites `destPath` with `srcPath`, back the destination
- * body up under `{toDir}/.conflicts/` if it exists and differs from the
- * incoming source — so the losing side of a last-write-wins merge stays
- * recoverable. Best-effort: never throws.
- */
+/** Best-effort backup before a merge overwrites a differing destination body. */
 async function backupOverwrittenBody(
   srcPath: string,
   destPath: string,
@@ -453,17 +418,7 @@ async function backupOverwrittenBody(
   } catch { /* best-effort backup */ }
 }
 
-/**
- * Migrate the notes directory from `fromDir` to `toDir`. Strategy controls
- * what happens when both directories already contain shared state:
- *   - "merge": both sides' state is preserved; on collision, per-id `.meta`
- *     and per-filename `.md` / `.trash` files are reconciled by mtime/
- *     `updatedAt` — newer wins on either side. `.groups.json` is union-merged
- *     by `mergeGroupMaps` (newer `updatedAt` / `orderUpdatedAt` per id).
- *     `.assets/` is union-copied by content-hash filename (no overwrite).
- *   - "overwrite": destination contents are wiped first, then source is copied
- *     unconditionally.
- */
+/** Move managed note data. Merge preserves both sides with newer-wins clocks. */
 export async function migrateNotesDir(
   fromDir: string,
   toDir: string,
@@ -479,8 +434,6 @@ export async function migrateNotesDir(
   try {
     await mkdir(toDir, { recursive: true });
 
-    // Decompose any legacy manifest.json sitting in source / destination so the
-    // rest of the migration only deals with `.meta` and `.groups.json`.
     const sourceLegacy = await readLegacyManifestFile(fromDir);
     if (sourceLegacy) {
       await decomposeLegacyIntoDir(fromDir, sourceLegacy, machineId);
@@ -493,7 +446,6 @@ export async function migrateNotesDir(
     }
 
     if (mergeStrategy === "overwrite") {
-      // Wipe destination managed entries first.
       await clearDirContents(toDir, undefined, true);
       await copySharedTreeForOverwrite(fromDir, toDir);
 
@@ -503,14 +455,8 @@ export async function migrateNotesDir(
       return { success: true };
     }
 
-    // ── merge strategy ─────────────────────────────────────────────────────
-    // CRUCIAL: snapshot BOTH sides before touching the destination. The old
-    // implementation copied source over destination first, then tried to
-    // restore — but by the time it re-read the destination the original meta
-    // was gone, so per-id newer-wins silently became "source always wins".
-    //
-    // The corrected flow takes per-id and per-filename snapshots up-front,
-    // then performs only the writes that actually change the destination.
+    // Snapshot both sides before writing so newer-wins is based on original
+    // source and destination state.
     const fromBase = normalizeSep(fromDir);
     const toBase = normalizeSep(toDir);
 
@@ -538,27 +484,19 @@ export async function migrateNotesDir(
     const sourceGroupsFile = await readGroupsFile(fromDir);
     const destGroupsBefore = await readGroupsFile(toDir);
 
-    // 1) Root .md bodies — per-filename mtime newer-wins. When the source
-    //    wins over an EXISTING, differing destination body, back the loser
-    //    up under `.conflicts/` first so a losing edit stays recoverable.
     for (const [name, srcMtime] of sourceMdMtimes) {
       const destMtime = destMdMtimes.get(name);
       if (destMtime === undefined) {
-        await copyFile(`${fromBase}${name}`, `${toBase}${name}`); // dest has no such body
+        await copyFile(`${fromBase}${name}`, `${toBase}${name}`);
         continue;
       }
-      if (destMtime >= srcMtime) continue; // dest newer or equal → keep
+      if (destMtime >= srcMtime) continue;
       await backupOverwrittenBody(
         `${fromBase}${name}`, `${toBase}${name}`, toDir, name.replace(/\.md$/i, ""),
       );
       await copyFile(`${fromBase}${name}`, `${toBase}${name}`);
     }
-    // dest-only .md files were never touched → preserved automatically.
-
-    // 2) `.meta/{id}.json` — per-id `updatedAt` newer-wins for title/body
-    // metadata, but preserve non-null group membership. Group moves do not
-    // bump note `updatedAt`, so treating it as a whole-file clock can eject
-    // grouped notes during cloud-folder merges.
+    // Group membership has its own clock; do not let body/title clocks erase it.
     await ensureMetaDir(toDir);
     for (const [id, src] of sourceMeta) {
       const dest = destMetaBefore.get(id);
@@ -566,10 +504,6 @@ export async function migrateNotesDir(
       if (dest && metasEqual(dest, mergedMeta)) continue;
       await writeMeta(toDir, mergedMeta, machineId);
     }
-    // dest-only meta ids: still on disk untouched → preserved.
-
-    // 3) `.trash/{name}.md` — per-filename mtime newer-wins, with the same
-    //    `.conflicts/` backup of an overwritten, differing destination body.
     if (sourceTrashMtimes.size > 0) {
       await mkdir(`${toBase}.trash`, { recursive: true }).catch(() => {});
       for (const [name, srcMtime] of sourceTrashMtimes) {
@@ -586,20 +520,15 @@ export async function migrateNotesDir(
       }
     }
 
-    // 4) `.assets/` — content-addressed filenames; union-copy without overwrite.
     if (await exists(`${fromBase}.assets`).catch(() => false)) {
       await unionCopyMissing(`${fromBase}.assets`, `${toBase}.assets`);
     }
 
-    // 5) `.groups.json` — union with `mergeGroupMaps` (newer-wins per entry).
     const merged = mergeGroupMaps(destGroupsBefore.groups, sourceGroupsFile.groups);
     if (Object.keys(merged).length > 0) {
       await writeGroupsWithMerge(toDir, merged);
     }
 
-    // 6) `.conflicts/` — multi-device recovery backups; union-copy so both
-    //    sides' point-in-time backups survive. Best-effort: a backup-copy
-    //    failure must not abort the migration.
     if (await exists(`${fromBase}.conflicts`).catch(() => false)) {
       try {
         await unionCopyMissing(`${fromBase}.conflicts`, `${toBase}.conflicts`);
@@ -615,10 +544,6 @@ export async function migrateNotesDir(
   }
 }
 
-/**
- * Returns true if a directory contains any recognised Noten-managed data.
- * Used by the path-change flow to decide whether to prompt for merge/replace.
- */
 export async function hasExistingNotenData(dir: string): Promise<boolean> {
   const base = normalizeSep(dir);
   try {
@@ -648,5 +573,4 @@ export async function hasExistingNotenData(dir: string): Promise<boolean> {
 
 export const hasManifest = hasExistingNotenData;
 
-// Path helpers used by callers that just need them.
 export { metaDirFor, metaPathFor, groupsPathFor };

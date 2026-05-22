@@ -103,8 +103,6 @@ const useStyles = makeStyles({
   },
 });
 
-/* ─── component ─── */
-
 interface SearchBarProps {
   editor: Editor | null;
   onClose: () => void;
@@ -125,8 +123,6 @@ export function SearchBar({ editor, onClose, replaceOpen, onToggleReplace, local
 
   useEffect(() => { inputRef.current?.focus(); }, []);
   useEffect(() => { if (replaceOpen) replaceInputRef.current?.focus(); }, [replaceOpen]);
-
-  /* ── Tiptap search ── */
 
   const dispatchTiptap = useCallback(
     (q: string, activeIdx: number) => {
@@ -162,8 +158,6 @@ export function SearchBar({ editor, onClose, replaceOpen, onToggleReplace, local
     [editor],
   );
 
-  /* ── dispatch ── */
-
   const dispatchSearch = useCallback(
     (q: string, idx: number) => {
       const result = dispatchTiptap(q, idx);
@@ -192,19 +186,16 @@ export function SearchBar({ editor, onClose, replaceOpen, onToggleReplace, local
     onClose();
   }, [editor, onClose, onToggleReplace]);
 
-  /* ── sync React state from plugin after content dispatch ── */
-
   const syncAfterReplace = useCallback(
     (desiredIndex: number) => {
       if (!editor) return;
-      // Plugin already recomputed matches in apply() — read directly, no doc traversal
+      // Plugin already recomputed matches in apply().
       const ps = searchPluginKey.getState(editor.state) as SearchPluginState;
       const count = ps.matches.length;
       const idx = count > 0
         ? ((desiredIndex % count) + count) % count
         : 0;
 
-      // Correct activeIndex for decoration highlighting (wrapping vs clamping)
       if (idx !== ps.activeIndex) {
         const { tr } = editor.state;
         tr.setMeta(searchPluginKey, { query, activeIndex: idx, matches: ps.matches } satisfies SearchPluginState);
@@ -219,8 +210,6 @@ export function SearchBar({ editor, onClose, replaceOpen, onToggleReplace, local
     },
     [editor, query],
   );
-
-  /* ── replace ── */
 
   const handleReplace = useCallback(() => {
     if (!editor || !query || matchCount === 0) return;
@@ -247,8 +236,6 @@ export function SearchBar({ editor, onClose, replaceOpen, onToggleReplace, local
     syncAfterReplace(0);
   }, [editor, query, replaceText, matchCount, syncAfterReplace]);
 
-  /* ── keyboard ── */
-
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Escape") { e.preventDefault(); handleClose(); }
@@ -268,7 +255,6 @@ export function SearchBar({ editor, onClose, replaceOpen, onToggleReplace, local
 
   return (
     <div className={styles.wrapper}>
-      {/* ── Find row ── */}
       <div className={styles.topRow}>
         <input
           ref={inputRef}
@@ -301,7 +287,6 @@ export function SearchBar({ editor, onClose, replaceOpen, onToggleReplace, local
         </button>
       </div>
 
-      {/* ── Replace row ── */}
       {replaceOpen && (
         <div className={styles.replaceRow}>
           <input

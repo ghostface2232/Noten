@@ -1,7 +1,4 @@
-/**
- * `getCoords` 가 반환하는 좌표가 화면 상단/하단 80px 영역에 있을 때,
- * scrollable 조상 컨테이너를 그 좌표의 1/3 지점으로 smooth 스크롤.
- */
+/** Smooth-scroll the nearest scrollable ancestor when a target is near an edge. */
 export function scrollToPos(
   dom: HTMLElement,
   getCoords: () => { top: number } | null,
@@ -27,6 +24,6 @@ export function scrollToPos(
           });
         }
       }
-    } catch { /* no-op */ }
+    } catch {}
   });
 }

@@ -45,7 +45,7 @@ export const useStyles = makeStyles({
       "--sidebar-mask-bottom": "24px",
     },
   },
-  /* ─── "All Notes" drill-in view ─── */
+  /* All Notes drill-in view */
   bodyArea: {
     flex: 1,
     minHeight: 0,
@@ -534,7 +534,7 @@ export const useStyles = makeStyles({
     padding: "4px",
     minWidth: "140px",
   },
-  /* ─── Color swatches (context menu rows + filter popover) ─── */
+  /* Color swatches */
   colorRow: {
     display: "flex",
     alignItems: "center",
@@ -655,7 +655,7 @@ export const useStyles = makeStyles({
     padding: "0",
     flexShrink: 0,
   },
-  /* ─── Group styles ─── */
+  /* Group styles */
   groupHeader: {
     position: "relative",
     display: "flex",
@@ -725,7 +725,7 @@ export const useStyles = makeStyles({
     flex: 1,
     borderRadius: "3px",
   },
-  /* ─── Multi-select ─── */
+  /* Multi-select */
   selectCheckbox: {
     width: 0,
     height: "16px",
