@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Button, Tooltip, tokens, mergeClasses } from "@fluentui/react-components";
 import {
+  ChevronLeftRegular,
   ChevronRightRegular,
   DeleteRegular,
   DismissRegular,
   DocumentAddRegular,
+  DocumentMultipleRegular,
   DocumentRegular,
   FolderAddRegular,
   FolderArrowRightRegular,
@@ -182,10 +184,15 @@ export function Sidebar({
   const [editingGroupValue, setEditingGroupValue] = useState("");
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
+  // "All Notes" drill-in view: when true, the body slides to a flat list of
+  // every note (groups ignored, pinned first).
+  const [inAllNotes, setInAllNotes] = useState(false);
 
   const sidebarBodyRef = useRef<HTMLDivElement>(null);
   const [scrollAtTop, setScrollAtTop] = useState(true);
   const [scrollAtBottom, setScrollAtBottom] = useState(true);
+  const [allScrollTop, setAllScrollTop] = useState(true);
+  const [allScrollBottom, setAllScrollBottom] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
   const groupInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -423,6 +430,13 @@ export function Sidebar({
       // Skip if last click was not inside the sidebar
       if (!sidebarActiveRef.current) return;
 
+      // Escape leaves the "All Notes" drill-in view.
+      if (e.key === "Escape" && inAllNotes) {
+        e.preventDefault();
+        setInAllNotes(false);
+        return;
+      }
+
       const ctrl = e.ctrlKey || e.metaKey;
       if (ctrl && e.key === "d") {
         e.preventDefault();
@@ -447,7 +461,7 @@ export function Sidebar({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeIndex, editingIndex, editingGroupId, getDocumentContent, onDuplicateNote, onExportNote, onToggleNotePinned, onDeleteNote, handleDoubleClick]);
+  }, [activeIndex, editingIndex, editingGroupId, getDocumentContent, onDuplicateNote, onExportNote, onToggleNotePinned, onDeleteNote, handleDoubleClick, inAllNotes]);
 
   const toggleNoteSelection = useCallback((noteId: string) => {
     setSelectedNoteIds((prev) => {
@@ -513,7 +527,13 @@ export function Sidebar({
     return { groupItems: gItems, noteItems: nItems };
   }, [isSearching, filteredDocs, docs, groups, groupedNoteIds, notesSortOrder, locale, collapsingGroupIds]);
 
-  const renderNoteItem = (doc: NoteDoc, originalIndex: number, indented: boolean, snippet?: SearchSnippet | null, searchIndex?: number) => {
+  const renderNoteItem = (
+    doc: NoteDoc,
+    originalIndex: number,
+    indented: boolean,
+    opts: { snippet?: SearchSnippet | null; searchIndex?: number; noDrag?: boolean; paneActive?: boolean } = {},
+  ) => {
+    const { snippet = null, searchIndex, noDrag = false, paneActive = true } = opts;
     const isSelected = selectedNoteIds.has(doc.id);
     const isHovered = hoveredIndex === originalIndex;
     const isContextTarget = contextMenu?.type === "note" && contextMenu.index === originalIndex;
@@ -553,7 +573,7 @@ export function Sidebar({
             ? { animationDelay: `${searchIndex * 0.03}s` }
             : animationDelay > 0 ? { animationDelay: `${animationDelay}s` } : undefined
         }
-        onPointerDown={(e) => handleDragPointerDown(e, doc.id)}
+        onPointerDown={noDrag ? undefined : (e) => handleDragPointerDown(e, doc.id)}
         onMouseEnter={() => setHoveredIndex(originalIndex)}
         onMouseLeave={() => setHoveredIndex(null)}
         onContextMenu={(e) => {
@@ -582,7 +602,7 @@ export function Sidebar({
             <path d="M1.5 5.5L4 8L8.5 2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
-        {editingIndex === originalIndex ? (
+        {editingIndex === originalIndex && paneActive ? (
           <Button
             appearance="subtle"
             icon={doc.pinned ? <PinRegular /> : <DocumentRegular />}
@@ -811,74 +831,135 @@ export function Sidebar({
         </Button>
       </div>
 
-      <div
-        ref={sidebarBodyRef}
-        className={styles.body}
-        data-sidebar-body
-        data-scroll-top={scrollAtTop ? "true" : "false"}
-        data-scroll-bottom={scrollAtBottom ? "true" : "false"}
-        onScroll={(e) => {
-          const el = e.target as HTMLElement;
-          setScrollAtTop(el.scrollTop <= 0);
-          setScrollAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 1);
-        }}
-        onContextMenu={(e) => {
-          if ((e.target as HTMLElement).closest("[data-doc-item]")) return;
-          if ((e.target as HTMLElement).closest("[data-group-item]")) return;
-          e.preventDefault();
-          e.stopPropagation();
-          setContextMenu({ type: "empty", index: -1, x: e.clientX, y: e.clientY });
-        }}
-      >
-        {groupItems.length === 0 && noteItems.length === 0 && !exitingDoc ? (
-          <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : sidebarSearchQuery ? "" : i("sidebar.empty")}</span>
-        ) : (
-          <>
-            {/* Groups section */}
-            {!isSearching && (
-              <div
-                data-groups-section
-                className={mergeClasses(styles.groupsSection, groups.length === 0 && styles.groupsSectionHidden)}
+      <div className={styles.bodyArea}>
+        <div className={mergeClasses(styles.viewTrack, inAllNotes && styles.viewTrackShifted)}>
+          {/* ── Pane 1: groups + ungrouped notes (root view) ── */}
+          <div
+            ref={sidebarBodyRef}
+            className={styles.body}
+            data-sidebar-body
+            inert={inAllNotes}
+            data-scroll-top={scrollAtTop ? "true" : "false"}
+            data-scroll-bottom={scrollAtBottom ? "true" : "false"}
+            onScroll={(e) => {
+              const el = e.target as HTMLElement;
+              setScrollAtTop(el.scrollTop <= 0);
+              setScrollAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 1);
+            }}
+            onContextMenu={(e) => {
+              if ((e.target as HTMLElement).closest("[data-doc-item]")) return;
+              if ((e.target as HTMLElement).closest("[data-group-item]")) return;
+              e.preventDefault();
+              e.stopPropagation();
+              setContextMenu({ type: "empty", index: -1, x: e.clientX, y: e.clientY });
+            }}
+          >
+            {!isSearching && docs.length > 0 && groups.length > 0 && (
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<DocumentMultipleRegular />}
+                className={styles.allNotesEntry}
+                onClick={() => setInAllNotes(true)}
               >
-                <div className={styles.groupsSectionInner}>
-                  <span className={styles.sectionLabel}>{i("sidebar.groupsLabel")}</span>
-                  {groupItems.map((item) => {
-                    if (item.kind === "group") return renderGroupHeader(item.group);
-                    return renderNoteItem(item.doc, item.originalIndex, item.indented);
-                  })}
-                </div>
-              </div>
+                <span className={styles.allNotesEntryName}>{i("sidebar.allNotes")}</span>
+                <span className={styles.allNotesEntryCount}>{docs.length}</span>
+                <ChevronRightRegular fontSize={14} className={styles.allNotesEntryChevron} />
+              </Button>
             )}
-
-            {/* Notes section */}
-            <div data-notes-section>
-              {!isSearching && (noteItems.length > 0 || exitingDoc) && (
-                <span className={styles.sectionLabel}>{i("sidebar.notesLabel")}</span>
-              )}
-              {exitingDoc && exitingDoc.index === 0 && (
-                <div key={`exit-${exitingDoc.doc.id}`} className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}>
-                  <div className={styles.docItem} style={{ opacity: 0.5 }}>
-                    <span className={styles.docName}>{exitingDoc.doc.fileName}</span>
+            {groupItems.length === 0 && noteItems.length === 0 && !exitingDoc ? (
+              <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : sidebarSearchQuery ? "" : i("sidebar.empty")}</span>
+            ) : (
+              <>
+                {/* Groups section */}
+                {!isSearching && (
+                  <div
+                    data-groups-section
+                    className={mergeClasses(styles.groupsSection, groups.length === 0 && styles.groupsSectionHidden)}
+                  >
+                    <div className={styles.groupsSectionInner}>
+                      <span className={styles.sectionLabel}>{i("sidebar.groupsLabel")}</span>
+                      {groupItems.map((item) => {
+                        if (item.kind === "group") return renderGroupHeader(item.group);
+                        return renderNoteItem(item.doc, item.originalIndex, item.indented, { paneActive: !inAllNotes });
+                      })}
+                    </div>
                   </div>
-                </div>
-              )}
-              {noteItems.map((item, idx) => {
-                if (item.kind !== "note") return null;
-                const elements = [renderNoteItem(item.doc, item.originalIndex, item.indented, item.snippet, isSearching ? idx : undefined)];
-                if (exitingDoc && exitingDoc.index === idx + 1) {
-                  elements.unshift(
+                )}
+
+                {/* Notes section */}
+                <div data-notes-section className={styles.notesSection}>
+                  {!isSearching && (noteItems.length > 0 || exitingDoc) && (
+                    <span className={styles.sectionLabel}>{i("sidebar.notesLabel")}</span>
+                  )}
+                  {exitingDoc && exitingDoc.index === 0 && (
                     <div key={`exit-${exitingDoc.doc.id}`} className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}>
                       <div className={styles.docItem} style={{ opacity: 0.5 }}>
                         <span className={styles.docName}>{exitingDoc.doc.fileName}</span>
                       </div>
                     </div>
-                  );
-                }
-                return elements;
-              })}
+                  )}
+                  {noteItems.map((item, idx) => {
+                    if (item.kind !== "note") return null;
+                    const elements = [renderNoteItem(item.doc, item.originalIndex, item.indented, { snippet: item.snippet, searchIndex: isSearching ? idx : undefined, paneActive: !inAllNotes })];
+                    if (exitingDoc && exitingDoc.index === idx + 1) {
+                      elements.unshift(
+                        <div key={`exit-${exitingDoc.doc.id}`} className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}>
+                          <div className={styles.docItem} style={{ opacity: 0.5 }}>
+                            <span className={styles.docName}>{exitingDoc.doc.fileName}</span>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return elements;
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* ── Pane 2: flat list of every note ── */}
+          <div className={styles.allNotesPane} inert={!inAllNotes}>
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<ChevronLeftRegular />}
+              className={styles.allNotesHeader}
+              onClick={() => setInAllNotes(false)}
+            >
+              <span className={styles.allNotesHeaderLabel}>{i("sidebar.allNotes")}</span>
+            </Button>
+            <div
+              className={styles.allNotesScroll}
+              data-scroll-top={allScrollTop ? "true" : "false"}
+              data-scroll-bottom={allScrollBottom ? "true" : "false"}
+              onScroll={(e) => {
+                const el = e.target as HTMLElement;
+                setAllScrollTop(el.scrollTop <= 0);
+                setAllScrollBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 1);
+              }}
+              onContextMenu={(e) => {
+                if ((e.target as HTMLElement).closest("[data-doc-item]")) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setContextMenu({ type: "empty", index: -1, x: e.clientX, y: e.clientY });
+              }}
+            >
+              {filteredDocs.length === 0 ? (
+                <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : i("sidebar.empty")}</span>
+              ) : (
+                filteredDocs.map(({ doc, originalIndex, snippet }, idx) => (
+                  renderNoteItem(doc, originalIndex, false, {
+                    snippet,
+                    searchIndex: isSearching ? idx : undefined,
+                    noDrag: true,
+                    paneActive: inAllNotes,
+                  })
+                ))
+              )}
             </div>
-          </>
-        )}
+          </div>
+        </div>
       </div>
 
       {/* Multi-select toolbar */}

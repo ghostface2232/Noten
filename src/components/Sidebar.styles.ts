@@ -20,7 +20,9 @@ export const useStyles = makeStyles({
     paddingRight: SIDE_PADDING,
   },
   body: {
-    flex: 1,
+    width: "50%",
+    height: "100%",
+    flexShrink: 0,
     overflowX: "hidden",
     overflowY: "auto",
     scrollbarGutter: "stable",
@@ -41,6 +43,123 @@ export const useStyles = makeStyles({
     "&[data-scroll-bottom='false']": {
       "--sidebar-mask-bottom": "24px",
     },
+  },
+  /* ─── "All Notes" drill-in view ─── */
+  bodyArea: {
+    flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
+  },
+  viewTrack: {
+    display: "flex",
+    width: "200%",
+    height: "100%",
+    transform: "translateX(0)",
+    transitionProperty: "transform",
+    transitionDuration: "0.24s",
+    transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+  },
+  viewTrackShifted: {
+    transform: "translateX(-50%)",
+  },
+  allNotesPane: {
+    width: "50%",
+    height: "100%",
+    flexShrink: 0,
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+  },
+  allNotesHeader: {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    width: "100%",
+    justifyContent: "flex-start",
+    textAlign: "left",
+    border: "none",
+    borderRadius: "6px",
+    fontSize: "13px",
+    fontWeight: 600,
+    gap: "2px",
+    minHeight: "36px",
+    marginBottom: "2px",
+    paddingLeft: "8px",
+    paddingRight: "8px",
+  },
+  allNotesHeaderLabel: {
+    flex: 1,
+    textAlign: "left",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  allNotesScroll: {
+    flex: 1,
+    minHeight: 0,
+    overflowX: "hidden",
+    overflowY: "auto",
+    scrollbarGutter: "stable",
+    paddingLeft: LIST_SIDE_PADDING,
+    paddingRight: LIST_SIDE_PADDING,
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    "--sidebar-mask-top": "0px",
+    "--sidebar-mask-bottom": "0px",
+    maskImage: "linear-gradient(to bottom, transparent, black var(--sidebar-mask-top), black calc(100% - var(--sidebar-mask-bottom)), transparent)",
+    transitionProperty: "--sidebar-mask-top, --sidebar-mask-bottom",
+    transitionDuration: "0.3s",
+    transitionTimingFunction: "ease",
+    "&[data-scroll-top='false']": {
+      "--sidebar-mask-top": "24px",
+    },
+    "&[data-scroll-bottom='false']": {
+      "--sidebar-mask-bottom": "24px",
+    },
+  },
+  // Icon/text aligned with `newDocItem`: that button sits in `sidebarFixed`
+  // (6px pad) with 8px paddingLeft → icon at 14px. This one sits in `body`
+  // (8px pad), so 6px paddingLeft + matching 8px gap lands the icon/text at
+  // the same x.
+  allNotesEntry: {
+    display: "flex",
+    alignItems: "center",
+    width: "100%",
+    justifyContent: "flex-start",
+    textAlign: "left",
+    border: "none",
+    borderRadius: "6px",
+    fontSize: "13px",
+    gap: "8px",
+    minHeight: "32px",
+    paddingLeft: "6px",
+    paddingRight: "6px",
+    fontWeight: 500,
+    marginBottom: "8px",
+    flexShrink: 0,
+  },
+  allNotesEntryName: {
+    flex: 1,
+    textAlign: "left",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  allNotesEntryCount: {
+    fontSize: "11px",
+    fontWeight: 500,
+    color: tokens.colorNeutralForeground3,
+    opacity: 0.8,
+    flexShrink: 0,
+  },
+  allNotesEntryChevron: {
+    display: "flex",
+    alignItems: "center",
+    color: tokens.colorNeutralForeground3,
+    flexShrink: 0,
+    // Optical alignment: nudge the chevron down 0.5px to sit level with the label.
+    transform: "translateY(0.5px)",
   },
   docItemWrapper: {
     position: "relative",
@@ -197,6 +316,13 @@ export const useStyles = makeStyles({
   },
   groupsSectionInner: {
     overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+  },
+  // Mirror `groupsSectionInner` so the label→list gap and row spacing match
+  // the groups section.
+  notesSection: {
     display: "flex",
     flexDirection: "column",
     gap: "2px",

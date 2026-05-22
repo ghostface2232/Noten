@@ -118,6 +118,7 @@ const dict = {
   "sidebar.groupNamePlaceholder": { en: "Group name", ko: "그룹 이름" },
   "sidebar.groupsLabel": { en: "GROUPS", ko: "그룹" },
   "sidebar.notesLabel": { en: "NOTES", ko: "노트" },
+  "sidebar.allNotes": { en: "All Notes", ko: "모든 노트" },
 
   /* ─── StatusBar ─── */
   "status.chars": { en: " chars", ko: " 자" },
