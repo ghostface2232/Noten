@@ -27,6 +27,7 @@ interface ManifestNote {
   createdAt: number;
   updatedAt: number;
   pinned?: boolean;
+  color?: NoteMeta["color"];
 }
 
 interface TrashedNoteEntry {
@@ -39,6 +40,7 @@ interface TrashedNoteEntry {
   createdAt: number;
   updatedAt: number;
   pinned?: boolean;
+  color?: NoteMeta["color"];
 }
 
 interface LegacyGroup {
@@ -206,6 +208,7 @@ async function decomposeLegacyIntoDir(
       createdAt: n.createdAt,
       updatedAt: n.updatedAt,
       pinned: n.pinned === true,
+      color: n.color,
       groupId: noteIdToGroupId.get(n.id) ?? null,
       groupUpdatedAt: n.updatedAt,
       trashedAt: null,
@@ -226,6 +229,7 @@ async function decomposeLegacyIntoDir(
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
       pinned: t.pinned === true,
+      color: t.color,
       groupId: t.groupId ?? null,
       groupUpdatedAt: t.updatedAt,
       trashedAt: t.trashedAt,
@@ -353,6 +357,7 @@ function metasEqual(a: NoteMeta, b: NoteMeta): boolean {
     && a.createdAt === b.createdAt
     && a.updatedAt === b.updatedAt
     && (a.pinned === true) === (b.pinned === true)
+    && (a.color ?? null) === (b.color ?? null)
     && (a.groupId ?? null) === (b.groupId ?? null)
     && (a.groupUpdatedAt ?? a.updatedAt) === (b.groupUpdatedAt ?? b.updatedAt)
     && (a.trashedAt ?? null) === (b.trashedAt ?? null)
@@ -364,6 +369,8 @@ function mergeMetaForMigration(source: NoteMeta, dest: NoteMeta | undefined): No
 
   const bodyWinner = source.updatedAt > dest.updatedAt ? source : dest;
   const other = bodyWinner === source ? dest : source;
+  const bodyWinnerColor = bodyWinner.color ?? null;
+  const otherColor = other.color ?? null;
   const sourceGroupUpdatedAt = source.groupUpdatedAt ?? source.updatedAt;
   const destGroupUpdatedAt = dest.groupUpdatedAt ?? dest.updatedAt;
   const groupWinner = sourceGroupUpdatedAt > destGroupUpdatedAt
@@ -376,7 +383,10 @@ function mergeMetaForMigration(source: NoteMeta, dest: NoteMeta | undefined): No
     ...bodyWinner,
     customName: bodyWinner.customName || undefined,
     createdAt: Math.min(source.createdAt, dest.createdAt),
-    pinned: bodyWinner.pinned === true,
+    // pinned/color do not bump `updatedAt`; preserve non-empty independent
+    // metadata instead of letting the body clock erase it during folder merges.
+    pinned: source.pinned === true || dest.pinned === true,
+    color: bodyWinnerColor ?? otherColor ?? undefined,
     groupId: groupWinner.groupId ?? null,
     groupUpdatedAt: groupWinner.groupUpdatedAt ?? groupWinner.updatedAt,
     trashedAt: bodyWinner.trashedAt ?? null,

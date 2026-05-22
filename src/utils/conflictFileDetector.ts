@@ -136,6 +136,9 @@ export async function scanAndAbsorbConflicts(notesDir: string): Promise<Conflict
         : remoteGroupUpdatedAt < localGroupUpdatedAt
           ? local
           : (local?.groupId ? local : remote);
+      const winnerColor = winner.color ?? null;
+      const localColor = local?.color ?? null;
+      const remoteColor = remote.color ?? null;
       // Layer winner on top of local so optional fields (e.g. trashedFromPath)
       // present only on the loser are preserved when not contradicted. Group
       // membership has its own clock so body/title conflicts do not overwrite it.
@@ -143,6 +146,8 @@ export async function scanAndAbsorbConflicts(notesDir: string): Promise<Conflict
         ...local,
         ...winner,
         id: canonicalStem,
+        pinned: local?.pinned === true || remote.pinned === true,
+        color: winnerColor ?? localColor ?? remoteColor ?? undefined,
         groupId: groupWinner?.groupId ?? null,
         groupUpdatedAt: groupWinner?.groupUpdatedAt ?? groupWinner?.updatedAt,
       };

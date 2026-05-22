@@ -625,6 +625,7 @@ interface LegacyManifestNote {
   createdAt: number;
   updatedAt: number;
   pinned?: boolean;
+  color?: NoteColorId;
 }
 
 interface LegacyManifestGroup {
@@ -645,6 +646,7 @@ interface LegacyManifestTrashed {
   createdAt: number;
   updatedAt: number;
   pinned?: boolean;
+  color?: NoteColorId;
 }
 
 interface LegacyManifest {
@@ -709,6 +711,7 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
       createdAt: n.createdAt,
       updatedAt: n.updatedAt,
       pinned: n.pinned === true,
+      color: n.color,
       groupId: noteIdToGroupId.get(n.id) ?? null,
       groupUpdatedAt: n.updatedAt,
       trashedAt: null,
@@ -726,6 +729,7 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
       pinned: t.pinned === true,
+      color: t.color,
       groupId: t.groupId ?? null,
       groupUpdatedAt: t.updatedAt,
       trashedAt: t.trashedAt,
@@ -1322,7 +1326,10 @@ export function useNotesLoader(
         // ── Image asset URL → file migration (one-time, per-machine) ──
         if (!imageAssetMigrationV1CompletedAtCache) {
           const noteFilePaths = docsLoaded.map((d) => d.filePath).filter(Boolean);
-          await migrateDataUrlImagesToAssets(Array.from(new Set(noteFilePaths)));
+          const imageMigration = await migrateDataUrlImagesToAssets(Array.from(new Set(noteFilePaths)));
+          if (imageMigration.changedFiles > 0) {
+            docsLoaded = await attachDocContents(docsLoaded);
+          }
           imageAssetMigrationV1CompletedAtCache = Date.now();
         }
 
