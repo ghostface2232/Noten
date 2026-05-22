@@ -185,7 +185,9 @@ export async function exportAsPdf(editorEl: HTMLElement, defaultName: string, lo
   try {
     await invoke("print_to_pdf", { html: htmlContent, outputPath: selected });
   } catch (err) {
-    console.error("PDF export failed:", err);
+    if (import.meta.env.DEV) {
+      console.error("PDF export failed:", err);
+    }
     await message(`PDF export failed: ${err}`, { title: t("dialog.exportFailed", locale), kind: "error" });
   }
 }

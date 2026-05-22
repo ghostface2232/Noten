@@ -307,7 +307,9 @@ export function useFileSystem(
         markOwnWrite(filePath, content);
         await writeTextFile(filePath, content);
       } catch (error) {
-        console.warn("Failed to write imported note file:", error);
+        if (import.meta.env.DEV) {
+          console.warn("Failed to write imported note file:", error);
+        }
       }
 
       importedDocs.push({
@@ -393,7 +395,9 @@ export function useFileSystem(
       await mkdir(notesDir, { recursive: true }).catch(() => {});
       filePath = `${notesDir}/${id}.md`;
     } catch (error) {
-      console.warn("Failed to resolve notes directory for new note:", error);
+      if (import.meta.env.DEV) {
+        console.warn("Failed to resolve notes directory for new note:", error);
+      }
     }
 
     const newDoc: NoteDoc = {
@@ -465,7 +469,9 @@ export function useFileSystem(
       markOwnWrite(filePath, "");
       await writeTextFile(filePath, "");
     } catch (error) {
-      console.warn("Failed to create note for wiki link:", error);
+      if (import.meta.env.DEV) {
+        console.warn("Failed to create note for wiki link:", error);
+      }
       return null;
     }
 
@@ -564,7 +570,9 @@ export function useFileSystem(
         }
       } catch {
         // Copy to .trash failed — abort deletion to preserve user data
-        console.warn("Failed to move note to trash, deletion aborted:", doc.filePath);
+        if (import.meta.env.DEV) {
+          console.warn("Failed to move note to trash, deletion aborted:", doc.filePath);
+        }
         return;
       }
     }
@@ -663,7 +671,9 @@ export function useFileSystem(
         markOwnWrite(filePath, content);
         await writeTextFile(filePath, content);
       } catch {
-        console.warn("Failed to write duplicated note file.");
+        if (import.meta.env.DEV) {
+          console.warn("Failed to write duplicated note file.");
+        }
       }
     }
 
@@ -734,7 +744,9 @@ export function useFileSystem(
           markOwnWrite(write.filePath, write.content);
           await writeTextFile(write.filePath, write.content);
         } catch {
-          console.warn("Failed to rewrite wiki links in note:", write.filePath);
+          if (import.meta.env.DEV) {
+            console.warn("Failed to rewrite wiki links in note:", write.filePath);
+          }
         }
       }),
     );
@@ -746,7 +758,9 @@ export function useFileSystem(
           markOwnWrite(activeDoc.filePath, activeRewrittenContent);
           await writeTextFile(activeDoc.filePath, activeRewrittenContent);
         } catch {
-          console.warn("Failed to persist rewritten wiki links for active note.");
+          if (import.meta.env.DEV) {
+            console.warn("Failed to persist rewritten wiki links for active note.");
+          }
         }
       }
       tiptapRef.current?.openDocument?.({
@@ -835,7 +849,9 @@ export function useFileSystem(
     try {
       await copyFile(trashed.trashFilePath, restoredPath);
     } catch (err) {
-      console.warn("Failed to restore note from trash:", err);
+      if (import.meta.env.DEV) {
+        console.warn("Failed to restore note from trash:", err);
+      }
       return;
     }
     // Remove from .trash — orphan is harmless if this fails (auto-purged after 14d)

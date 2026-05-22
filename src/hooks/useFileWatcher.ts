@@ -381,7 +381,9 @@ export function useFileWatcher(
         if (cancelled) unwatch();
         else rootUnwatch = unwatch;
       } catch (err) {
-        console.warn("Root file watcher setup failed:", err);
+        if (import.meta.env.DEV) {
+          console.warn("Root file watcher setup failed:", err);
+        }
       }
 
       // Ensure .meta/ exists before watching it (otherwise the watch call fails).
@@ -397,7 +399,9 @@ export function useFileWatcher(
         if (cancelled) unwatch();
         else metaUnwatch = unwatch;
       } catch (err) {
-        console.warn("Meta file watcher setup failed:", err);
+        if (import.meta.env.DEV) {
+          console.warn("Meta file watcher setup failed:", err);
+        }
       }
     })();
 

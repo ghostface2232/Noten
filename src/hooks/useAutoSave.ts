@@ -176,7 +176,9 @@ export function useAutoSave(
       }
       return true;
     } catch (err) {
-      console.warn("Auto-save failed:", err);
+      if (import.meta.env.DEV) {
+        console.warn("Auto-save failed:", err);
+      }
       return false;
     }
   }, []);

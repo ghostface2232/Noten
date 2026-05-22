@@ -136,7 +136,9 @@ export function useSettings() {
       try {
         await persistSettings(DEFAULTS);
       } catch {
-        console.warn("Failed to persist default settings:", DEFAULTS);
+        if (import.meta.env.DEV) {
+          console.warn("Failed to persist default settings:", DEFAULTS);
+        }
       }
       if (!cancelled) setIsLoaded(true);
     })();
@@ -155,7 +157,9 @@ export function useSettings() {
       await persistSettings(next);
       return true;
     } catch {
-      console.warn("Failed to persist settings update:", key);
+      if (import.meta.env.DEV) {
+        console.warn("Failed to persist settings update:", key);
+      }
       return false;
     }
   }, []);

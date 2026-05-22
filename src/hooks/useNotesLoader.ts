@@ -1451,7 +1451,9 @@ export function useNotesLoader(
           });
         }
       } catch (err) {
-        console.warn("Notes loader failed:", err);
+        if (import.meta.env.DEV) {
+          console.warn("Notes loader failed:", err);
+        }
         const timestamp = Date.now();
         setDocs([{
           id: "local",
