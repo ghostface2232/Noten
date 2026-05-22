@@ -188,11 +188,22 @@ export function unmarkGroupAsDeleted(id: string): void {
   pendingGroupTombstones.delete(id);
 }
 
+/**
+ * Per-id count of consecutive `reconcileFolder` passes that observed a meta
+ * whose body file (`{id}.md` or `.trash/{id}.md`) was missing. A meta is only
+ * deleted as an orphan after it stays bodyless across two passes, so a single
+ * mid-sync snapshot of a cloud folder (where the `.meta/{id}.json` sidecar can
+ * arrive before its body) cannot trigger metadata loss. Cleared when the body
+ * reappears or the notes directory changes.
+ */
+const metaBodyMissingObservations = new Map<string, number>();
+
 function resetWriteSnapshots() {
   writtenMetaSnapshot.clear();
   writtenGroupsSnapshot.clear();
   pendingGroupTombstones.clear();
   pendingGroupMembershipWrites.clear();
+  metaBodyMissingObservations.clear();
 }
 
 /**
@@ -920,27 +931,52 @@ export async function reconcileFolder(
     trashEntries.filter((e) => e.name?.endsWith(".md") && e.isFile).map((e) => e.name!),
   );
 
-  // ── Orphan meta cleanup: meta with trashedAt=null but no root .md ──
-  // Special case: if a `.trash/{id}.md` body exists for this meta, we are
-  // observing a `deleteNote` operation mid-flight (root removed, meta has
-  // not yet been stamped with `trashedAt`). Treating it as an orphan here
-  // would race against the upcoming `saveManifest` write and either delete
-  // a meta we're about to re-create or temporarily drop the trashed entry
-  // from the in-memory state until the next reconcile rediscovers it.
-  // Leave it alone and let the trash-side update finish.
+  // ── Orphan / missing-body meta handling ──
+  // A meta whose body file is absent is NOT automatically an orphan: on a
+  // cloud folder the `.meta/{id}.json` sidecar routinely syncs down before
+  // its `{id}.md` (or `.trash/{id}.md`) body. Deleting the meta here would
+  // drop group/color/pin/timestamps — and because `removeMetaFile` deletes a
+  // real file in the shared folder, that loss would propagate to every synced
+  // PC. Two cases are still safe to leave alone via `trashFileNames`:
+  //   - mid-flight `deleteNote` (root removed, meta not yet stamped trashed,
+  //     `.trash/{id}.md` already present) — let the trash-side update finish.
+  // Two guards gate the destructive delete:
+  //   • bulk guard — when many metas are bodyless at once the folder view is
+  //     almost certainly mid-sync, so the whole destructive pass is skipped.
+  //   • per-id grace — a meta must already have been observed bodyless on a
+  //     prior non-bulk pass before deletion, so a single mid-sync snapshot
+  //     never deletes.
+  const missingBodyIds: string[] = [];
   for (const meta of allMeta.values()) {
-    if (meta.trashedAt != null) continue;
     const rootName = `${meta.id}.md`;
-    if (folderFileNames.has(rootName)) continue;
-    if (trashFileNames.has(rootName)) continue;
-    try { await removeMetaFile(dir, meta.id); } catch { /* ignore */ }
+    if (meta.trashedAt == null) {
+      if (folderFileNames.has(rootName)) continue;
+      if (trashFileNames.has(rootName)) continue;
+    } else if (trashFileNames.has(rootName)) {
+      continue;
+    }
+    missingBodyIds.push(meta.id);
   }
 
-  // ── Trashed body integrity: meta says trashed but .trash file missing ──
-  for (const meta of allMeta.values()) {
-    if (meta.trashedAt == null) continue;
-    if (!trashFileNames.has(`${meta.id}.md`)) {
-      try { await removeMetaFile(dir, meta.id); } catch { /* ignore */ }
+  const looksMidSync = missingBodyIds.length >= 3
+    && missingBodyIds.length * 4 >= allMeta.size;
+
+  const missingNow = new Set(missingBodyIds);
+  for (const id of Array.from(metaBodyMissingObservations.keys())) {
+    if (!missingNow.has(id) || !allMeta.has(id)) {
+      metaBodyMissingObservations.delete(id);
+    }
+  }
+
+  if (!looksMidSync) {
+    for (const id of missingBodyIds) {
+      const seen = metaBodyMissingObservations.get(id) ?? 0;
+      if (seen >= 1) {
+        metaBodyMissingObservations.delete(id);
+        try { await removeMetaFile(dir, id); } catch { /* ignore */ }
+      } else {
+        metaBodyMissingObservations.set(id, seen + 1);
+      }
     }
   }
 

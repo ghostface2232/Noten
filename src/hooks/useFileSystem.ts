@@ -201,6 +201,10 @@ export function useFileSystem(
       try { markOwnWrite(leaving.filePath); remove(leaving.filePath).catch(() => {}); } catch {}
     }
     const leavingId = leaving.id;
+    // Drop the `.meta/{id}.json` sidecar paired with the body we just removed.
+    // Leaving it behind orphans the meta — previously masked by reconcile's
+    // orphan sweep, which is now grace-gated, so the meta must be deleted here.
+    void getNotesDir().then((dir) => removeMetaFile(dir, leavingId)).catch(() => {});
     setGroups?.((prev) => {
       const next = prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }));
       const kept = next.filter((g) => g.noteIds.length > 0);
@@ -363,6 +367,9 @@ export function useFileSystem(
       }
       cancelDocSaveRef?.current?.(currentDoc.id);
       const leavingId = currentDoc.id;
+      // Remove the meta sidecar paired with the pruned empty note's body so it
+      // does not linger as an orphan `.meta/{id}.json`.
+      void getNotesDir().then((dir) => removeMetaFile(dir, leavingId)).catch(() => {});
       const beforePrune = workingGroups
         ?.map((g) => ({ ...g, noteIds: g.noteIds.filter((noteId) => noteId !== leavingId) }));
       workingGroups = beforePrune

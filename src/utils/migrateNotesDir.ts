@@ -18,6 +18,7 @@ import {
 } from "./groupsIO";
 import { getMachineId } from "./machineId";
 import { getFileTimestamps } from "./fileTimestamps";
+import { backupRemoteVersion } from "./conflictBackup";
 
 interface ManifestNote {
   id: string;
@@ -311,6 +312,14 @@ async function copySharedTreeForOverwrite(fromDir: string, toDir: string): Promi
   if (await exists(`${fromBase}.assets`).catch(() => false)) {
     await copyDirRecursive(`${fromBase}.assets`, `${toBase}.assets`);
   }
+
+  // .conflicts directory — multi-device recovery backups. Best-effort: a
+  // failure to carry backups must never abort the notes migration itself.
+  if (await exists(`${fromBase}.conflicts`).catch(() => false)) {
+    try {
+      await copyDirRecursive(`${fromBase}.conflicts`, `${toBase}.conflicts`);
+    } catch { /* best-effort */ }
+  }
 }
 
 // ── Helpers used only by the merge path ────────────────────────────────────
@@ -395,15 +404,17 @@ function mergeMetaForMigration(source: NoteMeta, dest: NoteMeta | undefined): No
 }
 
 /**
- * Union-copy `.assets/{noteId}/{hash}.{ext}` from source into destination.
- * Asset filenames are SHA-256 of the body, so a destination file with the
- * same name has identical content — skip those, copy only the absent ones.
+ * Recursively copy every file from `srcDir` into `destDir`, skipping any file
+ * that already exists at the destination (never overwrite). Safe for trees
+ * whose filenames are immutable by construction:
+ *   - `.assets/{noteId}/{hash}.{ext}` — SHA-256 content hash, so a same-named
+ *     destination file is byte-identical.
+ *   - `.conflicts/{noteId}-{ts}.md`  — timestamped point-in-time backups.
  */
-async function mergedCopyAssets(srcDir: string, destDir: string): Promise<void> {
-  let entries: { name?: string; isFile?: boolean; isDirectory?: boolean }[] = [];
-  try { entries = await readDir(srcDir); } catch (err) {
-    throw err;
-  }
+async function unionCopyMissing(srcDir: string, destDir: string): Promise<void> {
+  // readDir throws if srcDir is unreadable — let it propagate. Callers that
+  // treat this copy as best-effort wrap the call in their own try/catch.
+  const entries = await readDir(srcDir);
   await mkdir(destDir, { recursive: true }).catch(() => {});
   const srcBase = normalizeSep(srcDir);
   const destBase = normalizeSep(destDir);
@@ -412,13 +423,34 @@ async function mergedCopyAssets(srcDir: string, destDir: string): Promise<void> 
     const srcPath = `${srcBase}${entry.name}`;
     const destPath = `${destBase}${entry.name}`;
     if (entry.isDirectory) {
-      await mergedCopyAssets(srcPath, destPath);
+      await unionCopyMissing(srcPath, destPath);
     } else if (entry.isFile) {
       const destAlready = await exists(destPath).catch(() => false);
       if (destAlready) continue;
       await copyFile(srcPath, destPath);
     }
   }
+}
+
+/**
+ * Before a merge overwrites `destPath` with `srcPath`, back the destination
+ * body up under `{toDir}/.conflicts/` if it exists and differs from the
+ * incoming source — so the losing side of a last-write-wins merge stays
+ * recoverable. Best-effort: never throws.
+ */
+async function backupOverwrittenBody(
+  srcPath: string,
+  destPath: string,
+  toDir: string,
+  noteId: string,
+): Promise<void> {
+  try {
+    const destBody = await readTextFile(destPath);
+    if (!destBody) return;
+    const srcBody = await readTextFile(srcPath);
+    if (destBody === srcBody) return;
+    await backupRemoteVersion(toDir, noteId, destBody);
+  } catch { /* best-effort backup */ }
 }
 
 /**
@@ -506,10 +538,19 @@ export async function migrateNotesDir(
     const sourceGroupsFile = await readGroupsFile(fromDir);
     const destGroupsBefore = await readGroupsFile(toDir);
 
-    // 1) Root .md bodies — per-filename mtime newer-wins.
+    // 1) Root .md bodies — per-filename mtime newer-wins. When the source
+    //    wins over an EXISTING, differing destination body, back the loser
+    //    up under `.conflicts/` first so a losing edit stays recoverable.
     for (const [name, srcMtime] of sourceMdMtimes) {
       const destMtime = destMdMtimes.get(name);
-      if (destMtime !== undefined && destMtime >= srcMtime) continue; // dest newer or equal → keep
+      if (destMtime === undefined) {
+        await copyFile(`${fromBase}${name}`, `${toBase}${name}`); // dest has no such body
+        continue;
+      }
+      if (destMtime >= srcMtime) continue; // dest newer or equal → keep
+      await backupOverwrittenBody(
+        `${fromBase}${name}`, `${toBase}${name}`, toDir, name.replace(/\.md$/i, ""),
+      );
       await copyFile(`${fromBase}${name}`, `${toBase}${name}`);
     }
     // dest-only .md files were never touched → preserved automatically.
@@ -527,25 +568,42 @@ export async function migrateNotesDir(
     }
     // dest-only meta ids: still on disk untouched → preserved.
 
-    // 3) `.trash/{name}.md` — per-filename mtime newer-wins.
+    // 3) `.trash/{name}.md` — per-filename mtime newer-wins, with the same
+    //    `.conflicts/` backup of an overwritten, differing destination body.
     if (sourceTrashMtimes.size > 0) {
       await mkdir(`${toBase}.trash`, { recursive: true }).catch(() => {});
       for (const [name, srcMtime] of sourceTrashMtimes) {
         const destMtime = destTrashMtimes.get(name);
-        if (destMtime !== undefined && destMtime >= srcMtime) continue;
+        if (destMtime === undefined) {
+          await copyFile(`${fromBase}.trash/${name}`, `${toBase}.trash/${name}`);
+          continue;
+        }
+        if (destMtime >= srcMtime) continue;
+        await backupOverwrittenBody(
+          `${fromBase}.trash/${name}`, `${toBase}.trash/${name}`, toDir, name.replace(/\.md$/i, ""),
+        );
         await copyFile(`${fromBase}.trash/${name}`, `${toBase}.trash/${name}`);
       }
     }
 
     // 4) `.assets/` — content-addressed filenames; union-copy without overwrite.
     if (await exists(`${fromBase}.assets`).catch(() => false)) {
-      await mergedCopyAssets(`${fromBase}.assets`, `${toBase}.assets`);
+      await unionCopyMissing(`${fromBase}.assets`, `${toBase}.assets`);
     }
 
     // 5) `.groups.json` — union with `mergeGroupMaps` (newer-wins per entry).
     const merged = mergeGroupMaps(destGroupsBefore.groups, sourceGroupsFile.groups);
     if (Object.keys(merged).length > 0) {
       await writeGroupsWithMerge(toDir, merged);
+    }
+
+    // 6) `.conflicts/` — multi-device recovery backups; union-copy so both
+    //    sides' point-in-time backups survive. Best-effort: a backup-copy
+    //    failure must not abort the migration.
+    if (await exists(`${fromBase}.conflicts`).catch(() => false)) {
+      try {
+        await unionCopyMissing(`${fromBase}.conflicts`, `${toBase}.conflicts`);
+      } catch { /* best-effort */ }
     }
 
     if (!destinationIsInsideSource) {
