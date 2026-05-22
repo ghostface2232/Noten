@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import { appDataDir } from "@tauri-apps/api/path";
 import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 
@@ -50,17 +49,30 @@ function parse(raw: string | null): UiState {
 }
 
 let cache: UiState | null = null;
+let loadPromise: Promise<UiState> | null = null;
 
-async function loadUiState(): Promise<UiState> {
+/**
+ * Read `ui-state.json` into the module cache. Idempotent and deduped: the
+ * first caller triggers the file read, concurrent callers share its promise.
+ * Must be awaited before any `getUiStateCached()` read whose result must be
+ * accurate on a cold start — notably the notes loader, which builds group
+ * collapsed state and the active note from it. Without this the cache is
+ * empty at first load and every group renders expanded.
+ */
+export async function loadUiState(): Promise<UiState> {
   if (cache) return cache;
-  try {
-    const path = await getUiStatePath();
-    const raw = await readTextFile(path);
-    cache = parse(raw);
-  } catch {
-    cache = DEFAULTS;
-  }
-  return cache;
+  if (loadPromise) return loadPromise;
+  loadPromise = (async () => {
+    try {
+      const path = await getUiStatePath();
+      const raw = await readTextFile(path);
+      cache = parse(raw);
+    } catch {
+      cache = DEFAULTS;
+    }
+    return cache;
+  })();
+  return loadPromise;
 }
 
 async function persistUiState(next: UiState): Promise<void> {
@@ -71,7 +83,9 @@ async function persistUiState(next: UiState): Promise<void> {
   } catch { /* best-effort */ }
 }
 
-/** Synchronously read the cached UI state (after useUiState has hydrated). */
+/** Synchronously read the cached UI state. Returns DEFAULTS until
+ *  `loadUiState()` has populated the cache — callers needing accuracy on a
+ *  cold start must await `loadUiState()` first. */
 export function getUiStateCached(): UiState {
   return cache ?? DEFAULTS;
 }
@@ -98,57 +112,4 @@ export async function pruneUiGroupCollapsed(validGroupIds: Set<string>): Promise
     else changed = true;
   }
   if (changed) await persistUiState({ ...cur, groupCollapsed: next });
-}
-
-export function useUiState() {
-  const [state, setState] = useState<UiState>(DEFAULTS);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const persistRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const loaded = await loadUiState();
-      if (!cancelled) {
-        setState(loaded);
-        setIsLoaded(true);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const schedulePersist = useCallback((next: UiState) => {
-    cache = next;
-    if (persistRef.current) clearTimeout(persistRef.current);
-    persistRef.current = setTimeout(() => {
-      void persistUiState(next).catch(() => {});
-    }, 150);
-  }, []);
-
-  const setActiveNoteId = useCallback((id: string | null) => {
-    setState((prev) => {
-      if (prev.activeNoteId === id) return prev;
-      const next: UiState = {
-        ...prev,
-        activeNoteId: id,
-        lastOpenedNoteId: id ?? prev.lastOpenedNoteId,
-      };
-      schedulePersist(next);
-      return next;
-    });
-  }, [schedulePersist]);
-
-  const setGroupCollapsed = useCallback((groupId: string, collapsed: boolean) => {
-    setState((prev) => {
-      if (prev.groupCollapsed[groupId] === collapsed) return prev;
-      const next: UiState = {
-        ...prev,
-        groupCollapsed: { ...prev.groupCollapsed, [groupId]: collapsed },
-      };
-      schedulePersist(next);
-      return next;
-    });
-  }, [schedulePersist]);
-
-  return { uiState: state, isLoaded, setActiveNoteId, setGroupCollapsed };
 }

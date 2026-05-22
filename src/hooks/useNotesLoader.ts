@@ -44,6 +44,7 @@ import {
 } from "../utils/conflictBackup";
 import {
   getUiStateCached,
+  loadUiState,
   setActiveNoteIdPersisted,
   setGroupCollapsedPersisted,
 } from "./useUiState";
@@ -459,6 +460,7 @@ interface DecomposedState {
  * from a stale React state snapshot.
  */
 export async function loadGroupsFromDisk(dir: string): Promise<NoteGroup[]> {
+  await loadUiState();
   const file = await readGroupsFile(dir);
   const allMeta = await readAllMeta(dir);
   const collapsedMap = getUiStateCached().groupCollapsed;
@@ -1326,6 +1328,11 @@ export function useNotesLoader(
       setMigrationInProgress(true);
       try {
         await getMachineId();
+        // Hydrate the per-machine UI-state cache (group collapsed state,
+        // active note) before loadDecomposedState reads it synchronously via
+        // getUiStateCached(). Without this the cache is empty on a cold start
+        // and every group renders expanded.
+        await loadUiState();
 
         const dir = await ensureNotesDir();
         await ensureSharedDirs(dir);
