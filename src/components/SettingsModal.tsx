@@ -631,25 +631,27 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
 
                   {/* Version notes */}
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.1.9</div>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.0</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 다른 창이 같은 문서를 autosave 할 때 현재 창의 미저장 편집이 덮어써지던 문제 수정<br />
-                          · 노트 이름 변경 시 위키링크 전체 rewrite를 병렬 디스크 쓰기로 전환 (대량 rename 체감 개선)<br />
-                          · 링크 href scheme 검증을 공용 allow-list로 단일화 (popover·paste·autolink 동일 규칙)<br />
-                          · 현재 보고 있는 노트의 그룹이 collapsed일 때 헤더에 선택 배경 표시 (expand 시 자동 해제)<br />
-                          · 그룹 expand/collapse 애니메이션이 매니페스트 비동기 로드 이후부터 재생되지 않던 문제 수정<br />
-                          · 긴 그룹(6+ 노트) collapse 시 끝부분 stagger가 잘리던 문제와 짧은 그룹 종료 직전 gap 잔여가 튀던 문제 정리
+                          · 여러 PC에서 공유 클라우드 폴더(OneDrive·Dropbox 등)를 통한 노트 동기화 지원 — 본문·메타데이터·그룹이 기기 간 병합됨<br />
+                          · 노트 고정(pin) 기능 추가 — 고정한 노트는 목록 최상단에 유지되며 PC 간 동기화됨<br />
+                          · 노트별 색상 라벨과 사이드바 색상 필터 추가<br />
+                          · 사이드바 "모든 노트" 보기 추가 — 그룹 구분 없이 전체 노트를 한 목록으로 표시<br />
+                          · 노트 폴더를 옮길 때 대상 폴더에 기존 데이터가 있으면 병합/덮어쓰기 선택 가능<br />
+                          · 설정 화면에 업데이트 알림 표시 추가<br />
+                          · 사이드바 UI 정리(호버 아이콘, 색상 팔레트, 선택 모드)와 그룹 접기 애니메이션 안정화
                         </>
                       ) : (
                         <>
-                          · Fixed unsaved local edits being overwritten when another window autosaved the same document<br />
-                          · Parallelized per-file disk writes during rename's wiki-link rewrite for faster mass renames<br />
-                          · Centralized link href scheme validation behind a shared allow-list so the popover, paste, and autolink paths all honour the same rules<br />
-                          · Collapsed group headers now carry the active-selection background when the currently-open note lives inside, falling off as soon as the group re-expands<br />
-                          · Fixed group expand/collapse animation going silent after the manifest finished loading asynchronously (transition-detector ref was never seeded for groups added post-mount)<br />
-                          · Smoothed the collapse animation on both ends: the stagger tail no longer truncates on longer groups, and the residual flex gap no longer pops at unmount on shorter ones
+                          · Sync notes across PCs through a shared cloud folder (OneDrive, Dropbox, etc.) — bodies, metadata, and groups merge between machines<br />
+                          · Added pinned notes — pinned notes stay at the top of the list and sync across PCs<br />
+                          · Added per-note color labels with a sidebar color filter<br />
+                          · Added an "All Notes" sidebar view — every note in a single list, groups ignored<br />
+                          · Moving the notes folder now offers a merge-or-replace choice when the target already holds data<br />
+                          · Added update-availability indicators to Settings<br />
+                          · Sidebar UI cleanup (hover icons, color palette, select mode) and steadier group collapse animations
                         </>
                       )}
                     </div>
