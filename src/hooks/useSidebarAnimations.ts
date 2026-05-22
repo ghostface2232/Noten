@@ -91,13 +91,27 @@ export function useSidebarAnimations({ docs, groups }: UseSidebarAnimationsOptio
     // trigger a collapse animation — the ref sync below records the state
     // without firing setState.
     let hasUntrackedGroup = false;
+    let stateChanged = false;
     for (const g of groups) {
       const wasColl = prev.get(g.id);
-      if (wasColl === undefined) hasUntrackedGroup = true;
-      else if (wasColl === false && g.collapsed) justCollapsed.push(g.id);
+      if (wasColl === undefined) {
+        hasUntrackedGroup = true;
+      } else if (wasColl !== g.collapsed) {
+        stateChanged = true;
+        // wasColl differs from g.collapsed; wasColl === false means this is a
+        // false → true transition: a collapse.
+        if (wasColl === false) justCollapsed.push(g.id);
+      }
     }
     const membershipChanged = hasUntrackedGroup || prev.size !== groups.length;
-    if (justCollapsed.length > 0 || membershipChanged) {
+    // Re-sync the ref on ANY collapsed-state change — expansions included.
+    // Previously it was re-synced only on collapse/membership changes, so an
+    // expand left `prev` stale at `collapsed: true`. The NEXT collapse then
+    // read `wasColl === true`, failed the `false → true` test, never entered
+    // `collapsingGroupIds`, so the note rows were filtered out immediately
+    // instead of staying mounted for the slide-out — the collapse snapped
+    // shut with almost no motion.
+    if (stateChanged || membershipChanged) {
       prevGroupCollapsedRef.current = new Map(groups.map((g) => [g.id, g.collapsed]));
     }
     if (justCollapsed.length > 0) {
