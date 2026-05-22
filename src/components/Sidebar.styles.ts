@@ -81,11 +81,13 @@ export const useStyles = makeStyles({
     border: "none",
     borderRadius: "6px",
     fontSize: "13px",
-    fontWeight: 600,
-    gap: "2px",
+    gap: "5px",
     minHeight: "36px",
     marginBottom: "2px",
-    paddingLeft: "8px",
+    // Header sits outside `allNotesScroll`, so it must absorb that container's
+    // 8px padding plus the 8px row padding to align its icon/text with the
+    // note list below. Gap matches `docItem` so the label lines up too.
+    paddingLeft: "16px",
     paddingRight: "8px",
   },
   allNotesHeaderLabel: {
