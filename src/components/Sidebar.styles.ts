@@ -186,11 +186,32 @@ export const useStyles = makeStyles({
     pointerEvents: "none" as const,
     overflow: "hidden",
   },
-  groupChildExpand: {
-    animationName: "groupChildExpand",
-    animationDuration: "0.28s",
-    animationTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
-    animationFillMode: "backwards",
+  // Per-group note container. The whole block of a group's notes slides as a
+  // single unit via the CSS Grid `1fr` ↔ `0fr` row trick (same technique as
+  // `groupsSection` below) — one smooth layout animation instead of one
+  // max-height animation per note. The wrapper is always mounted per group so
+  // the transition fires reliably on the `groupNotesSlideCollapsed` class flip.
+  groupNotesSlide: {
+    display: "grid",
+    gridTemplateRows: "1fr",
+    marginTop: "0px",
+    transitionProperty: "grid-template-rows, opacity, margin-top",
+    transitionDuration: "0.28s",
+    transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
+  },
+  groupNotesSlideCollapsed: {
+    gridTemplateRows: "0fr",
+    opacity: 0,
+    // Cancels the parent's `gap: 2px` so a collapsed (0-height) wrapper does
+    // not leave a doubled 4px gap between adjacent group headers.
+    marginTop: "-2px",
+  },
+  groupNotesSlideInner: {
+    overflow: "hidden",
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
   },
   groupCollapseOut: {
     animationName: "groupCollapseOut",

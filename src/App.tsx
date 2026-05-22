@@ -23,7 +23,7 @@ import { getCurrentMarkdown, useFileSystem } from "./hooks/useFileSystem";
 import { saveManifest, sortNotes, useNotesLoader, getNotesDir, setNotesDir, resetNotesDir, setMigrationInProgress } from "./hooks/useNotesLoader";
 import { useAutoSave } from "./hooks/useAutoSave";
 import { useNoteGroups } from "./hooks/useNoteGroups";
-import { useSettings } from "./hooks/useSettings";
+import { useSettings, type ParagraphSpacing } from "./hooks/useSettings";
 
 import {
   TiptapEditor,
@@ -460,6 +460,28 @@ function App() {
     return index === activeIndex ? state.getCachedMarkdown() : doc.content;
   }, [activeIndex, docs, state]);
 
+  // Stable handlers passed to the memoized TitleBar / EditorToolbar. Inline
+  // arrows would be new references each render and defeat their `memo`, so an
+  // unrelated state change (e.g. a sidebar group toggle) would still re-render
+  // the whole editor chrome — the cause of the perceived toggle delay.
+  const handleOpenSettings = useCallback(() => setSettingsOpen(true), []);
+
+  const handleUpdateParagraphSpacing = useCallback((v: ParagraphSpacing) => {
+    void updateSetting("paragraphSpacing", v);
+  }, [updateSetting]);
+
+  const handleOpenSearch = useCallback(() => {
+    setDocGoToLineOpen(false);
+    setDocSearchReplace(false);
+    setDocSearchOpen(true);
+  }, []);
+
+  const handleOpenGoToLine = useCallback(() => {
+    setDocSearchOpen(false);
+    setDocSearchReplace(false);
+    setDocGoToLineOpen(true);
+  }, []);
+
   // 노트 저장 위치 변경
   const handleChangeNotesDir = useCallback(async () => {
     const selected = await openDialog({ directory: true, multiple: false });
@@ -736,8 +758,8 @@ function App() {
           onNewNote={fs.newNote}
           onImportFile={fs.importFile}
           onToggleTheme={handleToggleTheme}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onUpdateParagraphSpacing={(v) => updateSetting("paragraphSpacing", v)}
+          onOpenSettings={handleOpenSettings}
+          onUpdateParagraphSpacing={handleUpdateParagraphSpacing}
           onExportMd={handleExportMd}
           onExportPdf={handleExportPdf}
           onExportRtf={handleExportRtf}
@@ -814,7 +836,7 @@ function App() {
               onImportFile={fs.importFile}
               notesSortOrder={settings.notesSortOrder}
               locale={locale}
-              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenSettings={handleOpenSettings}
               sidebarSearchOpen={sidebarSearchOpen}
               sidebarSearchQuery={sidebarSearchQuery}
               onSidebarSearchQueryChange={setSidebarSearchQuery}
@@ -872,16 +894,8 @@ function App() {
                   hidden={hideToolbar}
                   locale={locale}
                   onBarHeight={handleBarHeight}
-                  onOpenSearch={() => {
-                    setDocGoToLineOpen(false);
-                    setDocSearchReplace(false);
-                    setDocSearchOpen(true);
-                  }}
-                  onOpenGoToLine={() => {
-                    setDocSearchOpen(false);
-                    setDocSearchReplace(false);
-                    setDocGoToLineOpen(true);
-                  }}
+                  onOpenSearch={handleOpenSearch}
+                  onOpenGoToLine={handleOpenGoToLine}
                 />
               </div>
               {(docSearchOpen || docGoToLineOpen) && (

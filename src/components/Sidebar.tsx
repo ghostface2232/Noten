@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Fragment, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Button, Tooltip, tokens, mergeClasses } from "@fluentui/react-components";
 import {
   ChevronLeftRegular,
@@ -238,7 +238,7 @@ export function Sidebar({
 
   const {
     newDocIds, slideUpFromIndex, exitingDoc,
-    expandedGroupIds, collapsingGroupIds, removingGroupIds, newGroupIds,
+    collapsingGroupIds, removingGroupIds, newGroupIds,
     animateGroupRemoval,
   } = useSidebarAnimations({ docs, groups });
 
@@ -480,23 +480,28 @@ export function Sidebar({
 
   const isSearching = !!debouncedQuery;
 
-  // Compute render items: when not searching, organize by groups
+  // Flat note rows: ungrouped notes (root view) and search results. Grouped
+  // notes are carried by `GroupRender` below, not here.
   type RenderItem =
-    | { kind: "note"; doc: NoteDoc; originalIndex: number; indented: boolean; matchType?: MatchType; snippet?: SearchSnippet | null }
-    | { kind: "group"; group: NoteGroup }
+    { kind: "note"; doc: NoteDoc; originalIndex: number; indented: boolean; matchType?: MatchType; snippet?: SearchSnippet | null }
 
-  const { groupItems, noteItems } = useMemo(() => {
+  // Each group renders as a header plus a single sliding container holding its
+  // (sorted) notes — see the JSX below. `notes` is empty while the group is
+  // collapsed and not mid-collapse.
+  type GroupRender = { group: NoteGroup; notes: { doc: NoteDoc; originalIndex: number }[] };
+
+  const { groupRenderList, noteItems } = useMemo(() => {
     if (isSearching) {
       return {
-        groupItems: [] as RenderItem[],
+        groupRenderList: [] as GroupRender[],
         noteItems: filteredDocs.map(({ doc, originalIndex, matchType, snippet }) => ({
           kind: "note" as const, doc, originalIndex, indented: false, matchType, snippet,
-        })),
+        })) as RenderItem[],
       };
     }
 
     const docsMap = new Map(docs.map((d, i) => [d.id, { doc: d, originalIndex: i }]));
-    const gItems: RenderItem[] = [];
+    const gList: GroupRender[] = [];
     const nItems: RenderItem[] = [];
 
     const sortGroupNotes = (entries: { doc: NoteDoc; originalIndex: number }[]) => {
@@ -504,19 +509,18 @@ export function Sidebar({
     };
 
     for (const group of groups) {
-      gItems.push({ kind: "group", group });
-      // Keep notes mounted during a collapse animation so they can fade out.
+      // Keep notes mounted during a collapse so the block can slide out.
       const showNotes = !group.collapsed || collapsingGroupIds.has(group.id);
+      let notes: { doc: NoteDoc; originalIndex: number }[] = [];
       if (showNotes) {
         const entries: { doc: NoteDoc; originalIndex: number }[] = [];
         for (const noteId of group.noteIds) {
           const entry = docsMap.get(noteId);
           if (entry) entries.push(entry);
         }
-        for (const entry of sortGroupNotes(entries)) {
-          gItems.push({ kind: "note", doc: entry.doc, originalIndex: entry.originalIndex, indented: true });
-        }
+        notes = sortGroupNotes(entries);
       }
+      gList.push({ group, notes });
     }
 
     const ungrouped = filteredDocs.filter(({ doc }) => !groupedNoteIds.has(doc.id));
@@ -524,54 +528,40 @@ export function Sidebar({
       nItems.push({ kind: "note", doc, originalIndex, indented: false });
     }
 
-    return { groupItems: gItems, noteItems: nItems };
+    return { groupRenderList: gList, noteItems: nItems };
   }, [isSearching, filteredDocs, docs, groups, groupedNoteIds, notesSortOrder, locale, collapsingGroupIds]);
 
   const renderNoteItem = (
     doc: NoteDoc,
     originalIndex: number,
     indented: boolean,
-    opts: { snippet?: SearchSnippet | null; searchIndex?: number; noDrag?: boolean; paneActive?: boolean } = {},
+    opts: { snippet?: SearchSnippet | null; searchIndex?: number; noDrag?: boolean; paneActive?: boolean; groupId?: string } = {},
   ) => {
-    const { snippet = null, searchIndex, noDrag = false, paneActive = true } = opts;
+    const { snippet = null, searchIndex, noDrag = false, paneActive = true, groupId } = opts;
     const isSelected = selectedNoteIds.has(doc.id);
     const isHovered = hoveredIndex === originalIndex;
     const isContextTarget = contextMenu?.type === "note" && contextMenu.index === originalIndex;
 
-    // Check if this note's group just expanded or is collapsing
-    const noteGroup = indented ? getGroupForNote(doc.id) : null;
-    const isInExpandingGroup = noteGroup ? expandedGroupIds.has(noteGroup.id) : false;
-    const isInCollapsingGroup = noteGroup ? collapsingGroupIds.has(noteGroup.id) : false;
-    const isInRemovingGroup = removingGroupIds.has(doc.id);
-    const groupNoteIdx = noteGroup ? noteGroup.noteIds.indexOf(doc.id) : -1;
-    const expandStagger = isInExpandingGroup && groupNoteIdx >= 0
-      ? groupNoteIdx * 0.03
-      : 0;
-    // Reverse stagger so the bottom-most note disappears first — mirrors the
-    // expand motion (top-to-bottom) in time.
-    const collapseStagger = isInCollapsingGroup && noteGroup && groupNoteIdx >= 0
-      ? (noteGroup.noteIds.length - 1 - groupNoteIdx) * 0.03
-      : 0;
-    const animationDelay = expandStagger + collapseStagger;
+    // `groupId` (the owning group, passed in by the caller) only feeds the
+    // `data-group-id` attribute that drag hit-testing reads. Expand/collapse
+    // motion is handled by the group's sliding container, not per note.
 
     return (
       <div
         key={doc.id}
         data-doc-item
         data-note-id={doc.id}
-        data-group-id={noteGroup?.id}
+        data-group-id={groupId}
         className={mergeClasses(
           styles.docItemWrapper,
           newDocIds.has(doc.id) && styles.docItemNew,
           slideUpFromIndex >= 0 && originalIndex >= slideUpFromIndex && styles.docItemSlideUp,
-          isInExpandingGroup && styles.groupChildExpand,
-          (isInCollapsingGroup || isInRemovingGroup) && styles.groupCollapseOut,
           isSearching && searchIndex !== undefined && styles.searchResultFadeIn,
         )}
         style={
           isSearching && searchIndex !== undefined
             ? { animationDelay: `${searchIndex * 0.03}s` }
-            : animationDelay > 0 ? { animationDelay: `${animationDelay}s` } : undefined
+            : undefined
         }
         onPointerDown={noDrag ? undefined : (e) => handleDragPointerDown(e, doc.id)}
         onMouseEnter={() => setHoveredIndex(originalIndex)}
@@ -867,7 +857,7 @@ export function Sidebar({
                 <ChevronRightRegular fontSize={14} className={styles.allNotesEntryChevron} />
               </Button>
             )}
-            {groupItems.length === 0 && noteItems.length === 0 && !exitingDoc ? (
+            {groupRenderList.length === 0 && noteItems.length === 0 && !exitingDoc ? (
               <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : sidebarSearchQuery ? "" : i("sidebar.empty")}</span>
             ) : (
               <>
@@ -879,9 +869,27 @@ export function Sidebar({
                   >
                     <div className={styles.groupsSectionInner}>
                       <span className={styles.sectionLabel}>{i("sidebar.groupsLabel")}</span>
-                      {groupItems.map((item) => {
-                        if (item.kind === "group") return renderGroupHeader(item.group);
-                        return renderNoteItem(item.doc, item.originalIndex, item.indented, { paneActive: !inAllNotes });
+                      {groupRenderList.map(({ group, notes }) => {
+                        // The whole note block slides as one unit via the grid
+                        // `1fr`/`0fr` trick — collapsed groups (and groups being
+                        // removed) clip their container to zero height.
+                        const collapsed = group.collapsed || removingGroupIds.has(group.id);
+                        return (
+                          <Fragment key={`grp-${group.id}`}>
+                            {renderGroupHeader(group)}
+                            <div
+                              className={mergeClasses(
+                                styles.groupNotesSlide,
+                                collapsed && styles.groupNotesSlideCollapsed,
+                              )}
+                            >
+                              <div className={styles.groupNotesSlideInner}>
+                                {notes.map(({ doc, originalIndex }) =>
+                                  renderNoteItem(doc, originalIndex, true, { paneActive: !inAllNotes, groupId: group.id }))}
+                              </div>
+                            </div>
+                          </Fragment>
+                        );
                       })}
                     </div>
                   </div>
@@ -900,7 +908,6 @@ export function Sidebar({
                     </div>
                   )}
                   {noteItems.map((item, idx) => {
-                    if (item.kind !== "note") return null;
                     const elements = [renderNoteItem(item.doc, item.originalIndex, item.indented, { snippet: item.snippet, searchIndex: isSearching ? idx : undefined, paneActive: !inAllNotes })];
                     if (exitingDoc && exitingDoc.index === idx + 1) {
                       elements.unshift(

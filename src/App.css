@@ -184,15 +184,9 @@ body {
   100% { opacity: 0; max-height: 0px; }
 }
 
-/* `margin-top: -2px` cancels the sidebar body's `gap: 2px` during the
-   animation, so a collapsing note doesn't leave a residual gap slot that
-   would snap closed at unmount (the visible "pop"). Keep the value in
-   sync with Sidebar.styles.ts → `body.gap`. */
-@keyframes groupChildExpand {
-  from { opacity: 0; max-height: 0px; margin-top: -2px; }
-  to   { opacity: 1; max-height: 34px; margin-top: 0; }
-}
-
+/* A group's note block slides as a single unit via the CSS Grid row trick
+   (see Sidebar.styles.ts → `groupNotesSlide`). Only the group header still
+   uses a keyframe — for its own removal animation. */
 @keyframes groupCollapseOut {
   from { opacity: 1; max-height: 34px; margin-top: 0; }
   to   { opacity: 0; max-height: 0px; margin-top: -2px; overflow: hidden; }
