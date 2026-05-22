@@ -38,13 +38,14 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 
 - Internal documents live in the app's `notes` directory and are auto-saved (1s debounce).
 - Shared notes directories such as OneDrive/Dropbox are supported by file-based sync; metadata/group writes are merged so different PCs do not rely on one monolithic manifest.
-- Remote body conflicts are last-write-wins with previous remote body backups under `.conflicts/`.
+- Remote body conflicts are last-write-wins with previous remote body backups under `.conflicts/`. `.conflicts/` travels with the notes directory on a folder change/migration; a `merge` migration also backs up an about-to-be-overwritten destination body there before applying last-write-wins.
+- `reconcileFolder` does not delete a `.meta/<noteId>.json` the instant its body file is missing — on a mid-sync cloud folder the sidecar can arrive before its body. An orphan meta is deleted only after a per-id grace (observed bodyless on a prior non-bulk reconcile pass), and the whole sweep is skipped when many metas are bodyless at once (bulk guard — likely mid-sync).
 - Auto-save uses `activeDocRef` (sync ref) to track the active document, not React state's `activeIndex`, to prevent wrong-doc writes after rapid switching.
 - `notifyActiveDoc(id, filePath)` must be called in every code path that switches the active document (switchDocument, newNote, importFiles, duplicateNote, restoreNote). `deleteNote` does not call it directly because it relies on the subsequent active-index change to flow through normal state.
 - `cancelDocSave(docId)` cancels pending autosave timers for a specific doc. Called in deleteNote to prevent orphan writes.
 - `hasPendingChangesRef` (sync ref) tracks whether `scheduleAutoSave` was called, used by `flushAutoSave` to skip saving view-only documents.
 - `onCloseRequested` handler in App.tsx awaits `flushAutoSave` before window close.
-- Empty notes (no content, no customName) are auto-deleted when leaving via `pruneEmptyCurrentDoc`. Applied in switchDocument, newNote, importFiles, duplicateNote, and restoreNote.
+- Empty notes (no content, no customName) are auto-deleted when leaving via `pruneEmptyCurrentDoc`. Applied in switchDocument, newNote, importFiles, duplicateNote, and restoreNote. Pruning removes both the `.md` body and its `.meta/<noteId>.json` sidecar so no orphan metadata is left behind.
 - `Ctrl+O` imports selected files into the app notes directory and creates managed internal notes (new note IDs and note files).
 - Imported notes are treated the same as other internal notes (auto-save enabled, normal delete/duplicate/restore flow).
 - Rename updates the note title metadata (and sets `customName`), not the underlying `.md` file path.
