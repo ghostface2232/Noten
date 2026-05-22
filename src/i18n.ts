@@ -190,12 +190,20 @@ const dict = {
   "settings.notesDirectory.reset": { en: "Reset", ko: "초기화" },
   "settings.notesDirectory.default": { en: "Default", ko: "기본 위치" },
   "settings.notesDirectory.confirmMove": {
-    en: "Changing the storage location will copy existing notes to the new location. Continue?",
-    ko: "저장 위치를 변경하면 기존 노트를 새 위치로 복사합니다. 계속하시겠습니까?",
+    en: "Change the notes storage location?",
+    ko: "노트 저장 위치를 변경하시겠습니까?",
   },
   "settings.notesDirectory.mergePrompt": {
     en: "The selected folder already contains notes. Would you like to merge with existing notes?",
     ko: "선택한 폴더에 이미 노트가 있습니다. 기존 노트와 병합하시겠습니까?",
+  },
+  "settings.notesDirectory.conflictTitle": {
+    en: "This folder already contains Noten data",
+    ko: "이 폴더에 이미 Noten 데이터가 있습니다",
+  },
+  "settings.notesDirectory.conflictBody": {
+    en: "Merge keeps notes, images, and groups from both locations. Overwrite deletes the current app notes and loads this folder instead.",
+    ko: "병합은 양쪽의 노트, 이미지, 그룹을 함께 보존합니다. 덮어쓰기는 현재 앱 노트를 삭제하고 이 폴더의 데이터를 불러옵니다.",
   },
   "settings.notesDirectory.migrationFailed": {
     en: "Failed to migrate notes. The storage location was not changed.",

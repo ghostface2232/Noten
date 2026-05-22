@@ -99,7 +99,7 @@ async function copyDirRecursive(srcDir: string, destDir: string): Promise<void> 
   }
 }
 
-async function clearDirContents(dir: string): Promise<void> {
+async function clearDirContents(dir: string, protectedPath?: string): Promise<void> {
   let entries;
   try {
     entries = await readDir(dir);
@@ -119,11 +119,21 @@ async function clearDirContents(dir: string): Promise<void> {
       || (entry.isFile && entry.name.endsWith(".md"));
     if (!isManagedRootEntry) continue;
     const target = `${base}${entry.name}`;
+    if (protectedPath && isSameOrChildPath(target, protectedPath)) continue;
     try {
       await remove(target, { recursive: true });
     } catch {
       /* best-effort */
     }
+  }
+}
+
+export async function clearManagedNotesData(dir: string, protectedPath?: string): Promise<MigrationResult> {
+  try {
+    await clearDirContents(dir, protectedPath);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: String(err) };
   }
 }
 
@@ -498,12 +508,15 @@ export async function migrateNotesDir(
 }
 
 /**
- * Returns true if a given directory contains *any* recognised Noten state
- * (live `.meta` sidecars, a legacy `manifest.json`, or `.groups.json`).
- * Used by the App's path-change flow to decide whether to prompt for merge.
+ * Returns true if a directory contains any recognised Noten-managed data.
+ * Used by the path-change flow to decide whether to prompt for merge/replace.
  */
-export async function hasManifest(dir: string): Promise<boolean> {
+export async function hasExistingNotenData(dir: string): Promise<boolean> {
   const base = normalizeSep(dir);
+  try {
+    const entries = await readDir(dir);
+    if (entries.some((e) => e.isFile && e.name?.endsWith(".md"))) return true;
+  } catch { /* ignore */ }
   try {
     if (await exists(`${base}manifest.json`)) return true;
   } catch { /* ignore */ }
@@ -514,8 +527,18 @@ export async function hasManifest(dir: string): Promise<boolean> {
     const metaEntries = await readDir(`${base}.meta`);
     if (metaEntries.some((e) => e.name?.endsWith(".json"))) return true;
   } catch { /* ignore */ }
+  try {
+    const trashEntries = await readDir(`${base}.trash`);
+    if (trashEntries.some((e) => e.isFile && e.name?.endsWith(".md"))) return true;
+  } catch { /* ignore */ }
+  try {
+    const assetEntries = await readDir(`${base}.assets`);
+    if (assetEntries.some((e) => e.name)) return true;
+  } catch { /* ignore */ }
   return false;
 }
+
+export const hasManifest = hasExistingNotenData;
 
 // Path helpers used by callers that just need them.
 export { metaDirFor, metaPathFor, groupsPathFor };

@@ -21,6 +21,7 @@ import {
   readAllMeta,
   writeMeta as writeMetaFile,
   removeMeta as removeMetaFile,
+  type NoteMeta,
 } from "../utils/metadataIO";
 import {
   groupsPathFor,
@@ -462,6 +463,43 @@ function buildGroupsFromShared(
   return out;
 }
 
+function sameNoteIds(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function hydrateGroupMembershipFromMeta(
+  groups: NoteGroup[],
+  allMeta: Map<string, NoteMeta>,
+  liveDocIds: Set<string>,
+): { groups: NoteGroup[]; changed: boolean } {
+  const idsByGroup = new Map<string, string[]>();
+  for (const meta of allMeta.values()) {
+    if (meta.trashedAt != null) continue;
+    if (!meta.groupId || !liveDocIds.has(meta.id)) continue;
+    const ids = idsByGroup.get(meta.groupId) ?? [];
+    ids.push(meta.id);
+    idsByGroup.set(meta.groupId, ids);
+  }
+
+  let changed = false;
+  const hydrated = groups.map((group) => {
+    const metaIds = idsByGroup.get(group.id) ?? [];
+    const metaIdSet = new Set(metaIds);
+    const noteIds = [
+      ...group.noteIds.filter((id) => metaIdSet.has(id)),
+      ...metaIds.filter((id) => !group.noteIds.includes(id)),
+    ];
+    if (sameNoteIds(group.noteIds, noteIds)) return group;
+    changed = true;
+    return { ...group, noteIds };
+  });
+  return { groups: hydrated, changed };
+}
+
 async function loadDecomposedState(dir: string): Promise<DecomposedState> {
   const base = normalizeSep(dir);
   const trashBase = `${base}.trash/`;
@@ -828,7 +866,7 @@ export async function reconcileFolder(
   });
   if (nextDocs.length !== beforeRemoveLen) changed = true;
 
-  const nextGroups = removedIds.size > 0
+  let nextGroups = removedIds.size > 0
     ? groups.map((g) => ({
         ...g,
         noteIds: g.noteIds.filter((id) => !removedIds.has(id)),
@@ -865,6 +903,18 @@ export async function reconcileFolder(
     if (!trashFileNames.has(`${meta.id}.md`)) {
       try { await removeMetaFile(dir, meta.id); } catch { /* ignore */ }
     }
+  }
+
+  // Group membership is stored in `.meta/{noteId}.json` as `groupId`. Rebuild
+  // `noteIds` from disk after reconcile has finished touching meta files; if
+  // we return stale/empty `noteIds`, the loader's follow-up persist can write
+  // those stale memberships back as `groupId: null`.
+  const liveDocIds = new Set(nextDocs.map((d) => d.id));
+  const latestMeta = await readAllMeta(dir);
+  const hydratedGroups = hydrateGroupMembershipFromMeta(nextGroups, latestMeta, liveDocIds);
+  if (hydratedGroups.changed) {
+    nextGroups = hydratedGroups.groups;
+    changed = true;
   }
 
   // locale used only by getDefaultDocumentTitle above; suppress unused warning otherwise

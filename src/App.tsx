@@ -6,6 +6,9 @@ import {
   mergeClasses,
   Button,
   Tooltip,
+  Dialog,
+  DialogSurface,
+  tokens,
 } from "@fluentui/react-components";
 import {
   FolderAddRegular,
@@ -37,13 +40,13 @@ import { searchPluginKey, type SearchPluginState } from "./extensions/SearchHigh
 import { refreshWikiLinkDecorations } from "./extensions/WikiLink";
 import { t } from "./i18n";
 import { exportAsMarkdown, exportAsPdf, exportAsRtf } from "./utils/exportHandlers";
-import { migrateNotesDir, hasManifest } from "./utils/migrateNotesDir";
+import { clearManagedNotesData, hasExistingNotenData, migrateNotesDir } from "./utils/migrateNotesDir";
 import { useFileWatcher } from "./hooks/useFileWatcher";
 import { useWindowSync } from "./hooks/useWindowSync";
 import { useChromeVisibility } from "./hooks/useChromeVisibility";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useDragDrop } from "./hooks/useDragDrop";
-import { open as openDialog, confirm, ask, message } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, confirm, message } from "@tauri-apps/plugin-dialog";
 import { useStyles } from "./App.styles";
 import "./App.css";
 
@@ -57,6 +60,13 @@ const SIDEBAR_DEFAULT = 260;
 const EDITOR_MIN_WIDTH = 600;
 const WINDOW_MIN_HEIGHT = 620;
 const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
+
+type NotesDirConflictChoice = "merge" | "overwrite" | null;
+
+interface NotesDirConflictDialogState {
+  path: string;
+  resolve: (choice: NotesDirConflictChoice) => void;
+}
 
 function getSystemPrefersDark() {
   return typeof window !== "undefined"
@@ -134,6 +144,7 @@ function App() {
   const [docGoToLineOpen, setDocGoToLineOpen] = useState(false);
   const [sidebarSearchOpen, setSidebarSearchOpen] = useState(false);
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
+  const [notesDirConflict, setNotesDirConflict] = useState<NotesDirConflictDialogState | null>(null);
   const { settings, update: updateSetting, isLoaded: settingsLoaded } = useSettings();
   const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDark);
   const isDarkMode = settings.themeMode === "system"
@@ -145,6 +156,19 @@ function App() {
   const tiptapRef = useRef<TiptapEditorHandle>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [tiptapEditor, setTiptapEditor] = useState<import("@tiptap/react").Editor | null>(null);
+
+  const requestNotesDirConflictChoice = useCallback((path: string) => (
+    new Promise<NotesDirConflictChoice>((resolve) => {
+      setNotesDirConflict({ path, resolve });
+    })
+  ), []);
+
+  const resolveNotesDirConflictChoice = useCallback((choice: NotesDirConflictChoice) => {
+    setNotesDirConflict((prev) => {
+      prev?.resolve(choice);
+      return null;
+    });
+  }, []);
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
@@ -185,6 +209,8 @@ function App() {
   // Refs for values read (but not triggering) in effects
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
+  const docsRef = useRef(docs);
+  docsRef.current = docs;
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
 
@@ -446,18 +472,16 @@ function App() {
     const normalize = (p: string) => p.replace(/[\\/]+$/, "").replace(/\\/g, "/");
     if (normalize(newDir) === normalize(oldDir)) return;
 
-    const ok = await confirm(t("settings.notesDirectory.confirmMove", locale));
-    if (!ok) return;
+    const destHasData = await hasExistingNotenData(newDir);
+    let action: "move" | "merge" | "overwrite-current" = "move";
 
-    let strategy: "merge" | "overwrite" = "overwrite";
-    const destHasManifest = await hasManifest(newDir);
-    if (destHasManifest) {
-      const merge = await ask(t("settings.notesDirectory.mergePrompt", locale), {
-        kind: "info",
-        okLabel: t("dialog.merge", locale),
-        cancelLabel: t("dialog.overwrite", locale),
-      });
-      strategy = merge ? "merge" : "overwrite";
+    if (destHasData) {
+      const choice = await requestNotesDirConflictChoice(newDir);
+      if (choice === null) return;
+      action = choice === "merge" ? "merge" : "overwrite-current";
+    } else {
+      const ok = await confirm(t("settings.notesDirectory.confirmMove", locale));
+      if (!ok) return;
     }
 
     // Flush any in-flight autosave to the OLD directory FIRST so the user's
@@ -466,11 +490,18 @@ function App() {
     // writes to the old path while migrate runs and the subsequent reload
     // re-binds doc paths.
     await flushAutoSaveRef.current?.().catch(() => {});
+    await saveManifest(
+      docsRef.current,
+      docsRef.current[activeIndexRef.current]?.id ?? null,
+      groupsRef.current,
+    ).catch(() => {});
 
     setMigrationInProgress(true);
     let result;
     try {
-      result = await migrateNotesDir(oldDir, newDir, strategy);
+      result = action === "overwrite-current"
+        ? await clearManagedNotesData(oldDir, newDir)
+        : await migrateNotesDir(oldDir, newDir, action === "merge" ? "merge" : "overwrite");
     } catch (err) {
       setMigrationInProgress(false);
       throw err;
@@ -491,7 +522,7 @@ function App() {
     // its own finally. Releasing here would briefly open a window during
     // which the about-to-run effect's awaits could be preempted by an
     // autosave for an already-stale `snapshot.filePath`.
-  }, [locale, updateSetting]);
+  }, [locale, requestNotesDirConflictChoice, updateSetting]);
 
   const handleResetNotesDir = useCallback(async () => {
     if (!settings.notesDirectory) return;
@@ -503,6 +534,11 @@ function App() {
 
     // Flush before any path manipulation so pending edits land in OLD dir.
     await flushAutoSaveRef.current?.().catch(() => {});
+    await saveManifest(
+      docsRef.current,
+      docsRef.current[activeIndexRef.current]?.id ?? null,
+      groupsRef.current,
+    ).catch(() => {});
 
     // Compute default directory
     resetNotesDir();
@@ -885,6 +921,70 @@ function App() {
           </div>
         </div>
       </div>
+
+      <Dialog
+        open={notesDirConflict !== null}
+        onOpenChange={(_, data) => {
+          if (!data.open) resolveNotesDirConflictChoice(null);
+        }}
+      >
+        <DialogSurface
+          style={{
+            maxWidth: "420px",
+            padding: "24px 22px 18px",
+            borderRadius: "12px",
+            background: isDarkMode ? "rgba(32,32,32,0.92)" : "rgba(255,255,255,0.92)",
+            backdropFilter: "saturate(120%) blur(60px)",
+            WebkitBackdropFilter: "saturate(120%) blur(60px)",
+            border: `1px solid ${isDarkMode ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)"}`,
+            boxShadow: isDarkMode ? "0 24px 64px rgba(0,0,0,0.48)" : "0 24px 64px rgba(0,0,0,0.18)",
+          }}
+        >
+          <div style={{ fontSize: "16px", fontWeight: 600, color: tokens.colorNeutralForeground1, userSelect: "none" }}>
+            {t("settings.notesDirectory.conflictTitle", locale)}
+          </div>
+          <div style={{ fontSize: "13px", color: tokens.colorNeutralForeground2, lineHeight: 1.55, marginTop: "10px", userSelect: "none" }}>
+            {t("settings.notesDirectory.conflictBody", locale)}
+          </div>
+          <div
+            style={{
+              fontSize: "12px",
+              color: tokens.colorNeutralForeground3,
+              marginTop: "12px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              userSelect: "none",
+            }}
+          >
+            {notesDirConflict?.path}
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "22px" }}>
+            <Button
+              size="medium"
+              appearance="subtle"
+              onClick={() => resolveNotesDirConflictChoice(null)}
+            >
+              {t("trash.cancel", locale)}
+            </Button>
+            <Button
+              size="medium"
+              appearance="subtle"
+              onClick={() => resolveNotesDirConflictChoice("merge")}
+            >
+              {t("dialog.merge", locale)}
+            </Button>
+            <Button
+              size="medium"
+              appearance="subtle"
+              onClick={() => resolveNotesDirConflictChoice("overwrite")}
+              style={{ color: tokens.colorPaletteRedForeground1 }}
+            >
+              {t("dialog.overwrite", locale)}
+            </Button>
+          </div>
+        </DialogSurface>
+      </Dialog>
 
       <SettingsModal
         open={settingsOpen}
