@@ -91,6 +91,8 @@ const dict = {
   "sidebar.newNote": { en: "New document", ko: "새 문서" },
   "sidebar.import": { en: "Open", ko: "열기" },
   "sidebar.settings": { en: "Settings", ko: "설정" },
+  "sidebar.pin": { en: "Pin", ko: "고정" },
+  "sidebar.unpin": { en: "Unpin", ko: "고정 해제" },
   "sidebar.rename": { en: "Rename", ko: "이름 바꾸기" },
   "sidebar.openInNewWindow": { en: "Open in window", ko: "새 창에서 열기" },
   "sidebar.duplicate": { en: "Duplicate", ko: "복제" },
@@ -116,6 +118,19 @@ const dict = {
   "sidebar.groupNamePlaceholder": { en: "Group name", ko: "그룹 이름" },
   "sidebar.groupsLabel": { en: "GROUPS", ko: "그룹" },
   "sidebar.notesLabel": { en: "NOTES", ko: "노트" },
+  "sidebar.allNotes": { en: "All Notes", ko: "모든 노트" },
+  "sidebar.color": { en: "Color", ko: "색상" },
+  "sidebar.colorNone": { en: "No color", ko: "색상 없음" },
+  "sidebar.colorRed": { en: "Red", ko: "빨강" },
+  "sidebar.colorOrange": { en: "Orange", ko: "주황" },
+  "sidebar.colorYellow": { en: "Yellow", ko: "노랑" },
+  "sidebar.colorGreen": { en: "Green", ko: "초록" },
+  "sidebar.colorBlue": { en: "Blue", ko: "파랑" },
+  "sidebar.colorPurple": { en: "Purple", ko: "보라" },
+  "sidebar.colorGray": { en: "Gray", ko: "회색" },
+  "sidebar.filter": { en: "Filter by color", ko: "색상으로 필터" },
+  "sidebar.filterAll": { en: "All notes", ko: "전체 보기" },
+  "sidebar.colorFilterEmpty": { en: "No notes with this color", ko: "이 색상의 노트가 없습니다" },
 
   /* ─── StatusBar ─── */
   "status.chars": { en: " chars", ko: " 자" },
@@ -188,16 +203,28 @@ const dict = {
   "settings.notesDirectory.reset": { en: "Reset", ko: "초기화" },
   "settings.notesDirectory.default": { en: "Default", ko: "기본 위치" },
   "settings.notesDirectory.confirmMove": {
-    en: "Changing the storage location will copy existing notes to the new location. Continue?",
-    ko: "저장 위치를 변경하면 기존 노트를 새 위치로 복사합니다. 계속하시겠습니까?",
+    en: "Change the notes storage location?",
+    ko: "노트 저장 위치를 변경하시겠습니까?",
   },
   "settings.notesDirectory.mergePrompt": {
     en: "The selected folder already contains notes. Would you like to merge with existing notes?",
     ko: "선택한 폴더에 이미 노트가 있습니다. 기존 노트와 병합하시겠습니까?",
   },
+  "settings.notesDirectory.conflictTitle": {
+    en: "This folder already contains Noten data",
+    ko: "이 폴더에 이미 Noten 데이터가 있습니다",
+  },
+  "settings.notesDirectory.conflictBody": {
+    en: "Merge keeps notes, images, and groups from both locations. Overwrite deletes the current app notes and loads this folder instead.",
+    ko: "병합은 양쪽의 노트, 이미지, 그룹을 함께 보존합니다. 덮어쓰기는 현재 앱 노트를 삭제하고 이 폴더의 데이터를 불러옵니다.",
+  },
   "settings.notesDirectory.migrationFailed": {
     en: "Failed to migrate notes. The storage location was not changed.",
     ko: "노트 이동에 실패했습니다. 저장 위치가 변경되지 않았습니다.",
+  },
+  "settings.notesDirectory.settingsFailed": {
+    en: "The notes were moved, but the folder setting could not be saved. If your notes don't appear after restarting the app, reselect this folder in Settings.",
+    ko: "노트는 이동되었지만 폴더 설정을 저장하지 못했습니다. 앱을 다시 시작한 뒤 노트가 보이지 않으면 설정에서 이 폴더를 다시 선택하세요.",
   },
 
   /* ─── Trash ─── */

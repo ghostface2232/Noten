@@ -2,6 +2,7 @@ import {
   useEffect,
   useImperativeHandle,
   forwardRef,
+  memo,
   useRef,
   useCallback,
   useState,
@@ -653,7 +654,7 @@ type DocumentSession = {
   filePath: string | null;
 };
 
-export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
+const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
   function TiptapEditor({
     initialMarkdown,
     editable,
@@ -1625,3 +1626,8 @@ export const TiptapEditor = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     );
   },
 );
+
+// Memoized so unrelated App state changes (e.g. a sidebar group toggle) don't
+// re-render the editor wrapper. The ProseMirror instance is managed
+// imperatively, so a skipped parent-driven render has no behavioral effect.
+export const TiptapEditor = memo(TiptapEditorBase);

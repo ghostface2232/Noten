@@ -21,7 +21,9 @@ export const useStyles = makeStyles({
     paddingRight: SIDE_PADDING,
   },
   body: {
-    flex: 1,
+    width: "50%",
+    height: "100%",
+    flexShrink: 0,
     overflowX: "hidden",
     overflowY: "auto",
     scrollbarGutter: "stable",
@@ -42,6 +44,123 @@ export const useStyles = makeStyles({
     "&[data-scroll-bottom='false']": {
       "--sidebar-mask-bottom": "24px",
     },
+  },
+  /* ─── "All Notes" drill-in view ─── */
+  bodyArea: {
+    flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
+  },
+  viewTrack: {
+    display: "flex",
+    width: "200%",
+    height: "100%",
+    transform: "translateX(0)",
+    transitionProperty: "transform",
+    transitionDuration: "0.24s",
+    transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+  },
+  viewTrackShifted: {
+    transform: "translateX(-50%)",
+  },
+  allNotesPane: {
+    width: "50%",
+    height: "100%",
+    flexShrink: 0,
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+  },
+  allNotesHeader: {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    width: "100%",
+    justifyContent: "flex-start",
+    textAlign: "left",
+    border: "none",
+    borderRadius: "6px",
+    fontSize: "13px",
+    fontWeight: 600,
+    gap: "2px",
+    minHeight: "36px",
+    marginBottom: "2px",
+    paddingLeft: "8px",
+    paddingRight: "8px",
+  },
+  allNotesHeaderLabel: {
+    flex: 1,
+    textAlign: "left",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  allNotesScroll: {
+    flex: 1,
+    minHeight: 0,
+    overflowX: "hidden",
+    overflowY: "auto",
+    scrollbarGutter: "stable",
+    paddingLeft: LIST_SIDE_PADDING,
+    paddingRight: LIST_SIDE_PADDING,
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    "--sidebar-mask-top": "0px",
+    "--sidebar-mask-bottom": "0px",
+    maskImage: "linear-gradient(to bottom, transparent, black var(--sidebar-mask-top), black calc(100% - var(--sidebar-mask-bottom)), transparent)",
+    transitionProperty: "--sidebar-mask-top, --sidebar-mask-bottom",
+    transitionDuration: "0.3s",
+    transitionTimingFunction: "ease",
+    "&[data-scroll-top='false']": {
+      "--sidebar-mask-top": "24px",
+    },
+    "&[data-scroll-bottom='false']": {
+      "--sidebar-mask-bottom": "24px",
+    },
+  },
+  // Icon/text aligned with `newDocItem`: that button sits in `sidebarFixed`
+  // (6px pad) with 8px paddingLeft → icon at 14px. This one sits in `body`
+  // (8px pad), so 6px paddingLeft + matching 8px gap lands the icon/text at
+  // the same x.
+  allNotesEntry: {
+    display: "flex",
+    alignItems: "center",
+    width: "100%",
+    justifyContent: "flex-start",
+    textAlign: "left",
+    border: "none",
+    borderRadius: "6px",
+    fontSize: "13px",
+    gap: "8px",
+    minHeight: "32px",
+    paddingLeft: "6px",
+    paddingRight: "6px",
+    fontWeight: 500,
+    marginBottom: "8px",
+    flexShrink: 0,
+  },
+  allNotesEntryName: {
+    flex: 1,
+    textAlign: "left",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  allNotesEntryCount: {
+    fontSize: "11px",
+    fontWeight: 500,
+    color: tokens.colorNeutralForeground3,
+    opacity: 0.8,
+    flexShrink: 0,
+  },
+  allNotesEntryChevron: {
+    display: "flex",
+    alignItems: "center",
+    color: tokens.colorNeutralForeground3,
+    flexShrink: 0,
+    // Optical alignment: nudge the chevron down 0.5px to sit level with the label.
+    transform: "translateY(0.5px)",
   },
   docItemWrapper: {
     position: "relative",
@@ -68,11 +187,32 @@ export const useStyles = makeStyles({
     pointerEvents: "none" as const,
     overflow: "hidden",
   },
-  groupChildExpand: {
-    animationName: "groupChildExpand",
-    animationDuration: "0.28s",
-    animationTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
-    animationFillMode: "backwards",
+  // Per-group note container. The whole block of a group's notes slides as a
+  // single unit via the CSS Grid `1fr` ↔ `0fr` row trick (same technique as
+  // `groupsSection` below) — one smooth layout animation instead of one
+  // max-height animation per note. The wrapper is always mounted per group so
+  // the transition fires reliably on the `groupNotesSlideCollapsed` class flip.
+  groupNotesSlide: {
+    display: "grid",
+    gridTemplateRows: "1fr",
+    marginTop: "0px",
+    transitionProperty: "grid-template-rows, opacity, margin-top",
+    transitionDuration: "0.28s",
+    transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
+  },
+  groupNotesSlideCollapsed: {
+    gridTemplateRows: "0fr",
+    opacity: 0,
+    // Cancels the parent's `gap: 2px` so a collapsed (0-height) wrapper does
+    // not leave a doubled 4px gap between adjacent group headers.
+    marginTop: "-2px",
+  },
+  groupNotesSlideInner: {
+    overflow: "hidden",
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
   },
   groupCollapseOut: {
     animationName: "groupCollapseOut",
@@ -198,6 +338,13 @@ export const useStyles = makeStyles({
   },
   groupsSectionInner: {
     overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+  },
+  // Mirror `groupsSectionInner` so the label→list gap and row spacing match
+  // the groups section.
+  notesSection: {
     display: "flex",
     flexDirection: "column",
     gap: "2px",
@@ -360,6 +507,53 @@ export const useStyles = makeStyles({
     boxShadow: tokens.shadow16,
     padding: "4px",
     minWidth: "140px",
+  },
+  /* ─── Color swatches (context menu rows + filter popover) ─── */
+  colorRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    flexWrap: "wrap",
+    padding: "6px 8px",
+  },
+  colorSwatch: {
+    width: "18px",
+    height: "18px",
+    flexShrink: 0,
+    padding: 0,
+    borderRadius: "50%",
+    // Subtle ring so light swatches stay visible on the menu background.
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    outline: "none",
+    transitionProperty: "transform",
+    transitionDuration: "0.1s",
+    ":hover": {
+      transform: "scale(1.18)",
+    },
+  },
+  colorSwatchSelected: {
+    outline: `2px solid ${tokens.colorNeutralForeground1}`,
+    outlineOffset: "1px",
+  },
+  colorSwatchNone: {
+    backgroundColor: "transparent",
+    color: tokens.colorNeutralForeground3,
+    fontSize: "13px",
+  },
+  filterPopover: {
+    position: "fixed",
+    zIndex: 1000,
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: "8px",
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    boxShadow: tokens.shadow16,
+    padding: "4px",
+    display: "flex",
+    flexDirection: "column",
   },
   confirmOverlay: {
     position: "fixed",

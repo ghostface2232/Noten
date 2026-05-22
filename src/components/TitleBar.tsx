@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Button, makeStyles, tokens } from "@fluentui/react-components";
 import {
   Dismiss20Regular,
@@ -168,7 +169,7 @@ interface TitleBarProps {
   onExportRtf: () => void;
 }
 
-export function TitleBar({
+function TitleBarImpl({
   isDark,
   locale,
   editor,
@@ -238,3 +239,7 @@ export function TitleBar({
     </div>
   );
 }
+
+// Memoized so unrelated App state changes (e.g. a sidebar group toggle) don't
+// re-render the title bar. All props are primitives or stable callbacks.
+export const TitleBar = memo(TitleBarImpl);

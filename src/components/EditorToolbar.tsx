@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { memo, useEffect, useRef, useState, useCallback } from "react";
 import {
   Button,
   Tooltip,
@@ -164,7 +164,7 @@ interface EditorToolbarProps {
   onOpenGoToLine: () => void;
 }
 
-export function EditorToolbar({
+function EditorToolbarImpl({
   editor,
   sidebarOpen,
   hidden,
@@ -400,3 +400,8 @@ export function EditorToolbar({
     </div>
   );
 }
+
+// Memoized so unrelated App state changes (e.g. a sidebar group toggle) don't
+// re-render the toolbar. It still re-renders on its own editor `transaction`
+// subscription; memo only blocks parent-driven renders with unchanged props.
+export const EditorToolbar = memo(EditorToolbarImpl);

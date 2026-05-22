@@ -10,14 +10,18 @@ import {
   FolderAddRegular,
   FolderArrowRightRegular,
   FolderRegular,
+  PinOffRegular,
+  PinRegular,
   RenameRegular,
   WindowNewRegular,
 } from "@fluentui/react-icons";
 import { t } from "../i18n";
 import type { NoteDoc, NoteGroup } from "../hooks/useNotesLoader";
 import type { Locale } from "../hooks/useSettings";
+import type { NoteColorId } from "../utils/noteColors";
 import { openNewWindow } from "../utils/newWindow";
 import { clampMenuToViewport } from "../utils/clampMenuPosition";
+import { ColorSwatchRow } from "./NoteColorPicker";
 import { useStyles } from "./Sidebar.styles";
 
 /* FolderAddRegular의 + 를 − 로 바꾼 커스텀 아이콘 */
@@ -47,6 +51,9 @@ interface SidebarContextMenusProps {
   onDeleteNote: (index: number) => void;
   onDuplicateNote: (index: number) => void;
   onExportNote: (index: number) => void;
+  onToggleNotePinned: (index: number) => void;
+  onSetNoteColor: (index: number, color: NoteColorId | null) => void;
+  onSetNotesColor: (noteIds: string[], color: NoteColorId | null) => void;
   onImportFile: () => void;
   onCreateGroup: (name: string, initialNoteIds?: string[]) => string;
   onDeleteGroup: (groupId: string) => void;
@@ -76,6 +83,9 @@ export function SidebarContextMenus({
   onDeleteNote,
   onDuplicateNote,
   onExportNote,
+  onToggleNotePinned,
+  onSetNoteColor,
+  onSetNotesColor,
   onImportFile,
   onCreateGroup,
   onDeleteGroup,
@@ -235,6 +245,15 @@ export function SidebarContextMenus({
           {/* Select-mode bulk actions (right-click) */}
           {contextMenu.type === "empty" && contextMenu.index === -3 && (
             <>
+              <ColorSwatchRow
+                value={null}
+                onSelect={(c) => {
+                  onSetNotesColor(Array.from(selectedNoteIds), c);
+                  onSelectModeChange(false);
+                  closeContextMenu();
+                }}
+                locale={locale}
+              />
               {groups.length > 0 && (
                 <div
                   ref={submenuParentRef}
@@ -327,6 +346,20 @@ export function SidebarContextMenus({
 
           {contextMenu.type === "note" && (
             <>
+              <ColorSwatchRow
+                value={docs[contextMenu.index]?.color ?? null}
+                onSelect={(c) => { onSetNoteColor(contextMenu.index, c); closeContextMenu(); }}
+                locale={locale}
+              />
+              <Button
+                appearance="subtle"
+                icon={docs[contextMenu.index]?.pinned ? <PinOffRegular /> : <PinRegular />}
+                className={styles.contextMenuItem}
+                onClick={() => { onToggleNotePinned(contextMenu.index); closeContextMenu(); }}
+                size="small"
+              >
+                {docs[contextMenu.index]?.pinned ? i("sidebar.unpin") : i("sidebar.pin")}<span className={styles.shortcutHint}>Ctrl+Alt+P</span>
+              </Button>
               <Button
                 appearance="subtle"
                 icon={<RenameRegular />}

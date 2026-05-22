@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { appDataDir } from "@tauri-apps/api/path";
 import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { isNoteColorId, type NoteColorId } from "../utils/noteColors";
 
 export type Locale = "en" | "ko";
 export type ThemeMode = "light" | "dark" | "system";
@@ -21,6 +22,8 @@ export interface Settings {
   groupLayout: GroupLayout;
   fontFamily: FontFamily;
   notesDirectory: string;
+  /** Active sidebar color filter — only notes of this color are shown. */
+  colorFilter: NoteColorId | null;
 }
 
 const DEFAULTS: Settings = {
@@ -34,6 +37,7 @@ const DEFAULTS: Settings = {
   groupLayout: "groups-first",
   fontFamily: "sans",
   notesDirectory: "",
+  colorFilter: null,
 };
 
 let settingsPathPromise: Promise<string> | null = null;
@@ -86,6 +90,7 @@ function parseSettings(raw: string | null): Settings {
       groupLayout: parsed.groupLayout === "mixed" ? "mixed" : DEFAULTS.groupLayout,
       fontFamily: parsed.fontFamily === "serif" ? "serif" : DEFAULTS.fontFamily,
       notesDirectory: typeof parsed.notesDirectory === "string" ? parsed.notesDirectory : DEFAULTS.notesDirectory,
+      colorFilter: isNoteColorId(parsed.colorFilter) ? parsed.colorFilter : DEFAULTS.colorFilter,
     };
   } catch {
     return DEFAULTS;
@@ -112,6 +117,7 @@ export function useSettings() {
   const [settings, setSettingsRaw] = useState<Settings>(DEFAULTS);
   const [isLoaded, setIsLoaded] = useState(false);
   const didUserUpdateRef = useRef(false);
+  const settingsRef = useRef<Settings>(DEFAULTS);
 
   useEffect(() => {
     let cancelled = false;
@@ -120,6 +126,7 @@ export function useSettings() {
       const fileSettings = await loadSettingsFromFile();
       if (fileSettings) {
         if (!cancelled && !didUserUpdateRef.current) {
+          settingsRef.current = fileSettings;
           setSettingsRaw(fileSettings);
         }
         if (!cancelled) setIsLoaded(true);
@@ -139,16 +146,18 @@ export function useSettings() {
     };
   }, []);
 
-  const update = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
+  const update = useCallback(async <K extends keyof Settings>(key: K, value: Settings[K]): Promise<boolean> => {
     didUserUpdateRef.current = true;
-
-    setSettingsRaw((prev) => {
-      const next = { ...prev, [key]: value };
-      void persistSettings(next).catch(() => {
-        console.warn("Failed to persist settings update:", key);
-      });
-      return next;
-    });
+    const next = { ...settingsRef.current, [key]: value };
+    settingsRef.current = next;
+    setSettingsRaw(next);
+    try {
+      await persistSettings(next);
+      return true;
+    } catch {
+      console.warn("Failed to persist settings update:", key);
+      return false;
+    }
   }, []);
 
   return useMemo(() => ({ settings, update, isLoaded }), [settings, update, isLoaded]);

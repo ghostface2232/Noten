@@ -1,20 +1,24 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Fragment, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Button, Tooltip, tokens, mergeClasses } from "@fluentui/react-components";
 import {
+  ChevronLeftRegular,
   ChevronRightRegular,
   DeleteRegular,
   DismissRegular,
   DocumentAddRegular,
+  DocumentMultipleRegular,
   DocumentRegular,
   FolderAddRegular,
   FolderArrowRightRegular,
   MoreHorizontalRegular,
+  PinRegular,
   SettingsRegular,
 } from "@fluentui/react-icons";
 import { t } from "../i18n";
 import type { NoteDoc, NoteGroup } from "../hooks/useNotesLoader";
 import { stripMarkdownContent } from "../hooks/useNotesLoader";
 import type { Locale, NotesSortOrder } from "../hooks/useSettings";
+import { colorHex, type NoteColorId } from "../utils/noteColors";
 import { useSidebarDrag } from "../hooks/useSidebarDrag";
 import { useSidebarGroupDrag } from "../hooks/useSidebarGroupDrag";
 import { useSidebarAnimations } from "../hooks/useSidebarAnimations";
@@ -25,6 +29,33 @@ import type { ContextMenuState } from "./SidebarContextMenus";
 interface SearchSnippet { before: string; match: string; after: string }
 type MatchType = "title" | "body" | "both";
 const MATCH_TYPE_ORDER: Record<MatchType, number> = { both: 0, title: 1, body: 2 };
+
+function compareNotesForSidebar(a: NoteDoc, b: NoteDoc, order: NotesSortOrder, locale: Locale): number {
+  if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+
+  const desc = order.endsWith("-desc");
+  const byTitle = order.startsWith("title");
+  const byCreated = order.startsWith("created");
+  const dir = desc ? -1 : 1;
+
+  if (byTitle) {
+    const cmp = a.fileName.localeCompare(b.fileName, locale);
+    if (cmp !== 0) return cmp * dir;
+    return b.updatedAt - a.updatedAt;
+  }
+
+  const primary = byCreated
+    ? a.createdAt - b.createdAt
+    : a.updatedAt - b.updatedAt;
+  if (primary !== 0) return primary * dir;
+
+  const secondary = byCreated
+    ? a.updatedAt - b.updatedAt
+    : a.createdAt - b.createdAt;
+  if (secondary !== 0) return secondary * dir;
+
+  return a.fileName.localeCompare(b.fileName, locale);
+}
 
 function extractSnippet(text: string, query: string, windowSize = 80): SearchSnippet | null {
   const lowerText = text.toLowerCase();
@@ -78,6 +109,9 @@ interface SidebarProps {
   onDuplicateNote: (index: number) => void;
   onExportNote: (index: number) => void;
   onRenameNote: (index: number, newName: string) => void;
+  onToggleNotePinned: (index: number) => void;
+  onSetNoteColor: (index: number, color: NoteColorId | null) => void;
+  onSetNotesColor: (noteIds: string[], color: NoteColorId | null) => void;
   onImportFile: () => void;
   notesSortOrder: NotesSortOrder;
   locale: Locale;
@@ -106,6 +140,8 @@ interface SidebarProps {
   onPendingRenameGroupIdClear: () => void;
   updateAvailable: boolean;
   isDarkMode: boolean;
+  /** Active color filter — when set, the sidebar shows only matching notes. */
+  colorFilter: NoteColorId | null;
 }
 
 export function Sidebar({
@@ -118,6 +154,9 @@ export function Sidebar({
   onDuplicateNote,
   onExportNote,
   onRenameNote,
+  onToggleNotePinned,
+  onSetNoteColor,
+  onSetNotesColor,
   onImportFile,
   notesSortOrder,
   locale,
@@ -144,9 +183,12 @@ export function Sidebar({
   onPendingRenameGroupIdClear,
   updateAvailable,
   isDarkMode,
+  colorFilter,
 }: SidebarProps) {
   const styles = useStyles();
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
+
+  const colorFilterActive = colorFilter != null;
 
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
@@ -156,10 +198,15 @@ export function Sidebar({
   const [editingGroupValue, setEditingGroupValue] = useState("");
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
+  // "All Notes" drill-in view: when true, the body slides to a flat list of
+  // every note (groups ignored, pinned first).
+  const [inAllNotes, setInAllNotes] = useState(false);
 
   const sidebarBodyRef = useRef<HTMLDivElement>(null);
   const [scrollAtTop, setScrollAtTop] = useState(true);
   const [scrollAtBottom, setScrollAtBottom] = useState(true);
+  const [allScrollTop, setAllScrollTop] = useState(true);
+  const [allScrollBottom, setAllScrollBottom] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
   const groupInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -178,7 +225,7 @@ export function Sidebar({
     selectMode,
     editingIndex,
     editingGroupId,
-    searchActive: !!sidebarSearchQuery,
+    searchActive: !!sidebarSearchQuery || colorFilterActive,
     sidebarBodyRef,
     onAddNoteToGroup,
     onMoveNotesToGroup,
@@ -188,7 +235,7 @@ export function Sidebar({
 
   const { handleGroupDragPointerDown, isDraggingGroup } = useSidebarGroupDrag({
     groups,
-    searchActive: !!sidebarSearchQuery,
+    searchActive: !!sidebarSearchQuery || colorFilterActive,
     editingIndex,
     editingGroupId,
     sidebarBodyRef,
@@ -205,7 +252,7 @@ export function Sidebar({
 
   const {
     newDocIds, slideUpFromIndex, exitingDoc,
-    expandedGroupIds, collapsingGroupIds, removingGroupIds, newGroupIds,
+    collapsingGroupIds, removingGroupIds, newGroupIds,
     animateGroupRemoval,
   } = useSidebarAnimations({ docs, groups });
 
@@ -251,16 +298,19 @@ export function Sidebar({
     return cache;
   }, [docs]);
 
-  // Filter docs by search query (title + body)
+  // Filter docs by color label (if a filter is active) then by search query.
   const filteredDocs = useMemo(() => {
+    const colorOk = (doc: NoteDoc) => !colorFilter || doc.color === colorFilter;
     if (!debouncedQuery) return docs.map((doc, index) => ({
       doc, originalIndex: index, matchType: "title" as MatchType, snippet: null as SearchSnippet | null,
-    }));
+    })).filter(({ doc }) => colorOk(doc))
+      .sort((a, b) => compareNotesForSidebar(a.doc, b.doc, notesSortOrder, locale));
     const q = debouncedQuery.toLowerCase();
     const results: { doc: NoteDoc; originalIndex: number; matchType: MatchType; snippet: SearchSnippet | null }[] = [];
 
     for (let i = 0; i < docs.length; i++) {
       const doc = docs[i];
+      if (!colorOk(doc)) continue;
       const titleMatch = doc.fileName.toLowerCase().includes(q);
       const stripped = strippedContentMap.get(doc.id)?.stripped ?? "";
       const bodyMatch = stripped.toLowerCase().includes(q);
@@ -271,9 +321,14 @@ export function Sidebar({
       results.push({ doc, originalIndex: i, matchType, snippet });
     }
 
-    results.sort((a, b) => MATCH_TYPE_ORDER[a.matchType] - MATCH_TYPE_ORDER[b.matchType]);
+    results.sort((a, b) => {
+      if (!!a.doc.pinned !== !!b.doc.pinned) return a.doc.pinned ? -1 : 1;
+      const matchDiff = MATCH_TYPE_ORDER[a.matchType] - MATCH_TYPE_ORDER[b.matchType];
+      if (matchDiff !== 0) return matchDiff;
+      return compareNotesForSidebar(a.doc, b.doc, notesSortOrder, locale);
+    });
     return results;
-  }, [docs, debouncedQuery, strippedContentMap]);
+  }, [docs, debouncedQuery, strippedContentMap, notesSortOrder, locale, colorFilter]);
 
   // Focus the rename input when editing starts
   useEffect(() => {
@@ -392,6 +447,13 @@ export function Sidebar({
       // Skip if last click was not inside the sidebar
       if (!sidebarActiveRef.current) return;
 
+      // Escape leaves the "All Notes" drill-in view.
+      if (e.key === "Escape" && inAllNotes) {
+        e.preventDefault();
+        setInAllNotes(false);
+        return;
+      }
+
       const ctrl = e.ctrlKey || e.metaKey;
       if (ctrl && e.key === "d") {
         e.preventDefault();
@@ -402,6 +464,9 @@ export function Sidebar({
       } else if ((ctrl && e.key === "r") || e.key === "F2") {
         e.preventDefault();
         handleDoubleClick(activeIndex);
+      } else if (ctrl && e.altKey && e.key === "p") {
+        e.preventDefault();
+        onToggleNotePinned(activeIndex);
       } else if (ctrl && e.altKey && e.key === "c") {
         e.preventDefault();
         const content = getDocumentContent(activeIndex);
@@ -413,7 +478,7 @@ export function Sidebar({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeIndex, editingIndex, editingGroupId, getDocumentContent, onDuplicateNote, onExportNote, onDeleteNote, handleDoubleClick]);
+  }, [activeIndex, editingIndex, editingGroupId, getDocumentContent, onDuplicateNote, onExportNote, onToggleNotePinned, onDeleteNote, handleDoubleClick, inAllNotes]);
 
   const toggleNoteSelection = useCallback((noteId: string) => {
     setSelectedNoteIds((prev) => {
@@ -431,60 +496,50 @@ export function Sidebar({
   /* ─── Render helpers ─── */
 
   const isSearching = !!debouncedQuery;
+  // A color filter renders the same flat list as search (groups are flattened).
+  const flatListMode = isSearching || colorFilterActive;
 
-  // Compute render items: when not searching, organize by groups
+  // Flat note rows: ungrouped notes (root view) and search results. Grouped
+  // notes are carried by `GroupRender` below, not here.
   type RenderItem =
-    | { kind: "note"; doc: NoteDoc; originalIndex: number; indented: boolean; matchType?: MatchType; snippet?: SearchSnippet | null }
-    | { kind: "group"; group: NoteGroup }
+    { kind: "note"; doc: NoteDoc; originalIndex: number; indented: boolean; matchType?: MatchType; snippet?: SearchSnippet | null }
 
-  const { groupItems, noteItems } = useMemo(() => {
-    if (isSearching) {
+  // Each group renders as a header plus a single sliding container holding its
+  // (sorted) notes — see the JSX below. `notes` is empty while the group is
+  // collapsed and not mid-collapse.
+  type GroupRender = { group: NoteGroup; notes: { doc: NoteDoc; originalIndex: number }[] };
+
+  const { groupRenderList, noteItems } = useMemo(() => {
+    if (flatListMode) {
       return {
-        groupItems: [] as RenderItem[],
+        groupRenderList: [] as GroupRender[],
         noteItems: filteredDocs.map(({ doc, originalIndex, matchType, snippet }) => ({
           kind: "note" as const, doc, originalIndex, indented: false, matchType, snippet,
-        })),
+        })) as RenderItem[],
       };
     }
 
     const docsMap = new Map(docs.map((d, i) => [d.id, { doc: d, originalIndex: i }]));
-    const gItems: RenderItem[] = [];
+    const gList: GroupRender[] = [];
     const nItems: RenderItem[] = [];
 
-    const desc = notesSortOrder.endsWith("-desc");
-    const byTitle = notesSortOrder.startsWith("title");
-    const byCreated = notesSortOrder.startsWith("created");
-    const dir = desc ? -1 : 1;
-
     const sortGroupNotes = (entries: { doc: NoteDoc; originalIndex: number }[]) => {
-      return [...entries].sort((a, b) => {
-        if (byTitle) {
-          const cmp = a.doc.fileName.localeCompare(b.doc.fileName, locale);
-          if (cmp !== 0) return cmp * dir;
-          return (b.doc.updatedAt - a.doc.updatedAt);
-        }
-        const primary = byCreated
-          ? a.doc.createdAt - b.doc.createdAt
-          : a.doc.updatedAt - b.doc.updatedAt;
-        if (primary !== 0) return primary * dir;
-        return a.doc.fileName.localeCompare(b.doc.fileName, locale);
-      });
+      return [...entries].sort((a, b) => compareNotesForSidebar(a.doc, b.doc, notesSortOrder, locale));
     };
 
     for (const group of groups) {
-      gItems.push({ kind: "group", group });
-      // Keep notes mounted during a collapse animation so they can fade out.
+      // Keep notes mounted during a collapse so the block can slide out.
       const showNotes = !group.collapsed || collapsingGroupIds.has(group.id);
+      let notes: { doc: NoteDoc; originalIndex: number }[] = [];
       if (showNotes) {
         const entries: { doc: NoteDoc; originalIndex: number }[] = [];
         for (const noteId of group.noteIds) {
           const entry = docsMap.get(noteId);
           if (entry) entries.push(entry);
         }
-        for (const entry of sortGroupNotes(entries)) {
-          gItems.push({ kind: "note", doc: entry.doc, originalIndex: entry.originalIndex, indented: true });
-        }
+        notes = sortGroupNotes(entries);
       }
+      gList.push({ group, notes });
     }
 
     const ungrouped = filteredDocs.filter(({ doc }) => !groupedNoteIds.has(doc.id));
@@ -492,50 +547,42 @@ export function Sidebar({
       nItems.push({ kind: "note", doc, originalIndex, indented: false });
     }
 
-    return { groupItems: gItems, noteItems: nItems };
-  }, [isSearching, filteredDocs, docs, groups, groupedNoteIds, notesSortOrder, locale, collapsingGroupIds]);
+    return { groupRenderList: gList, noteItems: nItems };
+  }, [flatListMode, filteredDocs, docs, groups, groupedNoteIds, notesSortOrder, locale, collapsingGroupIds]);
 
-  const renderNoteItem = (doc: NoteDoc, originalIndex: number, indented: boolean, snippet?: SearchSnippet | null, searchIndex?: number) => {
+  const renderNoteItem = (
+    doc: NoteDoc,
+    originalIndex: number,
+    indented: boolean,
+    opts: { snippet?: SearchSnippet | null; searchIndex?: number; noDrag?: boolean; paneActive?: boolean; groupId?: string } = {},
+  ) => {
+    const { snippet = null, searchIndex, noDrag = false, paneActive = true, groupId } = opts;
     const isSelected = selectedNoteIds.has(doc.id);
     const isHovered = hoveredIndex === originalIndex;
     const isContextTarget = contextMenu?.type === "note" && contextMenu.index === originalIndex;
 
-    // Check if this note's group just expanded or is collapsing
-    const noteGroup = indented ? getGroupForNote(doc.id) : null;
-    const isInExpandingGroup = noteGroup ? expandedGroupIds.has(noteGroup.id) : false;
-    const isInCollapsingGroup = noteGroup ? collapsingGroupIds.has(noteGroup.id) : false;
-    const isInRemovingGroup = removingGroupIds.has(doc.id);
-    const groupNoteIdx = noteGroup ? noteGroup.noteIds.indexOf(doc.id) : -1;
-    const expandStagger = isInExpandingGroup && groupNoteIdx >= 0
-      ? groupNoteIdx * 0.03
-      : 0;
-    // Reverse stagger so the bottom-most note disappears first — mirrors the
-    // expand motion (top-to-bottom) in time.
-    const collapseStagger = isInCollapsingGroup && noteGroup && groupNoteIdx >= 0
-      ? (noteGroup.noteIds.length - 1 - groupNoteIdx) * 0.03
-      : 0;
-    const animationDelay = expandStagger + collapseStagger;
+    // `groupId` (the owning group, passed in by the caller) only feeds the
+    // `data-group-id` attribute that drag hit-testing reads. Expand/collapse
+    // motion is handled by the group's sliding container, not per note.
 
     return (
       <div
         key={doc.id}
         data-doc-item
         data-note-id={doc.id}
-        data-group-id={noteGroup?.id}
+        data-group-id={groupId}
         className={mergeClasses(
           styles.docItemWrapper,
           newDocIds.has(doc.id) && styles.docItemNew,
           slideUpFromIndex >= 0 && originalIndex >= slideUpFromIndex && styles.docItemSlideUp,
-          isInExpandingGroup && styles.groupChildExpand,
-          (isInCollapsingGroup || isInRemovingGroup) && styles.groupCollapseOut,
           isSearching && searchIndex !== undefined && styles.searchResultFadeIn,
         )}
         style={
           isSearching && searchIndex !== undefined
             ? { animationDelay: `${searchIndex * 0.03}s` }
-            : animationDelay > 0 ? { animationDelay: `${animationDelay}s` } : undefined
+            : undefined
         }
-        onPointerDown={(e) => handleDragPointerDown(e, doc.id)}
+        onPointerDown={noDrag ? undefined : (e) => handleDragPointerDown(e, doc.id)}
         onMouseEnter={() => setHoveredIndex(originalIndex)}
         onMouseLeave={() => setHoveredIndex(null)}
         onContextMenu={(e) => {
@@ -564,10 +611,10 @@ export function Sidebar({
             <path d="M1.5 5.5L4 8L8.5 2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
-        {editingIndex === originalIndex ? (
+        {editingIndex === originalIndex && paneActive ? (
           <Button
             appearance="subtle"
-            icon={<DocumentRegular />}
+            icon={<span style={{ display: "flex", color: colorHex(doc.color) }}>{doc.pinned ? <PinRegular /> : <DocumentRegular />}</span>}
             className={mergeClasses(
               originalIndex === activeIndex ? styles.docItemActive : styles.docItem,
               indented && !selectMode && styles.docItemIndented,
@@ -592,7 +639,7 @@ export function Sidebar({
           <>
             <Button
               appearance="subtle"
-              icon={<DocumentRegular />}
+              icon={<span style={{ display: "flex", color: colorHex(doc.color) }}>{doc.pinned ? <PinRegular /> : <DocumentRegular />}</span>}
               className={mergeClasses(
                 originalIndex === activeIndex ? styles.docItemActive : styles.docItem,
                 indented && !selectMode && styles.docItemIndented,
@@ -801,74 +848,152 @@ export function Sidebar({
         </Button>
       </div>
 
-      <div
-        ref={sidebarBodyRef}
-        className={styles.body}
-        data-sidebar-body
-        data-scroll-top={scrollAtTop ? "true" : "false"}
-        data-scroll-bottom={scrollAtBottom ? "true" : "false"}
-        onScroll={(e) => {
-          const el = e.target as HTMLElement;
-          setScrollAtTop(el.scrollTop <= 0);
-          setScrollAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 1);
-        }}
-        onContextMenu={(e) => {
-          if ((e.target as HTMLElement).closest("[data-doc-item]")) return;
-          if ((e.target as HTMLElement).closest("[data-group-item]")) return;
-          e.preventDefault();
-          e.stopPropagation();
-          setContextMenu({ type: "empty", index: -1, x: e.clientX, y: e.clientY });
-        }}
-      >
-        {groupItems.length === 0 && noteItems.length === 0 && !exitingDoc ? (
-          <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : sidebarSearchQuery ? "" : i("sidebar.empty")}</span>
-        ) : (
-          <>
-            {/* Groups section */}
-            {!isSearching && (
-              <div
-                data-groups-section
-                className={mergeClasses(styles.groupsSection, groups.length === 0 && styles.groupsSectionHidden)}
+      <div className={styles.bodyArea}>
+        <div className={mergeClasses(styles.viewTrack, inAllNotes && styles.viewTrackShifted)}>
+          {/* ── Pane 1: groups + ungrouped notes (root view) ── */}
+          <div
+            ref={sidebarBodyRef}
+            className={styles.body}
+            data-sidebar-body
+            inert={inAllNotes}
+            data-scroll-top={scrollAtTop ? "true" : "false"}
+            data-scroll-bottom={scrollAtBottom ? "true" : "false"}
+            onScroll={(e) => {
+              const el = e.target as HTMLElement;
+              setScrollAtTop(el.scrollTop <= 0);
+              setScrollAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 1);
+            }}
+            onContextMenu={(e) => {
+              if ((e.target as HTMLElement).closest("[data-doc-item]")) return;
+              if ((e.target as HTMLElement).closest("[data-group-item]")) return;
+              e.preventDefault();
+              e.stopPropagation();
+              setContextMenu({ type: "empty", index: -1, x: e.clientX, y: e.clientY });
+            }}
+          >
+            {!flatListMode && docs.length > 0 && groups.length > 0 && (
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<DocumentMultipleRegular />}
+                className={styles.allNotesEntry}
+                onClick={() => setInAllNotes(true)}
               >
-                <div className={styles.groupsSectionInner}>
-                  <span className={styles.sectionLabel}>{i("sidebar.groupsLabel")}</span>
-                  {groupItems.map((item) => {
-                    if (item.kind === "group") return renderGroupHeader(item.group);
-                    return renderNoteItem(item.doc, item.originalIndex, item.indented);
-                  })}
-                </div>
-              </div>
+                <span className={styles.allNotesEntryName}>{i("sidebar.allNotes")}</span>
+                <span className={styles.allNotesEntryCount}>{docs.length}</span>
+                <ChevronRightRegular fontSize={14} className={styles.allNotesEntryChevron} />
+              </Button>
             )}
-
-            {/* Notes section */}
-            <div data-notes-section>
-              {!isSearching && (noteItems.length > 0 || exitingDoc) && (
-                <span className={styles.sectionLabel}>{i("sidebar.notesLabel")}</span>
-              )}
-              {exitingDoc && exitingDoc.index === 0 && (
-                <div key={`exit-${exitingDoc.doc.id}`} className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}>
-                  <div className={styles.docItem} style={{ opacity: 0.5 }}>
-                    <span className={styles.docName}>{exitingDoc.doc.fileName}</span>
+            {groupRenderList.length === 0 && noteItems.length === 0 && !exitingDoc ? (
+              <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : sidebarSearchQuery ? "" : colorFilterActive ? i("sidebar.colorFilterEmpty") : i("sidebar.empty")}</span>
+            ) : (
+              <>
+                {/* Groups section */}
+                {!flatListMode && (
+                  <div
+                    data-groups-section
+                    className={mergeClasses(styles.groupsSection, groups.length === 0 && styles.groupsSectionHidden)}
+                  >
+                    <div className={styles.groupsSectionInner}>
+                      <span className={styles.sectionLabel}>{i("sidebar.groupsLabel")}</span>
+                      {groupRenderList.map(({ group, notes }) => {
+                        // The whole note block slides as one unit via the grid
+                        // `1fr`/`0fr` trick — collapsed groups (and groups being
+                        // removed) clip their container to zero height.
+                        const collapsed = group.collapsed || removingGroupIds.has(group.id);
+                        return (
+                          <Fragment key={`grp-${group.id}`}>
+                            {renderGroupHeader(group)}
+                            <div
+                              className={mergeClasses(
+                                styles.groupNotesSlide,
+                                collapsed && styles.groupNotesSlideCollapsed,
+                              )}
+                            >
+                              <div className={styles.groupNotesSlideInner}>
+                                {notes.map(({ doc, originalIndex }) =>
+                                  renderNoteItem(doc, originalIndex, true, { paneActive: !inAllNotes, groupId: group.id }))}
+                              </div>
+                            </div>
+                          </Fragment>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              )}
-              {noteItems.map((item, idx) => {
-                if (item.kind !== "note") return null;
-                const elements = [renderNoteItem(item.doc, item.originalIndex, item.indented, item.snippet, isSearching ? idx : undefined)];
-                if (exitingDoc && exitingDoc.index === idx + 1) {
-                  elements.unshift(
+                )}
+
+                {/* Notes section */}
+                <div data-notes-section className={styles.notesSection}>
+                  {!flatListMode && (noteItems.length > 0 || exitingDoc) && (
+                    <span className={styles.sectionLabel}>{i("sidebar.notesLabel")}</span>
+                  )}
+                  {exitingDoc && exitingDoc.index === 0 && (
                     <div key={`exit-${exitingDoc.doc.id}`} className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}>
                       <div className={styles.docItem} style={{ opacity: 0.5 }}>
                         <span className={styles.docName}>{exitingDoc.doc.fileName}</span>
                       </div>
                     </div>
-                  );
-                }
-                return elements;
-              })}
+                  )}
+                  {noteItems.map((item, idx) => {
+                    const elements = [renderNoteItem(item.doc, item.originalIndex, item.indented, { snippet: item.snippet, searchIndex: isSearching ? idx : undefined, paneActive: !inAllNotes })];
+                    if (exitingDoc && exitingDoc.index === idx + 1) {
+                      elements.unshift(
+                        <div key={`exit-${exitingDoc.doc.id}`} className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}>
+                          <div className={styles.docItem} style={{ opacity: 0.5 }}>
+                            <span className={styles.docName}>{exitingDoc.doc.fileName}</span>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return elements;
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* ── Pane 2: flat list of every note ── */}
+          <div className={styles.allNotesPane} inert={!inAllNotes}>
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<ChevronLeftRegular />}
+              className={styles.allNotesHeader}
+              onClick={() => setInAllNotes(false)}
+            >
+              <span className={styles.allNotesHeaderLabel}>{i("sidebar.allNotes")}</span>
+            </Button>
+            <div
+              className={styles.allNotesScroll}
+              data-scroll-top={allScrollTop ? "true" : "false"}
+              data-scroll-bottom={allScrollBottom ? "true" : "false"}
+              onScroll={(e) => {
+                const el = e.target as HTMLElement;
+                setAllScrollTop(el.scrollTop <= 0);
+                setAllScrollBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 1);
+              }}
+              onContextMenu={(e) => {
+                if ((e.target as HTMLElement).closest("[data-doc-item]")) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setContextMenu({ type: "empty", index: -1, x: e.clientX, y: e.clientY });
+              }}
+            >
+              {filteredDocs.length === 0 ? (
+                <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : colorFilterActive ? i("sidebar.colorFilterEmpty") : i("sidebar.empty")}</span>
+              ) : (
+                filteredDocs.map(({ doc, originalIndex, snippet }, idx) => (
+                  renderNoteItem(doc, originalIndex, false, {
+                    snippet,
+                    searchIndex: isSearching ? idx : undefined,
+                    noDrag: true,
+                    paneActive: inAllNotes,
+                  })
+                ))
+              )}
             </div>
-          </>
-        )}
+          </div>
+        </div>
       </div>
 
       {/* Multi-select toolbar */}
@@ -979,6 +1104,9 @@ export function Sidebar({
         onDeleteNote={onDeleteNote}
         onDuplicateNote={onDuplicateNote}
         onExportNote={onExportNote}
+        onToggleNotePinned={onToggleNotePinned}
+        onSetNoteColor={onSetNoteColor}
+        onSetNotesColor={onSetNotesColor}
         onImportFile={onImportFile}
         onCreateGroup={onCreateGroup}
         onDeleteGroup={onDeleteGroup}

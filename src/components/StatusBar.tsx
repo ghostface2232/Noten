@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { memo, useState, useEffect } from "react";
 import { makeStyles, tokens } from "@fluentui/react-components";
 import { t } from "../i18n";
 import type { Editor } from "@tiptap/react";
@@ -86,7 +86,7 @@ interface StatusBarProps {
   locale: Locale;
 }
 
-export function StatusBar({ editor, hidden, locale }: StatusBarProps) {
+function StatusBarImpl({ editor, hidden, locale }: StatusBarProps) {
   const styles = useStyles();
   const { charCount, lineCount, cursorRow } = useEditorStats(editor);
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
@@ -105,3 +105,7 @@ export function StatusBar({ editor, hidden, locale }: StatusBarProps) {
     </div>
   );
 }
+
+// Memoized so unrelated App state changes (e.g. a sidebar group toggle) don't
+// re-render the status bar. Cursor/char stats come from its own editor hook.
+export const StatusBar = memo(StatusBarImpl);

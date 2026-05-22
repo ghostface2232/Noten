@@ -6,10 +6,14 @@ import {
   mergeClasses,
   Button,
   Tooltip,
+  Dialog,
+  DialogSurface,
+  tokens,
 } from "@fluentui/react-components";
 import {
   FolderAddRegular,
   CheckboxCheckedRegular,
+  FilterRegular,
   PanelLeftFilled,
   PanelLeftRegular,
   SearchRegular,
@@ -20,7 +24,7 @@ import { getCurrentMarkdown, useFileSystem } from "./hooks/useFileSystem";
 import { saveManifest, sortNotes, useNotesLoader, getNotesDir, setNotesDir, resetNotesDir, setMigrationInProgress } from "./hooks/useNotesLoader";
 import { useAutoSave } from "./hooks/useAutoSave";
 import { useNoteGroups } from "./hooks/useNoteGroups";
-import { useSettings } from "./hooks/useSettings";
+import { useSettings, type ParagraphSpacing } from "./hooks/useSettings";
 
 import {
   TiptapEditor,
@@ -28,6 +32,8 @@ import {
 } from "./components/TiptapEditor";
 import { TitleBar } from "./components/TitleBar";
 import { Sidebar } from "./components/Sidebar";
+import { ColorSwatchRow } from "./components/NoteColorPicker";
+import { useStyles as useSidebarStyles } from "./components/Sidebar.styles";
 import { EditorToolbar } from "./components/EditorToolbar";
 import { StatusBar } from "./components/StatusBar";
 import { SettingsModal } from "./components/SettingsModal";
@@ -37,14 +43,16 @@ import { searchPluginKey, type SearchPluginState } from "./extensions/SearchHigh
 import { refreshWikiLinkDecorations } from "./extensions/WikiLink";
 import { t } from "./i18n";
 import { exportAsMarkdown, exportAsPdf, exportAsRtf } from "./utils/exportHandlers";
-import { migrateNotesDir, hasManifest } from "./utils/migrateNotesDir";
+import { clearManagedNotesData, hasExistingNotenData, migrateNotesDir } from "./utils/migrateNotesDir";
+import { colorHex } from "./utils/noteColors";
+import { clampMenuToViewport } from "./utils/clampMenuPosition";
 import { useFileWatcher } from "./hooks/useFileWatcher";
 import { useWindowSync } from "./hooks/useWindowSync";
 import { useChromeVisibility } from "./hooks/useChromeVisibility";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useDragDrop } from "./hooks/useDragDrop";
 import { useUpdater } from "./hooks/useUpdater";
-import { open as openDialog, confirm, ask, message } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, confirm, message } from "@tauri-apps/plugin-dialog";
 import { useStyles } from "./App.styles";
 import "./App.css";
 
@@ -58,6 +66,13 @@ const SIDEBAR_DEFAULT = 260;
 const EDITOR_MIN_WIDTH = 600;
 const WINDOW_MIN_HEIGHT = 620;
 const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
+
+type NotesDirConflictChoice = "merge" | "overwrite" | null;
+
+interface NotesDirConflictDialogState {
+  path: string;
+  resolve: (choice: NotesDirConflictChoice) => void;
+}
 
 function getSystemPrefersDark() {
   return typeof window !== "undefined"
@@ -135,6 +150,7 @@ function App() {
   const [docGoToLineOpen, setDocGoToLineOpen] = useState(false);
   const [sidebarSearchOpen, setSidebarSearchOpen] = useState(false);
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
+  const [notesDirConflict, setNotesDirConflict] = useState<NotesDirConflictDialogState | null>(null);
   const { settings, update: updateSetting, isLoaded: settingsLoaded } = useSettings();
   const updater = useUpdater();
   const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDark);
@@ -144,10 +160,24 @@ function App() {
   const locale = settings.locale;
   const state = useMarkdownState();
   const styles = useStyles();
+  const sidebarStyles = useSidebarStyles();
   const tiptapRef = useRef<TiptapEditorHandle>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const startupUpdateCheckStartedRef = useRef(false);
   const [tiptapEditor, setTiptapEditor] = useState<import("@tiptap/react").Editor | null>(null);
+
+  const requestNotesDirConflictChoice = useCallback((path: string) => (
+    new Promise<NotesDirConflictChoice>((resolve) => {
+      setNotesDirConflict({ path, resolve });
+    })
+  ), []);
+
+  const resolveNotesDirConflictChoice = useCallback((choice: NotesDirConflictChoice) => {
+    setNotesDirConflict((prev) => {
+      prev?.resolve(choice);
+      return null;
+    });
+  }, []);
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
@@ -194,6 +224,8 @@ function App() {
   // Refs for values read (but not triggering) in effects
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
+  const docsRef = useRef(docs);
+  docsRef.current = docs;
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
 
@@ -203,6 +235,9 @@ function App() {
   // Select 모드 & 그룹 생성 후 rename 트리거
   const [selectMode, setSelectMode] = useState(false);
   const [pendingRenameGroupId, setPendingRenameGroupId] = useState<string | null>(null);
+
+  // Color-filter popover (anchored under the sidebar filter button)
+  const [filterPopoverPos, setFilterPopoverPos] = useState<{ x: number; y: number } | null>(null);
 
   const initialLoaded = useRef(false);
   useEffect(() => {
@@ -293,7 +328,18 @@ function App() {
     state.setFilePath(doc.filePath);
     state.setIsDirty(false);
   }, [state]);
-  useWindowSync(setDocs, activeIndex, docs[activeIndex]?.id ?? null, tiptapRef, setActiveIndex, setGroups, setTrashedNotes, handleActiveDocChanged);
+  useWindowSync(
+    setDocs,
+    activeIndex,
+    docs[activeIndex]?.id ?? null,
+    tiptapRef,
+    setActiveIndex,
+    setGroups,
+    setTrashedNotes,
+    handleActiveDocChanged,
+    settings.notesSortOrder,
+    locale,
+  );
 
   // 파일 시스템 감시 (클라우드 동기화 등 외부 변경 감지)
   useFileWatcher(
@@ -432,6 +478,28 @@ function App() {
     return index === activeIndex ? state.getCachedMarkdown() : doc.content;
   }, [activeIndex, docs, state]);
 
+  // Stable handlers passed to the memoized TitleBar / EditorToolbar. Inline
+  // arrows would be new references each render and defeat their `memo`, so an
+  // unrelated state change (e.g. a sidebar group toggle) would still re-render
+  // the whole editor chrome — the cause of the perceived toggle delay.
+  const handleOpenSettings = useCallback(() => setSettingsOpen(true), []);
+
+  const handleUpdateParagraphSpacing = useCallback((v: ParagraphSpacing) => {
+    void updateSetting("paragraphSpacing", v);
+  }, [updateSetting]);
+
+  const handleOpenSearch = useCallback(() => {
+    setDocGoToLineOpen(false);
+    setDocSearchReplace(false);
+    setDocSearchOpen(true);
+  }, []);
+
+  const handleOpenGoToLine = useCallback(() => {
+    setDocSearchOpen(false);
+    setDocSearchReplace(false);
+    setDocGoToLineOpen(true);
+  }, []);
+
   // 노트 저장 위치 변경
   const handleChangeNotesDir = useCallback(async () => {
     const selected = await openDialog({ directory: true, multiple: false });
@@ -444,34 +512,65 @@ function App() {
     const normalize = (p: string) => p.replace(/[\\/]+$/, "").replace(/\\/g, "/");
     if (normalize(newDir) === normalize(oldDir)) return;
 
-    const ok = await confirm(t("settings.notesDirectory.confirmMove", locale));
-    if (!ok) return;
+    const destHasData = await hasExistingNotenData(newDir);
+    let action: "move" | "merge" | "overwrite-current" = "move";
 
-    let strategy: "merge" | "overwrite" = "overwrite";
-    const destHasManifest = await hasManifest(newDir);
-    if (destHasManifest) {
-      const merge = await ask(t("settings.notesDirectory.mergePrompt", locale), {
-        kind: "info",
-        okLabel: t("dialog.merge", locale),
-        cancelLabel: t("dialog.overwrite", locale),
-      });
-      strategy = merge ? "merge" : "overwrite";
+    if (destHasData) {
+      const choice = await requestNotesDirConflictChoice(newDir);
+      if (choice === null) return;
+      action = choice === "merge" ? "merge" : "overwrite-current";
+    } else {
+      const ok = await confirm(t("settings.notesDirectory.confirmMove", locale));
+      if (!ok) return;
     }
 
+    // Flush any in-flight autosave to the OLD directory FIRST so the user's
+    // most recent edits are included in the migration. The autosave's gating
+    // on `migrationInProgress` (set immediately after) then prevents new
+    // writes to the old path while migrate runs and the subsequent reload
+    // re-binds doc paths.
+    await flushAutoSaveRef.current?.().catch(() => {});
+    await saveManifest(
+      docsRef.current,
+      docsRef.current[activeIndexRef.current]?.id ?? null,
+      groupsRef.current,
+    ).catch(() => {});
+
     setMigrationInProgress(true);
-    const result = await migrateNotesDir(oldDir, newDir, strategy);
-    setMigrationInProgress(false);
+    let result;
+    try {
+      result = action === "overwrite-current"
+        ? await clearManagedNotesData(oldDir, newDir)
+        : await migrateNotesDir(oldDir, newDir, action === "merge" ? "merge" : "overwrite");
+    } catch (err) {
+      setMigrationInProgress(false);
+      throw err;
+    }
 
     if (!result.success) {
+      setMigrationInProgress(false);
       await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
       return;
     }
 
-    updateSetting("notesDirectory", newDir);
+    let settingsSaved = await updateSetting("notesDirectory", newDir);
+    if (!settingsSaved) settingsSaved = await updateSetting("notesDirectory", newDir); // retry once for transient failures
+    if (!settingsSaved) {
+      // Migration already succeeded — the data now lives in `newDir`. A failed
+      // settings write is NOT fatal: returning here would strand
+      // `migrationInProgress` at `true` for the whole session. Fall through to
+      // the same reload sequence as the success path.
+      await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
+    }
     setNotesDir(newDir);
     setCurrentNotesDir(newDir);
     setReloadKey((k) => k + 1);
-  }, [locale, updateSetting]);
+    // Don't release `migrationInProgress` here — the reload-triggered
+    // useNotesLoader effect re-acquires it at the top and releases it in
+    // its own finally. Releasing here would briefly open a window during
+    // which the about-to-run effect's awaits could be preempted by an
+    // autosave for an already-stale `snapshot.filePath`.
+  }, [locale, requestNotesDirConflictChoice, updateSetting]);
 
   const handleResetNotesDir = useCallback(async () => {
     if (!settings.notesDirectory) return;
@@ -481,24 +580,47 @@ function App() {
 
     const oldDir = await getNotesDir();
 
+    // Flush before any path manipulation so pending edits land in OLD dir.
+    await flushAutoSaveRef.current?.().catch(() => {});
+    await saveManifest(
+      docsRef.current,
+      docsRef.current[activeIndexRef.current]?.id ?? null,
+      groupsRef.current,
+    ).catch(() => {});
+
     // Compute default directory
     resetNotesDir();
     const defaultDir = await getNotesDir();
 
     setMigrationInProgress(true);
-    const result = await migrateNotesDir(oldDir, defaultDir, "overwrite");
-    setMigrationInProgress(false);
+    let result;
+    try {
+      result = await migrateNotesDir(oldDir, defaultDir, "overwrite");
+    } catch (err) {
+      setMigrationInProgress(false);
+      // Restore the custom dir so the user isn't stranded
+      setNotesDir(oldDir);
+      throw err;
+    }
 
     if (!result.success) {
+      setMigrationInProgress(false);
       // Restore the custom dir on failure
       setNotesDir(oldDir);
       await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
       return;
     }
 
-    updateSetting("notesDirectory", "");
+    let settingsSaved = await updateSetting("notesDirectory", "");
+    if (!settingsSaved) settingsSaved = await updateSetting("notesDirectory", ""); // retry once for transient failures
+    if (!settingsSaved) {
+      // Migration already succeeded — data now lives in the default folder.
+      // Don't return: that would strand `migrationInProgress` at `true`.
+      await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
+    }
     setCurrentNotesDir(defaultDir);
     setReloadKey((k) => k + 1);
+    // Same as handleChangeNotesDir — release is owned by the reload effect.
   }, [locale, settings.notesDirectory, updateSetting]);
 
   const {
@@ -654,8 +776,8 @@ function App() {
           onNewNote={fs.newNote}
           onImportFile={fs.importFile}
           onToggleTheme={handleToggleTheme}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onUpdateParagraphSpacing={(v) => updateSetting("paragraphSpacing", v)}
+          onOpenSettings={handleOpenSettings}
+          onUpdateParagraphSpacing={handleUpdateParagraphSpacing}
           onExportMd={handleExportMd}
           onExportPdf={handleExportPdf}
           onExportRtf={handleExportRtf}
@@ -695,6 +817,19 @@ function App() {
                     style={selectMode ? { backgroundColor: "var(--ui-active-bg)" } : undefined}
                   />
                 </Tooltip>
+                <Tooltip content={t("sidebar.filter", locale)} relationship="label" positioning="below" appearance={isDarkMode ? "inverted" : undefined}>
+                  <Button
+                    appearance="subtle"
+                    icon={<span style={{ display: "flex", color: colorHex(settings.colorFilter) }}><FilterRegular /></span>}
+                    className={styles.sidebarFilterBtn}
+                    onClick={(e) => {
+                      if (filterPopoverPos) { setFilterPopoverPos(null); return; }
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      setFilterPopoverPos({ x: rect.left, y: rect.bottom + 4 });
+                    }}
+                    style={settings.colorFilter ? { backgroundColor: "var(--ui-active-bg)" } : undefined}
+                  />
+                </Tooltip>
                 <Tooltip content={t("sidebar.newGroup", locale)} relationship="label" positioning="below" appearance={isDarkMode ? "inverted" : undefined}>
                   <Button
                     appearance="subtle"
@@ -715,6 +850,35 @@ function App() {
                     onClick={() => setSidebarSearchOpen((o) => !o)}
                   />
                 </Tooltip>
+                {filterPopoverPos && (
+                  <>
+                    <div
+                      style={{ position: "fixed", inset: 0, zIndex: 999 }}
+                      onClick={() => setFilterPopoverPos(null)}
+                      onContextMenu={(e) => { e.preventDefault(); setFilterPopoverPos(null); }}
+                    />
+                    <div
+                      className={sidebarStyles.filterPopover}
+                      style={{ left: filterPopoverPos.x, top: filterPopoverPos.y }}
+                      ref={(el) => { if (el) clampMenuToViewport(el); }}
+                    >
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        className={sidebarStyles.contextMenuItem}
+                        onClick={() => { void updateSetting("colorFilter", null); setFilterPopoverPos(null); }}
+                      >
+                        {t("sidebar.filterAll", locale)}
+                      </Button>
+                      <ColorSwatchRow
+                        value={settings.colorFilter}
+                        includeNone={false}
+                        locale={locale}
+                        onSelect={(c) => { void updateSetting("colorFilter", c); setFilterPopoverPos(null); }}
+                      />
+                    </div>
+                  </>
+                )}
               </>
             )}
             <Sidebar
@@ -728,10 +892,13 @@ function App() {
               onDuplicateNote={fs.duplicateNote}
               onExportNote={fs.exportNote}
               onRenameNote={fs.renameNote}
+              onToggleNotePinned={fs.toggleNotePinned}
+              onSetNoteColor={fs.setNoteColor}
+              onSetNotesColor={fs.setNotesColor}
               onImportFile={fs.importFile}
               notesSortOrder={settings.notesSortOrder}
               locale={locale}
-              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenSettings={handleOpenSettings}
               sidebarSearchOpen={sidebarSearchOpen}
               sidebarSearchQuery={sidebarSearchQuery}
               onSidebarSearchQueryChange={setSidebarSearchQuery}
@@ -754,6 +921,7 @@ function App() {
               onPendingRenameGroupIdClear={() => setPendingRenameGroupId(null)}
               updateAvailable={updater.state.status === "available" || updater.state.status === "downloading" || updater.state.status === "ready"}
               isDarkMode={isDarkMode}
+              colorFilter={settings.colorFilter}
             />
             <div
               className={mergeClasses(
@@ -791,16 +959,8 @@ function App() {
                   hidden={hideToolbar}
                   locale={locale}
                   onBarHeight={handleBarHeight}
-                  onOpenSearch={() => {
-                    setDocGoToLineOpen(false);
-                    setDocSearchReplace(false);
-                    setDocSearchOpen(true);
-                  }}
-                  onOpenGoToLine={() => {
-                    setDocSearchOpen(false);
-                    setDocSearchReplace(false);
-                    setDocGoToLineOpen(true);
-                  }}
+                  onOpenSearch={handleOpenSearch}
+                  onOpenGoToLine={handleOpenGoToLine}
                 />
               </div>
               {(docSearchOpen || docGoToLineOpen) && (
@@ -854,6 +1014,70 @@ function App() {
           </div>
         </div>
       </div>
+
+      <Dialog
+        open={notesDirConflict !== null}
+        onOpenChange={(_, data) => {
+          if (!data.open) resolveNotesDirConflictChoice(null);
+        }}
+      >
+        <DialogSurface
+          style={{
+            maxWidth: "420px",
+            padding: "24px 22px 18px",
+            borderRadius: "12px",
+            background: isDarkMode ? "rgba(32,32,32,0.92)" : "rgba(255,255,255,0.92)",
+            backdropFilter: "saturate(120%) blur(60px)",
+            WebkitBackdropFilter: "saturate(120%) blur(60px)",
+            border: `1px solid ${isDarkMode ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)"}`,
+            boxShadow: isDarkMode ? "0 24px 64px rgba(0,0,0,0.48)" : "0 24px 64px rgba(0,0,0,0.18)",
+          }}
+        >
+          <div style={{ fontSize: "16px", fontWeight: 600, color: tokens.colorNeutralForeground1, userSelect: "none" }}>
+            {t("settings.notesDirectory.conflictTitle", locale)}
+          </div>
+          <div style={{ fontSize: "13px", color: tokens.colorNeutralForeground2, lineHeight: 1.55, marginTop: "10px", userSelect: "none" }}>
+            {t("settings.notesDirectory.conflictBody", locale)}
+          </div>
+          <div
+            style={{
+              fontSize: "12px",
+              color: tokens.colorNeutralForeground3,
+              marginTop: "12px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              userSelect: "none",
+            }}
+          >
+            {notesDirConflict?.path}
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "22px" }}>
+            <Button
+              size="medium"
+              appearance="subtle"
+              onClick={() => resolveNotesDirConflictChoice(null)}
+            >
+              {t("trash.cancel", locale)}
+            </Button>
+            <Button
+              size="medium"
+              appearance="subtle"
+              onClick={() => resolveNotesDirConflictChoice("merge")}
+            >
+              {t("dialog.merge", locale)}
+            </Button>
+            <Button
+              size="medium"
+              appearance="subtle"
+              onClick={() => resolveNotesDirConflictChoice("overwrite")}
+              style={{ color: tokens.colorPaletteRedForeground1 }}
+            >
+              {t("dialog.overwrite", locale)}
+            </Button>
+          </div>
+        </DialogSurface>
+      </Dialog>
 
       <SettingsModal
         open={settingsOpen}

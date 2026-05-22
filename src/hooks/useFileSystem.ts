@@ -9,6 +9,7 @@ import {
   getFileBaseName,
   ensureTrashDir,
   getTrashedNotesCache,
+  markGroupAsDeleted,
   type NoteDoc,
   type NoteGroup,
   type TrashedNote,
@@ -18,8 +19,10 @@ import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { removeNoteAssetDir } from "../utils/imageAssetUtils";
-import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsUpdated, emitTrashUpdated } from "./useWindowSync";
+import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsUpdated, emitNoteColorUpdated, emitNotePinnedUpdated, emitTrashUpdated } from "./useWindowSync";
+import type { NoteColorId } from "../utils/noteColors";
 import { markOwnWrite } from "./ownWriteTracker";
+import { removeMeta as removeMetaFile } from "../utils/metadataIO";
 import { t } from "../i18n";
 
 export type { NoteDoc } from "./useNotesLoader";
@@ -96,6 +99,9 @@ export interface FileSystemActions {
   duplicateNote: (index: number) => Promise<void>;
   exportNote: (index: number) => Promise<void>;
   renameNote: (index: number, newName: string) => void;
+  toggleNotePinned: (index: number) => void;
+  setNoteColor: (index: number, color: NoteColorId | null) => void;
+  setNotesColor: (noteIds: string[], color: NoteColorId | null) => void;
   restoreNote: (trashedNoteId: string) => Promise<void>;
   permanentlyDeleteNote: (trashedNoteId: string) => Promise<void>;
   emptyTrash: () => Promise<void>;
@@ -195,9 +201,21 @@ export function useFileSystem(
       try { markOwnWrite(leaving.filePath); remove(leaving.filePath).catch(() => {}); } catch {}
     }
     const leavingId = leaving.id;
-    setGroups?.((prev) =>
-      prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }))
-        .filter((g) => g.noteIds.length > 0));
+    // Drop the `.meta/{id}.json` sidecar paired with the body we just removed.
+    // Leaving it behind orphans the meta — previously masked by reconcile's
+    // orphan sweep, which is now grace-gated, so the meta must be deleted here.
+    void getNotesDir().then((dir) => removeMetaFile(dir, leavingId)).catch(() => {});
+    setGroups?.((prev) => {
+      const next = prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }));
+      const kept = next.filter((g) => g.noteIds.length > 0);
+      // Record delete intent for any group that auto-prunes to empty so the
+      // tombstone reaches `.groups.json` on the next saveManifest.
+      if (kept.length !== next.length) {
+        const keptIds = new Set(kept.map((g) => g.id));
+        for (const g of next) if (!keptIds.has(g.id)) markGroupAsDeleted(g.id);
+      }
+      return kept;
+    });
     cancelDocSaveRef?.current?.(leavingId);
     tiptapRef.current?.invalidateDocumentSession?.(leavingId, leaving.filePath);
 
@@ -219,7 +237,7 @@ export function useFileSystem(
       targetPath = selected;
     }
 
-    markOwnWrite(targetPath);
+    markOwnWrite(targetPath, markdown);
     await writeTextFile(targetPath, markdown);
 
     const nextDocs = docs.map((entry, index) => {
@@ -249,7 +267,7 @@ export function useFileSystem(
     const defaultName = doc?.filePath ? getFileName(doc.filePath) : "untitled.md";
     const selected = await save({ title: t("dialog.export", locale), filters: MD_FILTERS, defaultPath: defaultName });
     if (!selected) return;
-    markOwnWrite(selected);
+    markOwnWrite(selected, markdown);
     await writeTextFile(selected, markdown);
   }, [activeIndex, docs, locale, tiptapRef]);
 
@@ -285,7 +303,7 @@ export function useFileSystem(
         const notesDir = await getNotesDir();
         await mkdir(notesDir, { recursive: true }).catch(() => {});
         filePath = `${notesDir}/${id}.md`;
-        markOwnWrite(filePath);
+        markOwnWrite(filePath, content);
         await writeTextFile(filePath, content);
       } catch (error) {
         console.warn("Failed to write imported note file:", error);
@@ -349,9 +367,18 @@ export function useFileSystem(
       }
       cancelDocSaveRef?.current?.(currentDoc.id);
       const leavingId = currentDoc.id;
-      workingGroups = workingGroups
-        ?.map((g) => ({ ...g, noteIds: g.noteIds.filter((noteId) => noteId !== leavingId) }))
-        .filter((g) => g.id === inheritedGroupId || g.noteIds.length > 0);
+      // Remove the meta sidecar paired with the pruned empty note's body so it
+      // does not linger as an orphan `.meta/{id}.json`.
+      void getNotesDir().then((dir) => removeMetaFile(dir, leavingId)).catch(() => {});
+      const beforePrune = workingGroups
+        ?.map((g) => ({ ...g, noteIds: g.noteIds.filter((noteId) => noteId !== leavingId) }));
+      workingGroups = beforePrune
+        ?.filter((g) => g.id === inheritedGroupId || g.noteIds.length > 0);
+      // Same auto-prune tombstone tracking as `pruneEmptyCurrentDoc`.
+      if (beforePrune && workingGroups && beforePrune.length !== workingGroups.length) {
+        const keptIds = new Set(workingGroups.map((g) => g.id));
+        for (const g of beforePrune) if (!keptIds.has(g.id)) markGroupAsDeleted(g.id);
+      }
       setGroups?.(workingGroups ?? []);
       prunedDocs = baseDocs.filter((d) => d.id !== currentDoc.id);
       setDocs(prunedDocs);
@@ -400,7 +427,7 @@ export function useFileSystem(
       resetDocState(state, tiptapRef, id, filePath, "");
       notifyActiveDocRef?.current?.(id, filePath);
       if (filePath) {
-        markOwnWrite(filePath);
+        markOwnWrite(filePath, "");
         writeTextFile(filePath, "").catch(() => {});
       }
     };
@@ -434,7 +461,7 @@ export function useFileSystem(
       const notesDir = await getNotesDir();
       await mkdir(notesDir, { recursive: true }).catch(() => {});
       filePath = `${notesDir}/${id}.md`;
-      markOwnWrite(filePath);
+      markOwnWrite(filePath, "");
       await writeTextFile(filePath, "");
     } catch (error) {
       console.warn("Failed to create note for wiki link:", error);
@@ -526,6 +553,8 @@ export function useFileSystem(
           groupId: group?.id ?? null,
           createdAt: doc.createdAt,
           updatedAt: doc.updatedAt,
+          pinned: doc.pinned === true,
+          color: doc.color,
         };
 
         if (setTrashedNotes) {
@@ -560,7 +589,7 @@ export function useFileSystem(
       try {
         const notesDir = await getNotesDir();
         filePath = `${notesDir}/${id}.md`;
-        markOwnWrite(filePath);
+        markOwnWrite(filePath, "");
         await writeTextFile(filePath, "");
       } catch { /* ignore */ }
 
@@ -630,7 +659,7 @@ export function useFileSystem(
 
     if (filePath) {
       try {
-        markOwnWrite(filePath);
+        markOwnWrite(filePath, content);
         await writeTextFile(filePath, content);
       } catch {
         console.warn("Failed to write duplicated note file.");
@@ -701,7 +730,7 @@ export function useFileSystem(
     await Promise.all(
       diskWrites.map(async (write) => {
         try {
-          markOwnWrite(write.filePath);
+          markOwnWrite(write.filePath, write.content);
           await writeTextFile(write.filePath, write.content);
         } catch {
           console.warn("Failed to rewrite wiki links in note:", write.filePath);
@@ -713,7 +742,7 @@ export function useFileSystem(
       const activeDoc = liveDocs[currentActiveIndex];
       if (activeDoc?.filePath) {
         try {
-          markOwnWrite(activeDoc.filePath);
+          markOwnWrite(activeDoc.filePath, activeRewrittenContent);
           await writeTextFile(activeDoc.filePath, activeRewrittenContent);
         } catch {
           console.warn("Failed to persist rewritten wiki links for active note.");
@@ -732,6 +761,50 @@ export function useFileSystem(
     sortAndPersistDocs(nextDocs, doc.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
     emitDocRenamed(doc.id, doc.filePath, doc.filePath, trimmed);
   }, [getLiveDocsSnapshot, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
+
+  const toggleNotePinned = useCallback((index: number) => {
+    const doc = docsRef.current[index];
+    if (!doc) return;
+
+    const activeId = docsRef.current[activeIndexRef.current]?.id ?? null;
+    const nextPinned = !doc.pinned;
+    const nextDocs = docsRef.current.map((entry, i) => (
+      i === index ? { ...entry, pinned: nextPinned } : entry
+    ));
+
+    sortAndPersistDocs(nextDocs, activeId, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
+    emitNotePinnedUpdated(doc.id, nextPinned);
+  }, [locale, notesSortOrder, setActiveIndex, setDocs]);
+
+  // Color is a label, not a content edit — `updatedAt` is intentionally left
+  // untouched. `metaSnapshotEqual` includes `color`, so the change still
+  // produces exactly one `.meta` write per affected note.
+  const setNoteColor = useCallback((index: number, color: NoteColorId | null) => {
+    const doc = docsRef.current[index];
+    if (!doc || doc.color === (color ?? undefined)) return;
+
+    const activeId = docsRef.current[activeIndexRef.current]?.id ?? null;
+    const nextDocs = docsRef.current.map((entry, i) => (
+      i === index ? { ...entry, color: color ?? undefined } : entry
+    ));
+
+    sortAndPersistDocs(nextDocs, activeId, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
+    emitNoteColorUpdated(doc.id, color);
+  }, [locale, notesSortOrder, setActiveIndex, setDocs]);
+
+  const setNotesColor = useCallback((noteIds: string[], color: NoteColorId | null) => {
+    const idSet = new Set(noteIds);
+    const next = color ?? undefined;
+    if (!docsRef.current.some((d) => idSet.has(d.id) && d.color !== next)) return;
+
+    const activeId = docsRef.current[activeIndexRef.current]?.id ?? null;
+    const nextDocs = docsRef.current.map((entry) => (
+      idSet.has(entry.id) ? { ...entry, color: next } : entry
+    ));
+
+    sortAndPersistDocs(nextDocs, activeId, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
+    for (const id of idSet) emitNoteColorUpdated(id, color);
+  }, [locale, notesSortOrder, setActiveIndex, setDocs]);
 
   const restoreNote = useCallback(async (trashedNoteId: string) => {
     const trashed = trashedNotesRef.current?.find((n) => n.id === trashedNoteId);
@@ -762,6 +835,8 @@ export function useFileSystem(
       content,
       createdAt: trashed.createdAt,
       updatedAt: trashed.updatedAt,
+      pinned: trashed.pinned === true,
+      color: trashed.color,
     };
 
     const { docs: liveDocs, activeDocId } = getLiveDocsSnapshot();
@@ -809,6 +884,7 @@ export function useFileSystem(
     try {
       const notesDir = await getNotesDir();
       await removeNoteAssetDir(notesDir, trashed.id);
+      await removeMetaFile(notesDir, trashed.id);
     } catch { /* ignore */ }
 
     if (setTrashedNotes) {
@@ -827,7 +903,10 @@ export function useFileSystem(
     try { notesDir = await getNotesDir(); } catch { /* ignore */ }
     for (const trashed of trashedSnapshot) {
       try { await remove(trashed.trashFilePath); } catch { /* ignore */ }
-      if (notesDir) await removeNoteAssetDir(notesDir, trashed.id);
+      if (notesDir) {
+        await removeNoteAssetDir(notesDir, trashed.id);
+        await removeMetaFile(notesDir, trashed.id);
+      }
     }
 
     if (setTrashedNotes) {
@@ -839,5 +918,5 @@ export function useFileSystem(
     void saveManifest(docsRef.current, docsRef.current[activeIndexRef.current]?.id ?? null, groupsRef.current).catch(() => {});
   }, [setTrashedNotes]);
 
-  return { importFile, importFiles, saveFile, saveFileAs, newNote, createNoteWithTitle, switchDocument, deleteNote, duplicateNote, exportNote, renameNote, restoreNote, permanentlyDeleteNote, emptyTrash };
+  return { importFile, importFiles, saveFile, saveFileAs, newNote, createNoteWithTitle, switchDocument, deleteNote, duplicateNote, exportNote, renameNote, toggleNotePinned, setNoteColor, setNotesColor, restoreNote, permanentlyDeleteNote, emptyTrash };
 }

@@ -56,14 +56,14 @@ export function useKeyboardShortcuts({
 
       // 개발자용 비밀 단축키 (차단 규칙보다 먼저 처리해 preventDefault 이전에 통과시킴)
       // — Ctrl+Alt+Shift+I: 개발자 도구 토글 (release 빌드에서는 no-op)
-      // — Ctrl+Alt+Shift+R: 하드 새로고침
+      // — Ctrl+Alt+Shift+R: 하드 새로고침 (dev 빌드 전용, release 빌드에서는 차단)
       if (ctrl && e.altKey && e.shiftKey && key === "i") {
         e.preventDefault();
         e.stopPropagation();
         void invoke("toggle_devtools").catch(() => {});
         return;
       }
-      if (ctrl && e.altKey && e.shiftKey && key === "r") {
+      if (import.meta.env.DEV && ctrl && e.altKey && e.shiftKey && key === "r") {
         e.preventDefault();
         e.stopPropagation();
         window.location.reload();
