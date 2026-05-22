@@ -112,6 +112,7 @@ interface SidebarProps {
   onToggleNotePinned: (index: number) => void;
   onSetNoteColor: (index: number, color: NoteColorId | null) => void;
   onSetNotesColor: (noteIds: string[], color: NoteColorId | null) => void;
+  onSetNotesPinned: (noteIds: string[], pinned: boolean) => void;
   onImportFile: () => void;
   notesSortOrder: NotesSortOrder;
   locale: Locale;
@@ -157,6 +158,7 @@ export function Sidebar({
   onToggleNotePinned,
   onSetNoteColor,
   onSetNotesColor,
+  onSetNotesPinned,
   onImportFile,
   notesSortOrder,
   locale,
@@ -573,6 +575,7 @@ export function Sidebar({
         data-group-id={groupId}
         className={mergeClasses(
           styles.docItemWrapper,
+          selectMode && originalIndex === activeIndex && styles.docItemWrapperActive,
           newDocIds.has(doc.id) && styles.docItemNew,
           slideUpFromIndex >= 0 && originalIndex >= slideUpFromIndex && styles.docItemSlideUp,
           isSearching && searchIndex !== undefined && styles.searchResultFadeIn,
@@ -614,9 +617,11 @@ export function Sidebar({
         {editingIndex === originalIndex && paneActive ? (
           <Button
             appearance="subtle"
-            icon={<span style={{ display: "flex", color: colorHex(doc.color) }}>{doc.pinned ? <PinRegular /> : <DocumentRegular />}</span>}
+            icon={<span className={styles.docItemIcon} style={doc.color ? { color: colorHex(doc.color) } : undefined}>{doc.pinned ? <PinRegular /> : <DocumentRegular />}</span>}
             className={mergeClasses(
               originalIndex === activeIndex ? styles.docItemActive : styles.docItem,
+              selectMode && originalIndex === activeIndex && styles.docItemActiveBgClear,
+              selectMode && styles.docItemSelectGap,
               indented && !selectMode && styles.docItemIndented,
             )}
             size="small"
@@ -639,9 +644,11 @@ export function Sidebar({
           <>
             <Button
               appearance="subtle"
-              icon={<span style={{ display: "flex", color: colorHex(doc.color) }}>{doc.pinned ? <PinRegular /> : <DocumentRegular />}</span>}
+              icon={<span className={styles.docItemIcon} style={doc.color ? { color: colorHex(doc.color) } : undefined}>{doc.pinned ? <PinRegular /> : <DocumentRegular />}</span>}
               className={mergeClasses(
                 originalIndex === activeIndex ? styles.docItemActive : styles.docItem,
+                selectMode && originalIndex === activeIndex && styles.docItemActiveBgClear,
+                selectMode && styles.docItemSelectGap,
                 indented && !selectMode && styles.docItemIndented,
               )}
               onClick={() => {
@@ -1107,6 +1114,7 @@ export function Sidebar({
         onToggleNotePinned={onToggleNotePinned}
         onSetNoteColor={onSetNoteColor}
         onSetNotesColor={onSetNotesColor}
+        onSetNotesPinned={onSetNotesPinned}
         onImportFile={onImportFile}
         onCreateGroup={onCreateGroup}
         onDeleteGroup={onDeleteGroup}

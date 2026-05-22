@@ -4,7 +4,7 @@
  */
 
 export type NoteColorId =
-  | "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "gray";
+  | "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "pink";
 
 export interface NoteColorDef {
   id: NoteColorId;
@@ -19,7 +19,7 @@ export const NOTE_COLORS: NoteColorDef[] = [
   { id: "green",  hex: "#30A46C" },
   { id: "blue",   hex: "#3B82F6" },
   { id: "purple", hex: "#8E4EC6" },
-  { id: "gray",   hex: "#8B8D98" },
+  { id: "pink",   hex: "#E93D82" },
 ];
 
 const HEX_BY_ID = new Map<NoteColorId, string>(NOTE_COLORS.map((c) => [c.id, c.hex]));

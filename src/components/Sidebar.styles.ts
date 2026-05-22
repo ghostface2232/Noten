@@ -283,6 +283,32 @@ export const useStyles = makeStyles({
   docItemIndented: {
     paddingLeft: "20px",
   },
+  docItemIcon: {
+    display: "flex",
+    // Pin the icon to the resting foreground colour so it does not inherit
+    // the subtle Button's brand-tinted hover colour (colorNeutralForeground2-
+    // BrandHover) — a hovered uncoloured note's icon turning blue is
+    // indistinguishable from the blue colour label. A note that has a colour
+    // label overrides this inline.
+    color: tokens.colorNeutralForeground2,
+  },
+  // Select mode: the active-note fill moves from the note button onto the
+  // wrapper so it also wraps the checkbox.
+  docItemWrapperActive: {
+    backgroundColor: "var(--ui-active-bg)",
+    borderRadius: "6px",
+  },
+  // Clears the note button's own active background in select mode — the fill
+  // now lives on the wrapper, and --ui-active-bg is translucent so keeping
+  // both would tint the note portion darker than the checkbox portion.
+  docItemActiveBgClear: {
+    backgroundColor: "transparent",
+  },
+  // Tightens the checkbox-to-icon gap in select mode (docItem's default
+  // paddingLeft is 8px).
+  docItemSelectGap: {
+    paddingLeft: "4px",
+  },
   newDocItem: {
     display: "flex",
     alignItems: "center",
@@ -538,11 +564,6 @@ export const useStyles = makeStyles({
   colorSwatchSelected: {
     outline: `2px solid ${tokens.colorNeutralForeground1}`,
     outlineOffset: "1px",
-  },
-  colorSwatchNone: {
-    backgroundColor: "transparent",
-    color: tokens.colorNeutralForeground3,
-    fontSize: "13px",
   },
   filterPopover: {
     position: "fixed",

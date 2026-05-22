@@ -54,6 +54,7 @@ interface SidebarContextMenusProps {
   onToggleNotePinned: (index: number) => void;
   onSetNoteColor: (index: number, color: NoteColorId | null) => void;
   onSetNotesColor: (noteIds: string[], color: NoteColorId | null) => void;
+  onSetNotesPinned: (noteIds: string[], pinned: boolean) => void;
   onImportFile: () => void;
   onCreateGroup: (name: string, initialNoteIds?: string[]) => string;
   onDeleteGroup: (groupId: string) => void;
@@ -86,6 +87,7 @@ export function SidebarContextMenus({
   onToggleNotePinned,
   onSetNoteColor,
   onSetNotesColor,
+  onSetNotesPinned,
   onImportFile,
   onCreateGroup,
   onDeleteGroup,
@@ -254,6 +256,26 @@ export function SidebarContextMenus({
                 }}
                 locale={locale}
               />
+              {(() => {
+                // Unpin if every selected note is already pinned, else pin all.
+                const selectedDocs = docs.filter((d) => selectedNoteIds.has(d.id));
+                const allPinned = selectedDocs.length > 0 && selectedDocs.every((d) => d.pinned === true);
+                return (
+                  <Button
+                    appearance="subtle"
+                    icon={allPinned ? <PinOffRegular /> : <PinRegular />}
+                    className={styles.contextMenuItem}
+                    onClick={() => {
+                      onSetNotesPinned(Array.from(selectedNoteIds), !allPinned);
+                      onSelectModeChange(false);
+                      closeContextMenu();
+                    }}
+                    size="small"
+                  >
+                    {allPinned ? i("sidebar.unpin") : i("sidebar.pin")}
+                  </Button>
+                );
+              })()}
               {groups.length > 0 && (
                 <div
                   ref={submenuParentRef}

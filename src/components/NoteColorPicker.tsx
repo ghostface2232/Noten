@@ -1,5 +1,4 @@
 import { mergeClasses } from "@fluentui/react-components";
-import { ProhibitedRegular } from "@fluentui/react-icons";
 import { NOTE_COLORS, type NoteColorId } from "../utils/noteColors";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
@@ -13,7 +12,7 @@ const COLOR_LABEL_KEY: Record<NoteColorId, Parameters<typeof t>[0]> = {
   green: "sidebar.colorGreen",
   blue: "sidebar.colorBlue",
   purple: "sidebar.colorPurple",
-  gray: "sidebar.colorGray",
+  pink: "sidebar.colorPink",
 };
 
 interface ColorSwatchRowProps {
@@ -50,6 +49,8 @@ export function ColorSwatchRow({ value, onSelect, includeNone = true, locale }: 
         );
       })}
       {includeNone && (
+        // "No color" — an empty swatch (no icon), distinguished from the
+        // colored swatches purely by having no fill.
         <button
           type="button"
           title={t("sidebar.colorNone", locale)}
@@ -57,13 +58,10 @@ export function ColorSwatchRow({ value, onSelect, includeNone = true, locale }: 
           aria-pressed={value === null}
           className={mergeClasses(
             styles.colorSwatch,
-            styles.colorSwatchNone,
             value === null && styles.colorSwatchSelected,
           )}
           onClick={() => onSelect(null)}
-        >
-          <ProhibitedRegular />
-        </button>
+        />
       )}
     </div>
   );

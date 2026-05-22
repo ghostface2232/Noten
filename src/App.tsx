@@ -895,6 +895,7 @@ function App() {
               onToggleNotePinned={fs.toggleNotePinned}
               onSetNoteColor={fs.setNoteColor}
               onSetNotesColor={fs.setNotesColor}
+              onSetNotesPinned={fs.setNotesPinned}
               onImportFile={fs.importFile}
               notesSortOrder={settings.notesSortOrder}
               locale={locale}

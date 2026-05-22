@@ -100,6 +100,7 @@ export interface FileSystemActions {
   exportNote: (index: number) => Promise<void>;
   renameNote: (index: number, newName: string) => void;
   toggleNotePinned: (index: number) => void;
+  setNotesPinned: (noteIds: string[], pinned: boolean) => void;
   setNoteColor: (index: number, color: NoteColorId | null) => void;
   setNotesColor: (noteIds: string[], color: NoteColorId | null) => void;
   restoreNote: (trashedNoteId: string) => Promise<void>;
@@ -776,6 +777,21 @@ export function useFileSystem(
     emitNotePinnedUpdated(doc.id, nextPinned);
   }, [locale, notesSortOrder, setActiveIndex, setDocs]);
 
+  // Bulk pin/unpin for select mode. Unlike `toggleNotePinned`, this SETS a
+  // single target state across every selected note rather than flipping each.
+  const setNotesPinned = useCallback((noteIds: string[], pinned: boolean) => {
+    const idSet = new Set(noteIds);
+    if (!docsRef.current.some((d) => idSet.has(d.id) && (d.pinned === true) !== pinned)) return;
+
+    const activeId = docsRef.current[activeIndexRef.current]?.id ?? null;
+    const nextDocs = docsRef.current.map((entry) => (
+      idSet.has(entry.id) ? { ...entry, pinned } : entry
+    ));
+
+    sortAndPersistDocs(nextDocs, activeId, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
+    for (const id of idSet) emitNotePinnedUpdated(id, pinned);
+  }, [locale, notesSortOrder, setActiveIndex, setDocs]);
+
   // Color is a label, not a content edit — `updatedAt` is intentionally left
   // untouched. `metaSnapshotEqual` includes `color`, so the change still
   // produces exactly one `.meta` write per affected note.
@@ -918,5 +934,5 @@ export function useFileSystem(
     void saveManifest(docsRef.current, docsRef.current[activeIndexRef.current]?.id ?? null, groupsRef.current).catch(() => {});
   }, [setTrashedNotes]);
 
-  return { importFile, importFiles, saveFile, saveFileAs, newNote, createNoteWithTitle, switchDocument, deleteNote, duplicateNote, exportNote, renameNote, toggleNotePinned, setNoteColor, setNotesColor, restoreNote, permanentlyDeleteNote, emptyTrash };
+  return { importFile, importFiles, saveFile, saveFileAs, newNote, createNoteWithTitle, switchDocument, deleteNote, duplicateNote, exportNote, renameNote, toggleNotePinned, setNotesPinned, setNoteColor, setNotesColor, restoreNote, permanentlyDeleteNote, emptyTrash };
 }

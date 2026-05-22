@@ -127,8 +127,8 @@ const dict = {
   "sidebar.colorGreen": { en: "Green", ko: "초록" },
   "sidebar.colorBlue": { en: "Blue", ko: "파랑" },
   "sidebar.colorPurple": { en: "Purple", ko: "보라" },
-  "sidebar.colorGray": { en: "Gray", ko: "회색" },
-  "sidebar.filter": { en: "Filter by color", ko: "색상으로 필터" },
+  "sidebar.colorPink": { en: "Pink", ko: "분홍" },
+  "sidebar.filter": { en: "Color filter", ko: "색상 필터" },
   "sidebar.filterAll": { en: "All notes", ko: "전체 보기" },
   "sidebar.colorFilterEmpty": { en: "No notes with this color", ko: "이 색상의 노트가 없습니다" },
 
