@@ -1,7 +1,13 @@
 import { makeStyles, tokens } from "@fluentui/react-components";
 
 export const SIDE_PADDING = "6px";
-const LIST_SIDE_PADDING = "8px";
+// Scroll containers reserve a both-edges scrollbar gutter (6px — the
+// `::-webkit-scrollbar` width in App.css), so their content sits
+// LIST_SIDE_PADDING + SCROLLBAR_GUTTER in from each edge. Non-scrolling areas
+// use NONSCROLL_SIDE_PADDING to land their pills on that same line.
+const SCROLLBAR_GUTTER = "6px";
+const LIST_SIDE_PADDING = "2px";
+const NONSCROLL_SIDE_PADDING = `calc(${LIST_SIDE_PADDING} + ${SCROLLBAR_GUTTER})`;
 
 export const useStyles = makeStyles({
   sidebar: {
@@ -17,8 +23,10 @@ export const useStyles = makeStyles({
   sidebarFixed: {
     flexShrink: 0,
     paddingTop: "55px",
-    paddingLeft: SIDE_PADDING,
-    paddingRight: SIDE_PADDING,
+    // No scrollbar gutter here, so pad by the full non-scroll inset to align
+    // the new-note button with the note rows below.
+    paddingLeft: NONSCROLL_SIDE_PADDING,
+    paddingRight: NONSCROLL_SIDE_PADDING,
   },
   body: {
     width: "50%",
@@ -26,7 +34,7 @@ export const useStyles = makeStyles({
     flexShrink: 0,
     overflowX: "hidden",
     overflowY: "auto",
-    scrollbarGutter: "stable",
+    scrollbarGutter: "stable both-edges",
     paddingLeft: LIST_SIDE_PADDING,
     paddingRight: LIST_SIDE_PADDING,
     display: "flex",
@@ -75,7 +83,6 @@ export const useStyles = makeStyles({
     flexShrink: 0,
     display: "flex",
     alignItems: "center",
-    width: "100%",
     justifyContent: "flex-start",
     textAlign: "left",
     border: "none",
@@ -84,10 +91,14 @@ export const useStyles = makeStyles({
     gap: "5px",
     minHeight: "36px",
     marginBottom: "2px",
-    // Header sits outside `allNotesScroll`, so it must absorb that container's
-    // 8px padding plus the 8px row padding to align its icon/text with the
-    // note list below. Gap matches `docItem` so the label lines up too.
-    paddingLeft: "16px",
+    // Side margins inset the header into a contained pill aligned with the
+    // note rows. The header has no scrollbar gutter of its own, so it uses the
+    // full non-scroll inset. paddingLeft matches `docItem`'s row padding so the
+    // chevron and label line up with the list.
+    marginLeft: NONSCROLL_SIDE_PADDING,
+    marginRight: NONSCROLL_SIDE_PADDING,
+    maxWidth: "none",
+    paddingLeft: "8px",
     paddingRight: "8px",
   },
   allNotesHeaderLabel: {
@@ -97,12 +108,17 @@ export const useStyles = makeStyles({
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
+  // Optical correction: the back chevron's glyph sits inset within its slot,
+  // so nudge it 2px left to read level with the note list's document icons.
+  allNotesHeaderIcon: {
+    transform: "translateX(-2px)",
+  },
   allNotesScroll: {
     flex: 1,
     minHeight: 0,
     overflowX: "hidden",
     overflowY: "auto",
-    scrollbarGutter: "stable",
+    scrollbarGutter: "stable both-edges",
     paddingLeft: LIST_SIDE_PADDING,
     paddingRight: LIST_SIDE_PADDING,
     display: "flex",
@@ -121,10 +137,6 @@ export const useStyles = makeStyles({
       "--sidebar-mask-bottom": "24px",
     },
   },
-  // Icon/text aligned with `newDocItem`: that button sits in `sidebarFixed`
-  // (6px pad) with 8px paddingLeft → icon at 14px. This one sits in `body`
-  // (8px pad), so 6px paddingLeft + matching 8px gap lands the icon/text at
-  // the same x.
   allNotesEntry: {
     display: "flex",
     alignItems: "center",
@@ -134,12 +146,12 @@ export const useStyles = makeStyles({
     border: "none",
     borderRadius: "6px",
     fontSize: "13px",
-    gap: "8px",
+    gap: "5px",
     minHeight: "32px",
-    paddingLeft: "6px",
-    paddingRight: "6px",
+    paddingLeft: "8px",
+    paddingRight: "8px",
     fontWeight: 500,
-    marginBottom: "8px",
+    marginBottom: "12px",
     flexShrink: 0,
   },
   allNotesEntryName: {
@@ -320,12 +332,12 @@ export const useStyles = makeStyles({
     border: "none",
     borderRadius: "6px",
     fontSize: "13px",
-    gap: "8px",
+    gap: "5px",
     minHeight: "32px",
     paddingLeft: "8px",
     paddingRight: "8px",
     fontWeight: 500,
-    marginBottom: "8px",
+    marginBottom: "4px",
     "& .new-doc-shortcut": {
       marginLeft: "auto",
       fontSize: "11px",
@@ -357,7 +369,7 @@ export const useStyles = makeStyles({
     transitionProperty: "grid-template-rows, opacity, margin-bottom",
     transitionDuration: "0.25s",
     transitionTimingFunction: "ease",
-    marginBottom: "8px",
+    marginBottom: "12px",
   },
   groupsSectionHidden: {
     gridTemplateRows: "0fr",
@@ -459,8 +471,10 @@ export const useStyles = makeStyles({
   },
   footer: {
     flexShrink: 0,
-    paddingLeft: SIDE_PADDING,
-    paddingRight: SIDE_PADDING,
+    // No scrollbar gutter here, so pad by the full non-scroll inset to align
+    // the settings button with the new-note button and note rows.
+    paddingLeft: NONSCROLL_SIDE_PADDING,
+    paddingRight: NONSCROLL_SIDE_PADDING,
     paddingBottom: SIDE_PADDING,
   },
   settingsBtn: {
@@ -668,9 +682,9 @@ export const useStyles = makeStyles({
     border: "none",
     borderRadius: "6px",
     fontSize: "13px",
-    gap: "4px",
+    gap: "5px",
     minHeight: "32px",
-    paddingLeft: "6px",
+    paddingLeft: "8px",
     paddingRight: "8px",
     cursor: "pointer",
   },

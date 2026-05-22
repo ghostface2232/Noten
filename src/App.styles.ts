@@ -78,7 +78,10 @@ export const useStyles = makeStyles({
   sidebarToggle: {
     position: "absolute",
     top: "13px",
-    left: "5px",
+    // 9px + 3px wrapper padding + the 4px icon inset within the 28px button
+    // lands the toggle icon at x=16px, level with the sidebar content icons
+    // (new-note button, note rows).
+    left: "9px",
     zIndex: 20,
     display: "inline-flex",
     alignItems: "center",

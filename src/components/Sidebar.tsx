@@ -921,7 +921,7 @@ export function Sidebar({
             <Button
               appearance="subtle"
               size="small"
-              icon={<ChevronLeftRegular />}
+              icon={<ChevronLeftRegular className={styles.allNotesHeaderIcon} />}
               className={styles.allNotesHeader}
               onClick={() => setInAllNotes(false)}
             >
