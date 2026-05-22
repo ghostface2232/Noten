@@ -26,7 +26,7 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 
 - App settings are stored in `AppData/Roaming/com.noten.app/settings.json` via Tauri fs plugin.
 - Shared note state is decomposed into note bodies (`<noteId>.md`), per-note metadata (`.meta/<noteId>.json`), and shared groups (`.groups.json`). Legacy `manifest.json` is migrated to `manifest.legacy.json`.
-- Note metadata includes title/customName, created/updated timestamps, group membership (with its own `groupUpdatedAt` clock so group moves resolve independently of body last-write-wins), trash state, and shared `pinned` state.
+- Note metadata includes title/customName, created/updated timestamps, group membership (with its own `groupUpdatedAt` clock so group moves resolve independently of body last-write-wins), trash state, shared `pinned` state, and a shared `color` label (one of a fixed 7-color palette in `src/utils/noteColors.ts`). `color` syncs like `pinned` — independent metadata that propagates even while the body is locally dirty — and does not bump `updatedAt`.
 - Active note and group collapsed state are per-machine UI state, not shared sync state.
 - Local cache includes `imageAssetMigrationV1CompletedAt` to track one-time image asset migration completion per notes directory.
 - Sidebar open/close state and width are stored in localStorage.
@@ -53,7 +53,7 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 
 ## Current Settings Model
 
-- Theme, note sort order, paste formatting, spellcheck, wrap mode, font family, group layout, paragraph spacing, and notes directory are user settings.
+- Theme, note sort order, paste formatting, spellcheck, wrap mode, font family, group layout, paragraph spacing, notes directory, and the active sidebar color filter (`colorFilter`) are user settings.
 - Note sort order supports six options: `updated-desc`, `updated-asc`, `created-desc`, `created-asc`, `title-asc`, `title-desc` (default: `updated-desc`).
 - Old values `recent-first`/`recent-last` are auto-migrated on load.
 
@@ -102,6 +102,7 @@ Do not use old community-package APIs such as `editor.storage.markdown.getMarkdo
 - Toolbar layout: Undo/Redo in column 1, formatting tools centered in column 2, Search and Go-to-line in column 3; when width < 740px the formatting tools wrap to row 2.
 - Browser/WebView shortcuts that would interfere with app behavior are blocked. This includes reload, DevTools, print, source view, caret browsing, zoom, and browser back/forward. Ctrl+R is unblocked when sidebar has focus (used for rename).
 - The sidebar body slides between two panes: the root view (groups section + ungrouped notes section) and an "All Notes" drill-in — a flat list of every note (groups ignored, pinned first, current sort order). The "All Notes" entry atop the group list enters it; its header or `Escape` returns. Drag-to-group works only in the root view.
+- A note's color label is set from the note context menu (or, in select mode, the bulk right-click menu) and tints the note's sidebar icon. The sidebar "filter" button opens a swatch popover; picking a color filters the sidebar to a flat list of only that color's notes (composes with search; reuses the search flat-list rendering path, so drag is inert while filtered). The filter persists across restarts.
 - Sidebar shortcuts (Ctrl+D, Ctrl+R, F2, Ctrl+Alt+P, Ctrl+Alt+C, Delete) are active when last mousedown was inside the sidebar. Tracked via `data-sidebar-active` attribute on `document.documentElement`.
 - Editor shortcuts include `Ctrl+Shift+X` for strike-through, `Ctrl+G` for Go to Line, and `Ctrl+H` for Find and Replace. All are handled at the window level via `useKeyboardShortcuts`, not inside individual editor keymaps.
 - Sidebar shortcut hints are displayed in context menus. Shortcut style is unified across all menus (opacity 0.45, 12px, 24px left padding).

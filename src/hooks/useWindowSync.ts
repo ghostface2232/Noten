@@ -6,6 +6,7 @@ import { sortNotes, type NoteDoc, type NoteGroup, type TrashedNote } from "./use
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import { setTrashedNotesCache, syncGroupsSnapshotFromDisk, getNotesDir } from "./useNotesLoader";
 import type { Locale, NotesSortOrder } from "./useSettings";
+import type { NoteColorId } from "../utils/noteColors";
 
 interface DocUpdatedPayload {
   sourceWindow: string;
@@ -37,6 +38,12 @@ interface NotePinnedUpdatedPayload {
   sourceWindow: string;
   docId: string;
   pinned: boolean;
+}
+
+interface NoteColorUpdatedPayload {
+  sourceWindow: string;
+  docId: string;
+  color: NoteColorId | null;
 }
 
 interface GroupsUpdatedPayload {
@@ -82,6 +89,12 @@ export function emitNotePinnedUpdated(docId: string, pinned: boolean) {
   emit("note-pinned-updated", {
     sourceWindow: WINDOW_LABEL, docId, pinned,
   } satisfies NotePinnedUpdatedPayload).catch(() => {});
+}
+
+export function emitNoteColorUpdated(docId: string, color: NoteColorId | null) {
+  emit("note-color-updated", {
+    sourceWindow: WINDOW_LABEL, docId, color,
+  } satisfies NoteColorUpdatedPayload).catch(() => {});
 }
 
 export function emitGroupsUpdated(groups: NoteGroup[]) {
@@ -249,6 +262,19 @@ export function useWindowSync(
             if (nextActiveIndex >= 0) setActiveIndex(nextActiveIndex);
           }
           return sorted;
+        });
+      }),
+
+      listen<NoteColorUpdatedPayload>("note-color-updated", (event) => {
+        const { sourceWindow, docId, color } = event.payload;
+        if (sourceWindow === WINDOW_LABEL) return;
+
+        setDocs((prev) => {
+          const idx = prev.findIndex((d) => d.id === docId);
+          if (idx < 0 || prev[idx].color === (color ?? undefined)) return prev;
+          const next = [...prev];
+          next[idx] = { ...next[idx], color: color ?? undefined };
+          return next;
         });
       }),
 

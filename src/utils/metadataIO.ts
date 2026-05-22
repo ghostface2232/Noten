@@ -1,6 +1,7 @@
 import { mkdir, readDir, readTextFile, remove } from "@tauri-apps/plugin-fs";
 import { atomicWriteText } from "./atomicWrite";
 import { markOwnWrite } from "../hooks/ownWriteTracker";
+import { isNoteColorId, type NoteColorId } from "./noteColors";
 
 export interface NoteMeta {
   version: 2;
@@ -10,6 +11,8 @@ export interface NoteMeta {
   createdAt: number;
   updatedAt: number;
   pinned?: boolean;
+  /** User-assigned color label (sidebar icon tint). */
+  color?: NoteColorId;
   groupId: string | null;
   /** Last time this note's group membership changed. */
   groupUpdatedAt?: number;
@@ -58,6 +61,7 @@ export async function readMeta(notesDir: string, noteId: string): Promise<NoteMe
       ...m,
       version: 2,
       pinned: m.pinned === true,
+      color: isNoteColorId(m.color) ? m.color : undefined,
       trashedAt: typeof m.trashedAt === "number" ? m.trashedAt : null,
     };
   } catch {
@@ -76,6 +80,7 @@ export async function writeMeta(notesDir: string, meta: NoteMeta, machineId: str
     createdAt: meta.createdAt,
     updatedAt: meta.updatedAt,
     pinned: meta.pinned === true ? true : undefined,
+    color: isNoteColorId(meta.color) ? meta.color : undefined,
     groupId: meta.groupId ?? null,
     groupUpdatedAt: typeof meta.groupUpdatedAt === "number" ? meta.groupUpdatedAt : undefined,
     trashedAt: meta.trashedAt ?? null,

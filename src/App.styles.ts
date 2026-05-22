@@ -111,6 +111,18 @@ export const useStyles = makeStyles({
   sidebarNewGroupBtn: {
     position: "absolute",
     top: "16px",
+    right: "92px",
+    zIndex: 10,
+    borderRadius: "6px",
+    border: "none",
+    minWidth: "auto",
+    height: "28px",
+    width: "28px",
+    padding: "0",
+  },
+  sidebarFilterBtn: {
+    position: "absolute",
+    top: "16px",
     right: "64px",
     zIndex: 10,
     borderRadius: "6px",

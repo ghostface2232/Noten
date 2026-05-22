@@ -497,6 +497,53 @@ export const useStyles = makeStyles({
     padding: "4px",
     minWidth: "140px",
   },
+  /* ─── Color swatches (context menu rows + filter popover) ─── */
+  colorRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    flexWrap: "wrap",
+    padding: "6px 8px",
+  },
+  colorSwatch: {
+    width: "18px",
+    height: "18px",
+    flexShrink: 0,
+    padding: 0,
+    borderRadius: "50%",
+    // Subtle ring so light swatches stay visible on the menu background.
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    outline: "none",
+    transitionProperty: "transform",
+    transitionDuration: "0.1s",
+    ":hover": {
+      transform: "scale(1.18)",
+    },
+  },
+  colorSwatchSelected: {
+    outline: `2px solid ${tokens.colorNeutralForeground1}`,
+    outlineOffset: "1px",
+  },
+  colorSwatchNone: {
+    backgroundColor: "transparent",
+    color: tokens.colorNeutralForeground3,
+    fontSize: "13px",
+  },
+  filterPopover: {
+    position: "fixed",
+    zIndex: 1000,
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: "8px",
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    boxShadow: tokens.shadow16,
+    padding: "4px",
+    display: "flex",
+    flexDirection: "column",
+  },
   confirmOverlay: {
     position: "fixed",
     inset: 0,

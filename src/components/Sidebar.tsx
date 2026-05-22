@@ -18,6 +18,7 @@ import { t } from "../i18n";
 import type { NoteDoc, NoteGroup } from "../hooks/useNotesLoader";
 import { stripMarkdownContent } from "../hooks/useNotesLoader";
 import type { Locale, NotesSortOrder } from "../hooks/useSettings";
+import { colorHex, type NoteColorId } from "../utils/noteColors";
 import { useSidebarDrag } from "../hooks/useSidebarDrag";
 import { useSidebarGroupDrag } from "../hooks/useSidebarGroupDrag";
 import { useSidebarAnimations } from "../hooks/useSidebarAnimations";
@@ -109,6 +110,8 @@ interface SidebarProps {
   onExportNote: (index: number) => void;
   onRenameNote: (index: number, newName: string) => void;
   onToggleNotePinned: (index: number) => void;
+  onSetNoteColor: (index: number, color: NoteColorId | null) => void;
+  onSetNotesColor: (noteIds: string[], color: NoteColorId | null) => void;
   onImportFile: () => void;
   notesSortOrder: NotesSortOrder;
   locale: Locale;
@@ -135,6 +138,8 @@ interface SidebarProps {
   onSelectModeChange: (mode: boolean) => void;
   pendingRenameGroupId: string | null;
   onPendingRenameGroupIdClear: () => void;
+  /** Active color filter — when set, the sidebar shows only matching notes. */
+  colorFilter: NoteColorId | null;
 }
 
 export function Sidebar({
@@ -148,6 +153,8 @@ export function Sidebar({
   onExportNote,
   onRenameNote,
   onToggleNotePinned,
+  onSetNoteColor,
+  onSetNotesColor,
   onImportFile,
   notesSortOrder,
   locale,
@@ -172,9 +179,12 @@ export function Sidebar({
   onSelectModeChange,
   pendingRenameGroupId,
   onPendingRenameGroupIdClear,
+  colorFilter,
 }: SidebarProps) {
   const styles = useStyles();
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
+
+  const colorFilterActive = colorFilter != null;
 
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
@@ -211,7 +221,7 @@ export function Sidebar({
     selectMode,
     editingIndex,
     editingGroupId,
-    searchActive: !!sidebarSearchQuery,
+    searchActive: !!sidebarSearchQuery || colorFilterActive,
     sidebarBodyRef,
     onAddNoteToGroup,
     onMoveNotesToGroup,
@@ -221,7 +231,7 @@ export function Sidebar({
 
   const { handleGroupDragPointerDown, isDraggingGroup } = useSidebarGroupDrag({
     groups,
-    searchActive: !!sidebarSearchQuery,
+    searchActive: !!sidebarSearchQuery || colorFilterActive,
     editingIndex,
     editingGroupId,
     sidebarBodyRef,
@@ -284,16 +294,19 @@ export function Sidebar({
     return cache;
   }, [docs]);
 
-  // Filter docs by search query (title + body)
+  // Filter docs by color label (if a filter is active) then by search query.
   const filteredDocs = useMemo(() => {
+    const colorOk = (doc: NoteDoc) => !colorFilter || doc.color === colorFilter;
     if (!debouncedQuery) return docs.map((doc, index) => ({
       doc, originalIndex: index, matchType: "title" as MatchType, snippet: null as SearchSnippet | null,
-    })).sort((a, b) => compareNotesForSidebar(a.doc, b.doc, notesSortOrder, locale));
+    })).filter(({ doc }) => colorOk(doc))
+      .sort((a, b) => compareNotesForSidebar(a.doc, b.doc, notesSortOrder, locale));
     const q = debouncedQuery.toLowerCase();
     const results: { doc: NoteDoc; originalIndex: number; matchType: MatchType; snippet: SearchSnippet | null }[] = [];
 
     for (let i = 0; i < docs.length; i++) {
       const doc = docs[i];
+      if (!colorOk(doc)) continue;
       const titleMatch = doc.fileName.toLowerCase().includes(q);
       const stripped = strippedContentMap.get(doc.id)?.stripped ?? "";
       const bodyMatch = stripped.toLowerCase().includes(q);
@@ -311,7 +324,7 @@ export function Sidebar({
       return compareNotesForSidebar(a.doc, b.doc, notesSortOrder, locale);
     });
     return results;
-  }, [docs, debouncedQuery, strippedContentMap, notesSortOrder, locale]);
+  }, [docs, debouncedQuery, strippedContentMap, notesSortOrder, locale, colorFilter]);
 
   // Focus the rename input when editing starts
   useEffect(() => {
@@ -479,6 +492,8 @@ export function Sidebar({
   /* ─── Render helpers ─── */
 
   const isSearching = !!debouncedQuery;
+  // A color filter renders the same flat list as search (groups are flattened).
+  const flatListMode = isSearching || colorFilterActive;
 
   // Flat note rows: ungrouped notes (root view) and search results. Grouped
   // notes are carried by `GroupRender` below, not here.
@@ -491,7 +506,7 @@ export function Sidebar({
   type GroupRender = { group: NoteGroup; notes: { doc: NoteDoc; originalIndex: number }[] };
 
   const { groupRenderList, noteItems } = useMemo(() => {
-    if (isSearching) {
+    if (flatListMode) {
       return {
         groupRenderList: [] as GroupRender[],
         noteItems: filteredDocs.map(({ doc, originalIndex, matchType, snippet }) => ({
@@ -529,7 +544,7 @@ export function Sidebar({
     }
 
     return { groupRenderList: gList, noteItems: nItems };
-  }, [isSearching, filteredDocs, docs, groups, groupedNoteIds, notesSortOrder, locale, collapsingGroupIds]);
+  }, [flatListMode, filteredDocs, docs, groups, groupedNoteIds, notesSortOrder, locale, collapsingGroupIds]);
 
   const renderNoteItem = (
     doc: NoteDoc,
@@ -595,7 +610,7 @@ export function Sidebar({
         {editingIndex === originalIndex && paneActive ? (
           <Button
             appearance="subtle"
-            icon={doc.pinned ? <PinRegular /> : <DocumentRegular />}
+            icon={<span style={{ display: "flex", color: colorHex(doc.color) }}>{doc.pinned ? <PinRegular /> : <DocumentRegular />}</span>}
             className={mergeClasses(
               originalIndex === activeIndex ? styles.docItemActive : styles.docItem,
               indented && !selectMode && styles.docItemIndented,
@@ -620,7 +635,7 @@ export function Sidebar({
           <>
             <Button
               appearance="subtle"
-              icon={doc.pinned ? <PinRegular /> : <DocumentRegular />}
+              icon={<span style={{ display: "flex", color: colorHex(doc.color) }}>{doc.pinned ? <PinRegular /> : <DocumentRegular />}</span>}
               className={mergeClasses(
                 originalIndex === activeIndex ? styles.docItemActive : styles.docItem,
                 indented && !selectMode && styles.docItemIndented,
@@ -844,7 +859,7 @@ export function Sidebar({
               setContextMenu({ type: "empty", index: -1, x: e.clientX, y: e.clientY });
             }}
           >
-            {!isSearching && docs.length > 0 && groups.length > 0 && (
+            {!flatListMode && docs.length > 0 && groups.length > 0 && (
               <Button
                 appearance="subtle"
                 size="small"
@@ -858,11 +873,11 @@ export function Sidebar({
               </Button>
             )}
             {groupRenderList.length === 0 && noteItems.length === 0 && !exitingDoc ? (
-              <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : sidebarSearchQuery ? "" : i("sidebar.empty")}</span>
+              <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : sidebarSearchQuery ? "" : colorFilterActive ? i("sidebar.colorFilterEmpty") : i("sidebar.empty")}</span>
             ) : (
               <>
                 {/* Groups section */}
-                {!isSearching && (
+                {!flatListMode && (
                   <div
                     data-groups-section
                     className={mergeClasses(styles.groupsSection, groups.length === 0 && styles.groupsSectionHidden)}
@@ -897,7 +912,7 @@ export function Sidebar({
 
                 {/* Notes section */}
                 <div data-notes-section className={styles.notesSection}>
-                  {!isSearching && (noteItems.length > 0 || exitingDoc) && (
+                  {!flatListMode && (noteItems.length > 0 || exitingDoc) && (
                     <span className={styles.sectionLabel}>{i("sidebar.notesLabel")}</span>
                   )}
                   {exitingDoc && exitingDoc.index === 0 && (
@@ -953,7 +968,7 @@ export function Sidebar({
               }}
             >
               {filteredDocs.length === 0 ? (
-                <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : i("sidebar.empty")}</span>
+                <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : colorFilterActive ? i("sidebar.colorFilterEmpty") : i("sidebar.empty")}</span>
               ) : (
                 filteredDocs.map(({ doc, originalIndex, snippet }, idx) => (
                   renderNoteItem(doc, originalIndex, false, {
@@ -1077,6 +1092,8 @@ export function Sidebar({
         onDuplicateNote={onDuplicateNote}
         onExportNote={onExportNote}
         onToggleNotePinned={onToggleNotePinned}
+        onSetNoteColor={onSetNoteColor}
+        onSetNotesColor={onSetNotesColor}
         onImportFile={onImportFile}
         onCreateGroup={onCreateGroup}
         onDeleteGroup={onDeleteGroup}

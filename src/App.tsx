@@ -13,6 +13,7 @@ import {
 import {
   FolderAddRegular,
   CheckboxCheckedRegular,
+  FilterRegular,
   PanelLeftFilled,
   PanelLeftRegular,
   SearchRegular,
@@ -31,6 +32,8 @@ import {
 } from "./components/TiptapEditor";
 import { TitleBar } from "./components/TitleBar";
 import { Sidebar } from "./components/Sidebar";
+import { ColorSwatchRow } from "./components/NoteColorPicker";
+import { useStyles as useSidebarStyles } from "./components/Sidebar.styles";
 import { EditorToolbar } from "./components/EditorToolbar";
 import { StatusBar } from "./components/StatusBar";
 import { SettingsModal } from "./components/SettingsModal";
@@ -41,6 +44,8 @@ import { refreshWikiLinkDecorations } from "./extensions/WikiLink";
 import { t } from "./i18n";
 import { exportAsMarkdown, exportAsPdf, exportAsRtf } from "./utils/exportHandlers";
 import { clearManagedNotesData, hasExistingNotenData, migrateNotesDir } from "./utils/migrateNotesDir";
+import { colorHex } from "./utils/noteColors";
+import { clampMenuToViewport } from "./utils/clampMenuPosition";
 import { useFileWatcher } from "./hooks/useFileWatcher";
 import { useWindowSync } from "./hooks/useWindowSync";
 import { useChromeVisibility } from "./hooks/useChromeVisibility";
@@ -153,6 +158,7 @@ function App() {
   const locale = settings.locale;
   const state = useMarkdownState();
   const styles = useStyles();
+  const sidebarStyles = useSidebarStyles();
   const tiptapRef = useRef<TiptapEditorHandle>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [tiptapEditor, setTiptapEditor] = useState<import("@tiptap/react").Editor | null>(null);
@@ -220,6 +226,9 @@ function App() {
   // Select 모드 & 그룹 생성 후 rename 트리거
   const [selectMode, setSelectMode] = useState(false);
   const [pendingRenameGroupId, setPendingRenameGroupId] = useState<string | null>(null);
+
+  // Color-filter popover (anchored under the sidebar filter button)
+  const [filterPopoverPos, setFilterPopoverPos] = useState<{ x: number; y: number } | null>(null);
 
   const initialLoaded = useRef(false);
   useEffect(() => {
@@ -799,6 +808,19 @@ function App() {
                     style={selectMode ? { backgroundColor: "var(--ui-active-bg)" } : undefined}
                   />
                 </Tooltip>
+                <Tooltip content={t("sidebar.filter", locale)} relationship="label" positioning="below" appearance={isDarkMode ? "inverted" : undefined}>
+                  <Button
+                    appearance="subtle"
+                    icon={<span style={{ display: "flex", color: colorHex(settings.colorFilter) }}><FilterRegular /></span>}
+                    className={styles.sidebarFilterBtn}
+                    onClick={(e) => {
+                      if (filterPopoverPos) { setFilterPopoverPos(null); return; }
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      setFilterPopoverPos({ x: rect.left, y: rect.bottom + 4 });
+                    }}
+                    style={settings.colorFilter ? { backgroundColor: "var(--ui-active-bg)" } : undefined}
+                  />
+                </Tooltip>
                 <Tooltip content={t("sidebar.newGroup", locale)} relationship="label" positioning="below" appearance={isDarkMode ? "inverted" : undefined}>
                   <Button
                     appearance="subtle"
@@ -819,6 +841,35 @@ function App() {
                     onClick={() => setSidebarSearchOpen((o) => !o)}
                   />
                 </Tooltip>
+                {filterPopoverPos && (
+                  <>
+                    <div
+                      style={{ position: "fixed", inset: 0, zIndex: 999 }}
+                      onClick={() => setFilterPopoverPos(null)}
+                      onContextMenu={(e) => { e.preventDefault(); setFilterPopoverPos(null); }}
+                    />
+                    <div
+                      className={sidebarStyles.filterPopover}
+                      style={{ left: filterPopoverPos.x, top: filterPopoverPos.y }}
+                      ref={(el) => { if (el) clampMenuToViewport(el); }}
+                    >
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        className={sidebarStyles.contextMenuItem}
+                        onClick={() => { void updateSetting("colorFilter", null); setFilterPopoverPos(null); }}
+                      >
+                        {t("sidebar.filterAll", locale)}
+                      </Button>
+                      <ColorSwatchRow
+                        value={settings.colorFilter}
+                        includeNone={false}
+                        locale={locale}
+                        onSelect={(c) => { void updateSetting("colorFilter", c); setFilterPopoverPos(null); }}
+                      />
+                    </div>
+                  </>
+                )}
               </>
             )}
             <Sidebar
@@ -833,6 +884,8 @@ function App() {
               onExportNote={fs.exportNote}
               onRenameNote={fs.renameNote}
               onToggleNotePinned={fs.toggleNotePinned}
+              onSetNoteColor={fs.setNoteColor}
+              onSetNotesColor={fs.setNotesColor}
               onImportFile={fs.importFile}
               notesSortOrder={settings.notesSortOrder}
               locale={locale}
@@ -857,6 +910,7 @@ function App() {
               onSelectModeChange={setSelectMode}
               pendingRenameGroupId={pendingRenameGroupId}
               onPendingRenameGroupIdClear={() => setPendingRenameGroupId(null)}
+              colorFilter={settings.colorFilter}
             />
             <div
               className={mergeClasses(

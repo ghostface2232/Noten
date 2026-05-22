@@ -205,6 +205,7 @@ export async function scanAndAbsorbConflicts(notesDir: string): Promise<Conflict
       createdAt: seed?.createdAt ?? now,
       updatedAt: now,
       pinned: seed?.pinned === true,
+      color: seed?.color,
       groupId: seed?.groupId ?? null,
       groupUpdatedAt: seed?.groupUpdatedAt ?? seed?.updatedAt ?? now,
       trashedAt: null,

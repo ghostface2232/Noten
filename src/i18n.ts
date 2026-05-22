@@ -119,6 +119,18 @@ const dict = {
   "sidebar.groupsLabel": { en: "GROUPS", ko: "그룹" },
   "sidebar.notesLabel": { en: "NOTES", ko: "노트" },
   "sidebar.allNotes": { en: "All Notes", ko: "모든 노트" },
+  "sidebar.color": { en: "Color", ko: "색상" },
+  "sidebar.colorNone": { en: "No color", ko: "색상 없음" },
+  "sidebar.colorRed": { en: "Red", ko: "빨강" },
+  "sidebar.colorOrange": { en: "Orange", ko: "주황" },
+  "sidebar.colorYellow": { en: "Yellow", ko: "노랑" },
+  "sidebar.colorGreen": { en: "Green", ko: "초록" },
+  "sidebar.colorBlue": { en: "Blue", ko: "파랑" },
+  "sidebar.colorPurple": { en: "Purple", ko: "보라" },
+  "sidebar.colorGray": { en: "Gray", ko: "회색" },
+  "sidebar.filter": { en: "Filter by color", ko: "색상으로 필터" },
+  "sidebar.filterAll": { en: "All notes", ko: "전체 보기" },
+  "sidebar.colorFilterEmpty": { en: "No notes with this color", ko: "이 색상의 노트가 없습니다" },
 
   /* ─── StatusBar ─── */
   "status.chars": { en: " chars", ko: " 자" },

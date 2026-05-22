@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { appDataDir } from "@tauri-apps/api/path";
 import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { isNoteColorId, type NoteColorId } from "../utils/noteColors";
 
 export type Locale = "en" | "ko";
 export type ThemeMode = "light" | "dark" | "system";
@@ -21,6 +22,8 @@ export interface Settings {
   groupLayout: GroupLayout;
   fontFamily: FontFamily;
   notesDirectory: string;
+  /** Active sidebar color filter — only notes of this color are shown. */
+  colorFilter: NoteColorId | null;
 }
 
 const DEFAULTS: Settings = {
@@ -34,6 +37,7 @@ const DEFAULTS: Settings = {
   groupLayout: "groups-first",
   fontFamily: "sans",
   notesDirectory: "",
+  colorFilter: null,
 };
 
 let settingsPathPromise: Promise<string> | null = null;
@@ -86,6 +90,7 @@ function parseSettings(raw: string | null): Settings {
       groupLayout: parsed.groupLayout === "mixed" ? "mixed" : DEFAULTS.groupLayout,
       fontFamily: parsed.fontFamily === "serif" ? "serif" : DEFAULTS.fontFamily,
       notesDirectory: typeof parsed.notesDirectory === "string" ? parsed.notesDirectory : DEFAULTS.notesDirectory,
+      colorFilter: isNoteColorId(parsed.colorFilter) ? parsed.colorFilter : DEFAULTS.colorFilter,
     };
   } catch {
     return DEFAULTS;

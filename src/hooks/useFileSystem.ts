@@ -19,7 +19,8 @@ import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { removeNoteAssetDir } from "../utils/imageAssetUtils";
-import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsUpdated, emitNotePinnedUpdated, emitTrashUpdated } from "./useWindowSync";
+import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsUpdated, emitNoteColorUpdated, emitNotePinnedUpdated, emitTrashUpdated } from "./useWindowSync";
+import type { NoteColorId } from "../utils/noteColors";
 import { markOwnWrite } from "./ownWriteTracker";
 import { removeMeta as removeMetaFile } from "../utils/metadataIO";
 import { t } from "../i18n";
@@ -99,6 +100,8 @@ export interface FileSystemActions {
   exportNote: (index: number) => Promise<void>;
   renameNote: (index: number, newName: string) => void;
   toggleNotePinned: (index: number) => void;
+  setNoteColor: (index: number, color: NoteColorId | null) => void;
+  setNotesColor: (noteIds: string[], color: NoteColorId | null) => void;
   restoreNote: (trashedNoteId: string) => Promise<void>;
   permanentlyDeleteNote: (trashedNoteId: string) => Promise<void>;
   emptyTrash: () => Promise<void>;
@@ -544,6 +547,7 @@ export function useFileSystem(
           createdAt: doc.createdAt,
           updatedAt: doc.updatedAt,
           pinned: doc.pinned === true,
+          color: doc.color,
         };
 
         if (setTrashedNotes) {
@@ -765,6 +769,36 @@ export function useFileSystem(
     emitNotePinnedUpdated(doc.id, nextPinned);
   }, [locale, notesSortOrder, setActiveIndex, setDocs]);
 
+  // Color is a label, not a content edit — `updatedAt` is intentionally left
+  // untouched. `metaSnapshotEqual` includes `color`, so the change still
+  // produces exactly one `.meta` write per affected note.
+  const setNoteColor = useCallback((index: number, color: NoteColorId | null) => {
+    const doc = docsRef.current[index];
+    if (!doc || doc.color === (color ?? undefined)) return;
+
+    const activeId = docsRef.current[activeIndexRef.current]?.id ?? null;
+    const nextDocs = docsRef.current.map((entry, i) => (
+      i === index ? { ...entry, color: color ?? undefined } : entry
+    ));
+
+    sortAndPersistDocs(nextDocs, activeId, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
+    emitNoteColorUpdated(doc.id, color);
+  }, [locale, notesSortOrder, setActiveIndex, setDocs]);
+
+  const setNotesColor = useCallback((noteIds: string[], color: NoteColorId | null) => {
+    const idSet = new Set(noteIds);
+    const next = color ?? undefined;
+    if (!docsRef.current.some((d) => idSet.has(d.id) && d.color !== next)) return;
+
+    const activeId = docsRef.current[activeIndexRef.current]?.id ?? null;
+    const nextDocs = docsRef.current.map((entry) => (
+      idSet.has(entry.id) ? { ...entry, color: next } : entry
+    ));
+
+    sortAndPersistDocs(nextDocs, activeId, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
+    for (const id of idSet) emitNoteColorUpdated(id, color);
+  }, [locale, notesSortOrder, setActiveIndex, setDocs]);
+
   const restoreNote = useCallback(async (trashedNoteId: string) => {
     const trashed = trashedNotesRef.current?.find((n) => n.id === trashedNoteId);
     if (!trashed) return;
@@ -795,6 +829,7 @@ export function useFileSystem(
       createdAt: trashed.createdAt,
       updatedAt: trashed.updatedAt,
       pinned: trashed.pinned === true,
+      color: trashed.color,
     };
 
     const { docs: liveDocs, activeDocId } = getLiveDocsSnapshot();
@@ -876,5 +911,5 @@ export function useFileSystem(
     void saveManifest(docsRef.current, docsRef.current[activeIndexRef.current]?.id ?? null, groupsRef.current).catch(() => {});
   }, [setTrashedNotes]);
 
-  return { importFile, importFiles, saveFile, saveFileAs, newNote, createNoteWithTitle, switchDocument, deleteNote, duplicateNote, exportNote, renameNote, toggleNotePinned, restoreNote, permanentlyDeleteNote, emptyTrash };
+  return { importFile, importFiles, saveFile, saveFileAs, newNote, createNoteWithTitle, switchDocument, deleteNote, duplicateNote, exportNote, renameNote, toggleNotePinned, setNoteColor, setNotesColor, restoreNote, permanentlyDeleteNote, emptyTrash };
 }

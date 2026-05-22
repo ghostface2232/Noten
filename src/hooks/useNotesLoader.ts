@@ -12,6 +12,7 @@ import {
 import { markOwnWrite } from "./ownWriteTracker";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
+import type { NoteColorId } from "../utils/noteColors";
 import { getFileTimestamps } from "../utils/fileTimestamps";
 import { migrateDataUrlImagesToAssets } from "../utils/migrateImageAssets";
 import { removeNoteAssetDir } from "../utils/imageAssetUtils";
@@ -61,6 +62,8 @@ export interface NoteDoc {
   updatedAt: number;
   pinned?: boolean;
   customName?: boolean;
+  /** User-assigned color label (sidebar icon tint). */
+  color?: NoteColorId;
 }
 
 export interface NoteGroup {
@@ -87,6 +90,7 @@ export interface TrashedNote {
   createdAt: number;
   updatedAt: number;
   pinned?: boolean;
+  color?: NoteColorId;
 }
 
 /**
@@ -127,6 +131,7 @@ interface MetaSnapshot {
   createdAt: number;
   updatedAt: number;
   pinned: boolean;
+  color: NoteColorId | null;
   groupId: string | null;
   groupUpdatedAt: number;
   trashedAt: number | null;
@@ -211,6 +216,7 @@ async function seedWriteSnapshots(dir: string): Promise<void> {
       createdAt: m.createdAt,
       updatedAt: m.updatedAt,
       pinned: m.pinned === true,
+      color: m.color ?? null,
       groupId: m.groupId ?? null,
       groupUpdatedAt: m.groupUpdatedAt ?? m.updatedAt,
       trashedAt: m.trashedAt ?? null,
@@ -564,6 +570,7 @@ async function loadDecomposedState(dir: string): Promise<DecomposedState> {
         createdAt: meta.createdAt,
         updatedAt: meta.updatedAt,
         pinned: meta.pinned === true,
+        color: meta.color,
       });
     } else {
       docs.push({
@@ -575,6 +582,7 @@ async function loadDecomposedState(dir: string): Promise<DecomposedState> {
         createdAt: meta.createdAt,
         updatedAt: meta.updatedAt,
         pinned: meta.pinned === true,
+        color: meta.color,
         customName: meta.customName,
       });
     }
@@ -809,6 +817,7 @@ export async function reconcileFolder(
       createdAt: meta.createdAt,
       updatedAt: meta.updatedAt,
       pinned: meta.pinned === true,
+      color: meta.color,
       customName: meta.customName,
     };
     nextDocs.push(newDoc);
@@ -959,6 +968,7 @@ function metaSnapshotEqual(a: MetaSnapshot, b: MetaSnapshot): boolean {
     && a.createdAt === b.createdAt
     && a.updatedAt === b.updatedAt
     && a.pinned === b.pinned
+    && a.color === b.color
     && a.groupId === b.groupId
     && a.groupUpdatedAt === b.groupUpdatedAt
     && a.trashedAt === b.trashedAt;
@@ -1035,6 +1045,7 @@ async function persistDecomposedState(
       createdAt: doc.createdAt,
       updatedAt: doc.updatedAt,
       pinned: doc.pinned === true,
+      color: doc.color ?? null,
       groupId: groupSnap.groupId,
       groupUpdatedAt: groupSnap.groupUpdatedAt,
       trashedAt: null,
@@ -1054,6 +1065,7 @@ async function persistDecomposedState(
         createdAt: snap.createdAt,
         updatedAt: snap.updatedAt,
         pinned: snap.pinned,
+        color: snap.color ?? undefined,
         groupId: snap.groupId,
         groupUpdatedAt: snap.groupUpdatedAt,
         trashedAt: null,
@@ -1072,6 +1084,7 @@ async function persistDecomposedState(
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
       pinned: t.pinned === true,
+      color: t.color ?? null,
       groupId: groupSnap.groupId,
       groupUpdatedAt: groupSnap.groupUpdatedAt,
       trashedAt: t.trashedAt,
@@ -1091,6 +1104,7 @@ async function persistDecomposedState(
         createdAt: snap.createdAt,
         updatedAt: snap.updatedAt,
         pinned: snap.pinned,
+        color: snap.color ?? undefined,
         groupId: snap.groupId,
         groupUpdatedAt: snap.groupUpdatedAt,
         trashedAt: snap.trashedAt,
@@ -1188,10 +1202,11 @@ async function persistDecomposedState(
   const localCache: LocalCache = {
     version: 2,
     notesDirectory: dir,
-    notes: docs.map(({ id, filePath, fileName, createdAt, updatedAt, customName, pinned }) => ({
+    notes: docs.map(({ id, filePath, fileName, createdAt, updatedAt, customName, pinned, color }) => ({
       id, filePath, fileName, createdAt, updatedAt,
       ...(customName ? { customName } : {}),
       ...(pinned ? { pinned } : {}),
+      ...(color ? { color } : {}),
     })),
     groups: groups && groups.length > 0 ? groups : undefined,
     trashedNotes: trashed.length > 0 ? trashed : undefined,
@@ -1374,10 +1389,11 @@ export function useNotesLoader(
           await writeLocalCache({
             version: 2,
             notesDirectory: dir,
-            notes: sorted.map(({ id, filePath, fileName, createdAt, updatedAt, customName, pinned }) => ({
+            notes: sorted.map(({ id, filePath, fileName, createdAt, updatedAt, customName, pinned, color }) => ({
               id, filePath, fileName, createdAt, updatedAt,
               ...(customName ? { customName } : {}),
               ...(pinned ? { pinned } : {}),
+              ...(color ? { color } : {}),
             })),
             groups: finalGroups.length > 0 ? finalGroups : undefined,
             trashedNotes: purgedTrashed.length > 0 ? purgedTrashed : undefined,

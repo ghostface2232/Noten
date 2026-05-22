@@ -94,18 +94,19 @@ export function useFileWatcher(
       const idx = prev.findIndex((d) => d.id === id);
       if (idx < 0) return prev;
       const cur = prev[idx];
-      // Active edits trump remote rename/title changes, but Pin is independent
-      // metadata and can safely sync while the body is locally dirty.
+      // Active edits trump remote rename/title changes, but Pin and Color are
+      // independent metadata and can safely sync while the body is locally dirty.
       if (cur.isDirty) {
-        if (cur.pinned === (meta.pinned === true)) return prev;
+        if (cur.pinned === (meta.pinned === true) && cur.color === meta.color) return prev;
         const next = [...prev];
-        next[idx] = { ...cur, pinned: meta.pinned === true, updatedAt: meta.updatedAt };
+        next[idx] = { ...cur, pinned: meta.pinned === true, color: meta.color, updatedAt: meta.updatedAt };
         return next;
       }
       if (
         cur.fileName === meta.fileName
         && cur.updatedAt === meta.updatedAt
         && cur.pinned === (meta.pinned === true)
+        && cur.color === meta.color
       ) return prev;
       const next = [...prev];
       next[idx] = {
@@ -113,6 +114,7 @@ export function useFileWatcher(
         fileName: meta.fileName,
         updatedAt: meta.updatedAt,
         pinned: meta.pinned === true,
+        color: meta.color,
         customName: meta.customName,
       };
       return next;
