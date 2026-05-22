@@ -227,7 +227,7 @@ interface SettingsModalProps {
   onClose: () => void;
   settings: Settings;
   isDarkMode: boolean;
-  onUpdate: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+  onUpdate: <K extends keyof Settings>(key: K, value: Settings[K]) => void | Promise<boolean>;
   currentNotesDir: string;
   onChangeNotesDir: () => void;
   onResetNotesDir: () => void;

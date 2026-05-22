@@ -112,6 +112,7 @@ export function useSettings() {
   const [settings, setSettingsRaw] = useState<Settings>(DEFAULTS);
   const [isLoaded, setIsLoaded] = useState(false);
   const didUserUpdateRef = useRef(false);
+  const settingsRef = useRef<Settings>(DEFAULTS);
 
   useEffect(() => {
     let cancelled = false;
@@ -120,6 +121,7 @@ export function useSettings() {
       const fileSettings = await loadSettingsFromFile();
       if (fileSettings) {
         if (!cancelled && !didUserUpdateRef.current) {
+          settingsRef.current = fileSettings;
           setSettingsRaw(fileSettings);
         }
         if (!cancelled) setIsLoaded(true);
@@ -139,16 +141,18 @@ export function useSettings() {
     };
   }, []);
 
-  const update = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
+  const update = useCallback(async <K extends keyof Settings>(key: K, value: Settings[K]): Promise<boolean> => {
     didUserUpdateRef.current = true;
-
-    setSettingsRaw((prev) => {
-      const next = { ...prev, [key]: value };
-      void persistSettings(next).catch(() => {
-        console.warn("Failed to persist settings update:", key);
-      });
-      return next;
-    });
+    const next = { ...settingsRef.current, [key]: value };
+    settingsRef.current = next;
+    setSettingsRaw(next);
+    try {
+      await persistSettings(next);
+      return true;
+    } catch {
+      console.warn("Failed to persist settings update:", key);
+      return false;
+    }
   }, []);
 
   return useMemo(() => ({ settings, update, isLoaded }), [settings, update, isLoaded]);

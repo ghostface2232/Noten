@@ -11,6 +11,8 @@ export interface NoteMeta {
   updatedAt: number;
   pinned?: boolean;
   groupId: string | null;
+  /** Last time this note's group membership changed. */
+  groupUpdatedAt?: number;
   /** If set, note lives under `.trash/` (body file is `.trash/{id}.md`). */
   trashedAt: number | null;
   /** Original file path when trashed — preserved for restore. Shared safely since all PCs point at same folder. */
@@ -75,6 +77,7 @@ export async function writeMeta(notesDir: string, meta: NoteMeta, machineId: str
     updatedAt: meta.updatedAt,
     pinned: meta.pinned === true ? true : undefined,
     groupId: meta.groupId ?? null,
+    groupUpdatedAt: typeof meta.groupUpdatedAt === "number" ? meta.groupUpdatedAt : undefined,
     trashedAt: meta.trashedAt ?? null,
     trashedFromPath: meta.trashedFromPath ?? null,
     lastWriterMachineId: machineId || meta.lastWriterMachineId || undefined,

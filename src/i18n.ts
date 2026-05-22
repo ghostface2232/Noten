@@ -209,6 +209,10 @@ const dict = {
     en: "Failed to migrate notes. The storage location was not changed.",
     ko: "노트 이동에 실패했습니다. 저장 위치가 변경되지 않았습니다.",
   },
+  "settings.notesDirectory.settingsFailed": {
+    en: "Failed to save the notes folder setting. The storage location was not changed.",
+    ko: "저장 위치 설정을 저장하지 못했습니다. 저장 위치가 변경되지 않았습니다.",
+  },
 
   /* ─── Trash ─── */
   "settings.tab.trash": { en: "Recently Deleted", ko: "최근 삭제한 노트" },

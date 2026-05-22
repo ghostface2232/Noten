@@ -513,7 +513,10 @@ function App() {
       return;
     }
 
-    updateSetting("notesDirectory", newDir);
+    if (!(await updateSetting("notesDirectory", newDir))) {
+      await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
+      return;
+    }
     setNotesDir(newDir);
     setCurrentNotesDir(newDir);
     setReloadKey((k) => k + 1);
@@ -563,7 +566,10 @@ function App() {
       return;
     }
 
-    updateSetting("notesDirectory", "");
+    if (!(await updateSetting("notesDirectory", ""))) {
+      await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
+      return;
+    }
     setCurrentNotesDir(defaultDir);
     setReloadKey((k) => k + 1);
     // Same as handleChangeNotesDir — release is owned by the reload effect.

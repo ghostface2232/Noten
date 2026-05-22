@@ -56,9 +56,9 @@ export interface ConflictScanResult {
 /**
  * Scan the shared notes folder for OneDrive/Dropbox conflict copies and absorb them.
  *
- *  - `manifest*.json` conflict copies → deleted (we no longer use manifest.json as truth).
- *  - `.groups*.json` / `.groups (1).json` etc. → merged into `.groups.json`, then deleted.
- *  - `.meta/{uuid}-{suffix}.json` → merged into the canonical `.meta/{uuid}.json`, then deleted.
+ *  - `manifest*.json` conflict copies → left in place; legacy manifests may contain state not safely decomposed here.
+ *  - `.groups*.json` / `.groups (1).json` etc. → merged into `.groups.json`, then deleted only after a confirmed write.
+ *  - `.meta/{uuid}-{suffix}.json` → merged into the canonical `.meta/{uuid}.json`, then deleted only after a confirmed write.
  *  - Root `{stem}-{suffix}.md` where stem is a UUID of a known note → re-homed under a new UUID
  *    with a " (from …)" label.
  */
@@ -78,14 +78,10 @@ export async function scanAndAbsorbConflicts(notesDir: string): Promise<Conflict
     return result;
   }
 
-  // ── manifest conflict copies: always discard ──
-  for (const e of rootEntries) {
-    if (!e.name || !e.isFile) continue;
-    if (e.name === "manifest.json" || e.name === "manifest.legacy.json") continue;
-    if (isConflictFileName(e.name, "manifest", ".json")) {
-      try { await remove(`${dirBase}${e.name}`); result.removedManifestConflicts++; } catch { /* ignore */ }
-    }
-  }
+  // ── manifest conflict copies ──
+  // Do not delete these here. A legacy conflict manifest can be the only copy
+  // containing old note/group/trash state, and this scanner cannot safely
+  // decompose it without body-file context.
 
   // ── .groups.json conflicts: merge then delete ──
   for (const e of rootEntries) {
@@ -93,15 +89,19 @@ export async function scanAndAbsorbConflicts(notesDir: string): Promise<Conflict
     if (e.name === ".groups.json") continue;
     if (isConflictFileName(e.name, ".groups", ".json")) {
       const path = `${dirBase}${e.name}`;
+      let merged = false;
       try {
         const raw = await readTextFile(path);
         const parsed = JSON.parse(raw) as { groups?: unknown };
         if (parsed && typeof parsed === "object" && parsed.groups && typeof parsed.groups === "object") {
           await writeGroupsWithMerge(notesDir, parsed.groups as Record<string, import("./groupsIO").SharedGroupEntry>);
           result.mergedGroupsConflicts++;
+          merged = true;
         }
       } catch { /* ignore broken file */ }
-      try { await remove(path); } catch { /* ignore */ }
+      if (merged) {
+        try { await remove(path); } catch { /* keep for retry */ }
+      }
     }
   }
 
@@ -119,23 +119,40 @@ export async function scanAndAbsorbConflicts(notesDir: string): Promise<Conflict
     if (!canonicalStem || !UUID_RE.test(canonicalStem)) continue;
 
     const conflictPath = `${metaDir}/${e.name}`;
+    let merged = false;
     try {
       const raw = await readTextFile(conflictPath);
       const remote = JSON.parse(raw) as NoteMeta;
       if (!remote || typeof remote !== "object" || remote.id !== canonicalStem) {
-        await remove(conflictPath).catch(() => {});
         continue;
       }
       const local = await readMeta(notesDir, canonicalStem);
       const winnerIsLocal = !!(local && local.updatedAt >= remote.updatedAt);
       const winner = winnerIsLocal ? local! : remote;
+      const localGroupUpdatedAt = local ? (local.groupUpdatedAt ?? local.updatedAt) : -1;
+      const remoteGroupUpdatedAt = remote.groupUpdatedAt ?? remote.updatedAt;
+      const groupWinner = remoteGroupUpdatedAt > localGroupUpdatedAt
+        ? remote
+        : remoteGroupUpdatedAt < localGroupUpdatedAt
+          ? local
+          : (local?.groupId ? local : remote);
       // Layer winner on top of local so optional fields (e.g. trashedFromPath)
-      // present only on the loser are preserved when not contradicted.
-      const merged = { ...local, ...winner, id: canonicalStem };
-      await writeMeta(notesDir, merged, getMachineIdCached());
+      // present only on the loser are preserved when not contradicted. Group
+      // membership has its own clock so body/title conflicts do not overwrite it.
+      const mergedMeta = {
+        ...local,
+        ...winner,
+        id: canonicalStem,
+        groupId: groupWinner?.groupId ?? null,
+        groupUpdatedAt: groupWinner?.groupUpdatedAt ?? groupWinner?.updatedAt,
+      };
+      await writeMeta(notesDir, mergedMeta, getMachineIdCached());
       result.mergedMetaConflicts++;
+      merged = true;
     } catch { /* ignore */ }
-    try { await remove(conflictPath); } catch { /* ignore */ }
+    if (merged) {
+      try { await remove(conflictPath); } catch { /* keep for retry */ }
+    }
   }
 
   // ── Root .md conflict copies ──
@@ -189,6 +206,7 @@ export async function scanAndAbsorbConflicts(notesDir: string): Promise<Conflict
       updatedAt: now,
       pinned: seed?.pinned === true,
       groupId: seed?.groupId ?? null,
+      groupUpdatedAt: seed?.groupUpdatedAt ?? seed?.updatedAt ?? now,
       trashedAt: null,
     };
     await writeMeta(notesDir, newMeta, getMachineIdCached());

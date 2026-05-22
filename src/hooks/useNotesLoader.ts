@@ -96,6 +96,7 @@ export interface TrashedNote {
  */
 interface LocalCache {
   version: 2;
+  notesDirectory?: string;
   notes: Omit<NoteDoc, "isDirty" | "content">[];
   groups?: NoteGroup[];
   trashedNotes?: TrashedNote[];
@@ -127,9 +128,26 @@ interface MetaSnapshot {
   updatedAt: number;
   pinned: boolean;
   groupId: string | null;
+  groupUpdatedAt: number;
   trashedAt: number | null;
 }
 const writtenMetaSnapshot = new Map<string, MetaSnapshot>();
+
+const pendingGroupMembershipWrites = new Map<string, { groupId: string | null; updatedAt: number }>();
+
+export function markGroupMembershipChanged(noteId: string, groupId: string | null, updatedAt = Date.now()): void {
+  pendingGroupMembershipWrites.set(noteId, { groupId, updatedAt });
+}
+
+export function markGroupMembershipChanges(
+  noteIds: string[],
+  groupId: string | null,
+  updatedAt = Date.now(),
+): void {
+  for (const noteId of noteIds) {
+    pendingGroupMembershipWrites.set(noteId, { groupId, updatedAt });
+  }
+}
 
 interface SharedGroupSnapshot {
   name: string;
@@ -169,6 +187,7 @@ function resetWriteSnapshots() {
   writtenMetaSnapshot.clear();
   writtenGroupsSnapshot.clear();
   pendingGroupTombstones.clear();
+  pendingGroupMembershipWrites.clear();
 }
 
 /**
@@ -193,6 +212,7 @@ async function seedWriteSnapshots(dir: string): Promise<void> {
       updatedAt: m.updatedAt,
       pinned: m.pinned === true,
       groupId: m.groupId ?? null,
+      groupUpdatedAt: m.groupUpdatedAt ?? m.updatedAt,
       trashedAt: m.trashedAt ?? null,
     });
   }
@@ -276,6 +296,7 @@ export async function getNotesDir(): Promise<string> {
 
 export function setNotesDir(dir: string) {
   notesDirCache = dir;
+  imageAssetMigrationV1CompletedAtCache = null;
   // Path changed → previous diff snapshot and conflict baseline are meaningless.
   resetWriteSnapshots();
   resetKnownDiskContent();
@@ -283,6 +304,7 @@ export function setNotesDir(dir: string) {
 
 export function resetNotesDir() {
   notesDirCache = null;
+  imageAssetMigrationV1CompletedAtCache = null;
   resetWriteSnapshots();
   resetKnownDiskContent();
 }
@@ -350,13 +372,14 @@ async function getLocalCachePath(): Promise<string> {
   return localCachePathPromise;
 }
 
-async function readLocalCache(): Promise<LocalCache | null> {
+async function readLocalCache(notesDir: string): Promise<LocalCache | null> {
   try {
     const path = await getLocalCachePath();
     const raw = await readTextFile(path);
     const parsed = JSON.parse(raw) as LocalCache;
     if (!parsed || typeof parsed !== "object") return null;
     if (parsed.version !== 2) return null;
+    if (parsed.notesDirectory !== notesDir) return null;
     if (!Array.isArray(parsed.notes)) return null;
     imageAssetMigrationV1CompletedAtCache = parsed.imageAssetMigrationV1CompletedAt ?? null;
     return parsed;
@@ -679,6 +702,7 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
       updatedAt: n.updatedAt,
       pinned: n.pinned === true,
       groupId: noteIdToGroupId.get(n.id) ?? null,
+      groupUpdatedAt: n.updatedAt,
       trashedAt: null,
     }, machineId);
   }
@@ -695,6 +719,7 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
       updatedAt: t.updatedAt,
       pinned: t.pinned === true,
       groupId: t.groupId ?? null,
+      groupUpdatedAt: t.updatedAt,
       trashedAt: t.trashedAt,
       trashedFromPath: t.originalFilePath,
     }, machineId);
@@ -769,6 +794,7 @@ export async function reconcileFolder(
         updatedAt: fts.updatedAt,
         pinned: false,
         groupId: null,
+        groupUpdatedAt: fts.updatedAt,
         trashedAt: null,
       };
       try { await writeMetaFile(dir, meta, machineId); } catch { /* ignore */ }
@@ -934,6 +960,7 @@ function metaSnapshotEqual(a: MetaSnapshot, b: MetaSnapshot): boolean {
     && a.updatedAt === b.updatedAt
     && a.pinned === b.pinned
     && a.groupId === b.groupId
+    && a.groupUpdatedAt === b.groupUpdatedAt
     && a.trashedAt === b.trashedAt;
 }
 
@@ -973,21 +1000,50 @@ async function persistDecomposedState(
     if (!g.id) continue;
     for (const nid of g.noteIds) noteIdToGroupId.set(nid, g.id);
   }
+  const diskMeta = await readAllMeta(dir);
+
+  const resolveGroupSnapshot = (noteId: string, stateGroupId: string | null): Pick<MetaSnapshot, "groupId" | "groupUpdatedAt"> => {
+    const pending = pendingGroupMembershipWrites.get(noteId);
+    if (pending) {
+      return {
+        groupId: pending.groupId,
+        groupUpdatedAt: pending.updatedAt,
+      };
+    }
+
+    const disk = diskMeta.get(noteId);
+    if (disk) {
+      return {
+        groupId: disk.groupId ?? null,
+        groupUpdatedAt: disk.groupUpdatedAt ?? disk.updatedAt,
+      };
+    }
+
+    return {
+      groupId: stateGroupId,
+      groupUpdatedAt: Date.now(),
+    };
+  };
 
   // ── 1. Per-note meta diffs ──
   const metaWrites: Promise<unknown>[] = [];
   for (const doc of docs) {
+    const groupSnap = resolveGroupSnapshot(doc.id, noteIdToGroupId.get(doc.id) ?? null);
     const snap: MetaSnapshot = {
       fileName: doc.fileName,
       customName: !!doc.customName,
       createdAt: doc.createdAt,
       updatedAt: doc.updatedAt,
       pinned: doc.pinned === true,
-      groupId: noteIdToGroupId.get(doc.id) ?? null,
+      groupId: groupSnap.groupId,
+      groupUpdatedAt: groupSnap.groupUpdatedAt,
       trashedAt: null,
     };
     const prev = writtenMetaSnapshot.get(doc.id);
-    if (prev && metaSnapshotEqual(prev, snap)) continue;
+    if (prev && metaSnapshotEqual(prev, snap)) {
+      pendingGroupMembershipWrites.delete(doc.id);
+      continue;
+    }
 
     metaWrites.push(
       writeMetaFile(dir, {
@@ -999,24 +1055,32 @@ async function persistDecomposedState(
         updatedAt: snap.updatedAt,
         pinned: snap.pinned,
         groupId: snap.groupId,
+        groupUpdatedAt: snap.groupUpdatedAt,
         trashedAt: null,
-      }, machineId).catch(() => {}),
+      }, machineId).then(() => {
+        writtenMetaSnapshot.set(doc.id, snap);
+        pendingGroupMembershipWrites.delete(doc.id);
+      }),
     );
-    writtenMetaSnapshot.set(doc.id, snap);
   }
 
   for (const t of trashed) {
+    const groupSnap = resolveGroupSnapshot(t.id, t.groupId ?? null);
     const snap: MetaSnapshot = {
       fileName: t.fileName,
       customName: false,
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
       pinned: t.pinned === true,
-      groupId: t.groupId ?? null,
+      groupId: groupSnap.groupId,
+      groupUpdatedAt: groupSnap.groupUpdatedAt,
       trashedAt: t.trashedAt,
     };
     const prev = writtenMetaSnapshot.get(t.id);
-    if (prev && metaSnapshotEqual(prev, snap)) continue;
+    if (prev && metaSnapshotEqual(prev, snap)) {
+      pendingGroupMembershipWrites.delete(t.id);
+      continue;
+    }
 
     metaWrites.push(
       writeMetaFile(dir, {
@@ -1028,11 +1092,14 @@ async function persistDecomposedState(
         updatedAt: snap.updatedAt,
         pinned: snap.pinned,
         groupId: snap.groupId,
+        groupUpdatedAt: snap.groupUpdatedAt,
         trashedAt: snap.trashedAt,
         trashedFromPath: t.originalFilePath,
-      }, machineId).catch(() => {}),
+      }, machineId).then(() => {
+        writtenMetaSnapshot.set(t.id, snap);
+        pendingGroupMembershipWrites.delete(t.id);
+      }),
     );
-    writtenMetaSnapshot.set(t.id, snap);
   }
 
   // ── 2. Shared groups diff ──
@@ -1120,6 +1187,7 @@ async function persistDecomposedState(
   // ── 4. Local cache for next-boot quick paint ──
   const localCache: LocalCache = {
     version: 2,
+    notesDirectory: dir,
     notes: docs.map(({ id, filePath, fileName, createdAt, updatedAt, customName, pinned }) => ({
       id, filePath, fileName, createdAt, updatedAt,
       ...(customName ? { customName } : {}),
@@ -1208,7 +1276,7 @@ export function useNotesLoader(
         await ensureSharedDirs(dir);
 
         // ── Quick-paint from local cache while we scan disk ──
-        const cache = await readLocalCache();
+        const cache = await readLocalCache(dir);
         if (cache && cache.notes.length > 0) {
           const cachedDocs: NoteDoc[] = cache.notes.map((n) => ({
             ...n,
@@ -1269,6 +1337,7 @@ export function useNotesLoader(
             createdAt: timestamp,
             updatedAt: timestamp,
             groupId: null,
+            groupUpdatedAt: timestamp,
             trashedAt: null,
           }, getMachineIdCached());
           finalDocs = [{
@@ -1304,6 +1373,7 @@ export function useNotesLoader(
         } else {
           await writeLocalCache({
             version: 2,
+            notesDirectory: dir,
             notes: sorted.map(({ id, filePath, fileName, createdAt, updatedAt, customName, pinned }) => ({
               id, filePath, fileName, createdAt, updatedAt,
               ...(customName ? { customName } : {}),

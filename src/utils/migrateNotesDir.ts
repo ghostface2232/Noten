@@ -82,7 +82,7 @@ async function copyDirRecursive(srcDir: string, destDir: string): Promise<void> 
   try {
     entries = await readDir(srcDir);
   } catch {
-    return;
+    throw new Error(`Failed to read source directory: ${srcDir}`);
   }
   await mkdir(destDir, { recursive: true });
   const srcBase = normalizeSep(srcDir);
@@ -99,7 +99,7 @@ async function copyDirRecursive(srcDir: string, destDir: string): Promise<void> 
   }
 }
 
-async function clearDirContents(dir: string, protectedPath?: string): Promise<void> {
+async function clearDirContents(dir: string, protectedPath?: string, strict = false): Promise<void> {
   let entries;
   try {
     entries = await readDir(dir);
@@ -123,9 +123,20 @@ async function clearDirContents(dir: string, protectedPath?: string): Promise<vo
     try {
       await remove(target, { recursive: true });
     } catch {
+      if (strict) throw new Error(`Failed to remove managed entry: ${target}`);
       /* best-effort */
     }
   }
+}
+
+async function assertReadableDirIfExists(dir: string): Promise<void> {
+  if (!(await exists(dir).catch(() => false))) return;
+  await readDir(dir);
+}
+
+async function assertReadableFileIfExists(path: string): Promise<void> {
+  if (!(await exists(path).catch(() => false))) return;
+  await readTextFile(path);
 }
 
 export async function clearManagedNotesData(dir: string, protectedPath?: string): Promise<MigrationResult> {
@@ -196,6 +207,7 @@ async function decomposeLegacyIntoDir(
       updatedAt: n.updatedAt,
       pinned: n.pinned === true,
       groupId: noteIdToGroupId.get(n.id) ?? null,
+      groupUpdatedAt: n.updatedAt,
       trashedAt: null,
     };
     const existing = await readMeta(dir, n.id);
@@ -215,6 +227,7 @@ async function decomposeLegacyIntoDir(
       updatedAt: t.updatedAt,
       pinned: t.pinned === true,
       groupId: t.groupId ?? null,
+      groupUpdatedAt: t.updatedAt,
       trashedAt: t.trashedAt,
       trashedFromPath: t.originalFilePath,
     };
@@ -265,46 +278,47 @@ async function copySharedTreeForOverwrite(fromDir: string, toDir: string): Promi
   for (const e of entries) {
     if (!e.name || !e.isFile) continue;
     if (!e.name.endsWith(".md")) continue;
-    await copyFile(`${fromBase}${e.name}`, `${toBase}${e.name}`).catch(() => {});
+    await copyFile(`${fromBase}${e.name}`, `${toBase}${e.name}`);
   }
 
   // .meta directory (per-note sidecars)
-  try {
+  if (await exists(`${fromBase}.meta`).catch(() => false)) {
     await copyDirRecursive(`${fromBase}.meta`, `${toBase}.meta`);
-  } catch { /* may not exist */ }
+  }
 
   // .groups.json — overwrite copies; merge path handles its own union write.
-  try {
-    if (await exists(`${fromBase}.groups.json`)) {
-      await copyFile(`${fromBase}.groups.json`, `${toBase}.groups.json`).catch(() => {});
-    }
-  } catch { /* ignore */ }
+  if (await exists(`${fromBase}.groups.json`).catch(() => false)) {
+    await copyFile(`${fromBase}.groups.json`, `${toBase}.groups.json`);
+  }
 
   // .trash directory contents (md files only)
-  try {
+  if (await exists(`${fromBase}.trash`).catch(() => false)) {
     const trashEntries = await readDir(`${fromBase}.trash`);
     const trashMd = trashEntries.filter((e) => e.name?.endsWith(".md") && e.isFile);
     if (trashMd.length > 0) {
       await mkdir(`${toBase}.trash`, { recursive: true });
       for (const e of trashMd) {
-        await copyFile(`${fromBase}.trash/${e.name}`, `${toBase}.trash/${e.name}`).catch(() => {});
+        await copyFile(`${fromBase}.trash/${e.name}`, `${toBase}.trash/${e.name}`);
       }
     }
-  } catch { /* may not exist */ }
+  }
 
   // .assets directory recursively
-  try {
+  if (await exists(`${fromBase}.assets`).catch(() => false)) {
     await copyDirRecursive(`${fromBase}.assets`, `${toBase}.assets`);
-  } catch { /* may not exist */ }
+  }
 }
 
 // ── Helpers used only by the merge path ────────────────────────────────────
 
 /** filename → mtime (ms) for every `.md` file directly inside `dir`. */
-async function readMdMtimes(dir: string): Promise<Map<string, number>> {
+async function readMdMtimes(dir: string, required = false): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   let entries: { name?: string; isFile?: boolean }[] = [];
-  try { entries = await readDir(dir); } catch { return out; }
+  try { entries = await readDir(dir); } catch (err) {
+    if (required) throw err;
+    return out;
+  }
   for (const e of entries) {
     if (!e.name || !e.isFile) continue;
     if (!e.name.endsWith(".md")) continue;
@@ -315,11 +329,14 @@ async function readMdMtimes(dir: string): Promise<Map<string, number>> {
 }
 
 /** filename → mtime (ms) for every `.md` file inside `dir/.trash`. */
-async function readTrashMdMtimes(dir: string): Promise<Map<string, number>> {
+async function readTrashMdMtimes(dir: string, required = false): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   const trashDir = `${normalizeSep(dir)}.trash`;
   let entries: { name?: string; isFile?: boolean }[] = [];
-  try { entries = await readDir(trashDir); } catch { return out; }
+  try { entries = await readDir(trashDir); } catch (err) {
+    if (required) throw err;
+    return out;
+  }
   for (const e of entries) {
     if (!e.name || !e.isFile) continue;
     if (!e.name.endsWith(".md")) continue;
@@ -337,6 +354,7 @@ function metasEqual(a: NoteMeta, b: NoteMeta): boolean {
     && a.updatedAt === b.updatedAt
     && (a.pinned === true) === (b.pinned === true)
     && (a.groupId ?? null) === (b.groupId ?? null)
+    && (a.groupUpdatedAt ?? a.updatedAt) === (b.groupUpdatedAt ?? b.updatedAt)
     && (a.trashedAt ?? null) === (b.trashedAt ?? null)
     && (a.trashedFromPath ?? null) === (b.trashedFromPath ?? null);
 }
@@ -344,17 +362,25 @@ function metasEqual(a: NoteMeta, b: NoteMeta): boolean {
 function mergeMetaForMigration(source: NoteMeta, dest: NoteMeta | undefined): NoteMeta {
   if (!dest) return source;
 
-  const winner = source.updatedAt > dest.updatedAt ? source : dest;
-  const loser = winner === source ? dest : source;
-  const groupId = winner.groupId ?? loser.groupId ?? null;
+  const bodyWinner = source.updatedAt > dest.updatedAt ? source : dest;
+  const other = bodyWinner === source ? dest : source;
+  const sourceGroupUpdatedAt = source.groupUpdatedAt ?? source.updatedAt;
+  const destGroupUpdatedAt = dest.groupUpdatedAt ?? dest.updatedAt;
+  const groupWinner = sourceGroupUpdatedAt > destGroupUpdatedAt
+    ? source
+    : sourceGroupUpdatedAt < destGroupUpdatedAt
+      ? dest
+      : (dest.groupId ? dest : source);
 
   return {
-    ...winner,
-    customName: winner.customName || undefined,
-    pinned: winner.pinned === true,
-    groupId,
-    trashedAt: winner.trashedAt ?? null,
-    trashedFromPath: winner.trashedFromPath ?? loser.trashedFromPath ?? null,
+    ...bodyWinner,
+    customName: bodyWinner.customName || undefined,
+    createdAt: Math.min(source.createdAt, dest.createdAt),
+    pinned: bodyWinner.pinned === true,
+    groupId: groupWinner.groupId ?? null,
+    groupUpdatedAt: groupWinner.groupUpdatedAt ?? groupWinner.updatedAt,
+    trashedAt: bodyWinner.trashedAt ?? null,
+    trashedFromPath: bodyWinner.trashedFromPath ?? other.trashedFromPath ?? null,
   };
 }
 
@@ -365,7 +391,9 @@ function mergeMetaForMigration(source: NoteMeta, dest: NoteMeta | undefined): No
  */
 async function mergedCopyAssets(srcDir: string, destDir: string): Promise<void> {
   let entries: { name?: string; isFile?: boolean; isDirectory?: boolean }[] = [];
-  try { entries = await readDir(srcDir); } catch { return; }
+  try { entries = await readDir(srcDir); } catch (err) {
+    throw err;
+  }
   await mkdir(destDir, { recursive: true }).catch(() => {});
   const srcBase = normalizeSep(srcDir);
   const destBase = normalizeSep(destDir);
@@ -378,7 +406,7 @@ async function mergedCopyAssets(srcDir: string, destDir: string): Promise<void> 
     } else if (entry.isFile) {
       const destAlready = await exists(destPath).catch(() => false);
       if (destAlready) continue;
-      await copyFile(srcPath, destPath).catch(() => {});
+      await copyFile(srcPath, destPath);
     }
   }
 }
@@ -424,7 +452,7 @@ export async function migrateNotesDir(
 
     if (mergeStrategy === "overwrite") {
       // Wipe destination managed entries first.
-      await clearDirContents(toDir);
+      await clearDirContents(toDir, undefined, true);
       await copySharedTreeForOverwrite(fromDir, toDir);
 
       if (!destinationIsInsideSource) {
@@ -444,14 +472,26 @@ export async function migrateNotesDir(
     const fromBase = normalizeSep(fromDir);
     const toBase = normalizeSep(toDir);
 
+    await assertReadableDirIfExists(`${fromBase}.meta`);
+    await assertReadableDirIfExists(`${toBase}.meta`);
+    await assertReadableDirIfExists(`${fromBase}.assets`);
+    await assertReadableFileIfExists(`${fromBase}.groups.json`);
+    await assertReadableFileIfExists(`${toBase}.groups.json`);
+
     const sourceMeta = await readAllMeta(fromDir);
     const destMetaBefore = await readAllMeta(toDir);
 
-    const sourceMdMtimes = await readMdMtimes(fromDir);
-    const destMdMtimes = await readMdMtimes(toDir);
+    const sourceMdMtimes = await readMdMtimes(fromDir, true);
+    const destMdMtimes = await readMdMtimes(toDir, true);
 
-    const sourceTrashMtimes = await readTrashMdMtimes(fromDir);
-    const destTrashMtimes = await readTrashMdMtimes(toDir);
+    const sourceTrashMtimes = await readTrashMdMtimes(
+      fromDir,
+      await exists(`${fromBase}.trash`).catch(() => false),
+    );
+    const destTrashMtimes = await readTrashMdMtimes(
+      toDir,
+      await exists(`${toBase}.trash`).catch(() => false),
+    );
 
     const sourceGroupsFile = await readGroupsFile(fromDir);
     const destGroupsBefore = await readGroupsFile(toDir);
@@ -460,7 +500,7 @@ export async function migrateNotesDir(
     for (const [name, srcMtime] of sourceMdMtimes) {
       const destMtime = destMdMtimes.get(name);
       if (destMtime !== undefined && destMtime >= srcMtime) continue; // dest newer or equal → keep
-      await copyFile(`${fromBase}${name}`, `${toBase}${name}`).catch(() => {});
+      await copyFile(`${fromBase}${name}`, `${toBase}${name}`);
     }
     // dest-only .md files were never touched → preserved automatically.
 
@@ -473,7 +513,7 @@ export async function migrateNotesDir(
       const dest = destMetaBefore.get(id);
       const mergedMeta = mergeMetaForMigration(src, dest);
       if (dest && metasEqual(dest, mergedMeta)) continue;
-      await writeMeta(toDir, mergedMeta, machineId).catch(() => {});
+      await writeMeta(toDir, mergedMeta, machineId);
     }
     // dest-only meta ids: still on disk untouched → preserved.
 
@@ -483,14 +523,14 @@ export async function migrateNotesDir(
       for (const [name, srcMtime] of sourceTrashMtimes) {
         const destMtime = destTrashMtimes.get(name);
         if (destMtime !== undefined && destMtime >= srcMtime) continue;
-        await copyFile(`${fromBase}.trash/${name}`, `${toBase}.trash/${name}`).catch(() => {});
+        await copyFile(`${fromBase}.trash/${name}`, `${toBase}.trash/${name}`);
       }
     }
 
     // 4) `.assets/` — content-addressed filenames; union-copy without overwrite.
-    try {
+    if (await exists(`${fromBase}.assets`).catch(() => false)) {
       await mergedCopyAssets(`${fromBase}.assets`, `${toBase}.assets`);
-    } catch { /* may not exist */ }
+    }
 
     // 5) `.groups.json` — union with `mergeGroupMaps` (newer-wins per entry).
     const merged = mergeGroupMaps(destGroupsBefore.groups, sourceGroupsFile.groups);
