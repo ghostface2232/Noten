@@ -210,8 +210,8 @@ const dict = {
     ko: "노트 이동에 실패했습니다. 저장 위치가 변경되지 않았습니다.",
   },
   "settings.notesDirectory.settingsFailed": {
-    en: "Failed to save the notes folder setting. The storage location was not changed.",
-    ko: "저장 위치 설정을 저장하지 못했습니다. 저장 위치가 변경되지 않았습니다.",
+    en: "The notes were moved, but the folder setting could not be saved. If your notes don't appear after restarting the app, reselect this folder in Settings.",
+    ko: "노트는 이동되었지만 폴더 설정을 저장하지 못했습니다. 앱을 다시 시작한 뒤 노트가 보이지 않으면 설정에서 이 폴더를 다시 선택하세요.",
   },
 
   /* ─── Trash ─── */

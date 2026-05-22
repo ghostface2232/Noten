@@ -513,9 +513,14 @@ function App() {
       return;
     }
 
-    if (!(await updateSetting("notesDirectory", newDir))) {
+    let settingsSaved = await updateSetting("notesDirectory", newDir);
+    if (!settingsSaved) settingsSaved = await updateSetting("notesDirectory", newDir); // retry once for transient failures
+    if (!settingsSaved) {
+      // Migration already succeeded — the data now lives in `newDir`. A failed
+      // settings write is NOT fatal: returning here would strand
+      // `migrationInProgress` at `true` for the whole session. Fall through to
+      // the same reload sequence as the success path.
       await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
-      return;
     }
     setNotesDir(newDir);
     setCurrentNotesDir(newDir);
@@ -566,9 +571,12 @@ function App() {
       return;
     }
 
-    if (!(await updateSetting("notesDirectory", ""))) {
+    let settingsSaved = await updateSetting("notesDirectory", "");
+    if (!settingsSaved) settingsSaved = await updateSetting("notesDirectory", ""); // retry once for transient failures
+    if (!settingsSaved) {
+      // Migration already succeeded — data now lives in the default folder.
+      // Don't return: that would strand `migrationInProgress` at `true`.
       await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
-      return;
     }
     setCurrentNotesDir(defaultDir);
     setReloadKey((k) => k + 1);
