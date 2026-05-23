@@ -8,12 +8,24 @@ import {
 import { tauriFileSystem } from "../utils/fs";
 import { normalizeSep } from "../utils/pathUtils";
 import { reconcileFolder, createReconcileState, clearReconcileState, type ReconcileState } from "../utils/reconcileFolder";
+import {
+  createPersistState,
+  clearPersistState,
+  persistDecomposedState as persistDecomposedStateImpl,
+  loadDecomposedState as loadDecomposedStateImpl,
+  seedWriteSnapshots as seedWriteSnapshotsImpl,
+  syncGroupsSnapshotFromDisk as syncGroupsSnapshotFromDiskImpl,
+  readLocalCache as readLocalCacheImpl,
+  writeLocalCache as writeLocalCacheImpl,
+  buildGroupsFromShared,
+  type LocalCache,
+  type DecomposedState,
+} from "../utils/decomposedState";
 import { markOwnWrite } from "./ownWriteTracker";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import type { NoteColorId } from "../utils/noteColors";
 import type { NoteDoc, NoteGroup, TrashedNote } from "../utils/noteTypes";
-import { getFileBaseName } from "../utils/noteText";
 export type { NoteDoc, NoteGroup, TrashedNote } from "../utils/noteTypes";
 export { deriveTitle, getFileBaseName, stripInlineMarkdown, stripMarkdownContent } from "../utils/noteText";
 import { migrateDataUrlImagesToAssets } from "../utils/migrateImageAssets";
@@ -49,16 +61,6 @@ import {
   setGroupCollapsedPersisted,
 } from "./useUiState";
 
-/** Per-machine quick-paint cache. Disk sidecars remain the source of truth. */
-interface LocalCache {
-  version: 2;
-  notesDirectory?: string;
-  notes: Omit<NoteDoc, "isDirty" | "content">[];
-  groups?: NoteGroup[];
-  trashedNotes?: TrashedNote[];
-  imageAssetMigrationV1CompletedAt?: number;
-}
-
 let notesDirCache: string | null = null;
 let imageAssetMigrationV1CompletedAtCache: number | null = null;
 let trashedNotesCache: TrashedNote[] = [];
@@ -69,24 +71,13 @@ export function setTrashedNotesCache(notes: TrashedNote[]) { trashedNotesCache =
 export let migrationInProgress = false;
 export function setMigrationInProgress(v: boolean) { migrationInProgress = v; }
 
-/** Last-written per-note meta, used to skip unchanged sidecar writes. */
-interface MetaSnapshot {
-  fileName: string;
-  customName: boolean;
-  createdAt: number;
-  updatedAt: number;
-  pinned: boolean;
-  color: NoteColorId | null;
-  groupId: string | null;
-  groupUpdatedAt: number;
-  trashedAt: number | null;
-}
-const writtenMetaSnapshot = new Map<string, MetaSnapshot>();
-
-const pendingGroupMembershipWrites = new Map<string, { groupId: string | null; updatedAt: number }>();
+// Single bundle of diff caches and pending writes. External helpers below
+// (markGroupAsDeleted etc.) mutate this bundle so callers in useFileSystem,
+// useNoteGroups, and useWindowSync don't need to thread it explicitly.
+const persistState = createPersistState();
 
 export function markGroupMembershipChanged(noteId: string, groupId: string | null, updatedAt = Date.now()): void {
-  pendingGroupMembershipWrites.set(noteId, { groupId, updatedAt });
+  persistState.pendingGroupMembership.set(noteId, { groupId, updatedAt });
 }
 
 export function markGroupMembershipChanges(
@@ -95,77 +86,28 @@ export function markGroupMembershipChanges(
   updatedAt = Date.now(),
 ): void {
   for (const noteId of noteIds) {
-    pendingGroupMembershipWrites.set(noteId, { groupId, updatedAt });
+    persistState.pendingGroupMembership.set(noteId, { groupId, updatedAt });
   }
 }
 
-interface SharedGroupSnapshot {
-  name: string;
-  orderKey: string;
-  orderUpdatedAt: number;
-  updatedAt: number;
-}
-const writtenGroupsSnapshot = new Map<string, SharedGroupSnapshot>();
-
-// Only explicit local group deletes become tombstones; stale saves must not
-// convert freshly synced remote groups into deletes.
-const pendingGroupTombstones = new Set<string>();
-
 export function markGroupAsDeleted(id: string): void {
-  pendingGroupTombstones.add(id);
+  persistState.pendingTombstones.add(id);
 }
 
 export function unmarkGroupAsDeleted(id: string): void {
-  pendingGroupTombstones.delete(id);
+  persistState.pendingTombstones.delete(id);
 }
 
 function resetWriteSnapshots() {
-  writtenMetaSnapshot.clear();
-  writtenGroupsSnapshot.clear();
-  pendingGroupTombstones.clear();
-  pendingGroupMembershipWrites.clear();
+  clearPersistState(persistState);
 }
 
-// Seed write snapshots from disk so deletions of pre-existing groups can emit
-// tombstones instead of being resurrected by read-merge-write.
 async function seedWriteSnapshots(dir: string): Promise<void> {
-  resetWriteSnapshots();
-
-  const allMeta = await readAllMeta(tauriFileSystem, dir);
-  for (const m of allMeta.values()) {
-    writtenMetaSnapshot.set(m.id, {
-      fileName: m.fileName,
-      customName: !!m.customName,
-      createdAt: m.createdAt,
-      updatedAt: m.updatedAt,
-      pinned: m.pinned === true,
-      color: m.color ?? null,
-      groupId: m.groupId ?? null,
-      groupUpdatedAt: m.groupUpdatedAt ?? m.updatedAt,
-      trashedAt: m.trashedAt ?? null,
-    });
-  }
-
-  await syncGroupsSnapshotFromDisk(dir);
+  await seedWriteSnapshotsImpl(tauriFileSystem, dir, persistState);
 }
 
 export async function syncGroupsSnapshotFromDisk(dir: string): Promise<void> {
-  const groupsFile = await readGroupsFile(tauriFileSystem, dir);
-  // Drop already-tombstoned groups from the local diff snapshot.
-  const liveOnDisk = new Set<string>();
-  for (const g of Object.values(groupsFile.groups)) {
-    if (g.deletedAt != null) continue;
-    liveOnDisk.add(g.id);
-    writtenGroupsSnapshot.set(g.id, {
-      name: g.name,
-      orderKey: g.orderKey,
-      orderUpdatedAt: g.orderUpdatedAt,
-      updatedAt: g.updatedAt,
-    });
-  }
-  for (const id of Array.from(writtenGroupsSnapshot.keys())) {
-    if (!liveOnDisk.has(id)) writtenGroupsSnapshot.delete(id);
-  }
+  await syncGroupsSnapshotFromDiskImpl(tauriFileSystem, dir, persistState);
 }
 
 export function sortNotes(docs: NoteDoc[], order: NotesSortOrder, locale: Locale = "en"): NoteDoc[] {
@@ -285,26 +227,10 @@ async function getLocalCachePath(): Promise<string> {
 }
 
 async function readLocalCache(notesDir: string): Promise<LocalCache | null> {
-  try {
-    const path = await getLocalCachePath();
-    const raw = await readTextFile(path);
-    const parsed = JSON.parse(raw) as LocalCache;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (parsed.version !== 2) return null;
-    if (parsed.notesDirectory !== notesDir) return null;
-    if (!Array.isArray(parsed.notes)) return null;
-    imageAssetMigrationV1CompletedAtCache = parsed.imageAssetMigrationV1CompletedAt ?? null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-async function writeLocalCache(cache: LocalCache): Promise<void> {
-  try {
-    const path = await getLocalCachePath();
-    await writeTextFile(path, JSON.stringify(cache, null, 2));
-  } catch { /* best-effort */ }
+  const path = await getLocalCachePath();
+  const cache = await readLocalCacheImpl(tauriFileSystem, path, notesDir);
+  if (cache) imageAssetMigrationV1CompletedAtCache = cache.imageAssetMigrationV1CompletedAt ?? null;
+  return cache;
 }
 
 async function readFileContent(path: string): Promise<string> {
@@ -313,13 +239,6 @@ async function readFileContent(path: string): Promise<string> {
   } catch {
     return "";
   }
-}
-
-interface DecomposedState {
-  docs: NoteDoc[];
-  groups: NoteGroup[];
-  trashedNotes: TrashedNote[];
-  activeNoteId: string | null;
 }
 
 /** Load groups from disk; membership is derived from per-note `groupId`. */
@@ -340,104 +259,8 @@ export async function loadGroupsFromDisk(dir: string): Promise<NoteGroup[]> {
   return buildGroupsFromShared(file.groups, metaByGroup, collapsedMap);
 }
 
-function buildGroupsFromShared(
-  shared: Record<string, SharedGroupEntry>,
-  metaByGroup: Map<string, string[]>,
-  collapsedMap: Record<string, boolean>,
-): NoteGroup[] {
-  const out: NoteGroup[] = [];
-  for (const entry of Object.values(shared)) {
-    if (entry.deletedAt != null) continue;
-    out.push({
-      id: entry.id,
-      name: entry.name,
-      noteIds: metaByGroup.get(entry.id) ?? [],
-      collapsed: !!collapsedMap[entry.id],
-      createdAt: entry.createdAt,
-      orderKey: entry.orderKey,
-      orderUpdatedAt: entry.orderUpdatedAt,
-      updatedAt: entry.updatedAt,
-    });
-  }
-  out.sort((a, b) => {
-    const ak = a.orderKey ?? "";
-    const bk = b.orderKey ?? "";
-    if (ak === bk) return a.createdAt - b.createdAt;
-    return ak < bk ? -1 : 1;
-  });
-  return out;
-}
-
 async function loadDecomposedState(dir: string): Promise<DecomposedState> {
-  const base = normalizeSep(dir);
-  const trashBase = `${base}.trash/`;
-
-  const allMeta = await readAllMeta(tauriFileSystem, dir);
-  const sharedGroupsFile = await readGroupsFile(tauriFileSystem, dir);
-  const uiState = getUiStateCached();
-
-  const metaByGroup = new Map<string, string[]>();
-  for (const meta of allMeta.values()) {
-    if (meta.trashedAt != null) continue;
-    if (meta.groupId) {
-      const arr = metaByGroup.get(meta.groupId) ?? [];
-      arr.push(meta.id);
-      metaByGroup.set(meta.groupId, arr);
-    }
-  }
-
-  const groups = buildGroupsFromShared(
-    sharedGroupsFile.groups,
-    metaByGroup,
-    uiState.groupCollapsed,
-  );
-
-  const docs: NoteDoc[] = [];
-  const trashed: TrashedNote[] = [];
-
-  for (const meta of allMeta.values()) {
-    if (meta.trashedAt != null) {
-      const fileName = getFileBaseName(meta.trashedFromPath ?? `${base}${meta.id}.md`);
-      const trashFilePath = `${trashBase}${meta.id}.md`;
-      trashed.push({
-        id: meta.id,
-        fileName: meta.fileName,
-        originalFilePath: meta.trashedFromPath ?? `${base}${fileName}`,
-        trashFilePath,
-        trashedAt: meta.trashedAt,
-        groupId: meta.groupId ?? null,
-        createdAt: meta.createdAt,
-        updatedAt: meta.updatedAt,
-        pinned: meta.pinned === true,
-        color: meta.color,
-      });
-    } else {
-      docs.push({
-        id: meta.id,
-        filePath: `${base}${meta.id}.md`,
-        fileName: meta.fileName,
-        isDirty: false,
-        content: "",
-        createdAt: meta.createdAt,
-        updatedAt: meta.updatedAt,
-        pinned: meta.pinned === true,
-        color: meta.color,
-        customName: meta.customName,
-      });
-    }
-  }
-
-  const docIds = new Set(docs.map((d) => d.id));
-  let activeId: string | null = null;
-  if (uiState.activeNoteId && docIds.has(uiState.activeNoteId)) {
-    activeId = uiState.activeNoteId;
-  } else if (uiState.lastOpenedNoteId && docIds.has(uiState.lastOpenedNoteId)) {
-    activeId = uiState.lastOpenedNoteId;
-  } else {
-    activeId = docs[0]?.id ?? null;
-  }
-
-  return { docs, groups, trashedNotes: trashed, activeNoteId: activeId };
+  return loadDecomposedStateImpl(tauriFileSystem, dir, getUiStateCached());
 }
 
 async function attachDocContents(docs: NoteDoc[]): Promise<NoteDoc[]> {
@@ -580,25 +403,6 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
 }
 
 
-function metaSnapshotEqual(a: MetaSnapshot, b: MetaSnapshot): boolean {
-  return a.fileName === b.fileName
-    && a.customName === b.customName
-    && a.createdAt === b.createdAt
-    && a.updatedAt === b.updatedAt
-    && a.pinned === b.pinned
-    && a.color === b.color
-    && a.groupId === b.groupId
-    && a.groupUpdatedAt === b.groupUpdatedAt
-    && a.trashedAt === b.trashedAt;
-}
-
-function groupSnapshotEqual(a: SharedGroupSnapshot, b: SharedGroupSnapshot): boolean {
-  return a.name === b.name
-    && a.orderKey === b.orderKey
-    && a.orderUpdatedAt === b.orderUpdatedAt
-    && a.updatedAt === b.updatedAt;
-}
-
 // Ungated writer used by the loader while it already owns `migrationInProgress`.
 // External callers should use `saveManifest`.
 async function persistDecomposedState(
@@ -607,212 +411,14 @@ async function persistDecomposedState(
   groups?: NoteGroup[],
 ): Promise<void> {
   const dir = await getNotesDir();
-  const machineId = getMachineIdCached();
-  const trashed = trashedNotesCache;
-
-  const noteIdToGroupId = new Map<string, string>();
-  for (const g of groups ?? []) {
-    if (!g.id) continue;
-    for (const nid of g.noteIds) noteIdToGroupId.set(nid, g.id);
-  }
-  const diskMeta = await readAllMeta(tauriFileSystem, dir);
-
-  const resolveGroupSnapshot = (noteId: string, stateGroupId: string | null): Pick<MetaSnapshot, "groupId" | "groupUpdatedAt"> => {
-    const pending = pendingGroupMembershipWrites.get(noteId);
-    if (pending) {
-      return {
-        groupId: pending.groupId,
-        groupUpdatedAt: pending.updatedAt,
-      };
-    }
-
-    const disk = diskMeta.get(noteId);
-    if (disk) {
-      return {
-        groupId: disk.groupId ?? null,
-        groupUpdatedAt: disk.groupUpdatedAt ?? disk.updatedAt,
-      };
-    }
-
-    return {
-      groupId: stateGroupId,
-      groupUpdatedAt: Date.now(),
-    };
-  };
-
-  const metaWrites: Promise<unknown>[] = [];
-  for (const doc of docs) {
-    const groupSnap = resolveGroupSnapshot(doc.id, noteIdToGroupId.get(doc.id) ?? null);
-    const snap: MetaSnapshot = {
-      fileName: doc.fileName,
-      customName: !!doc.customName,
-      createdAt: doc.createdAt,
-      updatedAt: doc.updatedAt,
-      pinned: doc.pinned === true,
-      color: doc.color ?? null,
-      groupId: groupSnap.groupId,
-      groupUpdatedAt: groupSnap.groupUpdatedAt,
-      trashedAt: null,
-    };
-    const prev = writtenMetaSnapshot.get(doc.id);
-    if (prev && metaSnapshotEqual(prev, snap)) {
-      pendingGroupMembershipWrites.delete(doc.id);
-      continue;
-    }
-
-    metaWrites.push(
-      writeMetaFile(tauriFileSystem, dir, {
-        version: 2,
-        id: doc.id,
-        fileName: snap.fileName,
-        customName: snap.customName || undefined,
-        createdAt: snap.createdAt,
-        updatedAt: snap.updatedAt,
-        pinned: snap.pinned,
-        color: snap.color ?? undefined,
-        groupId: snap.groupId,
-        groupUpdatedAt: snap.groupUpdatedAt,
-        trashedAt: null,
-      }, machineId).then(() => {
-        writtenMetaSnapshot.set(doc.id, snap);
-        pendingGroupMembershipWrites.delete(doc.id);
-      }),
-    );
-  }
-
-  for (const t of trashed) {
-    const groupSnap = resolveGroupSnapshot(t.id, t.groupId ?? null);
-    const snap: MetaSnapshot = {
-      fileName: t.fileName,
-      customName: false,
-      createdAt: t.createdAt,
-      updatedAt: t.updatedAt,
-      pinned: t.pinned === true,
-      color: t.color ?? null,
-      groupId: groupSnap.groupId,
-      groupUpdatedAt: groupSnap.groupUpdatedAt,
-      trashedAt: t.trashedAt,
-    };
-    const prev = writtenMetaSnapshot.get(t.id);
-    if (prev && metaSnapshotEqual(prev, snap)) {
-      pendingGroupMembershipWrites.delete(t.id);
-      continue;
-    }
-
-    metaWrites.push(
-      writeMetaFile(tauriFileSystem, dir, {
-        version: 2,
-        id: t.id,
-        fileName: snap.fileName,
-        customName: undefined,
-        createdAt: snap.createdAt,
-        updatedAt: snap.updatedAt,
-        pinned: snap.pinned,
-        color: snap.color ?? undefined,
-        groupId: snap.groupId,
-        groupUpdatedAt: snap.groupUpdatedAt,
-        trashedAt: snap.trashedAt,
-        trashedFromPath: t.originalFilePath,
-      }, machineId).then(() => {
-        writtenMetaSnapshot.set(t.id, snap);
-        pendingGroupMembershipWrites.delete(t.id);
-      }),
-    );
-  }
-
-  const localGroupsMap: Record<string, SharedGroupEntry> = {};
-  let lastOrderKey: string | undefined = undefined;
-  const orderedGroups = [...(groups ?? [])].sort((a, b) => {
-    const ak = a.orderKey ?? "";
-    const bk = b.orderKey ?? "";
-    if (ak === bk) return a.createdAt - b.createdAt;
-    return ak < bk ? -1 : 1;
+  const cachePath = await getLocalCachePath();
+  await persistDecomposedStateImpl(tauriFileSystem, dir, persistState, docs, activeId, groups, {
+    trashedNotes: trashedNotesCache,
+    machineId: getMachineIdCached(),
+    cachePath,
+    imageAssetMigrationCompletedAt: imageAssetMigrationV1CompletedAtCache,
+    setActiveNoteId: setActiveNoteIdPersisted,
   });
-  const now = Date.now();
-  let groupsChanged = false;
-  for (const g of orderedGroups) {
-    if (!g.id) continue;
-    let orderKey = g.orderKey;
-    let orderUpdatedAt = g.orderUpdatedAt ?? 0;
-    if (!orderKey) {
-      orderKey = genOrderKeyAfter(lastOrderKey);
-      orderUpdatedAt = now;
-    }
-    lastOrderKey = orderKey;
-
-    const updatedAt = g.updatedAt ?? now;
-    const snap: SharedGroupSnapshot = {
-      name: g.name,
-      orderKey,
-      orderUpdatedAt,
-      updatedAt,
-    };
-    const prev = writtenGroupsSnapshot.get(g.id);
-    if (!prev || !groupSnapshotEqual(prev, snap)) groupsChanged = true;
-    writtenGroupsSnapshot.set(g.id, snap);
-
-    localGroupsMap[g.id] = {
-      id: g.id,
-      name: g.name,
-      orderKey,
-      orderUpdatedAt,
-      updatedAt,
-      createdAt: g.createdAt,
-      deletedAt: null,
-    };
-  }
-
-  // Tombstone only explicit local deletes; stale saves can miss remote groups.
-  const currentIds = new Set(orderedGroups.map((g) => g.id));
-  const tombstoneApplied: string[] = [];
-  for (const id of Array.from(pendingGroupTombstones)) {
-    if (currentIds.has(id)) continue;
-    localGroupsMap[id] = {
-      id,
-      name: "",
-      orderKey: "z",
-      orderUpdatedAt: now,
-      updatedAt: now,
-      createdAt: now,
-      deletedAt: now,
-    };
-    writtenGroupsSnapshot.delete(id);
-    tombstoneApplied.push(id);
-    groupsChanged = true;
-  }
-
-  const groupsPromise = groupsChanged
-    ? writeGroupsWithMerge(tauriFileSystem, dir, localGroupsMap).then(
-        () => {
-          for (const id of tombstoneApplied) pendingGroupTombstones.delete(id);
-        },
-        () => { /* keep pending for retry */ },
-      )
-    : Promise.resolve();
-
-  const activePromise = setActiveNoteIdPersisted(activeId).catch(() => {});
-
-  const localCache: LocalCache = {
-    version: 2,
-    notesDirectory: dir,
-    notes: docs.map(({ id, filePath, fileName, createdAt, updatedAt, customName, pinned, color }) => ({
-      id, filePath, fileName, createdAt, updatedAt,
-      ...(customName ? { customName } : {}),
-      ...(pinned ? { pinned } : {}),
-      ...(color ? { color } : {}),
-    })),
-    groups: groups && groups.length > 0 ? groups : undefined,
-    trashedNotes: trashed.length > 0 ? trashed : undefined,
-    imageAssetMigrationV1CompletedAt: imageAssetMigrationV1CompletedAtCache ?? undefined,
-  };
-  const cachePromise = writeLocalCache(localCache);
-
-  await Promise.all([
-    Promise.all(metaWrites),
-    groupsPromise,
-    activePromise,
-    cachePromise,
-  ]);
 }
 
 export async function saveManifest(
@@ -959,7 +565,8 @@ export function useNotesLoader(
         if (reconcileChanged || trashChanged) {
           await persistDecomposedState(sorted, activeId, finalGroups).catch(() => {});
         } else {
-          await writeLocalCache({
+          const cachePath = await getLocalCachePath();
+          await writeLocalCacheImpl(tauriFileSystem, cachePath, {
             version: 2,
             notesDirectory: dir,
             notes: sorted.map(({ id, filePath, fileName, createdAt, updatedAt, customName, pinned, color }) => ({
