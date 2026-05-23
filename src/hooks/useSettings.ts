@@ -24,6 +24,8 @@ export interface Settings {
   notesDirectory: string;
   /** Active sidebar color filter — only notes of this color are shown. */
   colorFilter: NoteColorId | null;
+  /** When false, an active colorFilter is cleared on app start. */
+  persistColorFilterAcrossRestarts: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -38,6 +40,7 @@ const DEFAULTS: Settings = {
   fontFamily: "sans",
   notesDirectory: "",
   colorFilter: null,
+  persistColorFilterAcrossRestarts: false,
 };
 
 let settingsPathPromise: Promise<string> | null = null;
@@ -91,6 +94,9 @@ function parseSettings(raw: string | null): Settings {
       fontFamily: parsed.fontFamily === "serif" ? "serif" : DEFAULTS.fontFamily,
       notesDirectory: typeof parsed.notesDirectory === "string" ? parsed.notesDirectory : DEFAULTS.notesDirectory,
       colorFilter: isNoteColorId(parsed.colorFilter) ? parsed.colorFilter : DEFAULTS.colorFilter,
+      persistColorFilterAcrossRestarts: typeof parsed.persistColorFilterAcrossRestarts === "boolean"
+        ? parsed.persistColorFilterAcrossRestarts
+        : DEFAULTS.persistColorFilterAcrossRestarts,
     };
   } catch {
     return DEFAULTS;
@@ -125,9 +131,17 @@ export function useSettings() {
     (async () => {
       const fileSettings = await loadSettingsFromFile();
       if (fileSettings) {
+        const shouldResetFilter =
+          fileSettings.colorFilter != null && !fileSettings.persistColorFilterAcrossRestarts;
+        const effective = shouldResetFilter
+          ? { ...fileSettings, colorFilter: null }
+          : fileSettings;
         if (!cancelled && !didUserUpdateRef.current) {
-          settingsRef.current = fileSettings;
-          setSettingsRaw(fileSettings);
+          settingsRef.current = effective;
+          setSettingsRaw(effective);
+        }
+        if (shouldResetFilter) {
+          try { await persistSettings(effective); } catch { /* best-effort */ }
         }
         if (!cancelled) setIsLoaded(true);
         return;

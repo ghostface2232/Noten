@@ -509,6 +509,14 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     onChange={(_, data) => onUpdate("spellcheck", data.checked)}
                   />
                 </div>
+
+                <div className={mergeClasses(styles.row, settingItemClass(styles))}>
+                  <Label className={styles.label}>{i("settings.persistColorFilter")}</Label>
+                  <Switch
+                    checked={settings.persistColorFilterAcrossRestarts}
+                    onChange={(_, data) => onUpdate("persistColorFilterAcrossRestarts", data.checked)}
+                  />
+                </div>
               </div>
             )}
 

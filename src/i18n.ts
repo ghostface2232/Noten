@@ -131,6 +131,8 @@ const dict = {
   "sidebar.filter": { en: "Color filter", ko: "색상 필터" },
   "sidebar.filterAll": { en: "All notes", ko: "전체 보기" },
   "sidebar.colorFilterEmpty": { en: "No notes with this color", ko: "이 색상의 노트가 없습니다" },
+  "sidebar.colorFilterChip":       { en: "Filter on",     ko: "필터 적용 중" },
+  "sidebar.colorFilterChip.clear": { en: "Clear filter",  ko: "필터 해제" },
 
   /* StatusBar */
   "status.chars": { en: " chars", ko: " 자" },
@@ -180,6 +182,7 @@ const dict = {
   "settings.fontFamily.sans": { en: "Sans-serif", ko: "산세리프" },
   "settings.fontFamily.serif": { en: "Serif", ko: "세리프" },
   "settings.spellcheck": { en: "Spelling & grammar indicators", ko: "맞춤법 및 문법 표시" },
+  "settings.persistColorFilter": { en: "Keep color filter after restart", ko: "재시작 후 색상 필터 유지" },
   /* About tab */
   "settings.tab.about": { en: "About", ko: "정보" },
   "about.checkUpdate": { en: "Check for updates", ko: "업데이트 확인" },

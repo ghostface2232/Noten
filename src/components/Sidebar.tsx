@@ -140,6 +140,7 @@ interface SidebarProps {
   updateAvailable: boolean;
   isDarkMode: boolean;
   colorFilter: NoteColorId | null;
+  onClearColorFilter: () => void;
 }
 
 export function Sidebar({
@@ -183,6 +184,7 @@ export function Sidebar({
   updateAvailable,
   isDarkMode,
   colorFilter,
+  onClearColorFilter,
 }: SidebarProps) {
   const styles = useStyles();
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
@@ -815,6 +817,29 @@ export function Sidebar({
           {i("sidebar.newNote")}
           <span className="new-doc-shortcut">Ctrl+N</span>
         </Button>
+
+        {colorFilter && (
+          <div className={styles.filterChip} role="status" aria-live="polite">
+            <span
+              className={styles.filterChipDot}
+              style={{ backgroundColor: colorHex(colorFilter) }}
+              aria-hidden
+            />
+            <span className={styles.filterChipText}>
+              {i("sidebar.colorFilterChip")}
+            </span>
+            <Tooltip content={i("sidebar.colorFilterChip.clear")} relationship="label" withArrow>
+              <Button
+                appearance="subtle"
+                size="small"
+                className={styles.filterChipClear}
+                icon={<DismissRegular fontSize={12} />}
+                onClick={onClearColorFilter}
+                aria-label={i("sidebar.colorFilterChip.clear")}
+              />
+            </Tooltip>
+          </div>
+        )}
       </div>
 
       <div className={styles.bodyArea}>

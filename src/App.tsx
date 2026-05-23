@@ -871,6 +871,7 @@ function App() {
               updateAvailable={updater.state.status === "available" || updater.state.status === "downloading" || updater.state.status === "ready"}
               isDarkMode={isDarkMode}
               colorFilter={settings.colorFilter}
+              onClearColorFilter={() => { void updateSetting("colorFilter", null); }}
             />
             <div
               className={mergeClasses(
