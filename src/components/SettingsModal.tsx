@@ -83,6 +83,9 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     padding: "16px 8px",
+    marginTop: "-4px",
+    marginBottom: "-4px",
+    marginRight: "-8px",
     gap: "2px",
   },
   navTitle: {
@@ -290,7 +293,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
     const dark = isDarkMode;
     return {
       micaBg: dark ? "rgba(44, 44, 44, 0.92)" : "rgba(243, 243, 243, 0.90)",
-      navBg: dark ? "rgb(44, 44, 44)" : "rgb(243, 243, 243)",
+      navBg: dark ? "rgb(38, 38, 38)" : "rgb(236, 236, 236)",
       panelBg: dark ? "rgba(56, 56, 56, 0.70)" : "rgba(255, 255, 255, 0.70)",
       borderColor: dark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.06)",
       noiseOpacity: dark ? 0.035 : 0.025,
