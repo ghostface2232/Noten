@@ -37,6 +37,9 @@ export interface ContextMenuState {
   groupId?: string;
   x: number;
   y: number;
+  /** Original row index the menu was anchored to (set when opened from a row's
+   * "…" button). Used to toggle the menu shut on re-click of the same anchor. */
+  anchorIndex?: number;
 }
 
 interface SidebarContextMenusProps {
@@ -126,11 +129,16 @@ export function SidebarContextMenus({
     setSubmenuPos(null);
   }, [onContextMenuChange]);
 
-  // Close context menu on outside click
+  // Close context menu on outside click. Clicks on a "…" button are skipped
+  // so the button's own onClick can decide whether to toggle the menu shut or
+  // re-anchor it to a different row — otherwise mousedown would close first
+  // and the subsequent click would re-open, defeating the toggle.
   useEffect(() => {
     if (!contextMenu) return;
     const handleOutside = (e: MouseEvent) => {
-      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+      const target = e.target as Element | null;
+      if (target?.closest?.("[data-more-btn]")) return;
+      if (contextMenuRef.current && !contextMenuRef.current.contains(target as Node)) {
         closeContextMenu();
       }
     };

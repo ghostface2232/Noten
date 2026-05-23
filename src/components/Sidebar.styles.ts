@@ -181,6 +181,17 @@ export const useStyles = makeStyles({
     display: "flex",
     alignItems: "center",
     width: "100%",
+    // Hover-driven trailing-slot hide and more-button reveal are done via CSS
+    // :hover (not React state) so mouse enter/leave reacts immediately without
+    // re-rendering the whole sidebar — keeps the unhover transition snappy.
+    "&:hover [data-doc-trailing]": {
+      opacity: 0,
+      pointerEvents: "none",
+    },
+    "&:hover [data-more-btn]": {
+      opacity: 1,
+      pointerEvents: "auto",
+    },
   },
   docItemNew: {
     animationName: "docSlideIn",

@@ -191,7 +191,6 @@ export function Sidebar({
 
   const colorFilterActive = colorFilter != null;
 
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingValue, setEditingValue] = useState("");
@@ -375,7 +374,10 @@ export function Sidebar({
   const handleMoreClick = useCallback((index: number, e: React.MouseEvent) => {
     e.stopPropagation();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setContextMenu({ type: "note", index, x: rect.left, y: rect.bottom + 2 });
+    setContextMenu((prev) => {
+      if (prev && prev.anchorIndex === index) return null;
+      return { type: "note", index, anchorIndex: index, x: rect.left, y: rect.bottom + 2 };
+    });
   }, []);
 
   const handleGroupMoreClick = useCallback((groupId: string, e: React.MouseEvent) => {
@@ -532,7 +534,6 @@ export function Sidebar({
   ) => {
     const { snippet = null, searchIndex, noDrag = false, paneActive = true, groupId } = opts;
     const isSelected = selectedNoteIds.has(doc.id);
-    const isHovered = hoveredIndex === originalIndex;
     const isContextTarget = contextMenu?.type === "note" && contextMenu.index === originalIndex;
 
     return (
@@ -556,8 +557,6 @@ export function Sidebar({
             : undefined
         }
         onPointerDown={noDrag ? undefined : (e) => handleDragPointerDown(e, doc.id)}
-        onMouseEnter={() => setHoveredIndex(originalIndex)}
-        onMouseLeave={() => setHoveredIndex(null)}
         onContextMenu={(e) => {
           if (isDragging.current) { e.preventDefault(); return; }
           if (selectMode) {
@@ -640,10 +639,13 @@ export function Sidebar({
               ) : (
                 <span className={styles.docName}>{doc.fileName}</span>
               )}
-              <span className={mergeClasses(
-                styles.docTrailing,
-                (isHovered || isContextTarget) && styles.docTrailingHidden,
-              )}>
+              <span
+                data-doc-trailing
+                className={mergeClasses(
+                  styles.docTrailing,
+                  isContextTarget && styles.docTrailingHidden,
+                )}
+              >
                 {doc.isDirty && (
                   <span className={styles.dirtyDot}>●</span>
                 )}
@@ -661,20 +663,30 @@ export function Sidebar({
               appearance="subtle"
               className={mergeClasses(
                 styles.moreBtn,
-                isContextTarget
-                  ? styles.moreBtnActive
-                  : isHovered && styles.moreBtnVisible,
+                isContextTarget && styles.moreBtnActive,
               )}
-              onClick={(e) => {
+              onPointerDown={(e) => {
+                if (e.pointerType === "mouse" && e.button !== 0) return;
                 e.stopPropagation();
                 if (selectMode) {
+                  if (contextMenu?.anchorIndex === originalIndex) {
+                    setContextMenu(null);
+                    return;
+                  }
                   if (!selectedNoteIds.has(doc.id)) toggleNoteSelection(doc.id);
                   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                  setContextMenu({ type: "empty", index: -3, x: rect.left, y: rect.bottom + 2 });
+                  setContextMenu({
+                    type: "empty",
+                    index: -3,
+                    anchorIndex: originalIndex,
+                    x: rect.left,
+                    y: rect.bottom + 2,
+                  });
                 } else {
                   handleMoreClick(originalIndex, e);
                 }
               }}
+              onClick={(e) => e.stopPropagation()}
               size="small"
             >
               <MoreHorizontalRegular fontSize={16} />
