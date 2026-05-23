@@ -290,6 +290,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
     const dark = isDarkMode;
     return {
       micaBg: dark ? "rgba(44, 44, 44, 0.92)" : "rgba(243, 243, 243, 0.90)",
+      navBg: dark ? "rgb(44, 44, 44)" : "rgb(243, 243, 243)",
       panelBg: dark ? "rgba(56, 56, 56, 0.70)" : "rgba(255, 255, 255, 0.70)",
       borderColor: dark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.06)",
       noiseOpacity: dark ? 0.035 : 0.025,
@@ -338,6 +339,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
           <nav
             className={styles.nav}
             style={{
+              backgroundColor: themeStyles.navBg,
               "--settings-nav-hover": themeStyles.navHover,
               "--update-dot-color": isDarkMode ? tokens.colorBrandForeground1 : tokens.colorBrandBackground,
             } as React.CSSProperties}
