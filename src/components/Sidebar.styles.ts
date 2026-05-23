@@ -89,7 +89,7 @@ export const useStyles = makeStyles({
     borderRadius: "6px",
     fontSize: "13px",
     gap: "5px",
-    minHeight: "36px",
+    minHeight: "32px",
     marginBottom: "2px",
     // Side margins inset the header into a contained pill aligned with the
     // note rows. The header has no scrollbar gutter of its own, so it uses the
