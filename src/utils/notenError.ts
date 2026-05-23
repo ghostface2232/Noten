@@ -23,7 +23,6 @@ export class NotenError extends Error {
   readonly code: NotenErrorCode;
   readonly severity: NotenSeverity;
   readonly context?: NotenErrorContext;
-  readonly cause?: unknown;
 
   constructor(
     code: NotenErrorCode,
@@ -31,12 +30,11 @@ export class NotenError extends Error {
     message: string,
     options: NotenErrorOptions = {},
   ) {
-    super(message);
+    super(message, options.cause !== undefined ? { cause: options.cause } : undefined);
     this.name = "NotenError";
     this.code = code;
     this.severity = severity;
     if (options.context) this.context = options.context;
-    if (options.cause !== undefined) this.cause = options.cause;
   }
 }
 

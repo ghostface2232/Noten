@@ -423,6 +423,7 @@ async function persistDecomposedState(
       setActiveNoteId: setActiveNoteIdPersisted,
     });
   } catch (err) {
+    if (import.meta.env.DEV) console.warn("[PERSIST_FAILED]", err);
     void logNotenError(new NotenError(
       "PERSIST_FAILED",
       "fatal",
@@ -537,6 +538,7 @@ export function useNotesLoader(
           reconciledGroups = result.groups;
           reconcileChanged = result.changed;
         } catch (err) {
+          if (import.meta.env.DEV) console.warn("[RECONCILE_FAILED:loader]", err);
           void logNotenError(new NotenError(
             "RECONCILE_FAILED",
             "fatal",

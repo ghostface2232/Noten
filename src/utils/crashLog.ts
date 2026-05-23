@@ -12,10 +12,10 @@ import {
 const MAX_LOG_BYTES = 500 * 1024;
 const MAX_STACK_CHARS = 4000;
 const utf8Encoder = new TextEncoder();
+const INSTALLED_SENTINEL = "__notenCrashLogInstalled" as const;
 
 let crashLogPathPromise: Promise<string> | null = null;
 let writeChain: Promise<void> = Promise.resolve();
-let installed = false;
 
 async function resolveCrashLogPath(): Promise<string> {
   const base = await appDataDir();
@@ -133,8 +133,11 @@ function extractUncaughtMessage(value: unknown, fallback: string): string {
 }
 
 export function initCrashLog(): void {
-  if (installed || typeof window === "undefined") return;
-  installed = true;
+  if (typeof window === "undefined") return;
+  // Survives Vite HMR module re-evaluation — listeners are global, not modular.
+  const w = window as typeof window & { [INSTALLED_SENTINEL]?: boolean };
+  if (w[INSTALLED_SENTINEL]) return;
+  w[INSTALLED_SENTINEL] = true;
 
   window.addEventListener("error", (event) => {
     const err = (event as ErrorEvent).error;

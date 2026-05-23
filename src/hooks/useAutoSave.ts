@@ -161,6 +161,7 @@ export function useAutoSave(
       }
       return true;
     } catch (err) {
+      if (import.meta.env.DEV) console.warn("[SAVE_FAILED]", err);
       void logNotenError(new NotenError(
         "SAVE_FAILED",
         "fatal",

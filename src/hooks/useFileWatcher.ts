@@ -162,6 +162,9 @@ export function useFileWatcher(
       reconciledGroups = result.groups;
       changed = result.changed;
     } catch (err) {
+      // Watcher swallows reconcile errors (no outer catch) so the next watch
+      // event can retry; the loader path rethrows so its fallback fires.
+      if (import.meta.env.DEV) console.warn("[RECONCILE_FAILED:watcher]", err);
       void logNotenError(new NotenError(
         "RECONCILE_FAILED",
         "fatal",
