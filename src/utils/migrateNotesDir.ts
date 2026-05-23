@@ -21,6 +21,8 @@ import {
 import { getMachineId } from "./machineId";
 import { getFileTimestamps } from "./fileTimestamps";
 import { backupRemoteVersion } from "./conflictBackup";
+import { NotenError } from "./notenError";
+import { logNotenError } from "./crashLog";
 
 interface ManifestNote {
   id: string;
@@ -543,6 +545,12 @@ export async function migrateNotesDir(
     }
     return { success: true };
   } catch (err) {
+    void logNotenError(new NotenError(
+      "MIGRATION_FAILED",
+      "recoverable",
+      err instanceof Error ? err.message : String(err),
+      { context: { fromDir, toDir, mergeStrategy }, cause: err },
+    ));
     return { success: false, error: String(err) };
   }
 }

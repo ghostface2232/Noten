@@ -22,6 +22,8 @@ import { getFileTimestamps } from "../utils/fileTimestamps";
 import { readMeta } from "../utils/metadataIO";
 import { scanAndAbsorbConflicts } from "../utils/conflictFileDetector";
 import { setKnownDiskContent } from "../utils/conflictBackup";
+import { NotenError } from "../utils/notenError";
+import { logNotenError } from "../utils/crashLog";
 import type { Locale } from "./useSettings";
 
 export { markOwnWrite } from "./ownWriteTracker";
@@ -144,14 +146,30 @@ export function useFileWatcher(
     const dir = await getNotesDir();
     try { await scanAndAbsorbConflicts(tauriFileSystem, dir); } catch { /* best-effort */ }
 
-    const { docs: reconciledDocs, groups: reconciledGroups, changed } = await reconcileFolder(
-      tauriFileSystem,
-      reconcileState,
-      dir,
-      docsRef.current,
-      groupsRef.current,
-      localeRef.current,
-    );
+    let reconciledDocs: NoteDoc[];
+    let reconciledGroups: NoteGroup[];
+    let changed: boolean;
+    try {
+      const result = await reconcileFolder(
+        tauriFileSystem,
+        reconcileState,
+        dir,
+        docsRef.current,
+        groupsRef.current,
+        localeRef.current,
+      );
+      reconciledDocs = result.docs;
+      reconciledGroups = result.groups;
+      changed = result.changed;
+    } catch (err) {
+      void logNotenError(new NotenError(
+        "RECONCILE_FAILED",
+        "fatal",
+        err instanceof Error ? err.message : String(err),
+        { context: { dir, source: "watcher" }, cause: err },
+      ));
+      return;
+    }
 
     if (!changed) return;
 

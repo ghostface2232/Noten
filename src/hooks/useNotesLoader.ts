@@ -22,6 +22,8 @@ import {
   type DecomposedState,
 } from "../utils/decomposedState";
 import { markOwnWrite } from "./ownWriteTracker";
+import { NotenError } from "../utils/notenError";
+import { logNotenError } from "../utils/crashLog";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import type { NoteColorId } from "../utils/noteColors";
@@ -412,13 +414,23 @@ async function persistDecomposedState(
 ): Promise<void> {
   const dir = await getNotesDir();
   const cachePath = await getLocalCachePath();
-  await persistDecomposedStateImpl(tauriFileSystem, dir, persistState, docs, activeId, groups, {
-    trashedNotes: trashedNotesCache,
-    machineId: getMachineIdCached(),
-    cachePath,
-    imageAssetMigrationCompletedAt: imageAssetMigrationV1CompletedAtCache,
-    setActiveNoteId: setActiveNoteIdPersisted,
-  });
+  try {
+    await persistDecomposedStateImpl(tauriFileSystem, dir, persistState, docs, activeId, groups, {
+      trashedNotes: trashedNotesCache,
+      machineId: getMachineIdCached(),
+      cachePath,
+      imageAssetMigrationCompletedAt: imageAssetMigrationV1CompletedAtCache,
+      setActiveNoteId: setActiveNoteIdPersisted,
+    });
+  } catch (err) {
+    void logNotenError(new NotenError(
+      "PERSIST_FAILED",
+      "fatal",
+      err instanceof Error ? err.message : String(err),
+      { context: { dir, docCount: docs.length, activeId }, cause: err },
+    ));
+    throw err;
+  }
 }
 
 export async function saveManifest(
@@ -516,8 +528,23 @@ export function useNotesLoader(
         const trashChanged = purgedTrashed.length !== state.trashedNotes.length;
         setTrashedNotes(purgedTrashed);
 
-        const { docs: reconciled, groups: reconciledGroups, changed: reconcileChanged } =
-          await reconcileFolder(tauriFileSystem, reconcileStateRef.current, dir, docsLoaded, state.groups, locale);
+        let reconciled: NoteDoc[];
+        let reconciledGroups: NoteGroup[];
+        let reconcileChanged: boolean;
+        try {
+          const result = await reconcileFolder(tauriFileSystem, reconcileStateRef.current, dir, docsLoaded, state.groups, locale);
+          reconciled = result.docs;
+          reconciledGroups = result.groups;
+          reconcileChanged = result.changed;
+        } catch (err) {
+          void logNotenError(new NotenError(
+            "RECONCILE_FAILED",
+            "fatal",
+            err instanceof Error ? err.message : String(err),
+            { context: { dir, docCount: docsLoaded.length, source: "loader" }, cause: err },
+          ));
+          throw err;
+        }
 
         let finalDocs = reconcileChanged ? reconciled : docsLoaded;
         let finalGroups = reconcileChanged ? reconciledGroups : state.groups;

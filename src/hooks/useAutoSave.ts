@@ -10,6 +10,8 @@ import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { emitDocUpdated } from "./useWindowSync";
 import { markOwnWrite } from "./ownWriteTracker";
 import { backupIfRemoteWroteFirst, setKnownDiskContent } from "../utils/conflictBackup";
+import { NotenError } from "../utils/notenError";
+import { logNotenError } from "../utils/crashLog";
 
 const DEBOUNCE_MS = 1000;
 
@@ -159,9 +161,15 @@ export function useAutoSave(
       }
       return true;
     } catch (err) {
-      if (import.meta.env.DEV) {
-        console.warn("Auto-save failed:", err);
-      }
+      void logNotenError(new NotenError(
+        "SAVE_FAILED",
+        "fatal",
+        err instanceof Error ? err.message : String(err),
+        {
+          context: { noteId: snapshot.docId, filePath: snapshot.filePath, revision: snapshot.revision },
+          cause: err,
+        },
+      ));
       return false;
     }
   }, []);
