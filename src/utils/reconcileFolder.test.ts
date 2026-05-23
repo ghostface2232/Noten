@@ -12,7 +12,7 @@ import {
   metaPathFor,
   type NoteMeta,
 } from "./metadataIO";
-import type { NoteDoc, NoteGroup } from "../hooks/useNotesLoader";
+import type { NoteDoc, NoteGroup } from "./noteTypes";
 
 const DIR = "/notes";
 const LOCALE = "en" as const;

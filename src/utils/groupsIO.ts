@@ -1,6 +1,7 @@
 import type { FileSystem } from "./fs";
 import { atomicWriteText } from "./atomicWrite";
 import { markOwnWrite } from "../hooks/ownWriteTracker";
+import { normalizeSep } from "./pathUtils";
 
 // `.groups.json` stores shared group metadata only. Membership comes from
 // per-note `groupId`; collapsed state is per-machine UI state.
@@ -21,10 +22,6 @@ interface GroupsFile {
 }
 
 const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-
-function normalizeSep(dir: string): string {
-  return dir.endsWith("/") || dir.endsWith("\\") ? dir : `${dir}/`;
-}
 
 export function groupsPathFor(notesDir: string): string {
   return `${normalizeSep(notesDir)}.groups.json`;

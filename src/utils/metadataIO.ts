@@ -2,6 +2,7 @@ import type { FileSystem } from "./fs";
 import { atomicWriteText } from "./atomicWrite";
 import { markOwnWrite } from "../hooks/ownWriteTracker";
 import { isNoteColorId, type NoteColorId } from "./noteColors";
+import { normalizeSep } from "./pathUtils";
 
 export interface NoteMeta {
   version: 2;
@@ -21,10 +22,6 @@ export interface NoteMeta {
   /** Original file path when trashed — preserved for restore. Shared safely since all PCs point at same folder. */
   trashedFromPath?: string | null;
   lastWriterMachineId?: string;
-}
-
-function normalizeSep(dir: string): string {
-  return dir.endsWith("/") || dir.endsWith("\\") ? dir : `${dir}/`;
 }
 
 export function metaDirFor(notesDir: string): string {

@@ -1,7 +1,7 @@
 import type { FileSystem } from "./fs";
 import type { Locale } from "../hooks/useSettings";
-import type { NoteDoc, NoteGroup } from "../hooks/useNotesLoader";
-import { deriveTitle, getFileBaseName } from "../hooks/useNotesLoader";
+import type { NoteDoc, NoteGroup } from "./noteTypes";
+import { deriveTitle, getFileBaseName } from "./noteText";
 import { getDefaultDocumentTitle } from "./documentTitle";
 import {
   readAllMeta,
@@ -13,12 +13,9 @@ import { getMachineIdCached } from "./machineId";
 import { getFileTimestamps } from "./fileTimestamps";
 import { backupRemoteVersion } from "./conflictBackup";
 import { markOwnWrite } from "../hooks/ownWriteTracker";
+import { normalizeSep } from "./pathUtils";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function normalizeSep(dir: string): string {
-  return dir.endsWith("/") || dir.endsWith("\\") ? dir : `${dir}/`;
-}
 
 function fileNameToId(name: string): string {
   // Legacy notes may have non-UUID stems; preserve them.
@@ -82,6 +79,10 @@ export interface ReconcileState {
 
 export function createReconcileState(): ReconcileState {
   return { bodyMissing: new Map<string, number>() };
+}
+
+export function clearReconcileState(state: ReconcileState): void {
+  state.bodyMissing.clear();
 }
 
 export async function reconcileFolder(

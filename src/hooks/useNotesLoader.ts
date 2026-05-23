@@ -6,11 +6,16 @@ import {
   writeTextFile,
 } from "@tauri-apps/plugin-fs";
 import { tauriFileSystem } from "../utils/fs";
-import { reconcileFolder, createReconcileState, type ReconcileState } from "../utils/reconcileFolder";
+import { normalizeSep } from "../utils/pathUtils";
+import { reconcileFolder, createReconcileState, clearReconcileState, type ReconcileState } from "../utils/reconcileFolder";
 import { markOwnWrite } from "./ownWriteTracker";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import type { NoteColorId } from "../utils/noteColors";
+import type { NoteDoc, NoteGroup, TrashedNote } from "../utils/noteTypes";
+import { getFileBaseName } from "../utils/noteText";
+export type { NoteDoc, NoteGroup, TrashedNote } from "../utils/noteTypes";
+export { deriveTitle, getFileBaseName, stripInlineMarkdown, stripMarkdownContent } from "../utils/noteText";
 import { migrateDataUrlImagesToAssets } from "../utils/migrateImageAssets";
 import { removeNoteAssetDir } from "../utils/imageAssetUtils";
 import {
@@ -43,43 +48,6 @@ import {
   setActiveNoteIdPersisted,
   setGroupCollapsedPersisted,
 } from "./useUiState";
-
-export interface NoteDoc {
-  id: string;
-  filePath: string;
-  fileName: string;
-  isDirty: boolean;
-  content: string;
-  createdAt: number;
-  updatedAt: number;
-  pinned?: boolean;
-  customName?: boolean;
-  color?: NoteColorId;
-}
-
-export interface NoteGroup {
-  id: string;
-  name: string;
-  noteIds: string[];
-  collapsed: boolean;
-  createdAt: number;
-  orderKey?: string;
-  orderUpdatedAt?: number;
-  updatedAt?: number;
-}
-
-export interface TrashedNote {
-  id: string;
-  fileName: string;
-  originalFilePath: string;
-  trashFilePath: string;
-  trashedAt: number;
-  groupId: string | null;
-  createdAt: number;
-  updatedAt: number;
-  pinned?: boolean;
-  color?: NoteColorId;
-}
 
 /** Per-machine quick-paint cache. Disk sidecars remain the source of truth. */
 interface LocalCache {
@@ -240,18 +208,25 @@ export async function getNotesDir(): Promise<string> {
   return notesDirCache;
 }
 
-export function setNotesDir(dir: string) {
+/**
+ * Cleared state mirrors the active notes directory; pass the ReconcileState
+ * instance so its bodyMissing observations are reset alongside the snapshot
+ * caches. Callers that omit it accept that the observations will carry over.
+ */
+export function setNotesDir(dir: string, reconcileState?: ReconcileState) {
   notesDirCache = dir;
   imageAssetMigrationV1CompletedAtCache = null;
   resetWriteSnapshots();
   resetKnownDiskContent();
+  if (reconcileState) clearReconcileState(reconcileState);
 }
 
-export function resetNotesDir() {
+export function resetNotesDir(reconcileState?: ReconcileState) {
   notesDirCache = null;
   imageAssetMigrationV1CompletedAtCache = null;
   resetWriteSnapshots();
   resetKnownDiskContent();
+  if (reconcileState) clearReconcileState(reconcileState);
 }
 
 async function ensureNotesDir(): Promise<string> {
@@ -338,14 +313,6 @@ async function readFileContent(path: string): Promise<string> {
   } catch {
     return "";
   }
-}
-
-export function getFileBaseName(filePath: string): string {
-  return filePath.replace(/\\/g, "/").split("/").pop() ?? "";
-}
-
-function normalizeSep(dir: string): string {
-  return dir.endsWith("/") || dir.endsWith("\\") ? dir : `${dir}/`;
 }
 
 interface DecomposedState {
@@ -1029,65 +996,6 @@ export function useNotesLoader(
   }, [enabled, locale, notesSortOrder, reloadKey]);
 
   return { docs, setDocs, activeIndex, setActiveIndex, groups, setGroups, trashedNotes, setTrashedNotes, isLoading };
-}
-
-export function stripInlineMarkdown(text: string): string {
-  let s = text;
-  s = s.replace(/\[\[([^\[\]\n]+)\]\]/g, "$1");
-  s = s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
-  s = s.replace(/`([^`]*)`/g, "$1");
-  s = s.replace(/\*{1,3}(.*?)\*{1,3}/g, "$1");
-  s = s.replace(/_{1,3}(.*?)_{1,3}/g, "$1");
-  s = s.replace(/~~(.*?)~~/g, "$1");
-  s = s.replace(/&[a-zA-Z]+;|&#\d+;/g, " ");
-  return s.trim();
-}
-
-function stripBlockMarkers(line: string): string {
-  return line
-    .replace(/^#+\s*/, "")
-    .replace(/^(?:>\s*)+/, "")
-    .replace(/^[-*+]\s+/, "")
-    .replace(/^\d+\.\s+/, "")
-    .replace(/^\[[ xX]\]\s*/, "");
-}
-
-export function deriveTitle(content: string): string {
-  if (!content) return "";
-  const lines = content.trimStart().split("\n");
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-    if (line.startsWith("![") || line.startsWith("<img") || line.startsWith("```")) continue;
-    const heading = stripInlineMarkdown(stripBlockMarkers(line));
-    if (heading) return heading.slice(0, 20);
-  }
-  return "";
-}
-
-export function stripMarkdownContent(content: string): string {
-  if (!content) return "";
-  const lines = content.split("\n");
-  const result: string[] = [];
-  let inFence = false;
-
-  for (const raw of lines) {
-    if (raw.trimStart().startsWith("```")) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) continue;
-
-    const line = raw.trim();
-    if (!line) continue;
-    if (line.startsWith("![") || line.startsWith("<img")) continue;
-    if (/^[-*_]{3,}\s*$/.test(line)) continue;
-
-    const plain = stripInlineMarkdown(stripBlockMarkers(line));
-    if (plain) result.push(plain);
-  }
-
-  return result.join(" ").replace(/\s+/g, " ").trim();
 }
 
 export { metaPathFor, metaDirFor, groupsPathFor };

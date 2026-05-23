@@ -1,5 +1,6 @@
 import { mkdir, readDir, copyFile, readTextFile, writeTextFile, exists, remove, rename } from "@tauri-apps/plugin-fs";
 import { tauriFileSystem } from "./fs";
+import { normalizeSep } from "./pathUtils";
 import {
   ensureMetaDir,
   metaDirFor,
@@ -65,10 +66,6 @@ interface LegacyManifest {
 export interface MigrationResult {
   success: boolean;
   error?: string;
-}
-
-function normalizeSep(dir: string): string {
-  return dir.endsWith("/") || dir.endsWith("\\") ? dir : `${dir}/`;
 }
 
 function normalizePathForCompare(path: string): string {

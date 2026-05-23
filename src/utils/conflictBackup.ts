@@ -1,8 +1,5 @@
 import type { FileSystem } from "./fs";
-
-function normalizeSep(dir: string): string {
-  return dir.endsWith("/") || dir.endsWith("\\") ? dir : `${dir}/`;
-}
+import { normalizeSep } from "./pathUtils";
 
 const README_BODY = `This folder holds backups of note bodies that were on disk
 when another change was about to overwrite them. Files are named

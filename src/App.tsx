@@ -204,9 +204,6 @@ function App() {
   }, [settingsLoaded, settings.notesDirectory]);
 
   const reconcileStateRef = useRef(createReconcileState());
-  // Cloud-folder swap: clear bodyless-meta observations so a fresh folder gets
-  // a fresh per-id grace counter instead of carrying state from the prior dir.
-  useEffect(() => { reconcileStateRef.current.bodyMissing.clear(); }, [currentNotesDir]);
 
   const { docs, setDocs, activeIndex, setActiveIndex, groups, setGroups, trashedNotes, setTrashedNotes, isLoading } = useNotesLoader(
     locale,
@@ -531,7 +528,7 @@ function App() {
       // Migration already succeeded; reload so the guard is released.
       await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
     }
-    setNotesDir(newDir);
+    setNotesDir(newDir, reconcileStateRef.current);
     setCurrentNotesDir(newDir);
     setReloadKey((k) => k + 1);
     // Reload owns releasing migrationInProgress.
@@ -553,7 +550,7 @@ function App() {
       groupsRef.current,
     ).catch(() => {});
 
-    resetNotesDir();
+    resetNotesDir(reconcileStateRef.current);
     const defaultDir = await getNotesDir();
 
     setMigrationInProgress(true);
@@ -562,13 +559,13 @@ function App() {
       result = await migrateNotesDir(oldDir, defaultDir, "overwrite");
     } catch (err) {
       setMigrationInProgress(false);
-      setNotesDir(oldDir);
+      setNotesDir(oldDir, reconcileStateRef.current);
       throw err;
     }
 
     if (!result.success) {
       setMigrationInProgress(false);
-      setNotesDir(oldDir);
+      setNotesDir(oldDir, reconcileStateRef.current);
       await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
       return;
     }

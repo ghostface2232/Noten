@@ -3,10 +3,7 @@ import { metaDirFor, metaPathFor, readMeta, writeMeta, type NoteMeta } from "./m
 import { groupsPathFor, writeGroupsWithMerge } from "./groupsIO";
 import { getMachineIdCached } from "./machineId";
 import { atomicWriteText } from "./atomicWrite";
-
-function normalizeSep(dir: string): string {
-  return dir.endsWith("/") || dir.endsWith("\\") ? dir : `${dir}/`;
-}
+import { normalizeSep } from "./pathUtils";
 
 /** Known OneDrive/Dropbox conflict suffixes, anchored to the filename stem. */
 const CONFLICT_SUFFIX_RE = /(?:[- ]\(\d+\)|-\w+(?:-conflicted copy)?|-conflicted copy \d{4}-\d{2}-\d{2}|-DESKTOP-[A-Z0-9]+|-LAPTOP-[A-Z0-9]+|-PC-[A-Z0-9-]+| \(\w+[-\w]*'s conflicted copy \d{4}-\d{2}-\d{2}\))$/i;
