@@ -206,22 +206,18 @@ body {
 
 /* ─── Fluent UI Button hover/pressed: 투명 검정 오버레이 ─── */
 .fui-Button:hover {
-  background-color: rgba(0, 0, 0, 0.04) !important;
+  background-color: var(--ui-hover-bg) !important;
 }
 .fui-Button:active {
-  background-color: rgba(0, 0, 0, 0.08) !important;
-}
-[data-theme="dark"] .fui-Button:hover {
-  background-color: rgba(255, 255, 255, 0.06) !important;
-}
-[data-theme="dark"] .fui-Button:active {
-  background-color: rgba(255, 255, 255, 0.1) !important;
+  background-color: var(--ui-pressed-bg) !important;
 }
 
 /* ─── 다크 모드에서 active 배경 변수 오버라이드 ─── */
 [data-theme="dark"] {
   color-scheme: dark;
   --ui-active-bg: rgba(255, 255, 255, 0.12);
+  --ui-hover-bg: rgba(255, 255, 255, 0.06);
+  --ui-pressed-bg: rgba(255, 255, 255, 0.1);
   --sidebar-search-bg: rgba(255, 255, 255, 0.08);
 }
 

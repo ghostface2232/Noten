@@ -312,6 +312,24 @@ export const useStyles = makeStyles({
     backgroundColor: "var(--ui-active-bg)",
     borderRadius: "6px",
   },
+  // Select-mode hover counterpart of docItemWrapperActive. Uses CSS :hover on
+  // the wrapper so the paint fires immediately on mouse entry (including the
+  // checkbox area) without a React-state-driven re-render.
+  docItemWrapperHoverable: {
+    ":hover": {
+      backgroundColor: "var(--ui-hover-bg)",
+      borderRadius: "6px",
+    },
+  },
+  // In select mode the wrapper paints the row-level hover/active fill so it
+  // can include the checkbox. Suppress the inner Fluent Button's hover/active
+  // fill (defined globally in App.css with !important) so the two layers don't
+  // stack and tint the Button area darker than the checkbox area.
+  docItemSelectRow: {
+    "& .fui-Button:hover, & .fui-Button:active": {
+      backgroundColor: "transparent !important",
+    },
+  },
   // Clears the note button's own active background in select mode — the fill
   // now lives on the wrapper, and --ui-active-bg is translucent so keeping
   // both would tint the note portion darker than the checkbox portion.

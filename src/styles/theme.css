@@ -84,6 +84,8 @@
 
   /* ─── UI 컨트롤 active/hover ─── */
   --ui-active-bg: rgba(0, 0, 0, 0.06);
+  --ui-hover-bg: rgba(0, 0, 0, 0.04);
+  --ui-pressed-bg: rgba(0, 0, 0, 0.08);
 
   /* ─── 셸 레이아웃 ─── */
   --shell-sidebar-width: 260px;

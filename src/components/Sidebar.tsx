@@ -543,7 +543,9 @@ export function Sidebar({
         data-group-id={groupId}
         className={mergeClasses(
           styles.docItemWrapper,
+          selectMode && styles.docItemSelectRow,
           selectMode && originalIndex === activeIndex && styles.docItemWrapperActive,
+          selectMode && originalIndex !== activeIndex && styles.docItemWrapperHoverable,
           newDocIds.has(doc.id) && styles.docItemNew,
           slideUpFromIndex >= 0 && originalIndex >= slideUpFromIndex && styles.docItemSlideUp,
           isSearching && searchIndex !== undefined && styles.searchResultFadeIn,
@@ -654,22 +656,29 @@ export function Sidebar({
               </span>
             </Button>
 
-            {!selectMode && (
-              <Button
-                data-more-btn
-                appearance="subtle"
-                className={mergeClasses(
-                  styles.moreBtn,
-                  isContextTarget
-                    ? styles.moreBtnActive
-                    : isHovered && styles.moreBtnVisible,
-                )}
-                onClick={(e) => handleMoreClick(originalIndex, e)}
-                size="small"
-              >
-                <MoreHorizontalRegular fontSize={16} />
-              </Button>
-            )}
+            <Button
+              data-more-btn
+              appearance="subtle"
+              className={mergeClasses(
+                styles.moreBtn,
+                isContextTarget
+                  ? styles.moreBtnActive
+                  : isHovered && styles.moreBtnVisible,
+              )}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (selectMode) {
+                  if (!selectedNoteIds.has(doc.id)) toggleNoteSelection(doc.id);
+                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  setContextMenu({ type: "empty", index: -3, x: rect.left, y: rect.bottom + 2 });
+                } else {
+                  handleMoreClick(originalIndex, e);
+                }
+              }}
+              size="small"
+            >
+              <MoreHorizontalRegular fontSize={16} />
+            </Button>
           </>
         )}
       </div>
