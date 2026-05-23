@@ -1,4 +1,5 @@
 import { mkdir, readDir, copyFile, readTextFile, writeTextFile, exists, remove, rename } from "@tauri-apps/plugin-fs";
+import { tauriFileSystem } from "./fs";
 import {
   ensureMetaDir,
   metaDirFor,
@@ -167,7 +168,7 @@ async function decomposeLegacyIntoDir(
   manifest: LegacyManifest,
   machineId: string,
 ): Promise<void> {
-  await ensureMetaDir(dir);
+  await ensureMetaDir(tauriFileSystem, dir);
 
   const noteIdToGroupId = new Map<string, string>();
   const sharedGroups: Record<string, SharedGroupEntry> = {};
@@ -192,7 +193,7 @@ async function decomposeLegacyIntoDir(
     }
   }
   if (Object.keys(sharedGroups).length > 0) {
-    await writeGroupsWithMerge(dir, sharedGroups);
+    await writeGroupsWithMerge(tauriFileSystem, dir, sharedGroups);
   }
 
   for (const n of manifest.notes ?? []) {
@@ -210,10 +211,10 @@ async function decomposeLegacyIntoDir(
       groupUpdatedAt: n.updatedAt,
       trashedAt: null,
     };
-    const existing = await readMeta(dir, n.id);
+    const existing = await readMeta(tauriFileSystem, dir, n.id);
     const mergedMeta = mergeMetaForMigration(meta, existing ?? undefined);
     if (existing && metasEqual(existing, mergedMeta)) continue;
-    await writeMeta(dir, mergedMeta, machineId);
+    await writeMeta(tauriFileSystem, dir, mergedMeta, machineId);
   }
 
   for (const t of manifest.trashedNotes ?? []) {
@@ -232,10 +233,10 @@ async function decomposeLegacyIntoDir(
       trashedAt: t.trashedAt,
       trashedFromPath: t.originalFilePath,
     };
-    const existing = await readMeta(dir, t.id);
+    const existing = await readMeta(tauriFileSystem, dir, t.id);
     const mergedMeta = mergeMetaForMigration(meta, existing ?? undefined);
     if (existing && metasEqual(existing, mergedMeta)) continue;
-    await writeMeta(dir, mergedMeta, machineId);
+    await writeMeta(tauriFileSystem, dir, mergedMeta, machineId);
   }
 }
 
@@ -316,7 +317,7 @@ async function readMdMtimes(dir: string, required = false): Promise<Map<string, 
   for (const e of entries) {
     if (!e.name || !e.isFile) continue;
     if (!e.name.endsWith(".md")) continue;
-    const ts = await getFileTimestamps(`${normalizeSep(dir)}${e.name}`);
+    const ts = await getFileTimestamps(tauriFileSystem, `${normalizeSep(dir)}${e.name}`);
     out.set(e.name, ts.updatedAt);
   }
   return out;
@@ -333,7 +334,7 @@ async function readTrashMdMtimes(dir: string, required = false): Promise<Map<str
   for (const e of entries) {
     if (!e.name || !e.isFile) continue;
     if (!e.name.endsWith(".md")) continue;
-    const ts = await getFileTimestamps(`${normalizeSep(trashDir)}${e.name}`);
+    const ts = await getFileTimestamps(tauriFileSystem, `${normalizeSep(trashDir)}${e.name}`);
     out.set(e.name, ts.updatedAt);
   }
   return out;
@@ -414,7 +415,7 @@ async function backupOverwrittenBody(
     if (!destBody) return;
     const srcBody = await readTextFile(srcPath);
     if (destBody === srcBody) return;
-    await backupRemoteVersion(toDir, noteId, destBody);
+    await backupRemoteVersion(tauriFileSystem, toDir, noteId, destBody);
   } catch { /* best-effort backup */ }
 }
 
@@ -466,8 +467,8 @@ export async function migrateNotesDir(
     await assertReadableFileIfExists(`${fromBase}.groups.json`);
     await assertReadableFileIfExists(`${toBase}.groups.json`);
 
-    const sourceMeta = await readAllMeta(fromDir);
-    const destMetaBefore = await readAllMeta(toDir);
+    const sourceMeta = await readAllMeta(tauriFileSystem, fromDir);
+    const destMetaBefore = await readAllMeta(tauriFileSystem, toDir);
 
     const sourceMdMtimes = await readMdMtimes(fromDir, true);
     const destMdMtimes = await readMdMtimes(toDir, true);
@@ -481,8 +482,8 @@ export async function migrateNotesDir(
       await exists(`${toBase}.trash`).catch(() => false),
     );
 
-    const sourceGroupsFile = await readGroupsFile(fromDir);
-    const destGroupsBefore = await readGroupsFile(toDir);
+    const sourceGroupsFile = await readGroupsFile(tauriFileSystem, fromDir);
+    const destGroupsBefore = await readGroupsFile(tauriFileSystem, toDir);
 
     // Root bodies: per-filename mtime newer-wins. Back up a differing
     // destination body before the source overwrites it. The loop walks only
@@ -502,12 +503,12 @@ export async function migrateNotesDir(
     // Per-id meta: newer-wins per field, but group membership keeps its own
     // clock so body/title clocks cannot erase it. Destination-only ids stay
     // on disk untouched.
-    await ensureMetaDir(toDir);
+    await ensureMetaDir(tauriFileSystem, toDir);
     for (const [id, src] of sourceMeta) {
       const dest = destMetaBefore.get(id);
       const mergedMeta = mergeMetaForMigration(src, dest);
       if (dest && metasEqual(dest, mergedMeta)) continue;
-      await writeMeta(toDir, mergedMeta, machineId);
+      await writeMeta(tauriFileSystem, toDir, mergedMeta, machineId);
     }
     if (sourceTrashMtimes.size > 0) {
       await mkdir(`${toBase}.trash`, { recursive: true }).catch(() => {});
@@ -531,7 +532,7 @@ export async function migrateNotesDir(
 
     const merged = mergeGroupMaps(destGroupsBefore.groups, sourceGroupsFile.groups);
     if (Object.keys(merged).length > 0) {
-      await writeGroupsWithMerge(toDir, merged);
+      await writeGroupsWithMerge(tauriFileSystem, toDir, merged);
     }
 
     if (await exists(`${fromBase}.conflicts`).catch(() => false)) {

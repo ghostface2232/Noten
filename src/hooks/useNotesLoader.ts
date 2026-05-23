@@ -4,16 +4,13 @@ import {
   mkdir,
   readTextFile,
   writeTextFile,
-  readDir,
-  remove,
-  copyFile,
-  exists,
 } from "@tauri-apps/plugin-fs";
+import { tauriFileSystem } from "../utils/fs";
+import { reconcileFolder, createReconcileState, type ReconcileState } from "../utils/reconcileFolder";
 import { markOwnWrite } from "./ownWriteTracker";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import type { NoteColorId } from "../utils/noteColors";
-import { getFileTimestamps } from "../utils/fileTimestamps";
 import { migrateDataUrlImagesToAssets } from "../utils/migrateImageAssets";
 import { removeNoteAssetDir } from "../utils/imageAssetUtils";
 import {
@@ -22,7 +19,6 @@ import {
   readAllMeta,
   writeMeta as writeMetaFile,
   removeMeta as removeMetaFile,
-  type NoteMeta,
 } from "../utils/metadataIO";
 import {
   groupsPathFor,
@@ -40,7 +36,6 @@ import {
 import {
   setKnownDiskContent,
   resetKnownDiskContent,
-  backupRemoteVersion,
 } from "../utils/conflictBackup";
 import {
   getUiStateCached,
@@ -156,15 +151,11 @@ export function unmarkGroupAsDeleted(id: string): void {
   pendingGroupTombstones.delete(id);
 }
 
-// Orphan-meta deletion is delayed so cloud sidecars can arrive before bodies.
-const metaBodyMissingObservations = new Map<string, number>();
-
 function resetWriteSnapshots() {
   writtenMetaSnapshot.clear();
   writtenGroupsSnapshot.clear();
   pendingGroupTombstones.clear();
   pendingGroupMembershipWrites.clear();
-  metaBodyMissingObservations.clear();
 }
 
 // Seed write snapshots from disk so deletions of pre-existing groups can emit
@@ -172,7 +163,7 @@ function resetWriteSnapshots() {
 async function seedWriteSnapshots(dir: string): Promise<void> {
   resetWriteSnapshots();
 
-  const allMeta = await readAllMeta(dir);
+  const allMeta = await readAllMeta(tauriFileSystem, dir);
   for (const m of allMeta.values()) {
     writtenMetaSnapshot.set(m.id, {
       fileName: m.fileName,
@@ -191,7 +182,7 @@ async function seedWriteSnapshots(dir: string): Promise<void> {
 }
 
 export async function syncGroupsSnapshotFromDisk(dir: string): Promise<void> {
-  const groupsFile = await readGroupsFile(dir);
+  const groupsFile = await readGroupsFile(tauriFileSystem, dir);
   // Drop already-tombstoned groups from the local diff snapshot.
   const liveOnDisk = new Set<string>();
   for (const g of Object.values(groupsFile.groups)) {
@@ -291,10 +282,10 @@ export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<Tr
 
   for (const note of trashedNotes) {
     if (now - note.trashedAt > TRASH_RETENTION_MS) {
-      try { await remove(note.trashFilePath); } catch { /* file may already be gone */ }
+      try { await tauriFileSystem.remove(note.trashFilePath); } catch { /* file may already be gone */ }
       if (notesDir) {
         await removeNoteAssetDir(notesDir, note.id);
-        await removeMetaFile(notesDir, note.id);
+        await removeMetaFile(tauriFileSystem, notesDir, note.id);
       }
     } else {
       kept.push(note);
@@ -353,13 +344,6 @@ export function getFileBaseName(filePath: string): string {
   return filePath.replace(/\\/g, "/").split("/").pop() ?? "";
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function fileNameToId(name: string): string {
-  // Legacy notes may have non-UUID stems; preserve them.
-  return name.replace(/\.md$/i, "");
-}
-
 function normalizeSep(dir: string): string {
   return dir.endsWith("/") || dir.endsWith("\\") ? dir : `${dir}/`;
 }
@@ -374,8 +358,8 @@ interface DecomposedState {
 /** Load groups from disk; membership is derived from per-note `groupId`. */
 export async function loadGroupsFromDisk(dir: string): Promise<NoteGroup[]> {
   await loadUiState();
-  const file = await readGroupsFile(dir);
-  const allMeta = await readAllMeta(dir);
+  const file = await readGroupsFile(tauriFileSystem, dir);
+  const allMeta = await readAllMeta(tauriFileSystem, dir);
   const collapsedMap = getUiStateCached().groupCollapsed;
   const metaByGroup = new Map<string, string[]>();
   for (const m of allMeta.values()) {
@@ -417,49 +401,12 @@ function buildGroupsFromShared(
   return out;
 }
 
-function sameNoteIds(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
-
-function hydrateGroupMembershipFromMeta(
-  groups: NoteGroup[],
-  allMeta: Map<string, NoteMeta>,
-  liveDocIds: Set<string>,
-): { groups: NoteGroup[]; changed: boolean } {
-  const idsByGroup = new Map<string, string[]>();
-  for (const meta of allMeta.values()) {
-    if (meta.trashedAt != null) continue;
-    if (!meta.groupId || !liveDocIds.has(meta.id)) continue;
-    const ids = idsByGroup.get(meta.groupId) ?? [];
-    ids.push(meta.id);
-    idsByGroup.set(meta.groupId, ids);
-  }
-
-  let changed = false;
-  const hydrated = groups.map((group) => {
-    const metaIds = idsByGroup.get(group.id) ?? [];
-    const metaIdSet = new Set(metaIds);
-    const noteIds = [
-      ...group.noteIds.filter((id) => metaIdSet.has(id)),
-      ...metaIds.filter((id) => !group.noteIds.includes(id)),
-    ];
-    if (sameNoteIds(group.noteIds, noteIds)) return group;
-    changed = true;
-    return { ...group, noteIds };
-  });
-  return { groups: hydrated, changed };
-}
-
 async function loadDecomposedState(dir: string): Promise<DecomposedState> {
   const base = normalizeSep(dir);
   const trashBase = `${base}.trash/`;
 
-  const allMeta = await readAllMeta(dir);
-  const sharedGroupsFile = await readGroupsFile(dir);
+  const allMeta = await readAllMeta(tauriFileSystem, dir);
+  const sharedGroupsFile = await readGroupsFile(tauriFileSystem, dir);
   const uiState = getUiStateCached();
 
   const metaByGroup = new Map<string, string[]>();
@@ -615,12 +562,12 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
   }
 
   if (Object.keys(sharedGroups).length > 0) {
-    await writeGroupsWithMerge(dir, sharedGroups);
+    await writeGroupsWithMerge(tauriFileSystem, dir, sharedGroups);
   }
 
   for (const n of manifest.notes ?? []) {
     if (!n.id) continue;
-    await writeMetaFile(dir, {
+    await writeMetaFile(tauriFileSystem, dir, {
       version: 2,
       id: n.id,
       fileName: n.fileName,
@@ -637,7 +584,7 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
 
   for (const t of manifest.trashedNotes ?? []) {
     if (!t.id) continue;
-    await writeMetaFile(dir, {
+    await writeMetaFile(tauriFileSystem, dir, {
       version: 2,
       id: t.id,
       fileName: t.fileName,
@@ -665,208 +612,6 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
   }
 }
 
-export async function reconcileFolder(
-  dir: string,
-  docs: NoteDoc[],
-  groups: NoteGroup[],
-  locale: Locale,
-): Promise<{ docs: NoteDoc[]; groups: NoteGroup[]; changed: boolean }> {
-  let entries: { name?: string; isFile?: boolean; isDirectory?: boolean }[];
-  try {
-    entries = await readDir(dir);
-  } catch {
-    return { docs, groups, changed: false };
-  }
-
-  const machineId = getMachineIdCached();
-  const base = normalizeSep(dir);
-  const trashBase = `${base}.trash/`;
-
-  const mdEntries = entries.filter((e) => e.name?.endsWith(".md") && e.isFile);
-  const folderFileNames = new Set(mdEntries.map((e) => e.name!));
-  const allMeta = await readAllMeta(dir);
-  const trashedIds = new Set(
-    Array.from(allMeta.values()).filter((m) => m.trashedAt != null).map((m) => m.id),
-  );
-
-  let changed = false;
-  let nextDocs = [...docs];
-  const docById = new Map(nextDocs.map((d) => [d.id, d]));
-
-  for (const entry of mdEntries) {
-    const name = entry.name!;
-    const id = fileNameToId(name);
-    if (docById.has(id)) continue;
-    if (trashedIds.has(id)) continue; // handled in mismatch branch below
-
-    const filePath = `${base}${name}`;
-    const content = await readFileContent(filePath);
-
-    let meta = allMeta.get(id);
-    const fts = await getFileTimestamps(filePath);
-
-    if (!meta) {
-      meta = {
-        version: 2,
-        id,
-        fileName: deriveTitle(content) || getDefaultDocumentTitle(locale),
-        customName: !UUID_RE.test(id) ? true : undefined,
-        createdAt: fts.createdAt,
-        updatedAt: fts.updatedAt,
-        pinned: false,
-        groupId: null,
-        groupUpdatedAt: fts.updatedAt,
-        trashedAt: null,
-      };
-      try { await writeMetaFile(dir, meta, machineId); } catch { /* ignore */ }
-    }
-
-    const newDoc: NoteDoc = {
-      id,
-      filePath,
-      fileName: meta.fileName,
-      isDirty: false,
-      content,
-      createdAt: meta.createdAt,
-      updatedAt: meta.updatedAt,
-      pinned: meta.pinned === true,
-      color: meta.color,
-      customName: meta.customName,
-    };
-    nextDocs.push(newDoc);
-    docById.set(id, newDoc);
-    changed = true;
-  }
-
-  // If root and trash bodies both exist, preserve the losing body before
-  // resolving the mismatch.
-  for (const meta of allMeta.values()) {
-    if (meta.trashedAt == null) continue;
-    const rootName = `${meta.id}.md`;
-    if (!folderFileNames.has(rootName)) continue;
-
-    const rootPath = `${base}${rootName}`;
-    const trashPath = `${trashBase}${rootName}`;
-    let rootMtime = 0;
-    try { rootMtime = (await getFileTimestamps(rootPath)).updatedAt; } catch { /* fall back */ }
-
-    let trashBody: string | null = null;
-    try {
-      if (await exists(trashPath)) {
-        trashBody = await readTextFile(trashPath);
-      }
-    } catch { /* trash unreadable; treat as absent */ }
-
-    let rootBody = "";
-    try { rootBody = await readTextFile(rootPath); } catch { /* unreadable root */ }
-
-    if (rootMtime > meta.trashedAt) {
-      if (trashBody !== null && trashBody !== rootBody && trashBody.length > 0) {
-        try { await backupRemoteVersion(dir, meta.id, trashBody); } catch { /* best-effort */ }
-      }
-      if (trashBody !== null) {
-        try { markOwnWrite(trashPath); await remove(trashPath); } catch { /* ignore */ }
-      }
-      try {
-        await writeMetaFile(dir, { ...meta, trashedAt: null, trashedFromPath: null }, machineId);
-      } catch { /* ignore */ }
-      changed = true;
-    } else {
-      if (trashBody !== null && trashBody !== rootBody && trashBody.length > 0) {
-        try { await backupRemoteVersion(dir, meta.id, trashBody); } catch { /* best-effort */ }
-      }
-      try {
-        await mkdir(`${base}.trash`, { recursive: true });
-        markOwnWrite(rootPath);
-        await copyFile(rootPath, trashPath);
-        await remove(rootPath);
-      } catch { /* ignore */ }
-      const beforeLen = nextDocs.length;
-      nextDocs = nextDocs.filter((d) => d.id !== meta.id);
-      if (nextDocs.length !== beforeLen) changed = true;
-    }
-  }
-
-  // Keep dirty docs even if disk is gone; autosave can still recreate them.
-  const beforeRemoveLen = nextDocs.length;
-  const removedIds = new Set<string>();
-  nextDocs = nextDocs.filter((d) => {
-    if (!d.filePath) return true;
-    const name = getFileBaseName(d.filePath);
-    if (folderFileNames.has(name)) return true;
-    if (d.isDirty) return true;
-    removedIds.add(d.id);
-    return false;
-  });
-  if (nextDocs.length !== beforeRemoveLen) changed = true;
-
-  let nextGroups = removedIds.size > 0
-    ? groups.map((g) => ({
-        ...g,
-        noteIds: g.noteIds.filter((id) => !removedIds.has(id)),
-      }))
-    : groups;
-
-  let trashEntries: { name?: string; isFile?: boolean }[] = [];
-  try { trashEntries = await readDir(`${base}.trash`); } catch { trashEntries = []; }
-  const trashFileNames = new Set(
-    trashEntries.filter((e) => e.name?.endsWith(".md") && e.isFile).map((e) => e.name!),
-  );
-
-  // A bodyless meta may be a cloud-sync race — the sidecar can arrive before
-  // its body. Deleting it via removeMetaFile propagates to every synced PC,
-  // so two guards gate the delete: skip the whole pass when many metas are
-  // bodyless at once (bulk = likely mid-sync), and require a meta to stay
-  // bodyless across two passes (per-id grace) before removing it.
-  const missingBodyIds: string[] = [];
-  for (const meta of allMeta.values()) {
-    const rootName = `${meta.id}.md`;
-    if (meta.trashedAt == null) {
-      if (folderFileNames.has(rootName)) continue;
-      if (trashFileNames.has(rootName)) continue;
-    } else if (trashFileNames.has(rootName)) {
-      continue;
-    }
-    missingBodyIds.push(meta.id);
-  }
-
-  const looksMidSync = missingBodyIds.length >= 3
-    && missingBodyIds.length * 4 >= allMeta.size;
-
-  const missingNow = new Set(missingBodyIds);
-  for (const id of Array.from(metaBodyMissingObservations.keys())) {
-    if (!missingNow.has(id) || !allMeta.has(id)) {
-      metaBodyMissingObservations.delete(id);
-    }
-  }
-
-  if (!looksMidSync) {
-    for (const id of missingBodyIds) {
-      const seen = metaBodyMissingObservations.get(id) ?? 0;
-      if (seen >= 1) {
-        metaBodyMissingObservations.delete(id);
-        try { await removeMetaFile(dir, id); } catch { /* ignore */ }
-      } else {
-        metaBodyMissingObservations.set(id, seen + 1);
-      }
-    }
-  }
-
-  // Rebuild noteIds from sidecars so follow-up persistence cannot erase groupId.
-  const liveDocIds = new Set(nextDocs.map((d) => d.id));
-  const latestMeta = await readAllMeta(dir);
-  const hydratedGroups = hydrateGroupMembershipFromMeta(nextGroups, latestMeta, liveDocIds);
-  if (hydratedGroups.changed) {
-    nextGroups = hydratedGroups.groups;
-    changed = true;
-  }
-
-  // locale is consumed only by getDefaultDocumentTitle above; this reference
-  // keeps the unused-parameter check quiet.
-  void locale;
-
-  return { docs: nextDocs, groups: nextGroups, changed };
-}
 
 function metaSnapshotEqual(a: MetaSnapshot, b: MetaSnapshot): boolean {
   return a.fileName === b.fileName
@@ -903,7 +648,7 @@ async function persistDecomposedState(
     if (!g.id) continue;
     for (const nid of g.noteIds) noteIdToGroupId.set(nid, g.id);
   }
-  const diskMeta = await readAllMeta(dir);
+  const diskMeta = await readAllMeta(tauriFileSystem, dir);
 
   const resolveGroupSnapshot = (noteId: string, stateGroupId: string | null): Pick<MetaSnapshot, "groupId" | "groupUpdatedAt"> => {
     const pending = pendingGroupMembershipWrites.get(noteId);
@@ -949,7 +694,7 @@ async function persistDecomposedState(
     }
 
     metaWrites.push(
-      writeMetaFile(dir, {
+      writeMetaFile(tauriFileSystem, dir, {
         version: 2,
         id: doc.id,
         fileName: snap.fileName,
@@ -988,7 +733,7 @@ async function persistDecomposedState(
     }
 
     metaWrites.push(
-      writeMetaFile(dir, {
+      writeMetaFile(tauriFileSystem, dir, {
         version: 2,
         id: t.id,
         fileName: snap.fileName,
@@ -1070,7 +815,7 @@ async function persistDecomposedState(
   }
 
   const groupsPromise = groupsChanged
-    ? writeGroupsWithMerge(dir, localGroupsMap).then(
+    ? writeGroupsWithMerge(tauriFileSystem, dir, localGroupsMap).then(
         () => {
           for (const id of tombstoneApplied) pendingGroupTombstones.delete(id);
         },
@@ -1117,7 +862,12 @@ export function useNotesLoader(
   notesSortOrder: NotesSortOrder,
   enabled = true,
   reloadKey = 0,
+  reconcileState?: ReconcileState,
 ) {
+  const reconcileStateRef = useRef<ReconcileState>(reconcileState ?? createReconcileState());
+  if (reconcileState && reconcileStateRef.current !== reconcileState) {
+    reconcileStateRef.current = reconcileState;
+  }
   const [docs, setDocs] = useState<NoteDoc[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [groups, setGroups] = useState<NoteGroup[]>([]);
@@ -1153,7 +903,7 @@ export function useNotesLoader(
         await loadUiState();
 
         const dir = await ensureNotesDir();
-        await ensureSharedDirs(dir);
+        await ensureSharedDirs(tauriFileSystem, dir);
 
         const cache = await readLocalCache(dir);
         if (cache && cache.notes.length > 0) {
@@ -1169,11 +919,11 @@ export function useNotesLoader(
         const legacy = await readLegacyManifestFile(dir);
         if (legacy && Array.isArray(legacy.notes)) {
           await decomposeLegacyManifest(dir, legacy);
-          await retireLegacyManifest(dir);
+          await retireLegacyManifest(tauriFileSystem, dir);
         }
 
         try {
-          await scanAndAbsorbConflicts(dir);
+          await scanAndAbsorbConflicts(tauriFileSystem, dir);
         } catch { /* best-effort */ }
 
         const state = await loadDecomposedState(dir);
@@ -1194,7 +944,7 @@ export function useNotesLoader(
         setTrashedNotes(purgedTrashed);
 
         const { docs: reconciled, groups: reconciledGroups, changed: reconcileChanged } =
-          await reconcileFolder(dir, docsLoaded, state.groups, locale);
+          await reconcileFolder(tauriFileSystem, reconcileStateRef.current, dir, docsLoaded, state.groups, locale);
 
         let finalDocs = reconcileChanged ? reconciled : docsLoaded;
         let finalGroups = reconcileChanged ? reconciledGroups : state.groups;
@@ -1205,7 +955,7 @@ export function useNotesLoader(
           const timestamp = Date.now();
           markOwnWrite(filePath, "");
           await writeTextFile(filePath, "");
-          await writeMetaFile(dir, {
+          await writeMetaFile(tauriFileSystem, dir, {
             version: 2,
             id,
             fileName: getDefaultDocumentTitle(locale),

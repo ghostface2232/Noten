@@ -11,7 +11,9 @@
     "prepare-helper": "powershell -ExecutionPolicy Bypass -File .\\scripts\\prepare-helper.ps1",
     "prepare-helper:release": "powershell -ExecutionPolicy Bypass -File .\\scripts\\prepare-helper.ps1 -Release",
     "tauri:dev": "npm run prepare-helper && tauri dev",
-    "sync-version": "node scripts/sync-version.mjs"
+    "sync-version": "node scripts/sync-version.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@floating-ui/dom": "^1.7.6",
@@ -52,6 +54,7 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^4.1.7"
   }
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { writeTextFile } from "@tauri-apps/plugin-fs";
+import { tauriFileSystem } from "../utils/fs";
 import type { NoteDoc, NoteGroup } from "./useNotesLoader";
 import { deriveTitle, saveManifest, sortNotes, getNotesDir, migrationInProgress } from "./useNotesLoader";
 import { getCurrentMarkdown } from "./useFileSystem";
@@ -101,11 +101,11 @@ export function useAutoSave(
     try {
       try {
         const dir = await getNotesDir();
-        await backupIfRemoteWroteFirst(dir, snapshot.filePath, snapshot.docId, snapshot.content);
+        await backupIfRemoteWroteFirst(tauriFileSystem, dir, snapshot.filePath, snapshot.docId, snapshot.content);
       } catch { /* best-effort, never block the save */ }
 
       markOwnWrite(snapshot.filePath, snapshot.content);
-      await writeTextFile(snapshot.filePath, snapshot.content);
+      await tauriFileSystem.writeTextFile(snapshot.filePath, snapshot.content);
       setKnownDiskContent(snapshot.filePath, snapshot.content);
 
       if ((latestRevisionByDocRef.current.get(snapshot.docId) ?? 0) !== snapshot.revision) {

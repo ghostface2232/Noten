@@ -1,4 +1,4 @@
-import { mkdir, readDir, readTextFile, remove } from "@tauri-apps/plugin-fs";
+import type { FileSystem } from "./fs";
 import { atomicWriteText } from "./atomicWrite";
 import { markOwnWrite } from "../hooks/ownWriteTracker";
 import { isNoteColorId, type NoteColorId } from "./noteColors";
@@ -35,9 +35,9 @@ export function metaPathFor(notesDir: string, noteId: string): string {
   return `${metaDirFor(notesDir)}/${noteId}.json`;
 }
 
-export async function ensureMetaDir(notesDir: string): Promise<string> {
+export async function ensureMetaDir(fs: FileSystem, notesDir: string): Promise<string> {
   const dir = metaDirFor(notesDir);
-  await mkdir(dir, { recursive: true }).catch(() => {});
+  await fs.mkdir(dir, { recursive: true }).catch(() => {});
   return dir;
 }
 
@@ -51,9 +51,9 @@ function isValidMeta(obj: unknown): obj is NoteMeta {
     && (m.groupId === null || typeof m.groupId === "string");
 }
 
-export async function readMeta(notesDir: string, noteId: string): Promise<NoteMeta | null> {
+export async function readMeta(fs: FileSystem, notesDir: string, noteId: string): Promise<NoteMeta | null> {
   try {
-    const raw = await readTextFile(metaPathFor(notesDir, noteId));
+    const raw = await fs.readTextFile(metaPathFor(notesDir, noteId));
     const parsed = JSON.parse(raw) as unknown;
     if (!isValidMeta(parsed)) return null;
     const m = parsed as NoteMeta;
@@ -69,8 +69,8 @@ export async function readMeta(notesDir: string, noteId: string): Promise<NoteMe
   }
 }
 
-export async function writeMeta(notesDir: string, meta: NoteMeta, machineId: string): Promise<string> {
-  await ensureMetaDir(notesDir);
+export async function writeMeta(fs: FileSystem, notesDir: string, meta: NoteMeta, machineId: string): Promise<string> {
+  await ensureMetaDir(fs, notesDir);
   const path = metaPathFor(notesDir, meta.id);
   const normalized: NoteMeta = {
     version: 2,
@@ -90,23 +90,23 @@ export async function writeMeta(notesDir: string, meta: NoteMeta, machineId: str
   const serialized = JSON.stringify(normalized, null, 2);
   // Suppress watcher reprocessing: same content recorded for hash-based match.
   markOwnWrite(path, serialized);
-  await atomicWriteText(path, serialized);
+  await atomicWriteText(fs, path, serialized);
   return serialized;
 }
 
-export async function removeMeta(notesDir: string, noteId: string): Promise<void> {
+export async function removeMeta(fs: FileSystem, notesDir: string, noteId: string): Promise<void> {
   const path = metaPathFor(notesDir, noteId);
   // Mark intent so the watcher's "deleted" event for our own removal is
   // ignored by the time-based filter at least; reconcile cleans up regardless.
   markOwnWrite(path);
   try {
-    await remove(path);
+    await fs.remove(path);
   } catch { /* already gone */ }
 }
 
-export async function listMetaFiles(notesDir: string): Promise<string[]> {
+export async function listMetaFiles(fs: FileSystem, notesDir: string): Promise<string[]> {
   try {
-    const entries = await readDir(metaDirFor(notesDir));
+    const entries = await fs.readDir(metaDirFor(notesDir));
     return entries
       .filter((e) => e.name && e.name.endsWith(".json") && !e.name.endsWith(".tmp.json") && !e.name.endsWith(".tmp"))
       .map((e) => e.name!);
@@ -116,12 +116,12 @@ export async function listMetaFiles(notesDir: string): Promise<string[]> {
 }
 
 /** Read all metadata files from {notesDir}/.meta. Returns entries keyed by id. */
-export async function readAllMeta(notesDir: string): Promise<Map<string, NoteMeta>> {
-  const names = await listMetaFiles(notesDir);
+export async function readAllMeta(fs: FileSystem, notesDir: string): Promise<Map<string, NoteMeta>> {
+  const names = await listMetaFiles(fs, notesDir);
   const out = new Map<string, NoteMeta>();
   await Promise.all(names.map(async (name) => {
     const id = name.replace(/\.json$/, "");
-    const meta = await readMeta(notesDir, id);
+    const meta = await readMeta(fs, notesDir, id);
     if (meta && meta.id === id) out.set(id, meta);
   }));
   return out;

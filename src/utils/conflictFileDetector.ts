@@ -1,4 +1,4 @@
-import { mkdir, readDir, readTextFile, rename, remove, exists, copyFile } from "@tauri-apps/plugin-fs";
+import type { FileSystem } from "./fs";
 import { metaDirFor, metaPathFor, readMeta, writeMeta, type NoteMeta } from "./metadataIO";
 import { groupsPathFor, writeGroupsWithMerge } from "./groupsIO";
 import { getMachineIdCached } from "./machineId";
@@ -43,7 +43,7 @@ export interface ConflictScanResult {
 }
 
 /** Absorb safe OneDrive/Dropbox conflict copies in the shared notes folder. */
-export async function scanAndAbsorbConflicts(notesDir: string): Promise<ConflictScanResult> {
+export async function scanAndAbsorbConflicts(fs: FileSystem, notesDir: string): Promise<ConflictScanResult> {
   const result: ConflictScanResult = {
     absorbedMdNotes: 0,
     mergedGroupsConflicts: 0,
@@ -54,7 +54,7 @@ export async function scanAndAbsorbConflicts(notesDir: string): Promise<Conflict
   const dirBase = normalizeSep(notesDir);
   let rootEntries: { name?: string; isFile?: boolean; isDirectory?: boolean }[] = [];
   try {
-    rootEntries = await readDir(notesDir);
+    rootEntries = await fs.readDir(notesDir);
   } catch {
     return result;
   }
@@ -67,23 +67,23 @@ export async function scanAndAbsorbConflicts(notesDir: string): Promise<Conflict
       const path = `${dirBase}${e.name}`;
       let merged = false;
       try {
-        const raw = await readTextFile(path);
+        const raw = await fs.readTextFile(path);
         const parsed = JSON.parse(raw) as { groups?: unknown };
         if (parsed && typeof parsed === "object" && parsed.groups && typeof parsed.groups === "object") {
-          await writeGroupsWithMerge(notesDir, parsed.groups as Record<string, import("./groupsIO").SharedGroupEntry>);
+          await writeGroupsWithMerge(fs, notesDir, parsed.groups as Record<string, import("./groupsIO").SharedGroupEntry>);
           result.mergedGroupsConflicts++;
           merged = true;
         }
       } catch { /* ignore broken file */ }
       if (merged) {
-        try { await remove(path); } catch { /* keep for retry */ }
+        try { await fs.remove(path); } catch { /* keep for retry */ }
       }
     }
   }
 
   const metaDir = metaDirFor(notesDir);
   let metaEntries: { name?: string; isFile?: boolean }[] = [];
-  try { metaEntries = await readDir(metaDir); } catch { metaEntries = []; }
+  try { metaEntries = await fs.readDir(metaDir); } catch { metaEntries = []; }
 
   for (const e of metaEntries) {
     if (!e.name || !e.isFile) continue;
@@ -96,12 +96,12 @@ export async function scanAndAbsorbConflicts(notesDir: string): Promise<Conflict
     const conflictPath = `${metaDir}/${e.name}`;
     let merged = false;
     try {
-      const raw = await readTextFile(conflictPath);
+      const raw = await fs.readTextFile(conflictPath);
       const remote = JSON.parse(raw) as NoteMeta;
       if (!remote || typeof remote !== "object" || remote.id !== canonicalStem) {
         continue;
       }
-      const local = await readMeta(notesDir, canonicalStem);
+      const local = await readMeta(fs, notesDir, canonicalStem);
       const winnerIsLocal = !!(local && local.updatedAt >= remote.updatedAt);
       const winner = winnerIsLocal ? local! : remote;
       const localGroupUpdatedAt = local ? (local.groupUpdatedAt ?? local.updatedAt) : -1;
@@ -124,12 +124,12 @@ export async function scanAndAbsorbConflicts(notesDir: string): Promise<Conflict
         groupId: groupWinner?.groupId ?? null,
         groupUpdatedAt: groupWinner?.groupUpdatedAt ?? groupWinner?.updatedAt,
       };
-      await writeMeta(notesDir, mergedMeta, getMachineIdCached());
+      await writeMeta(fs, notesDir, mergedMeta, getMachineIdCached());
       result.mergedMetaConflicts++;
       merged = true;
     } catch { /* ignore */ }
     if (merged) {
-      try { await remove(conflictPath); } catch { /* keep for retry */ }
+      try { await fs.remove(conflictPath); } catch { /* keep for retry */ }
     }
   }
 
@@ -145,30 +145,30 @@ export async function scanAndAbsorbConflicts(notesDir: string): Promise<Conflict
     const canonicalPath = `${dirBase}${canonicalStem}.md`;
 
     let conflictBody = "";
-    try { conflictBody = await readTextFile(conflictPath); } catch { continue; }
+    try { conflictBody = await fs.readTextFile(conflictPath); } catch { continue; }
 
     let canonicalBody = "";
-    try { canonicalBody = await readTextFile(canonicalPath); } catch { /* canonical missing */ }
+    try { canonicalBody = await fs.readTextFile(canonicalPath); } catch { /* canonical missing */ }
 
     if (canonicalBody === conflictBody) {
-      try { await remove(conflictPath); } catch { /* ignore */ }
+      try { await fs.remove(conflictPath); } catch { /* ignore */ }
       continue;
     }
 
     const newId = crypto.randomUUID();
     const newPath = `${dirBase}${newId}.md`;
     try {
-      await rename(conflictPath, newPath);
+      await fs.rename(conflictPath, newPath);
     } catch {
       try {
-        await copyFile(conflictPath, newPath);
-        await remove(conflictPath);
+        await fs.copyFile(conflictPath, newPath);
+        await fs.remove(conflictPath);
       } catch {
         continue;
       }
     }
 
-    const seed = await readMeta(notesDir, canonicalStem);
+    const seed = await readMeta(fs, notesDir, canonicalStem);
     const suffixTag = stem.slice(canonicalStem.length).replace(/^[- ]/, "") || "conflict";
     const now = Date.now();
     const newMeta: NoteMeta = {
@@ -184,35 +184,35 @@ export async function scanAndAbsorbConflicts(notesDir: string): Promise<Conflict
       groupUpdatedAt: seed?.groupUpdatedAt ?? seed?.updatedAt ?? now,
       trashedAt: null,
     };
-    await writeMeta(notesDir, newMeta, getMachineIdCached());
+    await writeMeta(fs, notesDir, newMeta, getMachineIdCached());
     result.absorbedMdNotes++;
   }
 
   return result;
 }
 
-export async function retireLegacyManifest(notesDir: string): Promise<boolean> {
+export async function retireLegacyManifest(fs: FileSystem, notesDir: string): Promise<boolean> {
   const base = normalizeSep(notesDir);
   const src = `${base}manifest.json`;
   const dst = `${base}manifest.legacy.json`;
   try {
-    if (!(await exists(src))) return false;
+    if (!(await fs.exists(src))) return false;
   } catch {
     return false;
   }
   try {
-    const existsDst = await exists(dst).catch(() => false);
+    const existsDst = await fs.exists(dst).catch(() => false);
     if (existsDst) {
-      await remove(src).catch(() => {});
+      await fs.remove(src).catch(() => {});
       return true;
     }
-    await rename(src, dst);
+    await fs.rename(src, dst);
     return true;
   } catch {
     try {
-      const raw = await readTextFile(src);
-      await atomicWriteText(dst, raw);
-      await remove(src);
+      const raw = await fs.readTextFile(src);
+      await atomicWriteText(fs, dst, raw);
+      await fs.remove(src);
       return true;
     } catch {
       return false;
@@ -220,9 +220,9 @@ export async function retireLegacyManifest(notesDir: string): Promise<boolean> {
   }
 }
 
-export async function ensureSharedDirs(notesDir: string): Promise<void> {
-  await mkdir(notesDir, { recursive: true }).catch(() => {});
-  await mkdir(metaDirFor(notesDir), { recursive: true }).catch(() => {});
+export async function ensureSharedDirs(fs: FileSystem, notesDir: string): Promise<void> {
+  await fs.mkdir(notesDir, { recursive: true }).catch(() => {});
+  await fs.mkdir(metaDirFor(notesDir), { recursive: true }).catch(() => {});
 }
 
 export { metaPathFor, groupsPathFor };

@@ -1,4 +1,4 @@
-import { mkdir, readTextFile, writeTextFile, exists } from "@tauri-apps/plugin-fs";
+import type { FileSystem } from "./fs";
 
 function normalizeSep(dir: string): string {
   return dir.endsWith("/") || dir.endsWith("\\") ? dir : `${dir}/`;
@@ -12,13 +12,13 @@ content lost to a multi-device race.
 Safe to delete anything in here once you've reviewed the contents.
 `;
 
-async function ensureReadme(notesDir: string, conflictsDir: string): Promise<void> {
+async function ensureReadme(fs: FileSystem, notesDir: string, conflictsDir: string): Promise<void> {
   void notesDir; // signature symmetry; not currently used
   const path = `${normalizeSep(conflictsDir)}README.md`;
   try {
-    if (await exists(path)) return;
+    if (await fs.exists(path)) return;
   } catch { /* ignore */ }
-  try { await writeTextFile(path, README_BODY); } catch { /* best-effort */ }
+  try { await fs.writeTextFile(path, README_BODY); } catch { /* best-effort */ }
 }
 
 // Last known on-disk note bodies, used to detect unseen remote writes.
@@ -45,17 +45,18 @@ export function resetKnownDiskContent(): void {
 }
 
 export async function backupRemoteVersion(
+  fs: FileSystem,
   notesDir: string,
   noteId: string,
   body: string,
 ): Promise<string | null> {
   if (!body) return null;
   const conflictsDir = `${normalizeSep(notesDir)}.conflicts`;
-  try { await mkdir(conflictsDir, { recursive: true }); } catch { /* ignore */ }
+  try { await fs.mkdir(conflictsDir, { recursive: true }); } catch { /* ignore */ }
   const path = `${normalizeSep(conflictsDir)}${noteId}-${Date.now()}.md`;
   try {
-    await writeTextFile(path, body);
-    await ensureReadme(notesDir, conflictsDir);
+    await fs.writeTextFile(path, body);
+    await ensureReadme(fs, notesDir, conflictsDir);
     return path;
   } catch {
     return null;
@@ -64,6 +65,7 @@ export async function backupRemoteVersion(
 
 /** Back up an unseen remote body before overwriting it. */
 export async function backupIfRemoteWroteFirst(
+  fs: FileSystem,
   notesDir: string,
   filePath: string,
   noteId: string,
@@ -72,7 +74,7 @@ export async function backupIfRemoteWroteFirst(
   if (!filePath) return false;
   let diskContent: string | null = null;
   try {
-    diskContent = await readTextFile(filePath);
+    diskContent = await fs.readTextFile(filePath);
   } catch {
     diskContent = null;
   }
@@ -89,6 +91,6 @@ export async function backupIfRemoteWroteFirst(
 
   if (diskContent === intendedContent) return false;
 
-  await backupRemoteVersion(notesDir, noteId, diskContent);
+  await backupRemoteVersion(fs, notesDir, noteId, diskContent);
   return true;
 }

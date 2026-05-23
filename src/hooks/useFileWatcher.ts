@@ -7,7 +7,6 @@ import {
   deriveTitle,
   saveManifest,
   migrationInProgress,
-  reconcileFolder,
   metaDirFor,
   groupsPathFor,
   syncGroupsSnapshotFromDisk,
@@ -15,6 +14,8 @@ import {
   type NoteDoc,
   type NoteGroup,
 } from "./useNotesLoader";
+import { reconcileFolder, type ReconcileState } from "../utils/reconcileFolder";
+import { tauriFileSystem } from "../utils/fs";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import { isOwnWrite, isOwnWriteContentMatch, pruneOwnWrites } from "./ownWriteTracker";
 import { getFileTimestamps } from "../utils/fileTimestamps";
@@ -44,6 +45,7 @@ export function useFileWatcher(
   tiptapRef: React.RefObject<TiptapEditorHandle | null>,
   locale: Locale,
   enabled: boolean,
+  reconcileState: ReconcileState,
   onActiveDocChanged?: (doc: { filePath: string; content: string }) => void,
 ) {
   const docsRef = useRef(docs);
@@ -75,7 +77,7 @@ export function useFileWatcher(
 
   const applyMetaChange = useCallback(async (id: string) => {
     const dir = await getNotesDir();
-    const meta = await readMeta(dir, id);
+    const meta = await readMeta(tauriFileSystem, dir, id);
     if (!meta) return;
 
     setDocs((prev) => {
@@ -140,9 +142,11 @@ export function useFileWatcher(
   const runReconcile = useCallback(async () => {
     if (migrationInProgress) return;
     const dir = await getNotesDir();
-    try { await scanAndAbsorbConflicts(dir); } catch { /* best-effort */ }
+    try { await scanAndAbsorbConflicts(tauriFileSystem, dir); } catch { /* best-effort */ }
 
     const { docs: reconciledDocs, groups: reconciledGroups, changed } = await reconcileFolder(
+      tauriFileSystem,
+      reconcileState,
       dir,
       docsRef.current,
       groupsRef.current,
@@ -193,7 +197,7 @@ export function useFileWatcher(
     }
 
     await saveManifest(reconciledDocs, nextActiveId, reconciledGroups).catch(() => {});
-  }, [getRoutedActiveDocId, setActiveIndex, setDocs, setGroups, tiptapRef]);
+  }, [getRoutedActiveDocId, setActiveIndex, setDocs, setGroups, tiptapRef, reconcileState]);
 
   const handleRootEvent = useCallback(async (event: WatchEvent) => {
     if (migrationInProgress) return;
@@ -237,7 +241,7 @@ export function useFileWatcher(
 
       setKnownDiskContent(doc.filePath, content);
 
-      const { updatedAt: fileUpdatedAt } = await getFileTimestamps(doc.filePath);
+      const { updatedAt: fileUpdatedAt } = await getFileTimestamps(tauriFileSystem, doc.filePath);
 
       let needsSyncMarkdown = false;
       flushSync(() => {

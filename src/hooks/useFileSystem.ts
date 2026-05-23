@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { mkdir, readTextFile, writeTextFile, remove, copyFile } from "@tauri-apps/plugin-fs";
+import { tauriFileSystem } from "../utils/fs";
 import {
   getNotesDir,
   saveManifest,
@@ -195,7 +196,7 @@ export function useFileSystem(
       try { markOwnWrite(leaving.filePath); remove(leaving.filePath).catch(() => {}); } catch {}
     }
     const leavingId = leaving.id;
-    void getNotesDir().then((dir) => removeMetaFile(dir, leavingId)).catch(() => {});
+    void getNotesDir().then((dir) => removeMetaFile(tauriFileSystem, dir, leavingId)).catch(() => {});
     setGroups?.((prev) => {
       const next = prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }));
       const kept = next.filter((g) => g.noteIds.length > 0);
@@ -353,7 +354,7 @@ export function useFileSystem(
       }
       cancelDocSaveRef?.current?.(currentDoc.id);
       const leavingId = currentDoc.id;
-      void getNotesDir().then((dir) => removeMetaFile(dir, leavingId)).catch(() => {});
+      void getNotesDir().then((dir) => removeMetaFile(tauriFileSystem, dir, leavingId)).catch(() => {});
       const beforePrune = workingGroups
         ?.map((g) => ({ ...g, noteIds: g.noteIds.filter((noteId) => noteId !== leavingId) }));
       workingGroups = beforePrune
@@ -873,7 +874,7 @@ export function useFileSystem(
     try {
       const notesDir = await getNotesDir();
       await removeNoteAssetDir(notesDir, trashed.id);
-      await removeMetaFile(notesDir, trashed.id);
+      await removeMetaFile(tauriFileSystem, notesDir, trashed.id);
     } catch { /* ignore */ }
 
     if (setTrashedNotes) {
@@ -893,7 +894,7 @@ export function useFileSystem(
       try { await remove(trashed.trashFilePath); } catch { /* ignore */ }
       if (notesDir) {
         await removeNoteAssetDir(notesDir, trashed.id);
-        await removeMetaFile(notesDir, trashed.id);
+        await removeMetaFile(tauriFileSystem, notesDir, trashed.id);
       }
     }
 

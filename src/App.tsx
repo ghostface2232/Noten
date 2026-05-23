@@ -47,6 +47,7 @@ import { clearManagedNotesData, hasExistingNotenData, migrateNotesDir } from "./
 import { colorHex } from "./utils/noteColors";
 import { clampMenuToViewport } from "./utils/clampMenuPosition";
 import { useFileWatcher } from "./hooks/useFileWatcher";
+import { createReconcileState } from "./utils/reconcileFolder";
 import { useWindowSync } from "./hooks/useWindowSync";
 import { useChromeVisibility } from "./hooks/useChromeVisibility";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -202,11 +203,17 @@ function App() {
     })();
   }, [settingsLoaded, settings.notesDirectory]);
 
+  const reconcileStateRef = useRef(createReconcileState());
+  // Cloud-folder swap: clear bodyless-meta observations so a fresh folder gets
+  // a fresh per-id grace counter instead of carrying state from the prior dir.
+  useEffect(() => { reconcileStateRef.current.bodyMissing.clear(); }, [currentNotesDir]);
+
   const { docs, setDocs, activeIndex, setActiveIndex, groups, setGroups, trashedNotes, setTrashedNotes, isLoading } = useNotesLoader(
     locale,
     settings.notesSortOrder,
     notesDirReady,
     reloadKey,
+    reconcileStateRef.current,
   );
 
   // Refs used by async handlers without retriggering effects.
@@ -327,6 +334,7 @@ function App() {
     activeIndex, docs[activeIndex]?.id ?? null, setActiveIndex, tiptapRef,
     locale,
     notesDirReady && !isLoading,
+    reconcileStateRef.current,
     handleActiveDocChanged,
   );
 

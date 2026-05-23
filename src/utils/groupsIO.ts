@@ -1,4 +1,4 @@
-import { readTextFile } from "@tauri-apps/plugin-fs";
+import type { FileSystem } from "./fs";
 import { atomicWriteText } from "./atomicWrite";
 import { markOwnWrite } from "../hooks/ownWriteTracker";
 
@@ -42,9 +42,9 @@ function isValidEntry(obj: unknown): obj is SharedGroupEntry {
     && (e.deletedAt === null || typeof e.deletedAt === "number");
 }
 
-export async function readGroupsFile(notesDir: string): Promise<GroupsFile> {
+export async function readGroupsFile(fs: FileSystem, notesDir: string): Promise<GroupsFile> {
   try {
-    const raw = await readTextFile(groupsPathFor(notesDir));
+    const raw = await fs.readTextFile(groupsPathFor(notesDir));
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object") return { version: 1, groups: {} };
     const p = parsed as { groups?: unknown };
@@ -108,16 +108,17 @@ export function compactTombstones(
 }
 
 export async function writeGroupsWithMerge(
+  fs: FileSystem,
   notesDir: string,
   localGroups: Record<string, SharedGroupEntry>,
 ): Promise<Record<string, SharedGroupEntry>> {
-  const existing = await readGroupsFile(notesDir);
+  const existing = await readGroupsFile(fs, notesDir);
   const merged = compactTombstones(mergeGroupMaps(existing.groups, localGroups));
   const file: GroupsFile = { version: 1, groups: merged };
   const serialized = JSON.stringify(file, null, 2);
   const path = groupsPathFor(notesDir);
   markOwnWrite(path, serialized);
-  await atomicWriteText(path, serialized);
+  await atomicWriteText(fs, path, serialized);
   return merged;
 }
 
