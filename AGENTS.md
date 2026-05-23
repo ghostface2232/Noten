@@ -120,8 +120,8 @@ Releases are fully automated by `.github/workflows/release.yml`, triggered by pu
 
 To cut a release:
 
-1. Bump the version everywhere it appears: `package.json`, `package-lock.json` (root + root package entry), `src-tauri/tauri.conf.json`, the four `Cargo.toml` (`src-tauri`, `bootstrapper`, `maintenance-helper`, `noten-splash-ui`), our entries in `Cargo.lock` + `src-tauri/Cargo.lock`, and the `v…` label in `SettingsModal.tsx`.
-2. Rewrite the SettingsModal changelog block (Korean + English).
+1. Edit `package.json`'s `version`, then run `npm run sync-version`. The script (`scripts/sync-version.mjs`) propagates the new version to `package-lock.json` (root + root package entry), `src-tauri/tauri.conf.json`, the four `Cargo.toml` (`src-tauri`, `bootstrapper`, `maintenance-helper`, `noten-splash-ui`), our entries in `Cargo.lock` + `src-tauri/Cargo.lock`, and the `v…` label in `SettingsModal.tsx`. Add a new entry only if you introduce another hardcoded version site.
+2. Rewrite the SettingsModal changelog block (Korean + English) — this is human-written copy and is intentionally not touched by the script.
 3. Commit, `git push origin main`, then `git tag -a vX.Y.Z <commit> -m …` and `git push origin vX.Y.Z`.
 
 CI then builds the helper, runs `tauri-action@v0` (signs updater artifacts using `TAURI_SIGNING_PRIVATE_KEY`/`_PASSWORD` secrets and creates a **draft** release with the NSIS bundle, `.sig`, and `latest.json`), copies the NSIS into `bootstrapper/assets/nsis-payload.exe`, builds `noten-setup.exe`, Authenticode-signs it via `signtool` with `CODE_SIGN_PFX`/`_PASSWORD`, and uploads the signed bootstrapper to the same draft release.

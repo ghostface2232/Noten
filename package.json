@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "prepare-helper": "powershell -ExecutionPolicy Bypass -File .\\scripts\\prepare-helper.ps1",
     "prepare-helper:release": "powershell -ExecutionPolicy Bypass -File .\\scripts\\prepare-helper.ps1 -Release",
-    "tauri:dev": "npm run prepare-helper && tauri dev"
+    "tauri:dev": "npm run prepare-helper && tauri dev",
+    "sync-version": "node scripts/sync-version.mjs"
   },
   "dependencies": {
     "@floating-ui/dom": "^1.7.6",
