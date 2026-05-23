@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import {
   FluentProvider,
   webLightTheme,
@@ -85,6 +85,20 @@ function App() {
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     try { const v = localStorage.getItem("sidebar-width"); return v ? Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Number(v))) : SIDEBAR_DEFAULT; } catch { return SIDEBAR_DEFAULT; }
   });
+  // Track the live width during a drag without going through React state, so
+  // mousemove doesn't re-render the whole tree (the sidebar slot's CSS var is
+  // mutated imperatively below). State is updated once on mouseup.
+  const sidebarWidthRef = useRef(sidebarWidth);
+  const sidebarSlotRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { sidebarWidthRef.current = sidebarWidth; }, [sidebarWidth]);
+  // Drive the --shell-sidebar-width CSS variable imperatively. Using
+  // useLayoutEffect so the value is on the DOM element before the browser
+  // paints (avoids one-frame fallback to the :root default on mount and on
+  // sidebarOpen toggles). The mousemove handler writes to the same element
+  // directly during drag.
+  useLayoutEffect(() => {
+    sidebarSlotRef.current?.style.setProperty("--shell-sidebar-width", `${sidebarWidth}px`);
+  }, [sidebarWidth]);
   useEffect(() => { try { localStorage.setItem("sidebar-open", String(sidebarOpen)); } catch {} }, [sidebarOpen]);
   useEffect(() => { try { localStorage.setItem("sidebar-width", String(sidebarWidth)); } catch {} }, [sidebarWidth]);
   // Keep the native window minimum aligned with the current sidebar width.
@@ -752,12 +766,12 @@ function App() {
           </div>
 
           <div
+            ref={sidebarSlotRef}
             className={mergeClasses(
               styles.sidebarSlot,
               !sidebarResizing && styles.sidebarSlotAnimated,
               sidebarOpen && styles.sidebarSlotOpen,
             )}
-            style={sidebarOpen ? { "--shell-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties : undefined}
           >
             {sidebarOpen && (
               <>
@@ -888,13 +902,20 @@ function App() {
                 setSidebarResizing(true);
                 document.body.style.cursor = "ew-resize";
                 const startX = e.clientX;
-                const startW = sidebarWidth;
+                const startW = sidebarWidthRef.current;
+                const slotEl = sidebarSlotRef.current;
                 const onMove = (ev: MouseEvent) => {
                   const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + ev.clientX - startX));
-                  setSidebarWidth(w);
+                  sidebarWidthRef.current = w;
+                  // Imperative CSS-variable write — no React re-render path, so
+                  // the sidebar follows the cursor at native refresh rate while
+                  // the heavy effects (localStorage save, Tauri setMinSize +
+                  // auto-expand) stay off until mouseup.
+                  slotEl?.style.setProperty("--shell-sidebar-width", `${w}px`);
                 };
                 const onUp = () => {
                   setSidebarResizing(false);
+                  setSidebarWidth(sidebarWidthRef.current);
                   document.body.style.cursor = "";
                   document.removeEventListener("mousemove", onMove);
                   document.removeEventListener("mouseup", onUp);
