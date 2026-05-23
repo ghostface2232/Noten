@@ -191,7 +191,6 @@ export function Sidebar({
 
   const colorFilterActive = colorFilter != null;
 
-  const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -699,7 +698,6 @@ export function Sidebar({
 
   const renderGroupHeader = (group: NoteGroup) => {
     const isEditing = editingGroupId === group.id;
-    const isGroupHovered = hoveredGroupId === group.id;
     const isContextTarget = contextMenu?.type === "group" && contextMenu.groupId === group.id;
     const noteCount = group.noteIds.filter((id) => docs.some((d) => d.id === id)).length;
     const isRemoving = removingGroupIds.has(group.id);
@@ -718,8 +716,6 @@ export function Sidebar({
           isRemoving && styles.groupCollapseOut,
         )}
         onPointerDown={(e) => handleGroupDragPointerDown(e, group.id)}
-        onMouseEnter={() => setHoveredGroupId(group.id)}
-        onMouseLeave={() => setHoveredGroupId(null)}
         onContextMenu={(e) => {
           if (isDraggingGroup.current) { e.preventDefault(); return; }
           handleGroupContextMenu(group.id, e);
@@ -760,10 +756,13 @@ export function Sidebar({
           ) : (
             <>
               <span className={styles.groupName}>{group.name}</span>
-              <span className={mergeClasses(
-                styles.groupCount,
-                (isGroupHovered || isContextTarget) && styles.docTrailingHidden,
-              )}>{noteCount}</span>
+              <span
+                data-doc-trailing
+                className={mergeClasses(
+                  styles.groupCount,
+                  isContextTarget && styles.docTrailingHidden,
+                )}
+              >{noteCount}</span>
             </>
           )}
         </Button>
@@ -774,9 +773,7 @@ export function Sidebar({
             appearance="subtle"
             className={mergeClasses(
               styles.moreBtn,
-              isContextTarget
-                ? styles.moreBtnActive
-                : isGroupHovered && styles.moreBtnVisible,
+              isContextTarget && styles.moreBtnActive,
             )}
             onClick={(e) => handleGroupMoreClick(group.id, e)}
             size="small"
