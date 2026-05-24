@@ -392,9 +392,9 @@ export function Sidebar({
     const moreBtn = wrapper.querySelector<HTMLElement>("[data-more-btn]");
     if (moreBtn) {
       const rect = moreBtn.getBoundingClientRect();
-      setContextMenu({ type: "note", index, x: rect.left, y: rect.bottom + 2 });
+      setContextMenu({ type: "note", index, anchorIndex: index, x: rect.left, y: rect.bottom + 2 });
     } else {
-      setContextMenu({ type: "note", index, x: e.clientX, y: e.clientY });
+      setContextMenu({ type: "note", index, anchorIndex: index, x: e.clientX, y: e.clientY });
     }
   }, []);
 
