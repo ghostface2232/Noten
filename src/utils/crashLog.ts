@@ -27,7 +27,14 @@ async function resolveCrashLogPath(): Promise<string> {
 }
 
 function getCrashLogPath(): Promise<string> {
-  if (!crashLogPathPromise) crashLogPathPromise = resolveCrashLogPath();
+  if (!crashLogPathPromise) {
+    // Reset the cache on rejection so a transient failure during the app's
+    // most fragile init window does not silence the crash logger forever.
+    crashLogPathPromise = resolveCrashLogPath().catch((err) => {
+      crashLogPathPromise = null;
+      throw err;
+    });
+  }
   return crashLogPathPromise;
 }
 
