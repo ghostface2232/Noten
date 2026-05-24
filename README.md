@@ -5,7 +5,7 @@
 # Noten
 
 <p>
- <img width="2059" height="1450" alt="0 1 9" src="https://github.com/user-attachments/assets/ca0e7cd1-11ce-47f0-a165-3483e0a2dd5f" />
+<img width="1994" height="1607" alt="스크린샷 2026-05-24 115950" src="https://github.com/user-attachments/assets/41f996bf-a74c-4416-a662-ed1ebf6daa0a" />
 </p>
 
 [![License](https://img.shields.io/github/license/ghostface2232/Noten?style=flat-square)](LICENSE)
