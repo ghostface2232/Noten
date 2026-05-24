@@ -124,6 +124,55 @@ describe("reconcileFolder", () => {
     expect(await fs.exists(`${DIR}/.trash/${id}.md`)).toBe(false);
   });
 
+  it("keeps note trashed when stat fails on the root body (cloud-sync placeholder)", async () => {
+    const id = "22222222-2222-2222-2222-22222222aaaa";
+    const trashedAt = 5000;
+    await seedMeta(fs, makeMeta(id, { trashedAt, trashedFromPath: `${DIR}/${id}.md` }));
+    fs.seedTextFile(`${DIR}/${id}.md`, "ghost body");
+
+    // Simulate a transient stat failure on the root path only (OneDrive/Dropbox
+    // placeholders can EBUSY/EPERM on stat while readDir still lists them).
+    const rootPath = `${DIR}/${id}.md`;
+    const originalStat = fs.stat.bind(fs);
+    fs.stat = async (path: string) => {
+      if (path === rootPath) throw new Error("EBUSY: simulated cloud-sync lock");
+      return originalStat(path);
+    };
+
+    const result = await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+
+    const meta = await readMeta(fs, DIR, id);
+    expect(meta).not.toBeNull();
+    // Must NOT be restored: unknown mtime defaults to "keep in trash".
+    expect(meta!.trashedAt).toBe(trashedAt);
+    // Stale root body should have been moved to .trash/, not left to mislead later passes.
+    expect(await fs.exists(`${DIR}/.trash/${id}.md`)).toBe(true);
+    expect(await fs.exists(rootPath)).toBe(false);
+    expect(result.docs.find((d) => d.id === id)).toBeUndefined();
+  });
+
+  it("keeps note trashed when stat returns null mtime", async () => {
+    const id = "22222222-2222-2222-2222-22222222bbbb";
+    const trashedAt = 5000;
+    await seedMeta(fs, makeMeta(id, { trashedAt, trashedFromPath: `${DIR}/${id}.md` }));
+    fs.seedTextFile(`${DIR}/${id}.md`, "ghost body");
+
+    const rootPath = `${DIR}/${id}.md`;
+    const originalStat = fs.stat.bind(fs);
+    fs.stat = async (path: string) => {
+      const info = await originalStat(path);
+      if (path === rootPath) return { ...info, mtime: null };
+      return info;
+    };
+
+    await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+
+    const meta = await readMeta(fs, DIR, id);
+    expect(meta!.trashedAt).toBe(trashedAt);
+    expect(await fs.exists(`${DIR}/.trash/${id}.md`)).toBe(true);
+    expect(await fs.exists(rootPath)).toBe(false);
+  });
+
   it("moves root body to trash when trashedAt is newer than root mtime", async () => {
     const id = "33333333-3333-3333-3333-333333333333";
     fs.seedTextFile(`${DIR}/${id}.md`, "stale root");

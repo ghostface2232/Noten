@@ -169,8 +169,14 @@ export async function reconcileFolder(
 
     const rootPath = `${base}${rootName}`;
     const trashPath = `${trashBase}${rootName}`;
-    let rootMtime = 0;
-    try { rootMtime = (await getFileTimestamps(fs, rootPath)).updatedAt; } catch { /* fall back */ }
+    // stat directly: a failed/missing mtime must NOT be treated as "now",
+    // or a transient stat failure (common on OneDrive/Dropbox/GDrive
+    // placeholders) would silently restore trashed notes.
+    let rootMtime: number | null = null;
+    try {
+      const info = await fs.stat(rootPath);
+      rootMtime = info.mtime ? info.mtime.getTime() : null;
+    } catch { /* unknown mtime — keep in trash */ }
 
     let trashBody: string | null = null;
     try {
@@ -182,7 +188,7 @@ export async function reconcileFolder(
     let rootBody = "";
     try { rootBody = await fs.readTextFile(rootPath); } catch { /* unreadable root */ }
 
-    if (rootMtime > meta.trashedAt) {
+    if (rootMtime != null && rootMtime > meta.trashedAt) {
       if (trashBody !== null && trashBody !== rootBody && trashBody.length > 0) {
         try { await backupRemoteVersion(fs, dir, meta.id, trashBody); } catch { /* best-effort */ }
       }
