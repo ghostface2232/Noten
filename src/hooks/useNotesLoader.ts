@@ -484,6 +484,14 @@ export function useNotesLoader(
     (async () => {
       // Keep autosave out while load/reload paths touch multiple disk files.
       setMigrationInProgress(true);
+      // Snapshot of the best valid state we've reached so far. If a later
+      // step throws, the outer catch falls back to this instead of nuking
+      // the user's visible notes down to a single blank stub. On reload,
+      // seed from current hook state so an early throw (before any new
+      // checkpoint is reached) still preserves what the user already sees.
+      let safeDocs: NoteDoc[] | null = docs.length > 0 ? docs : null;
+      let safeGroups: NoteGroup[] | null = docs.length > 0 ? groups : null;
+      let safeActiveId: string | null = docs[activeIndex]?.id ?? null;
       try {
         await getMachineId();
         await loadUiState();
@@ -500,6 +508,9 @@ export function useNotesLoader(
           } as NoteDoc));
           setDocs(sortNotes(cachedDocs, notesSortOrder, locale));
           if (cache.groups) setGroups(cache.groups);
+          safeDocs = cachedDocs;
+          safeGroups = cache.groups ?? [];
+          safeActiveId = getUiStateCached().activeNoteId ?? null;
         }
 
         const legacy = await readLegacyManifestFile(dir);
@@ -515,12 +526,18 @@ export function useNotesLoader(
         const state = await loadDecomposedState(dir);
         await seedWriteSnapshots(dir);
         let docsLoaded = await attachDocContents(state.docs);
+        if (docsLoaded.length > 0) {
+          safeDocs = docsLoaded;
+          safeGroups = state.groups;
+          safeActiveId = state.activeNoteId ?? null;
+        }
 
         if (!imageAssetMigrationV1CompletedAtCache) {
           const noteFilePaths = docsLoaded.map((d) => d.filePath).filter(Boolean);
           const imageMigration = await migrateDataUrlImagesToAssets(Array.from(new Set(noteFilePaths)));
           if (imageMigration.changedFiles > 0) {
             docsLoaded = await attachDocContents(docsLoaded);
+            if (docsLoaded.length > 0) safeDocs = docsLoaded;
           }
           imageAssetMigrationV1CompletedAtCache = Date.now();
         }
@@ -590,6 +607,10 @@ export function useNotesLoader(
           : 0;
         setActiveIndex(nextActiveIndex);
 
+        safeDocs = sorted;
+        safeGroups = finalGroups;
+        safeActiveId = activeId;
+
         // The loader owns the migration guard, so use the ungated writer here.
         if (reconcileChanged || trashChanged) {
           await persistDecomposedState(sorted, activeId, finalGroups).catch(() => {});
@@ -613,17 +634,31 @@ export function useNotesLoader(
         if (import.meta.env.DEV) {
           console.warn("Notes loader failed:", err);
         }
-        const timestamp = Date.now();
-        setDocs([{
-          id: "local",
-          filePath: "",
-          fileName: getDefaultDocumentTitle(locale),
-          isDirty: false,
-          content: "",
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        }]);
-        setActiveIndex(0);
+        // Preserve whatever we'd already loaded. The stub is only a sane
+        // fallback when we have nothing — wiping a populated list to a
+        // single blank note loses the user's notes visually even though
+        // they are still on disk.
+        if (safeDocs && safeDocs.length > 0) {
+          const sorted = sortNotes(safeDocs, notesSortOrder, locale);
+          setDocs(sorted);
+          setGroups(safeGroups ?? []);
+          const idx = safeActiveId
+            ? Math.max(sorted.findIndex((d) => d.id === safeActiveId), 0)
+            : 0;
+          setActiveIndex(idx);
+        } else {
+          const timestamp = Date.now();
+          setDocs([{
+            id: "local",
+            filePath: "",
+            fileName: getDefaultDocumentTitle(locale),
+            isDirty: false,
+            content: "",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          }]);
+          setActiveIndex(0);
+        }
       } finally {
         setMigrationInProgress(false);
         setIsLoading(false);
