@@ -1,4 +1,4 @@
-import { mkdir, readDir, copyFile, readTextFile, writeTextFile, exists, remove, rename } from "@tauri-apps/plugin-fs";
+import { mkdir, readDir, copyFile, readTextFile, exists, remove } from "@tauri-apps/plugin-fs";
 import { tauriFileSystem } from "./fs";
 import { normalizeSep } from "./pathUtils";
 import {
@@ -21,6 +21,7 @@ import {
 import { getMachineId } from "./machineId";
 import { getFileTimestamps } from "./fileTimestamps";
 import { backupRemoteVersion } from "./conflictBackup";
+import { retireLegacyManifest } from "./conflictFileDetector";
 import { NotenError } from "./notenError";
 import { logNotenError } from "./crashLog";
 
@@ -239,28 +240,6 @@ async function decomposeLegacyIntoDir(
   }
 }
 
-async function retireLegacyManifestAt(dir: string): Promise<void> {
-  const base = normalizeSep(dir);
-  const src = `${base}manifest.json`;
-  try {
-    if (!(await exists(src))) return;
-  } catch { return; }
-  const dst = `${base}manifest.legacy.json`;
-  try {
-    if (await exists(dst).catch(() => false)) {
-      await remove(src).catch(() => {});
-      return;
-    }
-    await rename(src, dst);
-  } catch {
-    try {
-      const raw = await readTextFile(src);
-      await writeTextFile(dst, raw);
-      await remove(src);
-    } catch { /* ignore */ }
-  }
-}
-
 /** Copy all managed shared state for the overwrite strategy. */
 async function copySharedTreeForOverwrite(fromDir: string, toDir: string): Promise<void> {
   const fromBase = normalizeSep(fromDir);
@@ -437,12 +416,12 @@ export async function migrateNotesDir(
     const sourceLegacy = await readLegacyManifestFile(fromDir);
     if (sourceLegacy) {
       await decomposeLegacyIntoDir(fromDir, sourceLegacy, machineId);
-      await retireLegacyManifestAt(fromDir);
+      await retireLegacyManifest(tauriFileSystem,fromDir);
     }
     const destLegacy = await readLegacyManifestFile(toDir);
     if (destLegacy) {
       await decomposeLegacyIntoDir(toDir, destLegacy, machineId);
-      await retireLegacyManifestAt(toDir);
+      await retireLegacyManifest(tauriFileSystem,toDir);
     }
 
     if (mergeStrategy === "overwrite") {
