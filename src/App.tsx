@@ -207,9 +207,9 @@ function App() {
     if (!settingsLoaded) return;
     (async () => {
       if (settings.notesDirectory) {
-        setNotesDir(settings.notesDirectory);
+        setNotesDir(settings.notesDirectory, reconcileStateRef.current);
       } else {
-        resetNotesDir();
+        resetNotesDir(reconcileStateRef.current);
       }
       const dir = await getNotesDir();
       setCurrentNotesDir(dir);

@@ -161,6 +161,24 @@ describe("group tombstone propagation", () => {
     expect(entry.deletedAt).not.toBeNull();
     expect(state.pendingTombstones.has("g-doomed")).toBe(false);
   });
+
+  it("drops a pending tombstone when the group is alive in the current snapshot", async () => {
+    // Simulates: a prior delete left an entry in pendingTombstones (e.g.,
+    // because the write failed or was raced by reloadGroupsFromDisk), and
+    // the group has since been resurrected in the local snapshot.
+    const group = makeGroup("g-resurrected", { name: "Back" });
+    await persistDecomposedState(fs, DIR, state, [], null, [group], persistOpts());
+
+    state.pendingTombstones.add("g-resurrected");
+
+    // Persist with the group still present must not write a tombstone, and
+    // must clear the stale intent so it cannot fire later.
+    await persistDecomposedState(fs, DIR, state, [], null, [group], persistOpts());
+
+    const file = await readGroupsFile(fs, DIR);
+    expect(file.groups["g-resurrected"].deletedAt).toBeNull();
+    expect(state.pendingTombstones.has("g-resurrected")).toBe(false);
+  });
 });
 
 describe("pendingGroupMembership consumption", () => {

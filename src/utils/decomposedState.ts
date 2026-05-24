@@ -452,10 +452,16 @@ export async function persistDecomposedState(
   }
 
   // Tombstone only explicit local deletes; stale saves can miss remote groups.
+  // If a pending id is alive again locally (e.g., reloadGroupsFromDisk or
+  // remote sync resurrected it), drop the intent so it cannot fire later when
+  // the group disappears for an unrelated reason.
   const currentIds = new Set(orderedGroups.map((g) => g.id));
   const tombstoneApplied: string[] = [];
   for (const id of Array.from(state.pendingTombstones)) {
-    if (currentIds.has(id)) continue;
+    if (currentIds.has(id)) {
+      state.pendingTombstones.delete(id);
+      continue;
+    }
     localGroupsMap[id] = {
       id,
       name: "",
