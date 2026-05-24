@@ -11,6 +11,12 @@ import {
 
 const MAX_LOG_BYTES = 500 * 1024;
 const MAX_STACK_CHARS = 4000;
+const MAX_MESSAGE_CHARS = 2000;
+const MAX_CONTEXT_CHARS = 4000;
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max)}…[truncated]` : s;
+}
 const utf8Encoder = new TextEncoder();
 const INSTALLED_SENTINEL = "__notenCrashLogInstalled" as const;
 
@@ -45,8 +51,11 @@ function formatLine(
   context?: NotenErrorContext,
   stack?: string,
 ): string {
+  // Cap every variable component so a single pathological entry (e.g., an
+  // unhandledrejection whose reason is a huge object) cannot push past the
+  // 250KB threshold in trimExistingForAppend and wipe all prior history.
   const ts = new Date().toISOString();
-  let line = `[${ts}] [${severity}] [${code}] ${message}\n`;
+  let line = `[${ts}] [${severity}] [${code}] ${truncate(message, MAX_MESSAGE_CHARS)}\n`;
   if (context && Object.keys(context).length > 0) {
     let serialized: string;
     try {
@@ -54,13 +63,10 @@ function formatLine(
     } catch {
       serialized = "[unserializable]";
     }
-    line += `  context: ${serialized}\n`;
+    line += `  context: ${truncate(serialized, MAX_CONTEXT_CHARS)}\n`;
   }
   if (stack) {
-    const truncated = stack.length > MAX_STACK_CHARS
-      ? `${stack.slice(0, MAX_STACK_CHARS)}…[truncated]`
-      : stack;
-    line += `  stack: ${truncated.replace(/\n/g, "\n         ")}\n`;
+    line += `  stack: ${truncate(stack, MAX_STACK_CHARS).replace(/\n/g, "\n         ")}\n`;
   }
   return line;
 }
