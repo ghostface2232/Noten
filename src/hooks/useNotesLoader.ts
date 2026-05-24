@@ -474,6 +474,11 @@ export function useNotesLoader(
       initialized.current = false;
       setIsLoading(true);
       resetWriteSnapshots();
+      // bodyMissing counters belong to reconcileState (not PersistState),
+      // so resetWriteSnapshots leaves them stale. Without clearing, a
+      // sidecar that was bodyless on pass N-1 would be deleted on the
+      // very next reload pass — bypassing the 2-pass cloud-sync grace.
+      clearReconcileState(reconcileStateRef.current);
     }
   }, [reloadKey]);
 
