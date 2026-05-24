@@ -261,9 +261,21 @@ export async function reconcileFolder(
   const looksMidSync = missingBodyIds.length >= 3
     && missingBodyIds.length * 4 >= allMeta.size;
 
+  // Drop counters whose id is no longer in missingNow — either the body
+  // arrived or the meta itself is gone. The redundant `!allMeta.has(id)`
+  // check that used to live here was dead: missingNow ⊆ allMeta by
+  // construction, so `!missingNow.has(id)` already covers both.
+  //
+  // Note on split-read race: if a sidecar is mid-rewrite during the
+  // atomicWrite rename fallback (logged via META_WRITE_FAILED), its JSON
+  // parse can transiently fail and readAllMeta drops it for this pass.
+  // The id then disappears from missingNow and its counter resets. Net
+  // effect: deletion is delayed by one pass, never accelerated — which
+  // is aligned with the two-pass guard's purpose of being conservative
+  // about removeMetaFile, since it propagates to every synced PC.
   const missingNow = new Set(missingBodyIds);
   for (const id of Array.from(state.bodyMissing.keys())) {
-    if (!missingNow.has(id) || !allMeta.has(id)) {
+    if (!missingNow.has(id)) {
       state.bodyMissing.delete(id);
     }
   }
