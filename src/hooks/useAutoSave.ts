@@ -19,7 +19,14 @@ interface SaveSnapshot {
   docId: string;
   filePath: string;
   content: string;
+  editSerial: number;
   revision: number;
+}
+
+interface PendingSaveTarget {
+  docId: string;
+  filePath: string;
+  editSerial: number;
 }
 
 export function useAutoSave(
@@ -34,7 +41,9 @@ export function useAutoSave(
   groups: NoteGroup[],
 ) {
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const pendingTargetsRef = useRef(new Map<string, PendingSaveTarget>());
   const pendingSnapshotsRef = useRef(new Map<string, SaveSnapshot>());
+  const latestEditSerialByDocRef = useRef(new Map<string, number>());
   const latestRevisionByDocRef = useRef(new Map<string, number>());
   const hasPendingChangesRef = useRef(false);
   const stateRef = useRef({
@@ -67,38 +76,78 @@ export function useAutoSave(
     activeDocRef.current = { id: activeTarget.id, filePath: activeTarget.filePath };
   }
 
-  const createSnapshot = useCallback((): SaveSnapshot | null => {
+  const refreshHasPendingChanges = useCallback(() => {
+    hasPendingChangesRef.current = pendingTargetsRef.current.size > 0 || pendingSnapshotsRef.current.size > 0;
+  }, []);
+
+  const markActiveDocEdited = useCallback((): PendingSaveTarget | null => {
+    const target = activeDocRef.current;
+    if (!target?.filePath) return null;
+
+    const editSerial = (latestEditSerialByDocRef.current.get(target.id) ?? 0) + 1;
+    latestEditSerialByDocRef.current.set(target.id, editSerial);
+
+    const pending = {
+      docId: target.id,
+      filePath: target.filePath,
+      editSerial,
+    };
+    pendingTargetsRef.current.set(target.id, pending);
+    refreshHasPendingChanges();
+    return pending;
+  }, [refreshHasPendingChanges]);
+
+  const createSnapshot = useCallback((pendingTarget?: PendingSaveTarget): SaveSnapshot | null => {
     const {
       state: latestState,
       tiptapRef: latestEditorRef,
     } = stateRef.current;
 
-    const target = activeDocRef.current;
+    const target = pendingTarget ?? activeDocRef.current;
     if (!target?.filePath) return null;
+    const docId = "docId" in target ? target.docId : target.id;
+    if (activeDocRef.current?.id !== docId) {
+      return null;
+    }
 
     const content = getCurrentMarkdown(latestEditorRef);
     latestState.primeMarkdown(content);
-    const revision = (latestRevisionByDocRef.current.get(target.id) ?? 0) + 1;
-    latestRevisionByDocRef.current.set(target.id, revision);
+    const filePath = target.filePath;
+    const editSerial = "editSerial" in target
+      ? target.editSerial
+      : latestEditSerialByDocRef.current.get(docId) ?? 0;
+    const revision = (latestRevisionByDocRef.current.get(docId) ?? 0) + 1;
+    latestRevisionByDocRef.current.set(docId, revision);
 
     return {
-      docId: target.id,
-      filePath: target.filePath,
+      docId,
+      filePath,
       content,
+      editSerial,
       revision,
     };
-  }, []);
-
-  const refreshHasPendingChanges = useCallback(() => {
-    hasPendingChangesRef.current = pendingSnapshotsRef.current.size > 0;
   }, []);
 
   const clearPendingSnapshotIfCurrent = useCallback((snapshot: SaveSnapshot) => {
     const current = pendingSnapshotsRef.current.get(snapshot.docId);
     if (current?.revision !== snapshot.revision) return;
     pendingSnapshotsRef.current.delete(snapshot.docId);
+    const pendingTarget = pendingTargetsRef.current.get(snapshot.docId);
+    if (pendingTarget && pendingTarget.editSerial <= snapshot.editSerial) {
+      pendingTargetsRef.current.delete(snapshot.docId);
+    }
     refreshHasPendingChanges();
   }, [refreshHasPendingChanges]);
+
+  const discardPendingTarget = useCallback((docId: string) => {
+    pendingTargetsRef.current.delete(docId);
+    refreshHasPendingChanges();
+  }, [refreshHasPendingChanges]);
+
+  const snapshotIsCurrent = useCallback((snapshot: SaveSnapshot) => (
+    (latestRevisionByDocRef.current.get(snapshot.docId) ?? 0) === snapshot.revision
+    && (latestEditSerialByDocRef.current.get(snapshot.docId) ?? 0) === snapshot.editSerial
+  ), []);
 
   const doSave = useCallback(async (snapshot: SaveSnapshot): Promise<boolean> => {
     // Snapshots captured before a notes-dir migration point at stale paths.
@@ -146,21 +195,22 @@ export function useAutoSave(
         return false;
       }
 
+      if (!snapshotIsCurrent(snapshot)) {
+        return false;
+      }
+
       markOwnWrite(snapshot.filePath, snapshot.content);
       await tauriFileSystem.writeTextFile(snapshot.filePath, snapshot.content);
       setKnownDiskContent(snapshot.filePath, snapshot.content);
 
-      if ((latestRevisionByDocRef.current.get(snapshot.docId) ?? 0) !== snapshot.revision) {
+      if (!snapshotIsCurrent(snapshot)) {
         return false;
       }
 
       const live = stateRef.current;
       const currentActiveId = live.docs[live.activeIndex]?.id ?? null;
-      const currentMarkdown = currentActiveId === snapshot.docId
-        ? getCurrentMarkdown(live.tiptapRef)
-        : null;
       const activeDocStillMatches = currentActiveId === snapshot.docId
-        ? currentMarkdown === snapshot.content
+        ? live.state.getCachedMarkdown() === snapshot.content
         : false;
 
       let savedDocStillExists = false;
@@ -245,34 +295,47 @@ export function useAutoSave(
   const scheduleAutoSave = useCallback(() => {
     if (migrationInProgress) return;
 
-    const snapshot = createSnapshot();
-    if (!snapshot) return;
+    const pending = markActiveDocEdited();
+    if (!pending) return;
 
-    hasPendingChangesRef.current = true;
-    pendingSnapshotsRef.current.set(snapshot.docId, snapshot);
-
-    const existingTimer = timersRef.current.get(snapshot.docId);
+    const existingTimer = timersRef.current.get(pending.docId);
     if (existingTimer) {
       clearTimeout(existingTimer);
     }
 
     const timer = setTimeout(() => {
-      timersRef.current.delete(snapshot.docId);
-      const pending = pendingSnapshotsRef.current.get(snapshot.docId);
-      if (pending) {
-        void doSave(pending).then((saved) => {
-          if (saved) clearPendingSnapshotIfCurrent(pending);
+      timersRef.current.delete(pending.docId);
+      const pendingTarget = pendingTargetsRef.current.get(pending.docId);
+      if (pendingTarget) {
+        const snapshot = createSnapshot(pendingTarget);
+        if (!snapshot) {
+          discardPendingTarget(pending.docId);
+          return;
+        }
+        pendingSnapshotsRef.current.set(snapshot.docId, snapshot);
+        refreshHasPendingChanges();
+        void doSave(snapshot).then((saved) => {
+          if (saved) clearPendingSnapshotIfCurrent(snapshot);
           else refreshHasPendingChanges();
         });
       }
     }, DEBOUNCE_MS);
 
-    timersRef.current.set(snapshot.docId, timer);
-  }, [clearPendingSnapshotIfCurrent, createSnapshot, doSave, refreshHasPendingChanges]);
+    timersRef.current.set(pending.docId, timer);
+  }, [clearPendingSnapshotIfCurrent, createSnapshot, discardPendingTarget, doSave, markActiveDocEdited, refreshHasPendingChanges]);
 
   useEffect(() => {
     return () => {
+      const activePending = activeDocRef.current
+        ? pendingTargetsRef.current.get(activeDocRef.current.id)
+        : null;
+      if (activePending) {
+        const snapshot = createSnapshot(activePending);
+        if (snapshot) pendingSnapshotsRef.current.set(snapshot.docId, snapshot);
+      }
+
       const pendingEntries = Array.from(pendingSnapshotsRef.current.values());
+      pendingTargetsRef.current.clear();
       pendingSnapshotsRef.current.clear();
 
       for (const timer of timersRef.current.values()) {
@@ -284,7 +347,7 @@ export function useAutoSave(
         void doSave(snapshot);
       }
     };
-  }, [doSave]);
+  }, [createSnapshot, doSave]);
 
   const notifyActiveDoc = useCallback((id: string, filePath: string) => {
     activeDocRef.current = { id, filePath };
@@ -294,8 +357,10 @@ export function useAutoSave(
     const timer = timersRef.current.get(docId);
     if (timer) clearTimeout(timer);
     timersRef.current.delete(docId);
+    pendingTargetsRef.current.delete(docId);
     pendingSnapshotsRef.current.delete(docId);
-  }, []);
+    refreshHasPendingChanges();
+  }, [refreshHasPendingChanges]);
 
   return { scheduleAutoSave, flushAutoSave, notifyActiveDoc, cancelDocSave };
 }

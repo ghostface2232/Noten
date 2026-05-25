@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import {
   FluentProvider,
   webLightTheme,
@@ -164,6 +164,8 @@ function App() {
     : settings.themeMode === "dark";
   const locale = settings.locale;
   const state = useMarkdownState();
+  const isDirtyRef = useRef(state.isDirty);
+  isDirtyRef.current = state.isDirty;
   const styles = useStyles();
   const sidebarStyles = useSidebarStyles();
   const tiptapRef = useRef<TiptapEditorHandle>(null);
@@ -234,6 +236,11 @@ function App() {
   docsRef.current = docs;
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
+  const wikiDocIndexSignature = useMemo(
+    () => docs.map((doc) => `${doc.id}\u0000${doc.fileName}`).join("\u0001"),
+    [docs],
+  );
+  const lastWikiRefreshSignatureRef = useRef<string | null>(null);
 
   const noteGroups = useNoteGroups(groups, setGroups, docs, activeIndex);
 
@@ -398,8 +405,12 @@ function App() {
       void fs.switchDocument(idx);
     };
     storage.createNoteWithTitle = (title: string) => fs.createNoteWithTitle(title);
-    refreshWikiLinkDecorations(tiptapEditor);
-  }, [tiptapEditor, docs, locale, groups, noteGroups.toggleGroupCollapsed, fs.switchDocument, fs.createNoteWithTitle]);
+    const refreshSignature = `${wikiDocIndexSignature}\u0002${locale}`;
+    if (lastWikiRefreshSignatureRef.current !== refreshSignature) {
+      lastWikiRefreshSignatureRef.current = refreshSignature;
+      refreshWikiLinkDecorations(tiptapEditor);
+    }
+  }, [tiptapEditor, docs, locale, groups, noteGroups.toggleGroupCollapsed, fs.switchDocument, fs.createNoteWithTitle, wikiDocIndexSignature]);
 
   useEffect(() => {
     if (!settingsLoaded || docs.length < 2) return;
@@ -699,7 +710,10 @@ function App() {
   const handleTiptapDirty = useCallback(
     (dirty: boolean) => {
       if (!dirty) return;
-      state.setIsDirty(true);
+      if (!isDirtyRef.current) {
+        isDirtyRef.current = true;
+        state.setIsDirty(true);
+      }
       scheduleAutoSave();
     },
     [state, scheduleAutoSave],

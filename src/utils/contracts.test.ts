@@ -155,8 +155,8 @@ describe("contract: autosave failures remain flushable", () => {
     const timerMatch = text.match(/const timer = setTimeout[\s\S]*?\n    \}, DEBOUNCE_MS\);/);
     expect(timerMatch, "autosave timer callback not found").not.toBeNull();
     const body = timerMatch![0];
-    const saveAt = body.indexOf("doSave(pending)");
-    const clearAt = body.indexOf("clearPendingSnapshotIfCurrent(pending)");
+    const saveAt = body.indexOf("doSave(snapshot)");
+    const clearAt = body.indexOf("clearPendingSnapshotIfCurrent(snapshot)");
     expect(saveAt).toBeGreaterThanOrEqual(0);
     expect(clearAt).toBeGreaterThan(saveAt);
   });

@@ -158,7 +158,7 @@ describe("reconcileFolder", () => {
     expect(state.bodyMissing.get(id)).toBe(1);
     expect(await fs.exists(metaPathFor(DIR, id))).toBe(true);
 
-    const second = await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+    await reconcileFolder(fs, state, DIR, [], [], LOCALE);
     expect(state.bodyMissing.has(id)).toBe(false);
     expect(await fs.exists(metaPathFor(DIR, id))).toBe(false);
   });

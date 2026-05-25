@@ -84,11 +84,13 @@ vi.mock("../utils/documentTitle", () => ({
 // Imports must come AFTER vi.mock() registrations.
 import { useAutoSave } from "./useAutoSave";
 import * as useNotesLoaderModule from "./useNotesLoader";
+import * as useFileSystemModule from "./useFileSystem";
 import * as conflictBackupModule from "../utils/conflictBackup";
 import * as fsModule from "../utils/fs";
 import * as crashLogModule from "../utils/crashLog";
 
 const saveManifestMock = useNotesLoaderModule.saveManifest as ReturnType<typeof vi.fn>;
+const getCurrentMarkdownMock = useFileSystemModule.getCurrentMarkdown as ReturnType<typeof vi.fn>;
 const backupMock = conflictBackupModule.backupIfRemoteWroteFirst as ReturnType<typeof vi.fn>;
 const writeMock = fsModule.tauriFileSystem.writeTextFile as ReturnType<typeof vi.fn>;
 const logMock = crashLogModule.logNotenError as ReturnType<typeof vi.fn>;
@@ -107,10 +109,12 @@ function makeDoc(id: string, overrides: Partial<NoteDoc> = {}): NoteDoc {
 }
 
 function makeState(overrides: Partial<MarkdownState> = {}): MarkdownState {
+  let cachedMarkdown = refs.editorContent;
   return {
     isDirty: false,
     setIsDirty: vi.fn(),
-    primeMarkdown: vi.fn(),
+    primeMarkdown: vi.fn((value: string) => { cachedMarkdown = value; }),
+    getCachedMarkdown: vi.fn(() => cachedMarkdown),
     setFilePath: vi.fn(),
     filePath: null,
     ...overrides,
@@ -233,6 +237,21 @@ describe("useAutoSave — backup-failure defers save", () => {
 });
 
 describe("useAutoSave — debounce queue", () => {
+  it("defers Markdown serialization until the debounce fires", async () => {
+    vi.useFakeTimers();
+    const { result } = renderAutoSave({ state: makeState({ isDirty: true }) });
+
+    act(() => result.current.scheduleAutoSave());
+
+    expect(getCurrentMarkdownMock).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(999); });
+    expect(getCurrentMarkdownMock).not.toHaveBeenCalled();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(getCurrentMarkdownMock).toHaveBeenCalledTimes(1);
+    expect(writeMock).toHaveBeenCalledWith("/notes/a.md", "hello world");
+  });
+
   it("does not fire doSave until DEBOUNCE_MS has elapsed since the last schedule", async () => {
     vi.useFakeTimers();
     const { result } = renderAutoSave({ state: makeState({ isDirty: true }) });
@@ -294,12 +313,42 @@ describe("useAutoSave — revision-mismatch guard", () => {
       await Promise.resolve();
     });
 
-    // Positive AND negative assertion: doSave must actually have advanced past
-    // backup and through writeTextFile (otherwise we'd be confirming nothing —
-    // a backup that never resolves would also leave saveManifest uncalled).
-    // The revision guard then blocks the manifest commit.
-    expect(writeMock).toHaveBeenCalledTimes(1);
+    // The stale snapshot must bail before body write; protecting only the
+    // manifest would still allow old content to land on disk.
+    expect(writeMock).not.toHaveBeenCalled();
     expect(saveManifestMock).not.toHaveBeenCalled();
+  });
+
+  it("an older in-flight save cannot overwrite a newer flushed body", async () => {
+    vi.useFakeTimers();
+    let releaseFirstBackup: () => void = () => {};
+    backupMock.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => {
+        releaseFirstBackup = () => resolve(false);
+      }),
+    );
+    const { result } = renderAutoSave({ state: makeState({ isDirty: true }) });
+
+    refs.editorContent = "older content";
+    act(() => result.current.scheduleAutoSave());
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+    refs.editorContent = "newer content";
+    act(() => result.current.scheduleAutoSave());
+    await act(async () => {
+      const ok = await result.current.flushAutoSave();
+      expect(ok).toBe(true);
+    });
+    expect(writeMock).toHaveBeenCalledTimes(1);
+    expect(writeMock).toHaveBeenLastCalledWith("/notes/a.md", "newer content");
+
+    await act(async () => {
+      releaseFirstBackup();
+      await Promise.resolve();
+    });
+
+    expect(writeMock).toHaveBeenCalledTimes(1);
+    expect(writeMock).not.toHaveBeenCalledWith("/notes/a.md", "older content");
   });
 });
 
@@ -329,6 +378,43 @@ describe("useAutoSave — flushAutoSave behavior", () => {
     });
 
     expect(writeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a pending target that can no longer be snapshotted", async () => {
+    vi.useFakeTimers();
+    const docs = [makeDoc("a"), makeDoc("b")];
+    const setDocs = vi.fn();
+    const setActiveIndex = vi.fn();
+    const tiptapRef = makeTiptapRef();
+    const groups: NoteGroup[] = [];
+
+    const { result, rerender } = renderHook(
+      ({ activeIndex, state }: { activeIndex: number; state: MarkdownState }) =>
+        useAutoSave(
+          state,
+          tiptapRef,
+          docs,
+          setDocs,
+          activeIndex,
+          setActiveIndex,
+          "en" as Locale,
+          "updated-desc" as NotesSortOrder,
+          groups,
+        ),
+      { initialProps: { activeIndex: 0, state: makeState({ isDirty: true }) } },
+    );
+
+    act(() => result.current.scheduleAutoSave());
+    rerender({ activeIndex: 1, state: makeState({ isDirty: false }) });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+    await act(async () => {
+      const ok = await result.current.flushAutoSave();
+      expect(ok).toBe(true);
+    });
+
+    expect(getCurrentMarkdownMock).not.toHaveBeenCalled();
+    expect(writeMock).not.toHaveBeenCalled();
   });
 });
 

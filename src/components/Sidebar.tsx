@@ -213,6 +213,7 @@ export function Sidebar({
     for (const g of groups) for (const id of g.noteIds) set.add(id);
     return set;
   }, [groups]);
+  const docIdSet = useMemo(() => new Set(docs.map((doc) => doc.id)), [docs]);
 
   const { handleDragPointerDown, isDragging } = useSidebarDrag({
     groups,
@@ -280,6 +281,7 @@ export function Sidebar({
     const activeIds = new Set<string>();
     for (const doc of docs) {
       activeIds.add(doc.id);
+      if (!debouncedQuery) continue;
       const cached = cache.get(doc.id);
       if (cached && cached.content === doc.content) continue;
       cache.set(doc.id, { content: doc.content, stripped: stripMarkdownContent(doc.content) });
@@ -288,7 +290,7 @@ export function Sidebar({
       if (!activeIds.has(id)) cache.delete(id);
     }
     return cache;
-  }, [docs]);
+  }, [docs, debouncedQuery]);
 
   const filteredDocs = useMemo(() => {
     const colorOk = (doc: NoteDoc) => !colorFilter || doc.color === colorFilter;
@@ -699,7 +701,7 @@ export function Sidebar({
   const renderGroupHeader = (group: NoteGroup) => {
     const isEditing = editingGroupId === group.id;
     const isContextTarget = contextMenu?.type === "group" && contextMenu.groupId === group.id;
-    const noteCount = group.noteIds.filter((id) => docs.some((d) => d.id === id)).length;
+    const noteCount = group.noteIds.filter((id) => docIdSet.has(id)).length;
     const isRemoving = removingGroupIds.has(group.id);
     const activeDocId = docs[activeIndex]?.id ?? null;
     const isActiveGroup =

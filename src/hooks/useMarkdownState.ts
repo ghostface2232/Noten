@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 
 export interface MarkdownState {
   filePath: string | null;
@@ -20,12 +20,12 @@ export function useMarkdownState(): MarkdownState {
 
   const getCachedMarkdown = useCallback(() => markdownRef.current, []);
 
-  return {
+  return useMemo(() => ({
     filePath,
     isDirty,
     setFilePath,
     setIsDirty,
     getCachedMarkdown,
     primeMarkdown,
-  };
+  }), [filePath, getCachedMarkdown, isDirty, primeMarkdown]);
 }
