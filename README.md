@@ -25,7 +25,7 @@ Powered by [Tiptap](https://tiptap.dev/), edited as WYSIWYM with Markdown as the
 - **Shared folder sync** - Use OneDrive, Dropbox, or another synced folder to share notes across PCs with metadata merge and conflict backups
 - **Multi-window** - Open notes in separate windows with real-time cross-window sync
 - **Mica theme** - Native Windows 11 Mica material with dark/light mode
-- **Export** - Save notes as Markdown, PDF, or Rich Text
+- **Export** - Save notes as Markdown or PDF
 
 ## Tech Stack
 

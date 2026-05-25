@@ -113,6 +113,16 @@ Do not use old community-package APIs such as `editor.storage.markdown.getMarkdo
 - `npm run tauri:dev` for normal development. It runs `scripts/prepare-helper.ps1` to prepare `src-tauri/resources/maintenance-helper.exe`, then starts `tauri dev`.
 - `scripts/prepare-helper.ps1 -Release` builds only a release-mode helper, without bundling.
 - `scripts/build-release.ps1` is a **local smoke test only** — does not sign and is not what ships. It also fails at the Tauri step without `TAURI_SIGNING_PRIVATE_KEY` in env, because `bundle.createUpdaterArtifacts` is on. Real releases go through CI.
+- `npm run check` chains `typecheck` + `lint` + `test`; `.github/workflows/ci.yml` runs the same on every push and PR to `main`.
+
+## Quality Gates
+
+- **ESLint** (`npm run lint`, `eslint.config.js`) enforces two narrow project invariants on top of TypeScript:
+  - Durable writers (`metadataIO.ts`, `groupsIO.ts`, `conflictFileDetector.ts`) must call `atomicWriteText`, never `fs.writeTextFile` directly. Add new durable writers to the allowlist explicitly.
+  - `FileStat.mtime` and `birthtime` cannot be bypassed via non-null assertion or `as` cast; the `Date | null` shape must be handled explicitly. Tests are exempt.
+- **Contract tests** (`src/utils/contracts.test.ts`) cover cross-file invariants ESLint cannot express cheaply — e.g., every external `setNotesDir` / `resetNotesDir` call site must pass the reconcile state. Keep them grep-based and add new ones for each regression class.
+- **Fault injection** (`src/utils/fs.fault.test-utils.ts`, `wrapWithFaults`) lets FS-level tests reproduce OneDrive placeholders, AV rename locks, transient network errors, and `mtime: null` cases that the bare `InMemoryFileSystem` cannot.
+- **Crash log**: fatal/recoverable errors flow through `NotenError` + `logNotenError` and are appended to `AppData/Roaming/com.noten.app/crash.log` (capped, with per-component truncation in `formatLine`). `initCrashLog()` also captures uncaught `error` / `unhandledrejection` events.
 
 ## Release Process
 
