@@ -102,6 +102,67 @@ describe("reconcileFolder", () => {
     expect(await fs.exists(metaPathFor(DIR, id))).toBe(false);
   });
 
+  it("resets the bodyMissing counter when the body arrives, restoring the full grace on a later disappearance", async () => {
+    // OneDrive can drop and re-hydrate placeholders multiple times during a
+    // sync. If the counter were sticky, the second disappearance would skip
+    // straight to deletion — the user's note vanishes despite the body just
+    // having been seen on disk. This pins the counter-reset path on the
+    // body-arrival branch (reconcileFolder.ts:305-310).
+    const id = "11111111-1111-1111-1111-111111111aaa";
+    const filePath = `${DIR}/${id}.md`;
+    await seedMeta(fs, makeMeta(id));
+
+    // Pass 1: bodyless → grace recorded.
+    await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+    expect(state.bodyMissing.get(id)).toBe(1);
+
+    // Body arrives between passes (cloud-sync hydration completes).
+    fs.seedTextFile(filePath, "hydrated body");
+
+    // Pass 2: body present → counter must reset, sidecar must stay.
+    await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+    expect(state.bodyMissing.has(id)).toBe(false);
+    expect(await fs.exists(metaPathFor(DIR, id))).toBe(true);
+
+    // Body disappears again (placeholder re-virtualized).
+    await fs.remove(filePath);
+
+    // Pass 3: bodyless → should record fresh observation (seen=0 → 1), not
+    // delete on first sight. Without the reset, the lingering counter would
+    // have triggered deletion immediately here.
+    await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+    expect(state.bodyMissing.get(id)).toBe(1);
+    expect(await fs.exists(metaPathFor(DIR, id))).toBe(true);
+
+    // Pass 4: bodyless still → now eligible for deletion.
+    await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+    expect(state.bodyMissing.has(id)).toBe(false);
+    expect(await fs.exists(metaPathFor(DIR, id))).toBe(false);
+  });
+
+  it("graces a trashed meta whose trash body is missing across two passes", async () => {
+    // Trashed sidecars take the same path through the bodyMissing guard,
+    // but via the `meta.trashedAt != null` branch at reconcileFolder.ts:284
+    // — the body is expected at `.trash/{id}.md`, not at root. If that
+    // branch ever drops out of the grace, a synced PC with a momentarily
+    // missing trash placeholder would wipe the trash sidecar (and thus the
+    // trash entry) on every other machine through the .meta sync.
+    const id = "33333333-3333-3333-3333-333333333aaa";
+    await seedMeta(fs, makeMeta(id, {
+      trashedAt: 5000,
+      trashedFromPath: `${DIR}/${id}.md`,
+    }));
+
+    const first = await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+    expect(first.changed).toBe(false);
+    expect(state.bodyMissing.get(id)).toBe(1);
+    expect(await fs.exists(metaPathFor(DIR, id))).toBe(true);
+
+    const second = await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+    expect(state.bodyMissing.has(id)).toBe(false);
+    expect(await fs.exists(metaPathFor(DIR, id))).toBe(false);
+  });
+
   it("skips bodyless deletion when bulk guard trips (>=3 ids and >=25%)", async () => {
     for (let i = 0; i < 8; i += 1) {
       const id = `aaaaaaaa-aaaa-aaaa-aaaa-${i.toString().padStart(12, "0")}`;
