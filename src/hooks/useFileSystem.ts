@@ -40,14 +40,6 @@ function escapeRegexForRename(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Serializes manifest writes across all sortAndPersistDocs callers in this
-// window. Without it, two rapid actions (e.g. delete + new note) fired their
-// saves in parallel; the later one could finish first and the earlier one
-// would then overwrite disk with its stale snapshot. Chaining preserves
-// call-time ordering on disk while keeping the UI optimistic — the React
-// state below still commits immediately.
-let persistChain: Promise<unknown> = Promise.resolve();
-
 function sortAndPersistDocs(
   nextDocs: NoteDoc[],
   activeId: string | null,
@@ -64,26 +56,11 @@ function sortAndPersistDocs(
 
   setDocs(sortedDocs);
   setActiveIndex(nextActiveIndex);
-  // Surface PERSIST_FAILED with the originating stage so a silent .catch()
-  // can't hide a save failure from crashLog. The next persist call carries
-  // the full latest state, so transient failures self-heal; permanent
-  // failures (app closed before any subsequent save lands) at least leave a
-  // diagnosable trail instead of vanishing.
-  const job = persistChain
-    .catch(() => undefined)
-    .then(() => saveManifest(sortedDocs, activeId, groups));
-  persistChain = job;
-  void job.catch((err) => {
-    void logNotenError(new NotenError(
-      "PERSIST_FAILED",
-      "fatal",
-      err instanceof Error ? err.message : String(err),
-      {
-        context: { stage: "sortAndPersistDocs", docCount: sortedDocs.length, activeId },
-        cause: err,
-      },
-    ));
-  });
+  // Ordering + PERSIST_FAILED logging are handled inside saveManifest's
+  // own persistChain; callers just enqueue and stay non-blocking. The source
+  // tag travels through to the crashLog so the failure is still traceable
+  // to this entry point.
+  void saveManifest(sortedDocs, activeId, groups, "sortAndPersistDocs").catch(() => {});
 }
 
 export function getCurrentMarkdown(

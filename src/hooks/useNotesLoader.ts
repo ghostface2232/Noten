@@ -439,6 +439,7 @@ async function persistDecomposedState(
   docs: NoteDoc[],
   activeId: string | null,
   groups?: NoteGroup[],
+  source?: string,
 ): Promise<void> {
   const dir = await getNotesDir();
   const cachePath = await getLocalCachePath();
@@ -456,19 +457,33 @@ async function persistDecomposedState(
       "PERSIST_FAILED",
       "fatal",
       err instanceof Error ? err.message : String(err),
-      { context: { dir, docCount: docs.length, activeId }, cause: err },
+      { context: { dir, docCount: docs.length, activeId, source }, cause: err },
     ));
     throw err;
   }
 }
 
+// Serializes ALL manifest writes within this window through a single chain.
+// Without it, concurrent callers (autosave + watcher reconcile, sidebar action
+// + autosave, etc.) raced: the later call's stale snapshot could finish first
+// and the earlier one would overwrite disk on resolve. Chaining preserves
+// call-time ordering on disk; .catch(() => undefined) keeps a failed entry
+// from breaking subsequent writes. Multi-window races are a separate problem
+// — this chain lives per-process, so each window has its own queue.
+let persistChain: Promise<unknown> = Promise.resolve();
+
 export async function saveManifest(
   docs: NoteDoc[],
   activeId: string | null,
   groups?: NoteGroup[],
+  source?: string,
 ): Promise<void> {
   if (migrationInProgress) return;
-  return persistDecomposedState(docs, activeId, groups);
+  const job = persistChain
+    .catch(() => undefined)
+    .then(() => persistDecomposedState(docs, activeId, groups, source));
+  persistChain = job;
+  return job;
 }
 
 export function useNotesLoader(
