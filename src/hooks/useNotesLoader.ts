@@ -38,6 +38,7 @@ import {
   readAllMeta,
   writeMeta as writeMetaFile,
   removeMeta as removeMetaFile,
+  invalidateReadAllMetaCache,
 } from "../utils/metadataIO";
 import {
   groupsPathFor,
@@ -162,6 +163,7 @@ export function setNotesDir(dir: string, reconcileState?: ReconcileState) {
   imageAssetMigrationV1CompletedAtCache = null;
   resetWriteSnapshots();
   resetKnownDiskContent();
+  invalidateReadAllMetaCache(tauriFileSystem);
   if (reconcileState) clearReconcileState(reconcileState);
 }
 
@@ -170,6 +172,7 @@ export function resetNotesDir(reconcileState?: ReconcileState) {
   imageAssetMigrationV1CompletedAtCache = null;
   resetWriteSnapshots();
   resetKnownDiskContent();
+  invalidateReadAllMetaCache(tauriFileSystem);
   if (reconcileState) clearReconcileState(reconcileState);
 }
 

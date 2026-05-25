@@ -257,18 +257,29 @@ export function useFileSystem(
     ));
   }, []);
 
-  const pruneEmptyCurrentDoc = useCallback((baseDocs: NoteDoc[], leavingDocId: string | null): NoteDoc[] => {
+  const pruneEmptyCurrentDoc = useCallback(async (baseDocs: NoteDoc[], leavingDocId: string | null): Promise<NoteDoc[]> => {
     if (!leavingDocId) return baseDocs;
     const leaving = baseDocs.find((d) => d.id === leavingDocId);
     if (!leaving) return baseDocs;
     const currentContent = leaving.content.trim();
     if (currentContent || leaving.customName || baseDocs.length <= 1) return baseDocs;
 
+    // Order matters: remove the .md BEFORE the .meta. The reverse order
+    // (meta gone, body still present) is the dangerous one — the watcher's
+    // reconcileFolder treats a body without a sidecar as an unmanaged file
+    // and re-ingests it as a fresh doc with groupId: null, which surfaces as
+    // "the deleted note reappeared outside its group". Awaiting both also
+    // serializes them against the upcoming saveManifest's readAllMeta, which
+    // was racing the fire-and-forget removeMeta and surfacing as
+    // PERSIST_FAILED / RECONCILE_FAILED "os error 2" on .meta/<id>.json.
     if (leaving.filePath) {
-      try { markOwnWrite(leaving.filePath); remove(leaving.filePath).catch(() => {}); } catch {}
+      try { markOwnWrite(leaving.filePath); await remove(leaving.filePath); } catch { /* already gone or locked; reconcile recovers */ }
     }
     const leavingId = leaving.id;
-    void getNotesDir().then((dir) => removeMetaFile(tauriFileSystem, dir, leavingId)).catch(() => {});
+    try {
+      const dir = await getNotesDir();
+      await removeMetaFile(tauriFileSystem, dir, leavingId);
+    } catch { /* ignore — already gone or unreachable */ }
     setGroups?.((prev) => {
       const next = prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }));
       const kept = next.filter((g) => g.noteIds.length > 0);
@@ -398,7 +409,7 @@ export function useFileSystem(
     if (importedDocs.length === 0) return;
 
     const lastImported = importedDocs[importedDocs.length - 1];
-    const prunedDocs = pruneEmptyCurrentDoc(baseDocs, activeDocId);
+    const prunedDocs = await pruneEmptyCurrentDoc(baseDocs, activeDocId);
     const nextDocs = [...prunedDocs, ...importedDocs];
     sortAndPersistDocs(nextDocs, lastImported.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
     importedDocs.forEach((doc) => emitDocCreated(doc));
@@ -419,35 +430,63 @@ export function useFileSystem(
     if (newNoteInFlightRef.current) return;
     newNoteInFlightRef.current = true;
     try {
-      const { docs: liveDocs, activeDocId, activeIndex: currentActiveIndex } = getLiveDocsSnapshot();
-      const didPersistCurrentDoc = await leaveCurrentDoc();
-      const baseDocs = didPersistCurrentDoc ? markDocClean(liveDocs, activeDocId) : liveDocs;
+      // Click-handler sync portion MUST stay minimal — Chrome's "click handler
+      // took Xms" violation measures everything until the first macrotask
+      // yield, and editor.getMarkdown() can be 100–150ms on docs with custom
+      // NodeViews (Mermaid, WikiLink, ImageView). So:
+      //   - skip getLiveDocsSnapshot here (it calls getMarkdown when isDirty)
+      //   - defer captureAndQueueSave to after the first await (the snapshot
+      //     it captures is still correct as long as resetDocState hasn't run)
+      //   - read baseDocs/groups straight from refs
+      const baseDocs = docsRef.current;
+      const currentActiveIndex = activeIndexRef.current;
+      const currentDoc = baseDocs[currentActiveIndex] ?? null;
+      const activeDocId = currentDoc?.id ?? null;
 
-      // Provision the blank body BEFORE any destructive state changes. If the
-      // write fails we want to leave the previous doc untouched rather than
-      // commit a clean manifest entry pointing at a missing file.
+      // willReplace check: only consult the editor when the stored content is
+      // empty AND state is dirty (i.e. user may have typed since last
+      // autosave). Otherwise the stored .content already tells us non-empty,
+      // and we can skip the serialization.
+      let willReplace = false;
+      if (currentDoc && !currentDoc.customName && currentDoc.content.trim() === "") {
+        const liveContent = state.isDirty ? getCurrentMarkdown(tiptapRef).trim() : "";
+        willReplace = liveContent === "";
+      }
+
       const id = crypto.randomUUID();
       const timestamp = Date.now();
+      // Provision the new file BEFORE any destructive state changes — first
+      // await of the function, also the macrotask yield that closes the click
+      // handler's sync portion. If the write fails the previous doc is left
+      // untouched.
       const { filePath, ok } = await provisionNoteFile(id, "", "newNote");
       if (!ok) return;
+
+      // captureAndQueueSave runs AFTER provisionNoteFile so its getMarkdown
+      // call lands in a continuation microtask instead of the click handler's
+      // sync portion. The editor still points at the leaving doc here
+      // (resetDocState below hasn't run yet), so the snapshot captures the
+      // right content. willReplace skips this entirely — the leaving body is
+      // empty and is about to be deleted.
+      if (!willReplace) {
+        if (captureAndQueueSaveRef?.current) {
+          captureAndQueueSaveRef.current();
+        } else {
+          // Fallback for environments where the ref wasn't wired (tests).
+          await leaveCurrentDoc();
+        }
+      } else if (currentDoc) {
+        cancelDocSaveRef?.current?.(currentDoc.id);
+      }
 
       const inheritedGroupId = activeDocId
         ? (groupsRef.current?.find((g) => g.noteIds.includes(activeDocId))?.id ?? null)
         : null;
 
-      const currentDoc = baseDocs[currentActiveIndex];
-      const currentContent = currentDoc?.content.trim() ?? "";
-      const willReplace = !!currentDoc && !currentContent && !currentDoc.customName;
-
       let prunedDocs = baseDocs;
       let workingGroups: NoteGroup[] | undefined = groupsRef.current;
-      if (willReplace) {
-        if (currentDoc.filePath) {
-          try { markOwnWrite(currentDoc.filePath); remove(currentDoc.filePath).catch(() => {}); } catch {}
-        }
-        cancelDocSaveRef?.current?.(currentDoc.id);
+      if (willReplace && currentDoc) {
         const leavingId = currentDoc.id;
-        void getNotesDir().then((dir) => removeMetaFile(tauriFileSystem, dir, leavingId)).catch(() => {});
         const beforePrune = workingGroups
           ?.map((g) => ({ ...g, noteIds: g.noteIds.filter((noteId) => noteId !== leavingId) }));
         workingGroups = beforePrune
@@ -456,7 +495,6 @@ export function useFileSystem(
           const keptIds = new Set(workingGroups.map((g) => g.id));
           for (const g of beforePrune) if (!keptIds.has(g.id)) markGroupAsDeleted(g.id);
         }
-        setGroups?.(workingGroups ?? []);
         prunedDocs = baseDocs.filter((d) => d.id !== currentDoc.id);
       }
 
@@ -480,19 +518,46 @@ export function useFileSystem(
               ? { ...g, noteIds: [...g.noteIds, id] }
               : g,
           );
-          setGroups?.(nextGroups);
-          emitGroupsUpdated(nextGroups);
         }
+      }
+      // Commit groups in ONE setGroups so willReplace's prune and the new
+      // doc's add land in the same React commit (previously two separate
+      // setGroups calls produced a brief "no group" frame mid-flow).
+      if (nextGroups !== groupsRef.current) {
+        setGroups?.(nextGroups ?? []);
+        emitGroupsUpdated(nextGroups ?? []);
       }
       sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, locale, setDocs, setActiveIndex, nextGroups);
       emitDocCreated(newDoc);
       resetDocState(state, tiptapRef, id, filePath, "");
       notifyActiveDocRef?.current?.(id, filePath);
       focusEditor(tiptapRef);
+
+      // willReplace disk cleanup runs AFTER state commits, fire-and-forget.
+      // Safe to not await because:
+      //   - readAllMeta is TOCTOU-tolerant (metadataIO.ts), so a saveManifest
+      //     racing this removeMeta no longer surfaces PERSIST_FAILED
+      //   - hydrateGroupMembershipFromMeta preserves in-memory grouping for
+      //     live docs without on-disk meta, so a watcher reconcile firing
+      //     mid-cleanup can't yank the new doc out of its group
+      //   - .md is removed before .meta, so the bodyless-meta path in
+      //     reconcileFolder (with its 2-pass grace) absorbs any orphan
+      // Cancellation of the leaving doc's autosave already happened above.
+      if (willReplace && currentDoc?.filePath) {
+        const leavingFilePath = currentDoc.filePath;
+        const leavingId = currentDoc.id;
+        void (async () => {
+          try { markOwnWrite(leavingFilePath); await remove(leavingFilePath); } catch { /* already gone or locked; reconcile recovers */ }
+          try {
+            const dir = await getNotesDir();
+            await removeMetaFile(tauriFileSystem, dir, leavingId);
+          } catch { /* ignore — already gone or unreachable */ }
+        })();
+      }
     } finally {
       newNoteInFlightRef.current = false;
     }
-  }, [cancelDocSaveRef, getLiveDocsSnapshot, leaveCurrentDoc, locale, markDocClean, notesSortOrder, setActiveIndex, setDocs, setGroups, state, tiptapRef]);
+  }, [cancelDocSaveRef, captureAndQueueSaveRef, leaveCurrentDoc, locale, notesSortOrder, setActiveIndex, setDocs, setGroups, state, tiptapRef]);
 
   // Wiki-link creation path: provision a titled note without switching focus.
   const createNoteWithTitle = useCallback(async (rawTitle: string): Promise<string | null> => {
@@ -593,7 +658,7 @@ export function useFileSystem(
     }
 
     const targetDoc = baseDocs[index];
-    const nextDocs = pruneEmptyCurrentDoc(baseDocs, activeDocId);
+    const nextDocs = await pruneEmptyCurrentDoc(baseDocs, activeDocId);
     let targetIndex = nextDocs.findIndex((d) => d.id === targetDoc.id);
     if (targetIndex < 0) targetIndex = 0;
 
@@ -746,7 +811,7 @@ export function useFileSystem(
       updatedAt: timestamp,
     };
 
-    const prunedDocs = pruneEmptyCurrentDoc(baseDocs, activeDocId);
+    const prunedDocs = await pruneEmptyCurrentDoc(baseDocs, activeDocId);
     const nextDocs = [...prunedDocs, newDoc];
     sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
     resetDocState(state, tiptapRef, newDoc.id, filePath, content);
@@ -995,7 +1060,7 @@ export function useFileSystem(
       }
     }
 
-    const prunedDocs = pruneEmptyCurrentDoc(baseDocs, activeDocId);
+    const prunedDocs = await pruneEmptyCurrentDoc(baseDocs, activeDocId);
     const nextDocs = [...prunedDocs, restoredDoc];
     sortAndPersistDocs(nextDocs, restoredDoc.id, notesSortOrder, locale, setDocs, setActiveIndex, restoredGroups);
     emitDocCreated(restoredDoc);

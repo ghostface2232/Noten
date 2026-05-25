@@ -1,4 +1,4 @@
-import { Fragment, useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Fragment, memo, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Button, Tooltip, tokens, mergeClasses } from "@fluentui/react-components";
 import {
   ChevronLeftRegular,
@@ -98,6 +98,189 @@ function formatTimestamp(ts: number, locale: Locale): string {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return `${months[date.getMonth()]} ${date.getDate()}`;
 }
+
+// Per-note row extracted into a module-scope memoized component so a single
+// state change (activeIndex flip, one note's fileName edit, contextMenu open,
+// selection toggle) doesn't re-render every row in the sidebar. Previously
+// renderNoteItem was an inline closure inside Sidebar — any state change
+// rebuilt all N rows.
+//
+// All props except `doc` are either primitives, stable callbacks (parent uses
+// useCallback + ref-pinned closures so identity doesn't churn on selectMode/
+// selectedNoteIds changes), or per-row precomputed booleans. React.memo's
+// shallow comparison then skips rendering when the inputs for this specific
+// row haven't changed.
+interface NoteRowProps {
+  doc: NoteDoc;
+  originalIndex: number;
+  indented: boolean;
+  isActive: boolean;
+  isSelected: boolean;
+  isContextTarget: boolean;
+  isEditing: boolean;
+  isNew: boolean;
+  slideUp: boolean;
+  isSearching: boolean;
+  snippet: SearchSnippet | null;
+  searchIndex?: number;
+  noDrag: boolean;
+  groupId?: string;
+  selectMode: boolean;
+  locale: Locale;
+  notesSortOrder: NotesSortOrder;
+  styles: ReturnType<typeof useStyles>;
+  // Editing controls — only used when isEditing
+  editingValue: string;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onEditingValueChange: (v: string) => void;
+  onCommitRename: () => void;
+  onCancelRename: () => void;
+  // Stable callbacks (parent pins via ref so selectMode/selectedNoteIds
+  // changes don't churn their identity)
+  onActivate: (index: number, doc: NoteDoc) => void;
+  onContextMenu: (index: number, doc: NoteDoc, e: React.MouseEvent) => void;
+  onMoreClick: (index: number, doc: NoteDoc, e: React.PointerEvent) => void;
+  onPointerDown: (e: React.PointerEvent, id: string) => void;
+  onCheckboxClick: (id: string) => void;
+}
+
+const NoteRow = memo(function NoteRow(props: NoteRowProps) {
+  const {
+    doc, originalIndex, indented,
+    isActive, isSelected, isContextTarget, isEditing, isNew, slideUp,
+    isSearching, snippet, searchIndex, noDrag, groupId, selectMode,
+    locale, notesSortOrder, styles,
+    editingValue, inputRef, onEditingValueChange, onCommitRename, onCancelRename,
+    onActivate, onContextMenu, onMoreClick, onPointerDown, onCheckboxClick,
+  } = props;
+
+  return (
+    <div
+      key={doc.id}
+      data-doc-item
+      data-note-id={doc.id}
+      data-group-id={groupId}
+      className={mergeClasses(
+        styles.docItemWrapper,
+        selectMode && styles.docItemSelectRow,
+        selectMode && isActive && styles.docItemWrapperActive,
+        selectMode && !isActive && styles.docItemWrapperHoverable,
+        isNew && styles.docItemNew,
+        slideUp && styles.docItemSlideUp,
+        isSearching && searchIndex !== undefined && styles.searchResultFadeIn,
+      )}
+      style={
+        isSearching && searchIndex !== undefined
+          ? { animationDelay: `${searchIndex * 0.03}s` }
+          : undefined
+      }
+      onPointerDown={noDrag ? undefined : (e) => onPointerDown(e, doc.id)}
+      onContextMenu={(e) => onContextMenu(originalIndex, doc, e)}
+    >
+      <button
+        className={mergeClasses(
+          styles.selectCheckbox,
+          selectMode && styles.selectCheckboxVisible,
+          selectMode && isSelected && styles.selectCheckboxChecked,
+        )}
+        onClick={(e) => { e.stopPropagation(); onCheckboxClick(doc.id); }}
+        style={selectMode && indented ? { marginLeft: "16px" } : undefined}
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ opacity: isSelected ? 1 : 0, transition: "opacity 0.1s" }}>
+          <path d="M1.5 5.5L4 8L8.5 2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {isEditing ? (
+        <Button
+          appearance="subtle"
+          icon={<span className={styles.docItemIcon} style={doc.color ? { color: colorHex(doc.color) } : undefined}>{doc.pinned ? <PinRegular /> : <DocumentRegular />}</span>}
+          className={mergeClasses(
+            isActive ? styles.docItemActive : styles.docItem,
+            selectMode && isActive && styles.docItemActiveBgClear,
+            selectMode && styles.docItemSelectGap,
+            indented && !selectMode && styles.docItemIndented,
+          )}
+          size="small"
+          style={{ pointerEvents: "none" }}
+        >
+          <input
+            ref={inputRef}
+            className={styles.renameInput}
+            value={editingValue}
+            onChange={(e) => onEditingValueChange(e.target.value)}
+            onBlur={onCommitRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); onCommitRename(); }
+              if (e.key === "Escape") { e.preventDefault(); onCancelRename(); }
+            }}
+            style={{ pointerEvents: "auto" }}
+          />
+        </Button>
+      ) : (
+        <>
+          <Button
+            appearance="subtle"
+            icon={<span className={styles.docItemIcon} style={doc.color ? { color: colorHex(doc.color) } : undefined}>{doc.pinned ? <PinRegular /> : <DocumentRegular />}</span>}
+            className={mergeClasses(
+              isActive ? styles.docItemActive : styles.docItem,
+              selectMode && isActive && styles.docItemActiveBgClear,
+              selectMode && styles.docItemSelectGap,
+              indented && !selectMode && styles.docItemIndented,
+            )}
+            onClick={() => onActivate(originalIndex, doc)}
+            size="small"
+          >
+            {isSearching && snippet ? (
+              <div className={styles.searchResultContent}>
+                <span className={styles.docName}>{doc.fileName}</span>
+                <span className={styles.searchSnippet}>
+                  {snippet.before}<mark className={styles.snippetHighlight}>{snippet.match}</mark>{snippet.after}
+                </span>
+              </div>
+            ) : (
+              <span className={styles.docName}>{doc.fileName}</span>
+            )}
+            <span
+              data-doc-trailing
+              className={mergeClasses(
+                styles.docTrailing,
+                isContextTarget && styles.docTrailingHidden,
+              )}
+            >
+              {doc.isDirty && (
+                <span className={styles.dirtyDot}>●</span>
+              )}
+              <span className={styles.docTimestamp}>
+                {formatTimestamp(
+                  notesSortOrder.startsWith("created") ? doc.createdAt : doc.updatedAt,
+                  locale,
+                )}
+              </span>
+            </span>
+          </Button>
+
+          <Button
+            data-more-btn
+            appearance="subtle"
+            className={mergeClasses(
+              styles.moreBtn,
+              isContextTarget && styles.moreBtnActive,
+            )}
+            onPointerDown={(e) => {
+              if (e.pointerType === "mouse" && e.button !== 0) return;
+              e.stopPropagation();
+              onMoreClick(originalIndex, doc, e);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            size="small"
+          >
+            <MoreHorizontalRegular fontSize={16} />
+          </Button>
+        </>
+      )}
+    </div>
+  );
+});
 
 interface SidebarProps {
   docs: NoteDoc[];
@@ -474,6 +657,68 @@ export function Sidebar({
     });
   }, []);
 
+  // Refs pin selectMode / selectedNoteIds / contextMenu / isDragging /
+  // handleDrag... callbacks so the row-handler identities below stay stable
+  // even when those state slices flip. Without this, every selectMode toggle
+  // or every contextMenu open would change the handler refs and force every
+  // NoteRow to re-render — defeating React.memo. The reads happen at click
+  // time from .current so they always see the latest state.
+  const selectModeRef = useRef(selectMode);
+  selectModeRef.current = selectMode;
+  const selectedNoteIdsRef = useRef(selectedNoteIds);
+  selectedNoteIdsRef.current = selectedNoteIds;
+  const contextMenuRefForRow = useRef(contextMenu);
+  contextMenuRefForRow.current = contextMenu;
+  const onSwitchDocumentRef = useRef(onSwitchDocument);
+  onSwitchDocumentRef.current = onSwitchDocument;
+  const handleDragPointerDownRef = useRef(handleDragPointerDown);
+  handleDragPointerDownRef.current = handleDragPointerDown;
+
+  const handleRowActivate = useCallback((index: number, doc: NoteDoc) => {
+    if (isDragging.current) return;
+    if (selectModeRef.current) {
+      toggleNoteSelection(doc.id);
+    } else {
+      onSwitchDocumentRef.current(index);
+    }
+  }, [isDragging, toggleNoteSelection]);
+
+  const handleRowContextMenu = useCallback((index: number, doc: NoteDoc, e: React.MouseEvent) => {
+    if (isDragging.current) { e.preventDefault(); return; }
+    if (selectModeRef.current) {
+      if (!selectedNoteIdsRef.current.has(doc.id)) toggleNoteSelection(doc.id);
+      e.preventDefault();
+      e.stopPropagation();
+      setContextMenu({ type: "empty", index: -3, x: e.clientX, y: e.clientY });
+    } else {
+      handleContextMenu(index, e);
+    }
+  }, [handleContextMenu, isDragging, toggleNoteSelection]);
+
+  const handleRowMoreClick = useCallback((index: number, doc: NoteDoc, e: React.PointerEvent) => {
+    if (selectModeRef.current) {
+      if (contextMenuRefForRow.current?.anchorIndex === index) {
+        setContextMenu(null);
+        return;
+      }
+      if (!selectedNoteIdsRef.current.has(doc.id)) toggleNoteSelection(doc.id);
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      setContextMenu({
+        type: "empty",
+        index: -3,
+        anchorIndex: index,
+        x: rect.left,
+        y: rect.bottom + 2,
+      });
+    } else {
+      handleMoreClick(index, e);
+    }
+  }, [handleMoreClick, toggleNoteSelection]);
+
+  const handleRowPointerDown = useCallback((e: React.PointerEvent, id: string) => {
+    handleDragPointerDownRef.current(e, id);
+  }, []);
+
   const getGroupForNote = useCallback((noteId: string): NoteGroup | null => {
     return groups.find((g) => g.noteIds.includes(noteId)) ?? null;
   }, [groups]);
@@ -527,6 +772,10 @@ export function Sidebar({
     return { groupRenderList: gList, noteItems: nItems };
   }, [flatListMode, filteredDocs, docs, groups, groupedNoteIds, notesSortOrder, locale, collapsingGroupIds]);
 
+  const cancelEditing = useCallback(() => {
+    setEditingIndex(null);
+  }, []);
+
   const renderNoteItem = (
     doc: NoteDoc,
     originalIndex: number,
@@ -534,167 +783,45 @@ export function Sidebar({
     opts: { snippet?: SearchSnippet | null; searchIndex?: number; noDrag?: boolean; paneActive?: boolean; groupId?: string } = {},
   ) => {
     const { snippet = null, searchIndex, noDrag = false, paneActive = true, groupId } = opts;
+    const isActive = originalIndex === activeIndex;
     const isSelected = selectedNoteIds.has(doc.id);
     const isContextTarget = contextMenu?.type === "note" && contextMenu.index === originalIndex;
+    const isEditing = editingIndex === originalIndex && paneActive;
+    const isNew = newDocIds.has(doc.id);
+    const slideUp = slideUpFromIndex >= 0 && originalIndex >= slideUpFromIndex;
 
     return (
-      <div
+      <NoteRow
         key={doc.id}
-        data-doc-item
-        data-note-id={doc.id}
-        data-group-id={groupId}
-        className={mergeClasses(
-          styles.docItemWrapper,
-          selectMode && styles.docItemSelectRow,
-          selectMode && originalIndex === activeIndex && styles.docItemWrapperActive,
-          selectMode && originalIndex !== activeIndex && styles.docItemWrapperHoverable,
-          newDocIds.has(doc.id) && styles.docItemNew,
-          slideUpFromIndex >= 0 && originalIndex >= slideUpFromIndex && styles.docItemSlideUp,
-          isSearching && searchIndex !== undefined && styles.searchResultFadeIn,
-        )}
-        style={
-          isSearching && searchIndex !== undefined
-            ? { animationDelay: `${searchIndex * 0.03}s` }
-            : undefined
-        }
-        onPointerDown={noDrag ? undefined : (e) => handleDragPointerDown(e, doc.id)}
-        onContextMenu={(e) => {
-          if (isDragging.current) { e.preventDefault(); return; }
-          if (selectMode) {
-            if (!selectedNoteIds.has(doc.id)) toggleNoteSelection(doc.id);
-            e.preventDefault();
-            e.stopPropagation();
-            setContextMenu({ type: "empty", index: -3, x: e.clientX, y: e.clientY });
-          } else {
-            handleContextMenu(originalIndex, e);
-          }
-        }}
-      >
-        <button
-          className={mergeClasses(
-            styles.selectCheckbox,
-            selectMode && styles.selectCheckboxVisible,
-            selectMode && isSelected && styles.selectCheckboxChecked,
-          )}
-          onClick={(e) => { e.stopPropagation(); toggleNoteSelection(doc.id); }}
-          style={selectMode && indented ? { marginLeft: "16px" } : undefined}
-        >
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ opacity: isSelected ? 1 : 0, transition: "opacity 0.1s" }}>
-            <path d="M1.5 5.5L4 8L8.5 2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-        {editingIndex === originalIndex && paneActive ? (
-          <Button
-            appearance="subtle"
-            icon={<span className={styles.docItemIcon} style={doc.color ? { color: colorHex(doc.color) } : undefined}>{doc.pinned ? <PinRegular /> : <DocumentRegular />}</span>}
-            className={mergeClasses(
-              originalIndex === activeIndex ? styles.docItemActive : styles.docItem,
-              selectMode && originalIndex === activeIndex && styles.docItemActiveBgClear,
-              selectMode && styles.docItemSelectGap,
-              indented && !selectMode && styles.docItemIndented,
-            )}
-            size="small"
-            style={{ pointerEvents: "none" }}
-          >
-            <input
-              ref={inputRef}
-              className={styles.renameInput}
-              value={editingValue}
-              onChange={(e) => setEditingValue(e.target.value)}
-              onBlur={commitRename}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") { e.preventDefault(); commitRename(); }
-                if (e.key === "Escape") { e.preventDefault(); setEditingIndex(null); }
-              }}
-              style={{ pointerEvents: "auto" }}
-            />
-          </Button>
-        ) : (
-          <>
-            <Button
-              appearance="subtle"
-              icon={<span className={styles.docItemIcon} style={doc.color ? { color: colorHex(doc.color) } : undefined}>{doc.pinned ? <PinRegular /> : <DocumentRegular />}</span>}
-              className={mergeClasses(
-                originalIndex === activeIndex ? styles.docItemActive : styles.docItem,
-                selectMode && originalIndex === activeIndex && styles.docItemActiveBgClear,
-                selectMode && styles.docItemSelectGap,
-                indented && !selectMode && styles.docItemIndented,
-              )}
-              onClick={() => {
-                if (isDragging.current) return;
-                if (selectMode) {
-                  toggleNoteSelection(doc.id);
-                } else {
-                  onSwitchDocument(originalIndex);
-                }
-              }}
-              size="small"
-            >
-              {isSearching && snippet ? (
-                <div className={styles.searchResultContent}>
-                  <span className={styles.docName}>{doc.fileName}</span>
-                  <span className={styles.searchSnippet}>
-                    {snippet.before}<mark className={styles.snippetHighlight}>{snippet.match}</mark>{snippet.after}
-                  </span>
-                </div>
-              ) : (
-                <span className={styles.docName}>{doc.fileName}</span>
-              )}
-              <span
-                data-doc-trailing
-                className={mergeClasses(
-                  styles.docTrailing,
-                  isContextTarget && styles.docTrailingHidden,
-                )}
-              >
-                {doc.isDirty && (
-                  <span className={styles.dirtyDot}>●</span>
-                )}
-                <span className={styles.docTimestamp}>
-                  {formatTimestamp(
-                    notesSortOrder.startsWith("created") ? doc.createdAt : doc.updatedAt,
-                    locale,
-                  )}
-                </span>
-              </span>
-            </Button>
-
-            <Button
-              data-more-btn
-              appearance="subtle"
-              className={mergeClasses(
-                styles.moreBtn,
-                isContextTarget && styles.moreBtnActive,
-              )}
-              onPointerDown={(e) => {
-                if (e.pointerType === "mouse" && e.button !== 0) return;
-                e.stopPropagation();
-                if (selectMode) {
-                  if (contextMenu?.anchorIndex === originalIndex) {
-                    setContextMenu(null);
-                    return;
-                  }
-                  if (!selectedNoteIds.has(doc.id)) toggleNoteSelection(doc.id);
-                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                  setContextMenu({
-                    type: "empty",
-                    index: -3,
-                    anchorIndex: originalIndex,
-                    x: rect.left,
-                    y: rect.bottom + 2,
-                  });
-                } else {
-                  handleMoreClick(originalIndex, e);
-                }
-              }}
-              onClick={(e) => e.stopPropagation()}
-              size="small"
-            >
-              <MoreHorizontalRegular fontSize={16} />
-            </Button>
-          </>
-        )}
-      </div>
+        doc={doc}
+        originalIndex={originalIndex}
+        indented={indented}
+        isActive={isActive}
+        isSelected={isSelected}
+        isContextTarget={isContextTarget}
+        isEditing={isEditing}
+        isNew={isNew}
+        slideUp={slideUp}
+        isSearching={isSearching}
+        snippet={snippet}
+        searchIndex={searchIndex}
+        noDrag={noDrag}
+        groupId={groupId}
+        selectMode={selectMode}
+        locale={locale}
+        notesSortOrder={notesSortOrder}
+        styles={styles}
+        editingValue={editingValue}
+        inputRef={inputRef}
+        onEditingValueChange={setEditingValue}
+        onCommitRename={commitRename}
+        onCancelRename={cancelEditing}
+        onActivate={handleRowActivate}
+        onContextMenu={handleRowContextMenu}
+        onMoreClick={handleRowMoreClick}
+        onPointerDown={handleRowPointerDown}
+        onCheckboxClick={toggleNoteSelection}
+      />
     );
   };
 

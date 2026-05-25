@@ -45,6 +45,10 @@ export interface PersistState {
   writtenGroups: Map<string, SharedGroupSnapshot>;
   pendingTombstones: Set<string>;
   pendingGroupMembership: Map<string, { groupId: string | null; updatedAt: number }>;
+  /** Last successfully-written local cache JSON. Skip the write when the
+   *  serialized payload matches — autosaves driven by body-only edits
+   *  produce an identical cache and the OneDrive write is pure waste. */
+  lastWrittenLocalCache?: string;
 }
 
 export function createPersistState(): PersistState {
@@ -53,6 +57,7 @@ export function createPersistState(): PersistState {
     writtenGroups: new Map(),
     pendingTombstones: new Set(),
     pendingGroupMembership: new Map(),
+    lastWrittenLocalCache: undefined,
   };
 }
 
@@ -61,6 +66,7 @@ export function clearPersistState(state: PersistState): void {
   state.writtenGroups.clear();
   state.pendingTombstones.clear();
   state.pendingGroupMembership.clear();
+  state.lastWrittenLocalCache = undefined;
 }
 
 export function metaSnapshotEqual(a: MetaSnapshot, b: MetaSnapshot): boolean {
@@ -498,21 +504,33 @@ export async function persistDecomposedState(
     ? Promise.resolve(setActiveNoteId(activeId)).catch(() => {})
     : Promise.resolve();
 
-  const cachePromise = cachePath
-    ? writeLocalCache(fs, cachePath, {
-        version: 2,
-        notesDirectory: dir,
-        notes: docs.map(({ id, filePath, fileName, createdAt, updatedAt, customName, pinned, color }) => ({
-          id, filePath, fileName, createdAt, updatedAt,
-          ...(customName ? { customName } : {}),
-          ...(pinned ? { pinned } : {}),
-          ...(color ? { color } : {}),
-        })),
-        groups: groups && groups.length > 0 ? groups : undefined,
-        trashedNotes: trashedNotes.length > 0 ? trashedNotes : undefined,
-        imageAssetMigrationV1CompletedAt: imageAssetMigrationCompletedAt ?? undefined,
-      })
-    : Promise.resolve();
+  // Cache payload short-circuit. The local cache mirrors every doc's title/
+  // updatedAt/etc, so a body-only autosave (no fileName change, no group
+  // change) produces an identical serialized payload. Without this check
+  // every 1s autosave wrote the same 10–100 KB JSON back to OneDrive —
+  // pure I/O waste plus another fs op queueing into persistChain.
+  let cachePromise: Promise<unknown> = Promise.resolve();
+  if (cachePath) {
+    const cachePayload: LocalCache = {
+      version: 2,
+      notesDirectory: dir,
+      notes: docs.map(({ id, filePath, fileName, createdAt, updatedAt, customName, pinned, color }) => ({
+        id, filePath, fileName, createdAt, updatedAt,
+        ...(customName ? { customName } : {}),
+        ...(pinned ? { pinned } : {}),
+        ...(color ? { color } : {}),
+      })),
+      groups: groups && groups.length > 0 ? groups : undefined,
+      trashedNotes: trashedNotes.length > 0 ? trashedNotes : undefined,
+      imageAssetMigrationV1CompletedAt: imageAssetMigrationCompletedAt ?? undefined,
+    };
+    const serialized = JSON.stringify(cachePayload, null, 2);
+    if (state.lastWrittenLocalCache !== serialized) {
+      cachePromise = writeLocalCache(fs, cachePath, cachePayload).then(
+        () => { state.lastWrittenLocalCache = serialized; },
+      );
+    }
+  }
 
   await Promise.all([
     Promise.all(metaWrites),

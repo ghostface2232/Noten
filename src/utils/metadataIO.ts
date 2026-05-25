@@ -38,6 +38,68 @@ export async function ensureMetaDir(fs: FileSystem, notesDir: string): Promise<s
   return dir;
 }
 
+// readAllMeta is the hot spot: persistDecomposedState calls it on every
+// autosave (resolveGroupSnapshot needs disk truth), reconcileFolder calls it
+// twice per pass. With N notes on a cloud-sync folder, that's N JSON reads
+// each time, ~10-50ms per file. Short TTL cache keeps the per-flow second-and-
+// later calls free; per-write hooks keep the cache consistent with our own
+// disk ops so we don't have to invalidate-then-refill.
+//
+// Keyed by FileSystem instance via WeakMap so tests using fresh in-memory fs
+// instances get isolated cache automatically (no manual reset in beforeEach).
+interface ReadAllMetaCacheEntry {
+  result: Map<string, NoteMeta>;
+  expiresAt: number;
+}
+const READ_ALL_META_TTL_MS = 500;
+const readAllMetaCache = new WeakMap<FileSystem, Map<string, ReadAllMetaCacheEntry>>();
+
+function getCacheBucket(fs: FileSystem): Map<string, ReadAllMetaCacheEntry> {
+  let bucket = readAllMetaCache.get(fs);
+  if (!bucket) {
+    bucket = new Map();
+    readAllMetaCache.set(fs, bucket);
+  }
+  return bucket;
+}
+
+function lookupReadAllMetaCache(fs: FileSystem, notesDir: string): Map<string, NoteMeta> | null {
+  const bucket = readAllMetaCache.get(fs);
+  if (!bucket) return null;
+  const entry = bucket.get(notesDir);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    bucket.delete(notesDir);
+    return null;
+  }
+  return entry.result;
+}
+
+function setReadAllMetaCache(fs: FileSystem, notesDir: string, result: Map<string, NoteMeta>): void {
+  const bucket = getCacheBucket(fs);
+  bucket.set(notesDir, { result, expiresAt: Date.now() + READ_ALL_META_TTL_MS });
+}
+
+function patchCachedMeta(fs: FileSystem, notesDir: string, meta: NoteMeta): void {
+  const bucket = readAllMetaCache.get(fs);
+  const entry = bucket?.get(notesDir);
+  if (entry) entry.result.set(meta.id, meta);
+}
+
+function dropCachedMeta(fs: FileSystem, notesDir: string, noteId: string): void {
+  const bucket = readAllMetaCache.get(fs);
+  const entry = bucket?.get(notesDir);
+  if (entry) entry.result.delete(noteId);
+}
+
+/** Drop the readAllMeta cache for this fs (or this dir if provided). */
+export function invalidateReadAllMetaCache(fs: FileSystem, notesDir?: string): void {
+  const bucket = readAllMetaCache.get(fs);
+  if (!bucket) return;
+  if (notesDir) bucket.delete(notesDir);
+  else bucket.clear();
+}
+
 function isValidMeta(obj: unknown): obj is NoteMeta {
   if (!obj || typeof obj !== "object") return false;
   const m = obj as Record<string, unknown>;
@@ -89,6 +151,7 @@ export async function writeMeta(fs: FileSystem, notesDir: string, meta: NoteMeta
   // Suppress watcher reprocessing: same content recorded for hash-based match.
   markOwnWrite(path, serialized);
   await atomicWriteText(fs, path, serialized);
+  patchCachedMeta(fs, notesDir, normalized);
   return serialized;
 }
 
@@ -99,6 +162,7 @@ export async function removeMeta(fs: FileSystem, notesDir: string, noteId: strin
   markOwnWrite(path);
   try {
     await fs.remove(path);
+    dropCachedMeta(fs, notesDir, noteId);
   } catch { /* already gone */ }
 }
 
@@ -113,12 +177,43 @@ export async function listMetaFiles(fs: FileSystem, notesDir: string): Promise<s
 
 /** Read all metadata files from {notesDir}/.meta. Returns entries keyed by id. */
 export async function readAllMeta(fs: FileSystem, notesDir: string): Promise<Map<string, NoteMeta>> {
+  // Short-TTL cache: keyed by (fs, notesDir). Callers get a clone so they can
+  // mutate freely without poisoning the cache; writeMeta / removeMeta patch
+  // the cached map in place so the cache stays consistent with our own writes
+  // through the TTL window (instead of being invalidated and refilled).
+  const cached = lookupReadAllMetaCache(fs, notesDir);
+  if (cached) return new Map(cached);
+
   const names = await listMetaFiles(fs, notesDir);
   const out = new Map<string, NoteMeta>();
+  // Per-id read with TOCTOU defense. listMetaFiles snapshots a directory
+  // listing; readMeta then runs exists() + readTextFile() for each name. A
+  // concurrent removeMeta (own pruneEmptyCurrentDoc / newNote.willReplace, or
+  // a sibling window) can land between the listing and the read, or between
+  // exists and readTextFile — surfacing as "os error 2" inside Promise.all and
+  // failing the whole aggregate (PERSIST_FAILED / RECONCILE_FAILED).
+  //
+  // readMeta itself is contractually forbidden from catching (contract:
+  // shared metadata reads fail closed — transient unreadable must not look
+  // like absent state, or reconcile will write default meta over a locked
+  // sidecar and lose groupId). We can still distinguish *here*: on error,
+  // re-check existence. File gone = deletion raced this read, drop silently.
+  // File still present = real unreadable, propagate so the aggregate still
+  // fails closed for that case.
   await Promise.all(names.map(async (name) => {
     const id = name.replace(/\.json$/, "");
-    const meta = await readMeta(fs, notesDir, id);
-    if (meta && meta.id === id) out.set(id, meta);
+    try {
+      const meta = await readMeta(fs, notesDir, id);
+      if (meta && meta.id === id) out.set(id, meta);
+    } catch (err) {
+      let stillExists = false;
+      try { stillExists = await fs.exists(metaPathFor(notesDir, id)); } catch { stillExists = false; }
+      if (stillExists) throw err;
+    }
   }));
-  return out;
+
+  // Cache the canonical map (the one we own); return a clone so callers
+  // can't mutate our cache view.
+  setReadAllMetaCache(fs, notesDir, out);
+  return new Map(out);
 }

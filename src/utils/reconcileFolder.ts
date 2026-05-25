@@ -62,12 +62,29 @@ function hydrateGroupMembershipFromMeta(
     idsByGroup.set(meta.groupId, ids);
   }
 
+  // A reconcile pass can race a still-in-flight saveManifest: a freshly
+  // created note already lives in the in-memory groups state (newNote called
+  // setGroups synchronously) but its sidecar hasn't been written yet. If we
+  // strip every id absent from `allMeta`, the note gets yanked out of its
+  // group, and the very next newNote inherits inheritedGroupId=null because
+  // groupsRef no longer shows the previous active doc as a member. Track
+  // which live docs have *any* meta on disk so we can drop only when disk
+  // disagrees, not when disk hasn't caught up.
+  const docHasMeta = new Set<string>();
+  for (const meta of allMeta.values()) {
+    if (liveDocIds.has(meta.id)) docHasMeta.add(meta.id);
+  }
+
   let changed = false;
   const hydrated = groups.map((group) => {
     const metaIds = idsByGroup.get(group.id) ?? [];
     const metaIdSet = new Set(metaIds);
     const noteIds = [
-      ...group.noteIds.filter((id) => metaIdSet.has(id)),
+      ...group.noteIds.filter((id) => {
+        if (metaIdSet.has(id)) return true;          // disk confirms membership
+        if (docHasMeta.has(id)) return false;        // disk says different group → drop
+        return liveDocIds.has(id);                   // mid-creation, trust in-memory
+      }),
       ...metaIds.filter((id) => !group.noteIds.includes(id)),
     ];
     if (sameNoteIds(group.noteIds, noteIds)) return group;
@@ -156,6 +173,9 @@ export async function reconcileFolder(
       };
       try {
         await writeMetaFile(fs, dir, meta, machineId);
+        // Keep the local snapshot in sync with disk so the hydrate pass at the
+        // end of this function can reuse it (avoiding a second readAllMeta).
+        allMeta.set(id, meta);
       } catch (err) {
         // Meta write failed during ingest of a previously-unmanaged .md file.
         // The in-memory doc still gets built so the user sees the note this
@@ -225,7 +245,9 @@ export async function reconcileFolder(
         try { markOwnWrite(trashPath); await fs.remove(trashPath); } catch { /* ignore */ }
       }
       try {
-        await writeMetaFile(fs, dir, { ...meta, trashedAt: null, trashedFromPath: null }, machineId);
+        const restored = { ...meta, trashedAt: null, trashedFromPath: null };
+        await writeMetaFile(fs, dir, restored, machineId);
+        allMeta.set(meta.id, restored);
       } catch { /* ignore */ }
       changed = true;
     } else {
@@ -314,7 +336,10 @@ export async function reconcileFolder(
       const seen = state.bodyMissing.get(id) ?? 0;
       if (seen >= 1) {
         state.bodyMissing.delete(id);
-        try { await removeMetaFile(fs, dir, id); } catch { /* ignore */ }
+        try {
+          await removeMetaFile(fs, dir, id);
+          allMeta.delete(id);
+        } catch { /* ignore */ }
       } else {
         state.bodyMissing.set(id, seen + 1);
       }
@@ -322,9 +347,11 @@ export async function reconcileFolder(
   }
 
   // Rebuild noteIds from sidecars so follow-up persistence cannot erase groupId.
+  // Reuse the local allMeta we kept in sync with our writes/removes above
+  // instead of paying a second readAllMeta — saves one O(N) disk pass on
+  // every reconcile (was the second-largest cost after the initial read).
   const liveDocIds = new Set(nextDocs.map((d) => d.id));
-  const latestMeta = await readAllMeta(fs, dir);
-  const hydratedGroups = hydrateGroupMembershipFromMeta(nextGroups, latestMeta, liveDocIds);
+  const hydratedGroups = hydrateGroupMembershipFromMeta(nextGroups, allMeta, liveDocIds);
   if (hydratedGroups.changed) {
     nextGroups = hydratedGroups.groups;
     changed = true;
