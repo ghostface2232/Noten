@@ -19,7 +19,6 @@ import {
   type SharedGroupEntry,
 } from "./groupsIO";
 import { getMachineId } from "./machineId";
-import { getFileTimestamps } from "./fileTimestamps";
 import { backupRemoteVersion } from "./conflictBackup";
 import { retireLegacyManifest } from "./conflictFileDetector";
 import { NotenError } from "./notenError";
@@ -107,7 +106,8 @@ async function clearDirContents(dir: string, protectedPath?: string, strict = fa
   let entries;
   try {
     entries = await readDir(dir);
-  } catch {
+  } catch (err) {
+    if (strict) throw err;
     return;
   }
   const base = normalizeSep(dir);
@@ -134,18 +134,18 @@ async function clearDirContents(dir: string, protectedPath?: string, strict = fa
 }
 
 async function assertReadableDirIfExists(dir: string): Promise<void> {
-  if (!(await exists(dir).catch(() => false))) return;
+  if (!(await exists(dir))) return;
   await readDir(dir);
 }
 
 async function assertReadableFileIfExists(path: string): Promise<void> {
-  if (!(await exists(path).catch(() => false))) return;
+  if (!(await exists(path))) return;
   await readTextFile(path);
 }
 
 export async function clearManagedNotesData(dir: string, protectedPath?: string): Promise<MigrationResult> {
   try {
-    await clearDirContents(dir, protectedPath);
+    await clearDirContents(dir, protectedPath, true);
     return { success: true };
   } catch (err) {
     return { success: false, error: String(err) };
@@ -153,13 +153,10 @@ export async function clearManagedNotesData(dir: string, protectedPath?: string)
 }
 
 async function readLegacyManifestFile(dir: string): Promise<LegacyManifest | null> {
-  try {
-    const path = `${normalizeSep(dir)}manifest.json`;
-    const raw = await readTextFile(path);
-    return JSON.parse(raw) as LegacyManifest;
-  } catch {
-    return null;
-  }
+  const path = `${normalizeSep(dir)}manifest.json`;
+  if (!(await exists(path))) return null;
+  const raw = await readTextFile(path);
+  return JSON.parse(raw) as LegacyManifest;
 }
 
 /** Decompose a legacy manifest into sidecars, merging existing shared state. */
@@ -247,23 +244,22 @@ async function copySharedTreeForOverwrite(fromDir: string, toDir: string): Promi
 
   await mkdir(toDir, { recursive: true });
 
-  let entries: { name?: string; isFile?: boolean; isDirectory?: boolean }[] = [];
-  try { entries = await readDir(fromDir); } catch { entries = []; }
+  const entries = await readDir(fromDir);
   for (const e of entries) {
     if (!e.name || !e.isFile) continue;
     if (!e.name.endsWith(".md")) continue;
     await copyFile(`${fromBase}${e.name}`, `${toBase}${e.name}`);
   }
 
-  if (await exists(`${fromBase}.meta`).catch(() => false)) {
+  if (await exists(`${fromBase}.meta`)) {
     await copyDirRecursive(`${fromBase}.meta`, `${toBase}.meta`);
   }
 
-  if (await exists(`${fromBase}.groups.json`).catch(() => false)) {
+  if (await exists(`${fromBase}.groups.json`)) {
     await copyFile(`${fromBase}.groups.json`, `${toBase}.groups.json`);
   }
 
-  if (await exists(`${fromBase}.trash`).catch(() => false)) {
+  if (await exists(`${fromBase}.trash`)) {
     const trashEntries = await readDir(`${fromBase}.trash`);
     const trashMd = trashEntries.filter((e) => e.name?.endsWith(".md") && e.isFile);
     if (trashMd.length > 0) {
@@ -274,15 +270,21 @@ async function copySharedTreeForOverwrite(fromDir: string, toDir: string): Promi
     }
   }
 
-  if (await exists(`${fromBase}.assets`).catch(() => false)) {
+  if (await exists(`${fromBase}.assets`)) {
     await copyDirRecursive(`${fromBase}.assets`, `${toBase}.assets`);
   }
 
-  if (await exists(`${fromBase}.conflicts`).catch(() => false)) {
+  if (await exists(`${fromBase}.conflicts`)) {
     try {
       await copyDirRecursive(`${fromBase}.conflicts`, `${toBase}.conflicts`);
     } catch { /* best-effort */ }
   }
+}
+
+async function readFileUpdatedAtRequired(path: string): Promise<number> {
+  const info = await tauriFileSystem.stat(path);
+  if (!info.mtime) throw new Error(`Missing mtime for file: ${path}`);
+  return info.mtime.getTime();
 }
 
 async function readMdMtimes(dir: string, required = false): Promise<Map<string, number>> {
@@ -295,8 +297,8 @@ async function readMdMtimes(dir: string, required = false): Promise<Map<string, 
   for (const e of entries) {
     if (!e.name || !e.isFile) continue;
     if (!e.name.endsWith(".md")) continue;
-    const ts = await getFileTimestamps(tauriFileSystem, `${normalizeSep(dir)}${e.name}`);
-    out.set(e.name, ts.updatedAt);
+    const path = `${normalizeSep(dir)}${e.name}`;
+    out.set(e.name, await readFileUpdatedAtRequired(path));
   }
   return out;
 }
@@ -312,8 +314,8 @@ async function readTrashMdMtimes(dir: string, required = false): Promise<Map<str
   for (const e of entries) {
     if (!e.name || !e.isFile) continue;
     if (!e.name.endsWith(".md")) continue;
-    const ts = await getFileTimestamps(tauriFileSystem, `${normalizeSep(trashDir)}${e.name}`);
-    out.set(e.name, ts.updatedAt);
+    const path = `${normalizeSep(trashDir)}${e.name}`;
+    out.set(e.name, await readFileUpdatedAtRequired(path));
   }
   return out;
 }
@@ -374,7 +376,7 @@ async function unionCopyMissing(srcDir: string, destDir: string): Promise<void> 
     if (entry.isDirectory) {
       await unionCopyMissing(srcPath, destPath);
     } else if (entry.isFile) {
-      const destAlready = await exists(destPath).catch(() => false);
+      const destAlready = await exists(destPath);
       if (destAlready) continue;
       await copyFile(srcPath, destPath);
     }
@@ -453,11 +455,11 @@ export async function migrateNotesDir(
 
     const sourceTrashMtimes = await readTrashMdMtimes(
       fromDir,
-      await exists(`${fromBase}.trash`).catch(() => false),
+      await exists(`${fromBase}.trash`),
     );
     const destTrashMtimes = await readTrashMdMtimes(
       toDir,
-      await exists(`${toBase}.trash`).catch(() => false),
+      await exists(`${toBase}.trash`),
     );
 
     const sourceGroupsFile = await readGroupsFile(tauriFileSystem, fromDir);
@@ -504,7 +506,7 @@ export async function migrateNotesDir(
       }
     }
 
-    if (await exists(`${fromBase}.assets`).catch(() => false)) {
+    if (await exists(`${fromBase}.assets`)) {
       await unionCopyMissing(`${fromBase}.assets`, `${toBase}.assets`);
     }
 
@@ -513,7 +515,7 @@ export async function migrateNotesDir(
       await writeGroupsWithMerge(tauriFileSystem, toDir, merged);
     }
 
-    if (await exists(`${fromBase}.conflicts`).catch(() => false)) {
+    if (await exists(`${fromBase}.conflicts`)) {
       try {
         await unionCopyMissing(`${fromBase}.conflicts`, `${toBase}.conflicts`);
       } catch { /* best-effort */ }
@@ -535,29 +537,18 @@ export async function migrateNotesDir(
 }
 
 export async function hasExistingNotenData(dir: string): Promise<boolean> {
-  const base = normalizeSep(dir);
   try {
     const entries = await readDir(dir);
     if (entries.some((e) => e.isFile && e.name?.endsWith(".md"))) return true;
-  } catch { /* ignore */ }
-  try {
-    if (await exists(`${base}manifest.json`)) return true;
-  } catch { /* ignore */ }
-  try {
-    if (await exists(`${base}.groups.json`)) return true;
-  } catch { /* ignore */ }
-  try {
-    const metaEntries = await readDir(`${base}.meta`);
-    if (metaEntries.some((e) => e.name?.endsWith(".json"))) return true;
-  } catch { /* ignore */ }
-  try {
-    const trashEntries = await readDir(`${base}.trash`);
-    if (trashEntries.some((e) => e.isFile && e.name?.endsWith(".md"))) return true;
-  } catch { /* ignore */ }
-  try {
-    const assetEntries = await readDir(`${base}.assets`);
-    if (assetEntries.some((e) => e.name)) return true;
-  } catch { /* ignore */ }
+    if (entries.some((e) => e.name === "manifest.json")) return true;
+    if (entries.some((e) => e.name === ".groups.json")) return true;
+    if (entries.some((e) => e.name === ".meta" && e.isDirectory)) return true;
+    if (entries.some((e) => e.name === ".trash" && e.isDirectory)) return true;
+    if (entries.some((e) => e.name === ".assets" && e.isDirectory)) return true;
+    if (entries.some((e) => e.name === ".conflicts" && e.isDirectory)) return true;
+  } catch {
+    return true;
+  }
   return false;
 }
 

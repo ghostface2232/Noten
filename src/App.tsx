@@ -477,6 +477,15 @@ function App() {
     return saved;
   }, [updateSetting]);
 
+  // Unwind a failed notes-dir migration: restore the loader's in-memory dir,
+  // roll the persisted setting back, and release the autosave guard. Each
+  // failure path (try/catch throw, !result.success) repeated this triple.
+  const revertNotesDirChange = useCallback(async (oldDir: string, previousNotesDirectory: string) => {
+    setNotesDir(oldDir, reconcileStateRef.current);
+    await persistNotesDirectorySetting(previousNotesDirectory);
+    setMigrationInProgress(false);
+  }, [persistNotesDirectorySetting]);
+
   const handleOpenSearch = useCallback(() => {
     setDocGoToLineOpen(false);
     setDocSearchReplace(false);
@@ -533,16 +542,12 @@ function App() {
         ? await clearManagedNotesData(oldDir, newDir)
         : await migrateNotesDir(oldDir, newDir, action === "merge" ? "merge" : "overwrite");
     } catch (err) {
-      setNotesDir(oldDir, reconcileStateRef.current);
-      await persistNotesDirectorySetting(previousNotesDirectory);
-      setMigrationInProgress(false);
+      await revertNotesDirChange(oldDir, previousNotesDirectory);
       throw err;
     }
 
     if (!result.success) {
-      setNotesDir(oldDir, reconcileStateRef.current);
-      await persistNotesDirectorySetting(previousNotesDirectory);
-      setMigrationInProgress(false);
+      await revertNotesDirChange(oldDir, previousNotesDirectory);
       await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
       return;
     }
@@ -551,7 +556,7 @@ function App() {
     setCurrentNotesDir(newDir);
     setReloadKey((k) => k + 1);
     // Reload owns releasing migrationInProgress.
-  }, [locale, persistNotesDirectorySetting, requestNotesDirConflictChoice, settings.notesDirectory]);
+  }, [locale, persistNotesDirectorySetting, requestNotesDirConflictChoice, revertNotesDirChange, settings.notesDirectory]);
 
   const handleResetNotesDir = useCallback(async () => {
     if (!settings.notesDirectory) return;
@@ -584,16 +589,12 @@ function App() {
     try {
       result = await migrateNotesDir(oldDir, defaultDir, "overwrite");
     } catch (err) {
-      setNotesDir(oldDir, reconcileStateRef.current);
-      await persistNotesDirectorySetting(previousNotesDirectory);
-      setMigrationInProgress(false);
+      await revertNotesDirChange(oldDir, previousNotesDirectory);
       throw err;
     }
 
     if (!result.success) {
-      setNotesDir(oldDir, reconcileStateRef.current);
-      await persistNotesDirectorySetting(previousNotesDirectory);
-      setMigrationInProgress(false);
+      await revertNotesDirChange(oldDir, previousNotesDirectory);
       await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
       return;
     }
@@ -601,7 +602,7 @@ function App() {
     setCurrentNotesDir(defaultDir);
     setReloadKey((k) => k + 1);
     // Reload owns releasing migrationInProgress.
-  }, [locale, persistNotesDirectorySetting, settings.notesDirectory]);
+  }, [locale, persistNotesDirectorySetting, revertNotesDirChange, settings.notesDirectory]);
 
   const {
     chromeVisible,

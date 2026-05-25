@@ -138,3 +138,58 @@ describe("contract: notes directory setting is durable before migration", () => 
     expect(persistAt).toBeLessThan(migrateAt);
   });
 });
+
+describe("contract: autosave failures remain flushable", () => {
+  // Regression class: failed debounced saves must not clear all pending state
+  // before the write result is known. Otherwise a later flush can observe a
+  // dirty document but have no pending retry to perform.
+  const AUTOSAVE = resolve(SRC_ROOT, "hooks/useAutoSave.ts");
+
+  it("flush retries when the document is dirty even if pending flags were lost", () => {
+    const text = read(AUTOSAVE);
+    expect(text).toMatch(/!hasPendingChangesRef\.current && !stateRef\.current\.state\.isDirty/);
+  });
+
+  it("timer callbacks clear pending snapshots only after doSave succeeds", () => {
+    const text = read(AUTOSAVE);
+    const timerMatch = text.match(/const timer = setTimeout[\s\S]*?\n    \}, DEBOUNCE_MS\);/);
+    expect(timerMatch, "autosave timer callback not found").not.toBeNull();
+    const body = timerMatch![0];
+    const saveAt = body.indexOf("doSave(pending)");
+    const clearAt = body.indexOf("clearPendingSnapshotIfCurrent(pending)");
+    expect(saveAt).toBeGreaterThanOrEqual(0);
+    expect(clearAt).toBeGreaterThan(saveAt);
+  });
+});
+
+describe("contract: migration does not treat transient I/O as empty state", () => {
+  // Regression class: directory migration must fail closed when reads or stats
+  // are unavailable. Empty-dir and Date.now() fallbacks can pick the wrong
+  // last-write-wins side or delete/copy the wrong managed tree.
+  const MIGRATION = resolve(SRC_ROOT, "utils/migrateNotesDir.ts");
+
+  it("migration code does not downgrade exists failures to false", () => {
+    const text = read(MIGRATION);
+    expect(text).not.toMatch(/exists\([^)]*\)\.catch\(\(\) => false\)/);
+  });
+
+  it("overwrite copy does not turn an unreadable source root into an empty copy", () => {
+    const text = read(MIGRATION);
+    const fnMatch = text.match(/async function copySharedTreeForOverwrite[\s\S]*?\n\}/);
+    expect(fnMatch, "copySharedTreeForOverwrite not found").not.toBeNull();
+    expect(fnMatch![0]).not.toMatch(/entries\s*=\s*\[\]/);
+  });
+
+  it("migration mtimes come from stat mtime, not getFileTimestamps Date.now fallback", () => {
+    const text = read(MIGRATION);
+    expect(text).not.toMatch(/getFileTimestamps/);
+    expect(text).toMatch(/Missing mtime for file/);
+  });
+
+  it("destination probing fails closed when the root directory is unreadable", () => {
+    const text = read(MIGRATION);
+    const fnMatch = text.match(/export async function hasExistingNotenData[\s\S]*?\n\}/);
+    expect(fnMatch, "hasExistingNotenData not found").not.toBeNull();
+    expect(fnMatch![0]).toMatch(/catch\s*\{\s*return true;\s*\}/);
+  });
+});

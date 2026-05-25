@@ -89,6 +89,17 @@ export function useAutoSave(
     };
   }, []);
 
+  const refreshHasPendingChanges = useCallback(() => {
+    hasPendingChangesRef.current = pendingSnapshotsRef.current.size > 0;
+  }, []);
+
+  const clearPendingSnapshotIfCurrent = useCallback((snapshot: SaveSnapshot) => {
+    const current = pendingSnapshotsRef.current.get(snapshot.docId);
+    if (current?.revision !== snapshot.revision) return;
+    pendingSnapshotsRef.current.delete(snapshot.docId);
+    refreshHasPendingChanges();
+  }, [refreshHasPendingChanges]);
+
   const doSave = useCallback(async (snapshot: SaveSnapshot): Promise<boolean> => {
     // Snapshots captured before a notes-dir migration point at stale paths.
     if (migrationInProgress) return false;
@@ -199,18 +210,23 @@ export function useAutoSave(
       clearTimeout(timer);
     }
     timersRef.current.clear();
-    pendingSnapshotsRef.current.clear();
 
-    if (!hasPendingChangesRef.current) {
-      return Promise.resolve(!stateRef.current.state.isDirty);
+    if (!hasPendingChangesRef.current && !stateRef.current.state.isDirty) {
+      return Promise.resolve(true);
     }
-    hasPendingChangesRef.current = false;
 
     const freshSnapshot = createSnapshot();
     if (!freshSnapshot) return Promise.resolve(false);
 
-    return doSave(freshSnapshot);
-  }, [createSnapshot, doSave]);
+    hasPendingChangesRef.current = true;
+    pendingSnapshotsRef.current.set(freshSnapshot.docId, freshSnapshot);
+
+    return doSave(freshSnapshot).then((saved) => {
+      if (saved) clearPendingSnapshotIfCurrent(freshSnapshot);
+      else refreshHasPendingChanges();
+      return saved;
+    });
+  }, [clearPendingSnapshotIfCurrent, createSnapshot, doSave, refreshHasPendingChanges]);
 
   const scheduleAutoSave = useCallback(() => {
     if (migrationInProgress) return;
@@ -229,15 +245,16 @@ export function useAutoSave(
     const timer = setTimeout(() => {
       timersRef.current.delete(snapshot.docId);
       const pending = pendingSnapshotsRef.current.get(snapshot.docId);
-      pendingSnapshotsRef.current.delete(snapshot.docId);
       if (pending) {
-        hasPendingChangesRef.current = false;
-        void doSave(pending);
+        void doSave(pending).then((saved) => {
+          if (saved) clearPendingSnapshotIfCurrent(pending);
+          else refreshHasPendingChanges();
+        });
       }
     }, DEBOUNCE_MS);
 
     timersRef.current.set(snapshot.docId, timer);
-  }, [createSnapshot, doSave]);
+  }, [clearPendingSnapshotIfCurrent, createSnapshot, doSave, refreshHasPendingChanges]);
 
   useEffect(() => {
     return () => {
