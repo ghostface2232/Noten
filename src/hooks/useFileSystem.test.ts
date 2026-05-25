@@ -148,6 +148,7 @@ interface RenderOpts {
   openDocument?: ReturnType<typeof vi.fn>;
   invalidateDocumentSession?: ReturnType<typeof vi.fn>;
   focusEditor?: ReturnType<typeof vi.fn>;
+  flushDocSave?: (docId: string) => Promise<boolean>;
 }
 
 function renderFs(opts: RenderOpts = {}) {
@@ -163,6 +164,8 @@ function renderFs(opts: RenderOpts = {}) {
   const notifyActiveDocRef = { current: notifyActiveDoc };
   const cancelDocSave = vi.fn();
   const cancelDocSaveRef = { current: cancelDocSave };
+  const flushDocSave = opts.flushDocSave ?? vi.fn(async (_docId: string) => true);
+  const flushDocSaveRef: React.RefObject<((docId: string) => Promise<boolean>) | null> = { current: flushDocSave };
 
   const openDocument = opts.openDocument ?? vi.fn();
   const invalidateDocumentSession = opts.invalidateDocumentSession ?? vi.fn();
@@ -196,6 +199,8 @@ function renderFs(opts: RenderOpts = {}) {
       flushAutoSaveRef,
       notifyActiveDocRef,
       cancelDocSaveRef,
+      undefined,
+      flushDocSaveRef,
     ),
   );
 
@@ -208,6 +213,7 @@ function renderFs(opts: RenderOpts = {}) {
     flushAutoSave,
     notifyActiveDoc,
     cancelDocSave,
+    flushDocSave,
     openDocument,
     invalidateDocumentSession,
     focusEditor,
@@ -403,6 +409,60 @@ describe("useFileSystem — deleteNote cancels pending autosave", () => {
     // This is the first thing deleteNote does — protects against the autosave
     // timer firing into a file we're about to move to .trash.
     expect(cancelDocSave).toHaveBeenCalledWith("a");
+  });
+});
+
+describe("useFileSystem — deleteNote flushes in-flight save", () => {
+  it("flushes the deleted doc's background save before copying it to trash", async () => {
+    let releaseSave: (saved: boolean) => void = () => {};
+    const flushDocSave = vi.fn(
+      () => new Promise<boolean>((resolve) => {
+        releaseSave = resolve;
+      }),
+    );
+    const docA = makeDoc("a", { content: "new body" });
+    const docB = makeDoc("b");
+    const { result } = renderFs({
+      docs: [docA, docB],
+      activeIndex: 1,
+      flushDocSave,
+    });
+
+    let finished = false;
+    const deletePromise = act(async () => {
+      await result.current.deleteNote(0);
+      finished = true;
+    });
+
+    await Promise.resolve();
+    expect(flushDocSave).toHaveBeenCalledWith("a");
+    expect(copyFileMock).not.toHaveBeenCalled();
+    expect(finished).toBe(false);
+
+    releaseSave(true);
+    await deletePromise;
+
+    expect(copyFileMock).toHaveBeenCalledWith("/notes/a.md", "/notes/.trash/a.md");
+    expect(finished).toBe(true);
+  });
+
+  it("aborts deletion when the deleted doc cannot be flushed", async () => {
+    const flushDocSave = vi.fn(async () => false);
+    const docA = makeDoc("a", { content: "new body" });
+    const docB = makeDoc("b");
+    const { result, cancelDocSave } = renderFs({
+      docs: [docA, docB],
+      activeIndex: 1,
+      flushDocSave,
+    });
+
+    await act(async () => {
+      await result.current.deleteNote(0);
+    });
+
+    expect(flushDocSave).toHaveBeenCalledWith("a");
+    expect(cancelDocSave).not.toHaveBeenCalled();
+    expect(copyFileMock).not.toHaveBeenCalled();
   });
 });
 

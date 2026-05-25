@@ -604,6 +604,48 @@ describe("useAutoSave — captureAndQueueSave (doc-switch fast path)", () => {
     expect(getCurrentMarkdownMock).not.toHaveBeenCalled();
   });
 
+  it("does not snapshot a clean active doc because another doc has a stranded snapshot", async () => {
+    refs.writeShouldThrow = new Error("EBUSY");
+    const docs = [makeDoc("a"), makeDoc("b")];
+    const setDocs = vi.fn();
+    const setActiveIndex = vi.fn();
+    const tiptapRef = makeTiptapRef();
+    const groups: NoteGroup[] = [];
+
+    const { result, rerender } = renderHook(
+      ({ activeIndex, state }: { activeIndex: number; state: MarkdownState }) =>
+        useAutoSave(
+          state,
+          tiptapRef,
+          docs,
+          setDocs,
+          activeIndex,
+          setActiveIndex,
+          "en" as Locale,
+          "updated-desc" as NotesSortOrder,
+          groups,
+        ),
+      { initialProps: { activeIndex: 0, state: makeState({ isDirty: true }) } },
+    );
+
+    refs.editorContent = "dirty A";
+    act(() => result.current.captureAndQueueSave());
+    await act(async () => { await result.current.awaitInFlightSaves(); });
+    expect(writeMock).toHaveBeenCalledTimes(1);
+
+    refs.writeShouldThrow = null;
+    refs.editorContent = "clean B";
+    rerender({ activeIndex: 1, state: makeState({ isDirty: false }) });
+    getCurrentMarkdownMock.mockClear();
+    writeMock.mockClear();
+
+    act(() => result.current.captureAndQueueSave());
+    await act(async () => { await result.current.awaitInFlightSaves(); });
+
+    expect(getCurrentMarkdownMock).not.toHaveBeenCalled();
+    expect(writeMock).not.toHaveBeenCalled();
+  });
+
   it("clears any pending debounce timer so the save runs once, not twice", async () => {
     vi.useFakeTimers();
     refs.editorContent = "captured";
@@ -647,6 +689,37 @@ describe("useAutoSave — awaitInFlightSaves (close-handler guarantee)", () => {
     await drain;
     expect(drained).toBe(true);
     expect(writeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("awaitDocSave waits only for saves belonging to the requested doc", async () => {
+    let releaseBackup: () => void = () => {};
+    backupMock.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => {
+        releaseBackup = () => resolve(false);
+      }),
+    );
+    const { result } = renderAutoSave({ state: makeState({ isDirty: true }) });
+
+    act(() => result.current.captureAndQueueSave());
+
+    let otherDocDrained = false;
+    await act(async () => {
+      await result.current.awaitDocSave("b");
+      otherDocDrained = true;
+    });
+    expect(otherDocDrained).toBe(true);
+
+    let activeDocDrained = false;
+    const drainActive = act(async () => {
+      await result.current.awaitDocSave("a");
+      activeDocDrained = true;
+    });
+    await Promise.resolve();
+    expect(activeDocDrained).toBe(false);
+
+    releaseBackup();
+    await drainActive;
+    expect(activeDocDrained).toBe(true);
   });
 });
 

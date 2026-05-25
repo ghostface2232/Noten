@@ -196,6 +196,7 @@ export function useFileSystem(
   notifyActiveDocRef?: React.RefObject<((id: string, filePath: string) => void) | null>,
   cancelDocSaveRef?: React.RefObject<((docId: string) => void) | null>,
   captureAndQueueSaveRef?: React.RefObject<(() => void) | null>,
+  flushDocSaveRef?: React.RefObject<((docId: string) => Promise<boolean>) | null>,
 ): FileSystemActions {
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
@@ -607,16 +608,24 @@ export function useFileSystem(
   }, [captureAndQueueSaveRef, getLiveDocsSnapshot, leaveCurrentDoc, markDocClean, setActiveIndex, setDocs, state, tiptapRef, pruneEmptyCurrentDoc]);
 
   const deleteNote = useCallback(async (index: number) => {
+    const initialDoc = docsRef.current[index];
+    if (!initialDoc) return;
+
+    const didFlushDeletedDoc = await flushDocSaveRef?.current?.(initialDoc.id);
+    if (didFlushDeletedDoc === false) return;
+
     const { docs: liveDocs, activeDocId, activeIndex: currentActiveIndex } = getLiveDocsSnapshot();
-    const doc = liveDocs[index];
-    if (!doc) return;
+    const deleteIndex = liveDocs.findIndex((entry) => entry.id === initialDoc.id);
+    if (deleteIndex < 0) return;
+    const doc = liveDocs[deleteIndex];
+
 
     // Cancel any pending autosave timer for this doc to prevent orphan writes after deletion
     cancelDocSaveRef?.current?.(doc.id);
 
     // Flush pending auto-save so the on-disk file is up-to-date before trash copy
-    const didPersistCurrentDoc = index === currentActiveIndex ? await leaveCurrentDoc() : false;
-    const baseDocs = index === currentActiveIndex && didPersistCurrentDoc
+    const didPersistCurrentDoc = deleteIndex === currentActiveIndex ? await leaveCurrentDoc() : false;
+    const baseDocs = deleteIndex === currentActiveIndex && didPersistCurrentDoc
       ? markDocClean(liveDocs, activeDocId)
       : liveDocs;
 
@@ -658,7 +667,7 @@ export function useFileSystem(
       }
     }
 
-    const nextDocs = baseDocs.filter((_, i) => i !== index);
+    const nextDocs = baseDocs.filter((entry) => entry.id !== doc.id);
     tiptapRef.current?.invalidateDocumentSession?.(doc.id, doc.filePath);
     emitDocDeleted(doc.id);
 
@@ -696,11 +705,11 @@ export function useFileSystem(
       return;
     }
 
-    const wasActive = index === currentActiveIndex;
+    const wasActive = deleteIndex === currentActiveIndex;
     let nextActiveId: string;
 
     if (wasActive) {
-      const target = nextDocs[Math.min(index, nextDocs.length - 1)];
+      const target = nextDocs[Math.min(deleteIndex, nextDocs.length - 1)];
       nextActiveId = target.id;
       resetDocState(state, tiptapRef, target.id, target.filePath, target.content);
       notifyActiveDocRef?.current?.(target.id, target.filePath);
@@ -709,7 +718,7 @@ export function useFileSystem(
     }
 
     sortAndPersistDocs(nextDocs, nextActiveId, notesSortOrder, locale, setDocs, setActiveIndex, cleanedGroups);
-  }, [cancelDocSaveRef, getLiveDocsSnapshot, getGroupForNote, leaveCurrentDoc, locale, markDocClean, notesSortOrder, setActiveIndex, setDocs, setGroups, setTrashedNotes, state, tiptapRef]);
+  }, [cancelDocSaveRef, flushDocSaveRef, getLiveDocsSnapshot, getGroupForNote, leaveCurrentDoc, locale, markDocClean, notesSortOrder, setActiveIndex, setDocs, setGroups, setTrashedNotes, state, tiptapRef]);
 
   const duplicateNote = useCallback(async (index: number) => {
     const { docs: liveDocs, activeDocId } = getLiveDocsSnapshot();

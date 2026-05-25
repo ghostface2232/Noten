@@ -278,6 +278,7 @@ function App() {
   const flushAutoSaveRef = useRef<(() => Promise<boolean>) | null>(null);
   const captureAndQueueSaveRef = useRef<(() => void) | null>(null);
   const awaitInFlightSavesRef = useRef<(() => Promise<void>) | null>(null);
+  const flushDocSaveRef = useRef<((docId: string) => Promise<boolean>) | null>(null);
   const flushPendingSnapshotsRef = useRef<(() => Promise<void>) | null>(null);
   const notifyActiveDocRef = useRef<((id: string, filePath: string) => void) | null>(null);
   const cancelDocSaveRef = useRef<((docId: string) => void) | null>(null);
@@ -300,9 +301,10 @@ function App() {
     notifyActiveDocRef,
     cancelDocSaveRef,
     captureAndQueueSaveRef,
+    flushDocSaveRef,
   );
 
-  const { scheduleAutoSave, flushAutoSave, captureAndQueueSave, awaitInFlightSaves, flushPendingSnapshots, notifyActiveDoc, cancelDocSave } = useAutoSave(
+  const { scheduleAutoSave, flushAutoSave, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, notifyActiveDoc, cancelDocSave } = useAutoSave(
     state,
     tiptapRef,
     docs,
@@ -316,6 +318,7 @@ function App() {
   flushAutoSaveRef.current = flushAutoSave;
   captureAndQueueSaveRef.current = captureAndQueueSave;
   awaitInFlightSavesRef.current = awaitInFlightSaves;
+  flushDocSaveRef.current = flushDocSave;
   flushPendingSnapshotsRef.current = flushPendingSnapshots;
   notifyActiveDocRef.current = notifyActiveDoc;
   cancelDocSaveRef.current = cancelDocSave;
@@ -472,6 +475,18 @@ function App() {
   const activeDoc = docs[activeIndex];
   const docReady = !isLoading && !!activeDoc;
   const noteEditor = docReady ? tiptapEditor : null;
+  const editorDirtySessionRef = useRef<{ docId: string | null; dirty: boolean }>({
+    docId: null,
+    dirty: false,
+  });
+  useEffect(() => {
+    editorDirtySessionRef.current = { docId: activeDoc?.id ?? null, dirty: false };
+  }, [activeDoc?.id]);
+  useEffect(() => {
+    if (!state.isDirty) {
+      editorDirtySessionRef.current = { docId: activeDoc?.id ?? null, dirty: false };
+    }
+  }, [activeDoc?.id, state.isDirty]);
 
   const handleToggleTheme = useCallback(() => {
     updateSetting("themeMode", isDarkMode ? "light" : "dark");
@@ -746,22 +761,26 @@ function App() {
   const handleTiptapDirty = useCallback(
     (dirty: boolean) => {
       if (!dirty) return;
-      // No isDirtyRef gate: state.setIsDirty(true) is a no-op render when
-      // state is already true, and the setDocs updater early-returns prev
-      // when the doc is already dirty. Skipping the gate also avoids a
-      // narrow stale-ref window right after a fast-path switch, where
-      // isDirtyRef could still report the leaving doc's dirty state and
-      // make the first keystroke on the new doc invisible.
-      state.setIsDirty(true);
-      setDocs((prev) => {
-        const ai = activeIndexRef.current;
-        if (ai < 0 || ai >= prev.length) return prev;
-        const current = prev[ai];
-        if (current.isDirty) return prev;
-        const next = prev.slice();
-        next[ai] = { ...current, isDirty: true };
-        return next;
-      });
+      const ai = activeIndexRef.current;
+      const active = docsRef.current[ai];
+      if (
+        active
+        && (
+          editorDirtySessionRef.current.docId !== active.id
+          || !editorDirtySessionRef.current.dirty
+        )
+      ) {
+        editorDirtySessionRef.current = { docId: active.id, dirty: true };
+        state.setIsDirty(true);
+        setDocs((prev) => {
+          if (ai < 0 || ai >= prev.length) return prev;
+          const current = prev[ai];
+          if (current.isDirty) return prev;
+          const next = prev.slice();
+          next[ai] = { ...current, isDirty: true };
+          return next;
+        });
+      }
       scheduleAutoSave();
     },
     [state, scheduleAutoSave, setDocs],
