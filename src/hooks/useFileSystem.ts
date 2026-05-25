@@ -312,11 +312,10 @@ export function useFileSystem(
         while (existingNames.has(`${baseName} (${counter})`)) counter++;
         finalName = `${baseName} (${counter})`;
       }
-      existingNames.add(finalName);
 
       const id = crypto.randomUUID();
       const timestamp = Date.now();
-      let filePath = "";
+      let filePath: string;
 
       try {
         const notesDir = await getNotesDir();
@@ -325,11 +324,23 @@ export function useFileSystem(
         markOwnWrite(filePath, content);
         await writeTextFile(filePath, content);
       } catch (error) {
-        if (import.meta.env.DEV) {
-          console.warn("Failed to write imported note file:", error);
-        }
+        // Skip rather than pushing a ghost doc that points at a nonexistent
+        // file. The source file is still on disk so the user can retry; a
+        // loud SAVE_FAILED makes the failure diagnosable instead of vanishing
+        // behind a DEV-only warning.
+        void logNotenError(new NotenError(
+          "SAVE_FAILED",
+          "fatal",
+          error instanceof Error ? error.message : String(error),
+          {
+            context: { stage: "importFiles", sourcePath, finalName },
+            cause: error,
+          },
+        ));
+        continue;
       }
 
+      existingNames.add(finalName);
       importedDocs.push({
         id,
         filePath,
@@ -367,6 +378,31 @@ export function useFileSystem(
     const didPersistCurrentDoc = await leaveCurrentDoc();
     const baseDocs = didPersistCurrentDoc ? markDocClean(liveDocs, activeDocId) : liveDocs;
 
+    // Provision the blank body BEFORE any destructive state changes. If the
+    // write fails we want to leave the previous doc untouched rather than
+    // commit a clean manifest entry pointing at a missing file.
+    const id = crypto.randomUUID();
+    const timestamp = Date.now();
+    let filePath: string;
+    try {
+      const notesDir = await getNotesDir();
+      await mkdir(notesDir, { recursive: true }).catch(() => {});
+      filePath = `${notesDir}/${id}.md`;
+      markOwnWrite(filePath, "");
+      await writeTextFile(filePath, "");
+    } catch (error) {
+      void logNotenError(new NotenError(
+        "SAVE_FAILED",
+        "fatal",
+        error instanceof Error ? error.message : String(error),
+        {
+          context: { stage: "newNote", noteId: id },
+          cause: error,
+        },
+      ));
+      return;
+    }
+
     const inheritedGroupId = activeDocId
       ? (groupsRef.current?.find((g) => g.noteIds.includes(activeDocId))?.id ?? null)
       : null;
@@ -395,19 +431,6 @@ export function useFileSystem(
       setGroups?.(workingGroups ?? []);
       prunedDocs = baseDocs.filter((d) => d.id !== currentDoc.id);
       setDocs(prunedDocs);
-    }
-
-    const id = crypto.randomUUID();
-    const timestamp = Date.now();
-    let filePath = "";
-    try {
-      const notesDir = await getNotesDir();
-      await mkdir(notesDir, { recursive: true }).catch(() => {});
-      filePath = `${notesDir}/${id}.md`;
-    } catch (error) {
-      if (import.meta.env.DEV) {
-        console.warn("Failed to resolve notes directory for new note:", error);
-      }
     }
 
     const newDoc: NoteDoc = {
@@ -439,10 +462,6 @@ export function useFileSystem(
       emitDocCreated(newDoc);
       resetDocState(state, tiptapRef, id, filePath, "");
       notifyActiveDocRef?.current?.(id, filePath);
-      if (filePath) {
-        markOwnWrite(filePath, "");
-        writeTextFile(filePath, "").catch(() => {});
-      }
     };
 
     if (willReplace) {
@@ -593,18 +612,33 @@ export function useFileSystem(
       const id = crypto.randomUUID();
       const timestamp = Date.now();
       let filePath = "";
+      let writeOk = false;
       try {
         const notesDir = await getNotesDir();
         filePath = `${notesDir}/${id}.md`;
         markOwnWrite(filePath, "");
         await writeTextFile(filePath, "");
-      } catch { /* ignore */ }
+        writeOk = true;
+      } catch (error) {
+        // The user just emptied the trash slot; we can't unwind the delete
+        // above. Surface the failure and flag the replacement as dirty so the
+        // manifest doesn't claim a clean entry that has no body on disk.
+        void logNotenError(new NotenError(
+          "SAVE_FAILED",
+          "fatal",
+          error instanceof Error ? error.message : String(error),
+          {
+            context: { stage: "deleteNote.replacement", noteId: id, filePath },
+            cause: error,
+          },
+        ));
+      }
 
       const newDoc: NoteDoc = {
         id,
         filePath,
         fileName: getDefaultDocumentTitle(locale),
-        isDirty: false,
+        isDirty: !writeOk,
         content: "",
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -645,14 +679,29 @@ export function useFileSystem(
 
     const id = crypto.randomUUID();
     const timestamp = Date.now();
-    let filePath = "";
+    const content = sourceDoc.content;
+    let filePath: string;
     try {
       const notesDir = await getNotesDir();
       await mkdir(notesDir, { recursive: true }).catch(() => {});
       filePath = `${notesDir}/${id}.md`;
-    } catch { /* ignore */ }
+      markOwnWrite(filePath, content);
+      await writeTextFile(filePath, content);
+    } catch (error) {
+      // Abort rather than committing a clean duplicate that lies about being
+      // persisted. The source doc is unaffected, so the user can retry.
+      void logNotenError(new NotenError(
+        "SAVE_FAILED",
+        "fatal",
+        error instanceof Error ? error.message : String(error),
+        {
+          context: { stage: "duplicateNote", noteId: id, sourceId: sourceDoc.id },
+          cause: error,
+        },
+      ));
+      return;
+    }
 
-    const content = sourceDoc.content;
     const newDoc: NoteDoc = {
       id,
       filePath,
@@ -662,17 +711,6 @@ export function useFileSystem(
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-
-    if (filePath) {
-      try {
-        markOwnWrite(filePath, content);
-        await writeTextFile(filePath, content);
-      } catch {
-        if (import.meta.env.DEV) {
-          console.warn("Failed to write duplicated note file.");
-        }
-      }
-    }
 
     const prunedDocs = pruneEmptyCurrentDoc(baseDocs, activeDocId);
     const nextDocs = [...prunedDocs, newDoc];
@@ -713,60 +751,99 @@ export function useFileSystem(
     const replacement = `[[${trimmed}]]`;
     const now = Date.now();
 
-    let activeRewrittenContent: string | null = null;
-    const diskWrites: Array<{ filePath: string; content: string }> = [];
+    // Compute proposed rewrites without mutating memory yet; we only commit a
+    // rewrite to the in-memory doc once its disk write lands, so memory stays
+    // in sync with disk if a write fails.
+    interface ProposedRewrite { docId: string; updated: string; filePath: string | null; isActive: boolean; }
+    const proposed: ProposedRewrite[] = [];
+    for (const entry of liveDocs) {
+      if (entry.id === doc.id) continue;
+      if (!entry.content.includes("[[")) continue;
+      const updated = entry.content.replace(rewritePattern, replacement);
+      if (updated === entry.content) continue;
+      proposed.push({
+        docId: entry.id,
+        updated,
+        filePath: entry.filePath || null,
+        isActive: entry.id === activeDocId,
+      });
+    }
 
+    const committed = new Set<string>();
+
+    await Promise.all(proposed.map(async (rw) => {
+      if (rw.isActive) return; // active doc handled below
+      if (!rw.filePath) {
+        // Memory-only doc — no disk to diverge from, safe to commit.
+        committed.add(rw.docId);
+        return;
+      }
+      try {
+        markOwnWrite(rw.filePath, rw.updated);
+        await writeTextFile(rw.filePath, rw.updated);
+        committed.add(rw.docId);
+      } catch (error) {
+        void logNotenError(new NotenError(
+          "SAVE_FAILED",
+          "fatal",
+          error instanceof Error ? error.message : String(error),
+          {
+            context: { stage: "renameNote.rewrite", noteId: rw.docId, filePath: rw.filePath },
+            cause: error,
+          },
+        ));
+      }
+    }));
+
+    const activeRewrite = proposed.find((rw) => rw.isActive) ?? null;
+    let activeWriteOk = false;
+    if (activeRewrite) {
+      const activeDoc = liveDocs[currentActiveIndex];
+      if (activeDoc?.filePath) {
+        try {
+          markOwnWrite(activeDoc.filePath, activeRewrite.updated);
+          await writeTextFile(activeDoc.filePath, activeRewrite.updated);
+          activeWriteOk = true;
+        } catch (error) {
+          void logNotenError(new NotenError(
+            "SAVE_FAILED",
+            "fatal",
+            error instanceof Error ? error.message : String(error),
+            {
+              context: { stage: "renameNote.rewrite.active", noteId: activeDoc.id, filePath: activeDoc.filePath },
+              cause: error,
+            },
+          ));
+        }
+      } else {
+        // No file path on the active doc — memory only.
+        activeWriteOk = true;
+      }
+      if (activeWriteOk) committed.add(activeRewrite.docId);
+    }
+
+    const proposedById = new Map(proposed.map((rw) => [rw.docId, rw]));
     const nextDocs = liveDocs.map((entry, i) => {
       if (i === index) {
         return { ...entry, fileName: trimmed, updatedAt: now, customName: true };
       }
-      if (!entry.content.includes("[[")) return entry;
-      const updated = entry.content.replace(rewritePattern, replacement);
-      if (updated === entry.content) return entry;
-
-      if (entry.id === activeDocId) {
-        activeRewrittenContent = updated;
-        // Active doc is flushed through the editor (below), not direct disk write.
-        return { ...entry, content: updated, updatedAt: now };
-      }
-      if (entry.filePath) {
-        diskWrites.push({ filePath: entry.filePath, content: updated });
-      }
-      return { ...entry, content: updated, updatedAt: now };
+      const rw = proposedById.get(entry.id);
+      if (!rw || !committed.has(entry.id)) return entry;
+      return { ...entry, content: rw.updated, updatedAt: now };
     });
 
-    await Promise.all(
-      diskWrites.map(async (write) => {
-        try {
-          markOwnWrite(write.filePath, write.content);
-          await writeTextFile(write.filePath, write.content);
-        } catch {
-          if (import.meta.env.DEV) {
-            console.warn("Failed to rewrite wiki links in note:", write.filePath);
-          }
-        }
-      }),
-    );
-
-    if (activeRewrittenContent !== null) {
+    // Flip the editor only if the active doc's rewrite actually landed on
+    // disk. Clearing isDirty when the write failed would mask the loss; an
+    // unchanged editor + dirty flag lets autosave retry.
+    if (activeRewrite && activeWriteOk) {
       const activeDoc = liveDocs[currentActiveIndex];
-      if (activeDoc?.filePath) {
-        try {
-          markOwnWrite(activeDoc.filePath, activeRewrittenContent);
-          await writeTextFile(activeDoc.filePath, activeRewrittenContent);
-        } catch {
-          if (import.meta.env.DEV) {
-            console.warn("Failed to persist rewritten wiki links for active note.");
-          }
-        }
-      }
       tiptapRef.current?.openDocument?.({
         noteId: activeDoc?.id ?? null,
         filePath: activeDoc?.filePath ?? null,
-        markdown: activeRewrittenContent,
+        markdown: activeRewrite.updated,
         reason: "file-watch",
       });
-      state.primeMarkdown(activeRewrittenContent);
+      state.primeMarkdown(activeRewrite.updated);
       state.setIsDirty(false);
     }
 
