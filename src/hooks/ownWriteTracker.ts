@@ -1,8 +1,26 @@
 // Track local writes by short timestamp and optional content hash. Hash checks
 // keep shared-folder latency from hiding real remote edits on the same path.
 
-function normalizePath(p: string): string {
-  return p.replace(/\\/g, "/").toLowerCase();
+// Canonical key used for own-write lookups. Tauri's `writeTextFile` and the
+// fs watcher can hand us *different string forms of the same file* on Windows:
+// drive-letter case, separator direction, the `\\?\` extended-length prefix,
+// or `\\?\UNC\` for UNC shares. If the marker key doesn't match the watcher
+// key, every self-save looks remote and triggers a reconcile loop.
+export function pathKey(p: string): string {
+  if (!p) return "";
+  let s = p.replace(/\\/g, "/").toLowerCase();
+  // Strip Windows extended-length / UNC namespace prefixes so the watcher's
+  // canonicalized form lines up with whatever we passed to writeTextFile.
+  if (s.startsWith("//?/unc/")) s = "//" + s.slice("//?/unc/".length);
+  else if (s.startsWith("//?/")) s = s.slice("//?/".length);
+  else if (s.startsWith("//./")) s = s.slice("//./".length);
+  // Collapse duplicate separators (template concatenation produces these),
+  // but preserve the leading "//" that marks a UNC path.
+  const isUnc = s.startsWith("//");
+  s = s.replace(/\/+/g, "/");
+  if (isUnc) s = "/" + s;
+  if (s.length > 1) s = s.replace(/\/+$/, "");
+  return s;
 }
 
 const timestamps = new Map<string, number>();
@@ -22,7 +40,7 @@ async function sha256Hex(text: string): Promise<string> {
 }
 
 export function markOwnWrite(filePath: string, content?: string): void {
-  const key = normalizePath(filePath);
+  const key = pathKey(filePath);
   timestamps.set(key, Date.now());
   if (content !== undefined) {
     // Watch events are delayed, so this hash should land before we compare.
@@ -39,13 +57,13 @@ export function markOwnWrite(filePath: string, content?: string): void {
 }
 
 export function isOwnWrite(filePath: string): boolean {
-  const key = normalizePath(filePath);
+  const key = pathKey(filePath);
   const ts = timestamps.get(key);
   return ts !== undefined && Date.now() - ts < TIME_GRACE_MS;
 }
 
 export async function isOwnWriteContentMatch(filePath: string, content: string): Promise<boolean> {
-  const key = normalizePath(filePath);
+  const key = pathKey(filePath);
   const set = hashes.get(key);
   if (!set || set.size === 0) return false;
   const hash = await sha256Hex(content);

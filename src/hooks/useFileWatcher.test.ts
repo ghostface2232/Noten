@@ -74,6 +74,7 @@ vi.mock("./ownWriteTracker", () => ({
   isOwnWriteContentMatch: vi.fn(async () => refs.ownWriteMatch),
   pruneOwnWrites: vi.fn(),
   markOwnWrite: vi.fn(),
+  pathKey: (p: string) => p.replace(/\\/g, "/").toLowerCase(),
 }));
 
 vi.mock("../utils/fileTimestamps", () => ({

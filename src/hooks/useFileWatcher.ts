@@ -17,7 +17,7 @@ import {
 import { reconcileFolder, type ReconcileState } from "../utils/reconcileFolder";
 import { tauriFileSystem } from "../utils/fs";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
-import { isOwnWrite, isOwnWriteContentMatch, pruneOwnWrites } from "./ownWriteTracker";
+import { isOwnWrite, isOwnWriteContentMatch, pruneOwnWrites, pathKey } from "./ownWriteTracker";
 import { getFileTimestamps } from "../utils/fileTimestamps";
 import { readMeta } from "../utils/metadataIO";
 import { scanAndAbsorbConflicts } from "../utils/conflictFileDetector";
@@ -28,9 +28,10 @@ import type { Locale } from "./useSettings";
 
 export { markOwnWrite } from "./ownWriteTracker";
 
-function normalizePath(p: string): string {
-  return p.replace(/\\/g, "/").toLowerCase();
-}
+// Re-exported under the legacy name so existing call sites stay readable, but
+// the implementation must be the same one ownWriteTracker uses or own-write
+// suppression breaks on Windows (drive case / separators / `\\?\` prefixes).
+const normalizePath = pathKey;
 
 const RECONCILE_INTERVAL_MS = 60_000;
 const FOCUS_DEBOUNCE_MS = 500;
