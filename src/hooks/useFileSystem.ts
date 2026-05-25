@@ -302,7 +302,25 @@ export function useFileSystem(
     const importedDocs: NoteDoc[] = [];
 
     for (const sourcePath of sourcePaths) {
-      const content = await readTextFile(sourcePath);
+      let content: string;
+      try {
+        content = await readTextFile(sourcePath);
+      } catch (error) {
+        // A transient read failure on a single source file must not abort
+        // the whole batch: any files already written above would then be on
+        // disk without a manifest entry until next reload reconciles. Log,
+        // skip this file, keep importing the rest.
+        void logNotenError(new NotenError(
+          "BODY_READ_FAILED",
+          "recoverable",
+          error instanceof Error ? error.message : String(error),
+          {
+            context: { stage: "importFiles", sourcePath },
+            cause: error,
+          },
+        ));
+        continue;
+      }
       const rawName = getFileName(sourcePath).replace(/\.(md|markdown|mdx|txt)$/i, "");
       const baseName = rawName || "Imported";
 
@@ -925,7 +943,26 @@ export function useFileSystem(
     }
     try { await remove(trashed.trashFilePath); } catch { /* ignore */ }
 
-    const content = await readTextFile(restoredPath);
+    // copyFile above succeeded, so the file is on disk at restoredPath.
+    // If the read here fails, defer the UI commit — next reload's reconcile
+    // discovers the restored file and creates the doc with real content.
+    // Surfacing the failure prevents the user's click from looking like a
+    // silent no-op (trash entry still showing, no new doc).
+    let content: string;
+    try {
+      content = await readTextFile(restoredPath);
+    } catch (error) {
+      void logNotenError(new NotenError(
+        "BODY_READ_FAILED",
+        "recoverable",
+        error instanceof Error ? error.message : String(error),
+        {
+          context: { stage: "restoreNote", noteId: trashedNoteId, filePath: restoredPath },
+          cause: error,
+        },
+      ));
+      return;
+    }
 
     const restoredDoc: NoteDoc = {
       id: trashed.id,
