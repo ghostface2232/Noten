@@ -65,7 +65,7 @@ const useStyles = makeStyles({
     display: "flex",
     height: "470px",
     padding: "4px",
-    paddingLeft: 0,
+    gap: "4px",
     position: "relative",
   },
   noiseOverlay: {
@@ -83,9 +83,6 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     padding: "16px 8px",
-    marginTop: "-4px",
-    marginBottom: "-4px",
-    marginRight: "-8px",
     gap: "2px",
   },
   navTitle: {
@@ -146,9 +143,22 @@ const useStyles = makeStyles({
   },
   content: {
     flex: 1,
+    minWidth: 0,
     borderRadius: "8px",
-    padding: "24px",
-    overflow: "auto",
+    overflow: "hidden",
+  },
+  contentScroller: {
+    height: "calc(100% - 8px)",
+    boxSizing: "border-box",
+    marginTop: "4px",
+    marginRight: "2px",
+    marginBottom: "4px",
+    paddingTop: "20px",
+    paddingRight: "22px",
+    paddingBottom: "20px",
+    paddingLeft: "24px",
+    overflowX: "hidden",
+    overflowY: "scroll",
   },
   section: {
     display: "flex",
@@ -293,7 +303,6 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
     const dark = isDarkMode;
     return {
       micaBg: dark ? "rgba(44, 44, 44, 0.92)" : "rgba(243, 243, 243, 0.90)",
-      navBg: dark ? "rgb(38, 38, 38)" : "rgb(236, 236, 236)",
       panelBg: dark ? "rgba(56, 56, 56, 0.70)" : "rgba(255, 255, 255, 0.70)",
       borderColor: dark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.06)",
       noiseOpacity: dark ? 0.035 : 0.025,
@@ -342,7 +351,6 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
           <nav
             className={styles.nav}
             style={{
-              backgroundColor: themeStyles.navBg,
               "--settings-nav-hover": themeStyles.navHover,
               "--update-dot-color": isDarkMode ? tokens.colorBrandForeground1 : tokens.colorBrandBackground,
             } as React.CSSProperties}
@@ -365,6 +373,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
           </nav>
 
           <div className={styles.content} style={{ backgroundColor: themeStyles.panelBg }}>
+            <div className={styles.contentScroller}>
             {tab === "general" && (
               <div className={styles.section}>
                 <div className={mergeClasses(styles.row, settingItemClass(styles, true))}>
@@ -737,6 +746,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                 </div>
               </div>
             )}
+            </div>
           </div>
         </div>
       </DialogSurface>
