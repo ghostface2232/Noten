@@ -1,6 +1,8 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { appDataDir } from "@tauri-apps/api/path";
-import { mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { mkdir, readTextFile } from "@tauri-apps/plugin-fs";
+import { atomicWriteText } from "../utils/atomicWrite";
+import { tauriFileSystem } from "../utils/fs";
 import { isNoteColorId, type NoteColorId } from "../utils/noteColors";
 
 export type Locale = "en" | "ko";
@@ -106,7 +108,21 @@ function parseSettings(raw: string | null): Settings {
 async function persistSettings(settings: Settings) {
   await ensureSettingsDir();
   const path = await getSettingsPath();
-  await writeTextFile(path, JSON.stringify(settings, null, 2));
+  await atomicWriteText(tauriFileSystem, path, JSON.stringify(settings, null, 2));
+}
+
+// Re-read settings.json, apply a single key change on top of whatever is on
+// disk now, then atomically write. This narrows the multi-window clobber
+// window: if another window updated a different key between our reads, that
+// change survives. Returns the new on-disk state so callers can adopt it.
+async function readMergeWriteSetting<K extends keyof Settings>(
+  key: K,
+  value: Settings[K],
+): Promise<Settings> {
+  const onDisk = (await loadSettingsFromFile()) ?? DEFAULTS;
+  const merged = { ...onDisk, [key]: value };
+  await persistSettings(merged);
+  return merged;
 }
 
 async function loadSettingsFromFile(): Promise<Settings | null> {
@@ -124,6 +140,9 @@ export function useSettings() {
   const [isLoaded, setIsLoaded] = useState(false);
   const didUserUpdateRef = useRef(false);
   const settingsRef = useRef<Settings>(DEFAULTS);
+  // Serialize writes from this window so two fast clicks can't lose each
+  // other's changes before reaching disk.
+  const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
 
   useEffect(() => {
     let cancelled = false;
@@ -164,11 +183,14 @@ export function useSettings() {
 
   const update = useCallback(async <K extends keyof Settings>(key: K, value: Settings[K]): Promise<boolean> => {
     didUserUpdateRef.current = true;
-    const next = { ...settingsRef.current, [key]: value };
-    settingsRef.current = next;
-    setSettingsRaw(next);
+    const job = writeChainRef.current
+      .catch(() => undefined)
+      .then(() => readMergeWriteSetting(key, value));
+    writeChainRef.current = job;
     try {
-      await persistSettings(next);
+      const merged = await job;
+      settingsRef.current = merged;
+      setSettingsRaw(merged);
       return true;
     } catch {
       if (import.meta.env.DEV) {
