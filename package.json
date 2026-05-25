@@ -13,7 +13,8 @@
     "tauri:dev": "npm run prepare-helper && tauri dev",
     "sync-version": "node scripts/sync-version.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "eslint src"
   },
   "dependencies": {
     "@floating-ui/dom": "^1.7.6",
@@ -50,10 +51,13 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/node": "^25.9.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "eslint": "^9.39.4",
     "typescript": "~5.8.3",
+    "typescript-eslint": "^8.59.4",
     "vite": "^7.0.4",
     "vitest": "^4.1.7"
   }
