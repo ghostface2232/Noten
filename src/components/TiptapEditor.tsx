@@ -601,6 +601,7 @@ export interface TiptapEditorHandle {
   }) => void;
   invalidateDocumentSession: (noteId: string | null, filePath: string | null) => void;
   setEditable: (editable: boolean) => void;
+  focus: () => void;
   getEditor: () => ReturnType<typeof useEditor> | null;
 }
 
@@ -1326,6 +1327,9 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
             closeLinkPopover();
             closeLinkHoverPopover();
           }
+        },
+        focus: () => {
+          editor?.commands.focus();
         },
         getEditor: () => editor,
       }),

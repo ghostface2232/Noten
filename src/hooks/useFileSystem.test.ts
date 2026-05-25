@@ -147,6 +147,7 @@ interface RenderOpts {
   // Stub editor handle — openDocument tracking lets us assert against the editor.
   openDocument?: ReturnType<typeof vi.fn>;
   invalidateDocumentSession?: ReturnType<typeof vi.fn>;
+  focusEditor?: ReturnType<typeof vi.fn>;
 }
 
 function renderFs(opts: RenderOpts = {}) {
@@ -165,6 +166,7 @@ function renderFs(opts: RenderOpts = {}) {
 
   const openDocument = opts.openDocument ?? vi.fn();
   const invalidateDocumentSession = opts.invalidateDocumentSession ?? vi.fn();
+  const focusEditor = opts.focusEditor ?? vi.fn();
   const tiptapRef = {
     current: {
       getEditor: () => ({ getMarkdown: () => refs.editorContent }),
@@ -172,6 +174,7 @@ function renderFs(opts: RenderOpts = {}) {
       invalidateDocumentSession,
       setDocumentContext: vi.fn(),
       setContent: vi.fn(),
+      focus: focusEditor,
     } as unknown as TiptapEditorHandle,
   };
 
@@ -207,6 +210,7 @@ function renderFs(opts: RenderOpts = {}) {
     cancelDocSave,
     openDocument,
     invalidateDocumentSession,
+    focusEditor,
     state,
   };
 }
@@ -319,6 +323,17 @@ describe("useFileSystem — newNote disk-first invariant", () => {
     expect(setDocs).not.toHaveBeenCalled();
     expect(setActiveIndex).not.toHaveBeenCalled();
     expect(notifyActiveDoc).not.toHaveBeenCalled();
+  });
+
+  it("focuses the editor after creating a new note", async () => {
+    const existingDoc = makeDoc("existing", { content: "Keep me" });
+    const { result, focusEditor } = renderFs({ docs: [existingDoc] });
+
+    await act(async () => {
+      await result.current.newNote();
+    });
+
+    expect(focusEditor).toHaveBeenCalledTimes(1);
   });
 });
 

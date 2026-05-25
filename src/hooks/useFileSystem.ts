@@ -153,6 +153,10 @@ function resetDocState(
   state.setIsDirty(false);
 }
 
+function focusEditor(tiptapRef: React.RefObject<TiptapEditorHandle | null>) {
+  tiptapRef.current?.focus?.();
+}
+
 export interface FileSystemActions {
   importFile: () => Promise<void>;
   importFiles: (paths: string[]) => Promise<void>;
@@ -480,6 +484,7 @@ export function useFileSystem(
       emitDocCreated(newDoc);
       resetDocState(state, tiptapRef, id, filePath, "");
       notifyActiveDocRef?.current?.(id, filePath);
+      focusEditor(tiptapRef);
     };
 
     if (willReplace) {
