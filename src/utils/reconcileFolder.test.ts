@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createInMemoryFileSystem, type InMemoryFileSystem } from "./fs.test-utils";
 import { wrapWithFaults } from "./fs.fault.test-utils";
 import {
@@ -13,7 +13,17 @@ import {
   metaPathFor,
   type NoteMeta,
 } from "./metadataIO";
+import { NotenError } from "./notenError";
 import type { NoteDoc, NoteGroup } from "./noteTypes";
+
+vi.mock("./crashLog", () => ({
+  logNotenError: vi.fn(() => Promise.resolve()),
+}));
+
+async function getMockedLogger() {
+  const { logNotenError } = await import("./crashLog");
+  return logNotenError as unknown as ReturnType<typeof vi.fn>;
+}
 
 const DIR = "/notes";
 const LOCALE = "en" as const;
@@ -54,10 +64,11 @@ async function seedMeta(fs: InMemoryFileSystem, meta: NoteMeta): Promise<void> {
 let fs: InMemoryFileSystem;
 let state: ReconcileState;
 
-beforeEach(() => {
+beforeEach(async () => {
   fs = createInMemoryFileSystem();
   state = createReconcileState();
   fs.seedDir(DIR);
+  (await getMockedLogger()).mockClear();
 });
 
 describe("reconcileFolder", () => {
@@ -258,6 +269,51 @@ describe("reconcileFolder", () => {
     // Bulk guard short-circuits BEFORE the recording loop, so neither
     // bodyless nor bodied ids should ever land in the observations map.
     expect(state.bodyMissing.size).toBe(0);
+  });
+
+  it("skips a .md file whose body read fails transiently and reports BODY_READ_FAILED", async () => {
+    // Models a cloud-sync placeholder that lists in readDir but errors on
+    // readTextFile. A previous bug returned "" on this path, which would
+    // have created a doc with empty content and written a meta sidecar
+    // derived from the empty body — overwriting the real file on next save.
+    const id = "88888888-8888-8888-8888-888888888888";
+    const filePath = `${DIR}/${id}.md`;
+    fs.seedTextFile(filePath, "real body the user does not want destroyed");
+
+    const faultFs = wrapWithFaults(fs);
+    faultFs.injectFault({
+      op: "readTextFile",
+      path: filePath,
+      throwError: new Error("EBUSY: cloud-sync hydration in progress"),
+    });
+
+    const result = await reconcileFolder(faultFs, state, DIR, [], [], LOCALE);
+
+    // No doc constructed from the unreadable file.
+    expect(result.docs.find((d) => d.id === id)).toBeUndefined();
+    // No meta sidecar created — next reconcile retries the read instead of
+    // freezing wrong metadata to disk.
+    expect(await faultFs.exists(metaPathFor(DIR, id))).toBe(false);
+    // The real body must remain untouched on disk. Read past the fault by
+    // going through the bare in-memory FS.
+    expect(await fs.readTextFile(filePath)).toBe("real body the user does not want destroyed");
+
+    // Degradation must be observable.
+    const logger = await getMockedLogger();
+    expect(logger).toHaveBeenCalledTimes(1);
+    const reported = logger.mock.calls[0][0] as NotenError;
+    expect(reported).toBeInstanceOf(NotenError);
+    expect(reported.code).toBe("BODY_READ_FAILED");
+    expect(reported.severity).toBe("recoverable");
+    expect(reported.context).toMatchObject({ filePath });
+  });
+
+  it("does not emit BODY_READ_FAILED on the canonical read-succeeds path", async () => {
+    fs.seedTextFile(`${DIR}/canonical.md`, "ok");
+    await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+
+    const logger = await getMockedLogger();
+    expect(logger).not.toHaveBeenCalled();
   });
 
   it("drops removed-doc ids from every group's noteIds", async () => {

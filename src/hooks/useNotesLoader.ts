@@ -235,11 +235,24 @@ async function readLocalCache(notesDir: string): Promise<LocalCache | null> {
   return cache;
 }
 
-async function readFileContent(path: string): Promise<string> {
+/**
+ * Returns `null` on read failure rather than `""`, because a transient
+ * cloud-sync read failure followed by an empty-string fallback would poison
+ * the in-memory doc: the user sees a blank note, edits it, and autosave
+ * overwrites the real on-disk body. Callers must skip the doc on `null` so
+ * the next load (or watcher event) retries the read.
+ */
+async function readFileContent(path: string): Promise<string | null> {
   try {
     return await readTextFile(path);
-  } catch {
-    return "";
+  } catch (err) {
+    void logNotenError(new NotenError(
+      "BODY_READ_FAILED",
+      "recoverable",
+      "useNotesLoader: body read failed; deferring doc until next load",
+      { context: { filePath: path }, cause: err },
+    ));
+    return null;
   }
 }
 
@@ -266,13 +279,15 @@ async function loadDecomposedState(dir: string): Promise<DecomposedState> {
 }
 
 async function attachDocContents(docs: NoteDoc[]): Promise<NoteDoc[]> {
-  return Promise.all(
+  const results = await Promise.all(
     docs.map(async (d) => {
       const content = await readFileContent(d.filePath);
+      if (content === null) return null;
       if (d.filePath) setKnownDiskContent(d.filePath, content);
       return { ...d, content } as NoteDoc;
     }),
   );
+  return results.filter((d): d is NoteDoc => d !== null);
 }
 
 interface LegacyManifestNote {

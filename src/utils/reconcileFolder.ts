@@ -14,6 +14,8 @@ import { getFileTimestamps } from "./fileTimestamps";
 import { backupRemoteVersion } from "./conflictBackup";
 import { markOwnWrite } from "../hooks/ownWriteTracker";
 import { normalizeSep } from "./pathUtils";
+import { NotenError } from "./notenError";
+import { logNotenError } from "./crashLog";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -22,11 +24,18 @@ function fileNameToId(name: string): string {
   return name.replace(/\.md$/i, "");
 }
 
-async function readFileContent(fs: FileSystem, path: string): Promise<string> {
+/** See useNotesLoader.readFileContent for the rationale on `null` vs `""`. */
+async function readFileContent(fs: FileSystem, path: string): Promise<string | null> {
   try {
     return await fs.readTextFile(path);
-  } catch {
-    return "";
+  } catch (err) {
+    void logNotenError(new NotenError(
+      "BODY_READ_FAILED",
+      "recoverable",
+      "reconcileFolder: body read failed; deferring file until next reconcile",
+      { context: { filePath: path }, cause: err },
+    ));
+    return null;
   }
 }
 
@@ -123,6 +132,10 @@ export async function reconcileFolder(
 
     const filePath = `${base}${name}`;
     const content = await readFileContent(fs, filePath);
+    // Body unreadable (transient cloud-sync / placeholder failure). Skip this
+    // file for now; do not create a meta or in-memory doc that would later be
+    // saved back with empty content. Next reconcile retries.
+    if (content === null) continue;
 
     let meta = allMeta.get(id);
     const fts = await getFileTimestamps(fs, filePath);

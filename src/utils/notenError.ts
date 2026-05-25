@@ -5,6 +5,7 @@ export type NotenErrorCode =
   | "PERSIST_FAILED"
   | "SAVE_FAILED"
   | "META_WRITE_FAILED"
+  | "BODY_READ_FAILED"
   | "MIGRATION_FAILED"
   | "UNCAUGHT";
 
