@@ -316,6 +316,27 @@ describe("writtenGroups commit semantics — only update on disk-write success",
     expect(state.writtenGroups.has("g-tomb-flaky")).toBe(true);
     expect(state.pendingTombstones.has("g-tomb-flaky")).toBe(true);
   });
+
+  it("does not merge new groups onto an empty file when existing groups are unreadable", async () => {
+    const existing = makeGroup("g-existing", { name: "Existing" });
+    await persistDecomposedState(fs, DIR, state, [], null, [existing], persistOpts());
+
+    const faultFs = wrapWithFaults(fs);
+    faultFs.injectFault({
+      op: "readTextFile",
+      path: `${DIR}/.groups.json`,
+      times: 1,
+      throwError: new Error("EBUSY: groups file locked"),
+    });
+
+    const incoming = makeGroup("g-incoming", { name: "Incoming" });
+    await persistDecomposedState(faultFs, DIR, state, [], null, [incoming], persistOpts());
+
+    const file = await readGroupsFile(fs, DIR);
+    expect(file.groups["g-existing"]).toBeDefined();
+    expect(file.groups["g-incoming"]).toBeUndefined();
+    expect(state.writtenGroups.has("g-incoming")).toBe(false);
+  });
 });
 
 describe("seedWriteSnapshots", () => {

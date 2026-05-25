@@ -72,14 +72,34 @@ export function useFileWatcher(
   const reloadGroupsFromDisk = useCallback(async () => {
     if (migrationInProgress) return;
     const dir = await getNotesDir();
-    await syncGroupsSnapshotFromDisk(dir);
-    const next = await loadGroupsFromDisk(dir);
-    setGroups(next);
+    try {
+      await syncGroupsSnapshotFromDisk(dir);
+      const next = await loadGroupsFromDisk(dir);
+      setGroups(next);
+    } catch (err) {
+      void logNotenError(new NotenError(
+        "RECONCILE_FAILED",
+        "recoverable",
+        "useFileWatcher.reloadGroupsFromDisk: shared group read failed; keeping current groups until retry",
+        { context: { dir, source: "watcher.groups" }, cause: err },
+      ));
+    }
   }, [setGroups]);
 
   const applyMetaChange = useCallback(async (id: string) => {
     const dir = await getNotesDir();
-    const meta = await readMeta(tauriFileSystem, dir, id);
+    let meta;
+    try {
+      meta = await readMeta(tauriFileSystem, dir, id);
+    } catch (err) {
+      void logNotenError(new NotenError(
+        "RECONCILE_FAILED",
+        "recoverable",
+        "useFileWatcher.applyMetaChange: meta read failed; deferring until next reconcile",
+        { context: { noteId: id, source: "watcher.metaChange" }, cause: err },
+      ));
+      return;
+    }
     if (!meta) return;
 
     setDocs((prev) => {
@@ -118,19 +138,7 @@ export function useFileWatcher(
       targetGroupId !== null
       && !groupsRef.current.some((g) => g.id === targetGroupId)
     ) {
-      try {
-        await reloadGroupsFromDisk();
-      } catch (err) {
-        // Next reconcile re-resolves group membership, so this is recoverable
-        // — but the doc stays ungrouped in memory until then and the user has
-        // no signal that the sync stalled. Log so the stall is diagnosable.
-        void logNotenError(new NotenError(
-          "RECONCILE_FAILED",
-          "recoverable",
-          "useFileWatcher.applyMetaChange: reloadGroupsFromDisk failed; doc stays ungrouped until next reconcile",
-          { context: { noteId: id, targetGroupId, source: "watcher.metaChange" }, cause: err },
-        ));
-      }
+      await reloadGroupsFromDisk();
       return;
     }
 

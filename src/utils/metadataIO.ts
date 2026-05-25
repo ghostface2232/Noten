@@ -49,21 +49,22 @@ function isValidMeta(obj: unknown): obj is NoteMeta {
 }
 
 export async function readMeta(fs: FileSystem, notesDir: string, noteId: string): Promise<NoteMeta | null> {
-  try {
-    const raw = await fs.readTextFile(metaPathFor(notesDir, noteId));
-    const parsed = JSON.parse(raw) as unknown;
-    if (!isValidMeta(parsed)) return null;
-    const m = parsed as NoteMeta;
-    return {
-      ...m,
-      version: 2,
-      pinned: m.pinned === true,
-      color: isNoteColorId(m.color) ? m.color : undefined,
-      trashedAt: typeof m.trashedAt === "number" ? m.trashedAt : null,
-    };
-  } catch {
-    return null;
+  const path = metaPathFor(notesDir, noteId);
+  if (!(await fs.exists(path))) return null;
+
+  const raw = await fs.readTextFile(path);
+  const parsed = JSON.parse(raw) as unknown;
+  if (!isValidMeta(parsed)) {
+    throw new Error(`Invalid note metadata: ${path}`);
   }
+  const m = parsed as NoteMeta;
+  return {
+    ...m,
+    version: 2,
+    pinned: m.pinned === true,
+    color: isNoteColorId(m.color) ? m.color : undefined,
+    trashedAt: typeof m.trashedAt === "number" ? m.trashedAt : null,
+  };
 }
 
 export async function writeMeta(fs: FileSystem, notesDir: string, meta: NoteMeta, machineId: string): Promise<string> {
@@ -102,14 +103,12 @@ export async function removeMeta(fs: FileSystem, notesDir: string, noteId: strin
 }
 
 export async function listMetaFiles(fs: FileSystem, notesDir: string): Promise<string[]> {
-  try {
-    const entries = await fs.readDir(metaDirFor(notesDir));
-    return entries
-      .filter((e) => e.name && e.name.endsWith(".json") && !e.name.endsWith(".tmp.json") && !e.name.endsWith(".tmp"))
-      .map((e) => e.name!);
-  } catch {
-    return [];
-  }
+  const dir = metaDirFor(notesDir);
+  if (!(await fs.exists(dir))) return [];
+  const entries = await fs.readDir(dir);
+  return entries
+    .filter((e) => e.name && e.name.endsWith(".json") && !e.name.endsWith(".tmp.json") && !e.name.endsWith(".tmp"))
+    .map((e) => e.name!);
 }
 
 /** Read all metadata files from {notesDir}/.meta. Returns entries keyed by id. */

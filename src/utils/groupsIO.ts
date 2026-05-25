@@ -40,20 +40,23 @@ function isValidEntry(obj: unknown): obj is SharedGroupEntry {
 }
 
 export async function readGroupsFile(fs: FileSystem, notesDir: string): Promise<GroupsFile> {
-  try {
-    const raw = await fs.readTextFile(groupsPathFor(notesDir));
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object") return { version: 1, groups: {} };
-    const p = parsed as { groups?: unknown };
-    if (!p.groups || typeof p.groups !== "object") return { version: 1, groups: {} };
-    const groups: Record<string, SharedGroupEntry> = {};
-    for (const [k, v] of Object.entries(p.groups as Record<string, unknown>)) {
-      if (isValidEntry(v) && v.id === k) groups[k] = v;
-    }
-    return { version: 1, groups };
-  } catch {
-    return { version: 1, groups: {} };
+  const path = groupsPathFor(notesDir);
+  if (!(await fs.exists(path))) return { version: 1, groups: {} };
+
+  const raw = await fs.readTextFile(path);
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error(`Invalid groups file: ${path}`);
   }
+  const p = parsed as { groups?: unknown };
+  if (!p.groups || typeof p.groups !== "object") {
+    throw new Error(`Invalid groups file: ${path}`);
+  }
+  const groups: Record<string, SharedGroupEntry> = {};
+  for (const [k, v] of Object.entries(p.groups as Record<string, unknown>)) {
+    if (isValidEntry(v) && v.id === k) groups[k] = v;
+  }
+  return { version: 1, groups };
 }
 
 export function mergeGroupEntries(

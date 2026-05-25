@@ -193,3 +193,33 @@ describe("contract: migration does not treat transient I/O as empty state", () =
     expect(fnMatch![0]).toMatch(/catch\s*\{\s*return true;\s*\}/);
   });
 });
+
+describe("contract: shared metadata reads fail closed", () => {
+  // Regression class: transiently unreadable .meta/.groups files must not look
+  // like absent state. Otherwise later merge/reconcile writes can propagate
+  // default metadata, empty groups, or lost group membership.
+  const METADATA = resolve(SRC_ROOT, "utils/metadataIO.ts");
+  const GROUPS = resolve(SRC_ROOT, "utils/groupsIO.ts");
+
+  it("metadata readers distinguish missing files from unreadable files", () => {
+    const text = read(METADATA);
+    const readMetaMatch = text.match(/export async function readMeta[\s\S]*?\n\}/);
+    const listMetaMatch = text.match(/export async function listMetaFiles[\s\S]*?\n\}/);
+    expect(readMetaMatch, "readMeta not found").not.toBeNull();
+    expect(listMetaMatch, "listMetaFiles not found").not.toBeNull();
+    expect(readMetaMatch![0]).toMatch(/fs\.exists\(path\)/);
+    expect(readMetaMatch![0]).not.toMatch(/\bcatch\b/);
+    expect(listMetaMatch![0]).toMatch(/fs\.exists\(dir\)/);
+    expect(listMetaMatch![0]).not.toMatch(/\bcatch\b/);
+  });
+
+  it("groups reader does not collapse read or parse failures into an empty groups file", () => {
+    const text = read(GROUPS);
+    const fnMatch = text.match(/export async function readGroupsFile[\s\S]*?\n\}/);
+    expect(fnMatch, "readGroupsFile not found").not.toBeNull();
+    const body = fnMatch![0];
+    expect(body).toMatch(/fs\.exists\(path\)/);
+    expect(body).not.toMatch(/\bcatch\b/);
+    expect(body.indexOf("fs.exists(path)")).toBeLessThan(body.indexOf("fs.readTextFile(path)"));
+  });
+});

@@ -308,6 +308,32 @@ describe("reconcileFolder", () => {
     expect(reported.context).toMatchObject({ filePath });
   });
 
+  it("fails closed when the meta directory is unreadable instead of rebuilding absent metadata", async () => {
+    const id = "77777777-7777-7777-7777-777777777777";
+    await seedMeta(fs, makeMeta(id, {
+      fileName: "Remote Title",
+      groupId: "remote-group",
+      groupUpdatedAt: 5000,
+      pinned: true,
+    }));
+    fs.seedTextFile(`${DIR}/${id}.md`, "body");
+
+    const faultFs = wrapWithFaults(fs);
+    faultFs.injectFault({
+      op: "readDir",
+      path: `${DIR}/.meta`,
+      throwError: new Error("EBUSY: meta directory locked"),
+    });
+
+    await expect(reconcileFolder(faultFs, state, DIR, [], [], LOCALE)).rejects.toThrow("meta directory locked");
+
+    const meta = await readMeta(fs, DIR, id);
+    expect(meta).not.toBeNull();
+    expect(meta!.fileName).toBe("Remote Title");
+    expect(meta!.groupId).toBe("remote-group");
+    expect(meta!.pinned).toBe(true);
+  });
+
   it("does not emit BODY_READ_FAILED on the canonical read-succeeds path", async () => {
     fs.seedTextFile(`${DIR}/canonical.md`, "ok");
     await reconcileFolder(fs, state, DIR, [], [], LOCALE);
