@@ -14,7 +14,9 @@
     "sync-version": "node scripts/sync-version.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run lint && npm test"
   },
   "dependencies": {
     "@floating-ui/dom": "^1.7.6",
