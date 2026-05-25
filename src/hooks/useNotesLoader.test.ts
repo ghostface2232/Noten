@@ -110,10 +110,14 @@ vi.mock("../utils/reconcileFolder", async (importOriginal) => {
 });
 
 // Loader is imported AFTER all mocks. Tests then drive it with renderHook.
-import { useNotesLoader, resetNotesDir } from "./useNotesLoader";
+import { useNotesLoader, resetNotesDir, saveManifest } from "./useNotesLoader";
 import * as reconcileFolderModule from "../utils/reconcileFolder";
+import * as decomposedStateModule from "../utils/decomposedState";
+import * as crashLogModule from "../utils/crashLog";
 
 const clearReconcileSpy = reconcileFolderModule.clearReconcileState as unknown as ReturnType<typeof vi.fn>;
+const persistMock = decomposedStateModule.persistDecomposedState as ReturnType<typeof vi.fn>;
+const logNotenErrorMock = crashLogModule.logNotenError as ReturnType<typeof vi.fn>;
 
 function makeDoc(id: string): NoteDoc {
   return {
@@ -232,5 +236,108 @@ describe("useNotesLoader — reload clears reconcile state (bug 4 regression)", 
     // resetWriteSnapshots fires and this spy is never called.
     expect(clearReconcileSpy).toHaveBeenCalledTimes(1);
     expect(clearReconcileSpy).toHaveBeenCalledWith(externalState);
+  });
+});
+
+// The chain inside saveManifest (commit f3c70b5) serializes every manifest
+// write within a window — two rapid sidebar actions (delete + new note) used
+// to fire saveManifest in parallel; the later call could finish first and the
+// earlier one would then overwrite disk with its stale snapshot. These tests
+// pin the two guarantees the chain provides: ordering and failure isolation.
+describe("useNotesLoader — saveManifest persistChain", () => {
+  // Flush all pending microtasks and any setTimeout-deferred work the wrapper
+  // might queue. Plain `await Promise.resolve()` loops aren't enough because
+  // the wrapper has multiple `await` hops (getNotesDir / getLocalCachePath)
+  // before it reaches the mocked persistDecomposedStateImpl.
+  const flushAll = () => new Promise<void>((r) => setTimeout(r, 0));
+
+  // Prior hook tests in this file leave one in-flight persistDecomposedState
+  // call queued (the loader's post-reconcile checkpoint). Without resetting,
+  // it consumes the first mockImplementationOnce here and skews the call
+  // sequence. mockReset wipes the impl queue and the call history at once.
+  beforeEach(async () => {
+    await flushAll();
+    persistMock.mockReset();
+  });
+
+  it("invokes persistDecomposedState in call-time order even when the first call resolves last", async () => {
+    const docsA = [makeDoc("a")];
+    const docsB = [makeDoc("a"), makeDoc("b")];
+    let bStarted = false;
+    // Both promises are constructed up-front so the resolvers exist before any
+    // impl runs. Otherwise calling resolveB() before B's mock impl evaluates
+    // its `new Promise()` is a no-op (the resolver only gets assigned when the
+    // impl body executes), which leaves B's await hanging.
+    let resolveA: () => void = () => {};
+    let resolveB: () => void = () => {};
+    const aGate = new Promise<void>((r) => { resolveA = r; });
+    const bGate = new Promise<void>((r) => { resolveB = r; });
+
+    persistMock.mockImplementationOnce(async () => { await aGate; });
+    persistMock.mockImplementationOnce(async () => { bStarted = true; await bGate; });
+
+    const p1 = saveManifest(docsA, null, undefined, "A");
+    const p2 = saveManifest(docsB, null, undefined, "B");
+    p1.catch(() => {});
+    p2.catch(() => {});
+
+    await flushAll();
+    expect(persistMock).toHaveBeenCalledTimes(1);
+    expect(bStarted).toBe(false);
+
+    // Resolve B's gate prematurely. The chain must still hold B back until A
+    // finishes — even though B's await will be immediately satisfied once it
+    // gets to run, the gate-before-start check proves the chain ordering.
+    resolveB();
+    await flushAll();
+    expect(persistMock).toHaveBeenCalledTimes(1);
+    expect(bStarted).toBe(false);
+
+    // Resolving A lets the chain advance to B's wrap, which then starts the
+    // already-resolved B impl.
+    resolveA();
+    await p1;
+    await p2;
+    expect(bStarted).toBe(true);
+    expect(persistMock).toHaveBeenCalledTimes(2);
+
+    // Order assertion: first impl call got docsA, second got docsB.
+    const firstCallDocs = persistMock.mock.calls[0][3] as NoteDoc[];
+    const secondCallDocs = persistMock.mock.calls[1][3] as NoteDoc[];
+    expect(firstCallDocs.map((d) => d.id)).toEqual(["a"]);
+    expect(secondCallDocs.map((d) => d.id)).toEqual(["a", "b"]);
+  });
+
+  it("isolates a rejected entry so the next enqueue still runs", async () => {
+    const docsA = [makeDoc("a")];
+    const docsB = [makeDoc("a"), makeDoc("b")];
+    persistMock.mockRejectedValueOnce(new Error("EPERM: cache locked"));
+    persistMock.mockResolvedValueOnce(undefined);
+
+    // Attach rejection handlers immediately to avoid unhandled-rejection
+    // bookkeeping inside vitest while p1 is still pending. allSettled
+    // captures both outcomes after the chain has fully drained.
+    const settled = Promise.allSettled([
+      saveManifest(docsA, null, undefined, "A"),
+      saveManifest(docsB, null, undefined, "B"),
+    ]);
+
+    const [r1, r2] = await settled;
+
+    // Without the chain's .catch(() => undefined) bridge, p2 would never
+    // execute its impl — the dead promise would block every subsequent
+    // saveManifest for the lifetime of the window, silently losing every
+    // future save.
+    expect(r1.status).toBe("rejected");
+    expect((r1 as PromiseRejectedResult).reason.message).toMatch(/EPERM/);
+    expect(r2.status).toBe("fulfilled");
+    expect(persistMock).toHaveBeenCalledTimes(2);
+
+    // PERSIST_FAILED is emitted by the wrapper before rethrow, so the
+    // crashLog trail survives even when the throw is swallowed by the chain.
+    const logged = logNotenErrorMock.mock.calls.find(
+      (c) => (c[0] as { code: string }).code === "PERSIST_FAILED",
+    );
+    expect(logged).toBeDefined();
   });
 });
