@@ -195,6 +195,7 @@ export function useFileSystem(
   flushAutoSaveRef?: React.RefObject<(() => Promise<boolean>) | null>,
   notifyActiveDocRef?: React.RefObject<((id: string, filePath: string) => void) | null>,
   cancelDocSaveRef?: React.RefObject<((docId: string) => void) | null>,
+  captureAndQueueSaveRef?: React.RefObject<(() => void) | null>,
 ): FileSystemActions {
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
@@ -551,8 +552,46 @@ export function useFileSystem(
     if (index === currentActiveIndex) return;
     if (index < 0 || index >= liveDocs.length) return;
 
-    const didPersistCurrentDoc = await leaveCurrentDoc();
-    const baseDocs = didPersistCurrentDoc ? markDocClean(liveDocs, activeDocId) : liveDocs;
+    // Fast path: the leaving doc is non-empty (or pinned by customName), so
+    // pruneEmptyCurrentDoc below will not race the autosave. Fire the save
+    // synchronously (snapshot is captured in-band, doSave runs in background)
+    // and switch immediately. doSave gates each write on the live docs list
+    // and activeDocRef, so writing after the switch still hits the correct
+    // path; window close awaits in-flight saves via flushAutoSave.
+    //
+    // Slow path: the leaving doc is empty + auto-titled. pruneEmptyCurrentDoc
+    // will remove its file, so we must serialize the save BEFORE the prune to
+    // avoid a "save resurrects a deleted file" race.
+    //
+    // Emptiness MUST be checked against the live editor — leaving.content in
+    // liveDocs can lag the editor when state.isDirty is false (autosave just
+    // committed) but the user has typed one more char before clicking. Trusting
+    // the stale liveDocs would mis-route to the fast path, queue a background
+    // save with the real (non-empty) content, and pruneEmptyCurrentDoc would
+    // simultaneously delete the file — a guaranteed race.
+    const leavingDoc = liveDocs[currentActiveIndex];
+    const leavingHasContent = !!leavingDoc
+      && (
+        leavingDoc.content.trim() !== ""
+        || getCurrentMarkdown(tiptapRef).trim() !== ""
+      );
+    const isPruneCandidate = !!leavingDoc
+      && !leavingHasContent
+      && !leavingDoc.customName
+      && liveDocs.length > 1;
+
+    // Slow path absorbs both (a) prune candidates that need save-before-delete
+    // serialization and (b) the defensive case where the capture ref hasn't
+    // been wired yet (shouldn't happen in App.tsx — the ref is assigned every
+    // render — but the optional chain keeps this resilient to future refactors).
+    let baseDocs: NoteDoc[];
+    if (isPruneCandidate || !captureAndQueueSaveRef?.current) {
+      const didPersistCurrentDoc = await leaveCurrentDoc();
+      baseDocs = didPersistCurrentDoc ? markDocClean(liveDocs, activeDocId) : liveDocs;
+    } else {
+      captureAndQueueSaveRef.current();
+      baseDocs = liveDocs;
+    }
 
     const targetDoc = baseDocs[index];
     const nextDocs = pruneEmptyCurrentDoc(baseDocs, activeDocId);
@@ -565,7 +604,7 @@ export function useFileSystem(
     notifyActiveDocRef?.current?.(target.id, target.filePath);
     setActiveIndex(targetIndex);
     void saveManifest(nextDocs, target.id, groupsRef.current).catch(() => {});
-  }, [getLiveDocsSnapshot, leaveCurrentDoc, markDocClean, setActiveIndex, setDocs, state, tiptapRef, pruneEmptyCurrentDoc]);
+  }, [captureAndQueueSaveRef, getLiveDocsSnapshot, leaveCurrentDoc, markDocClean, setActiveIndex, setDocs, state, tiptapRef, pruneEmptyCurrentDoc]);
 
   const deleteNote = useCallback(async (index: number) => {
     const { docs: liveDocs, activeDocId, activeIndex: currentActiveIndex } = getLiveDocsSnapshot();

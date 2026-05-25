@@ -579,6 +579,174 @@ describe("useAutoSave — savedDocStillExists race", () => {
   });
 });
 
+describe("useAutoSave — captureAndQueueSave (doc-switch fast path)", () => {
+  it("captures the snapshot synchronously and lets doSave run in the background", async () => {
+    refs.editorContent = "queued at capture time";
+    const { result } = renderAutoSave({ state: makeState({ isDirty: true }) });
+
+    // Capture must be synchronous so the editor can repoint to a new doc
+    // immediately after; the snapshot taken here is what doSave commits.
+    act(() => result.current.captureAndQueueSave());
+
+    // getCurrentMarkdown was called inline (sync snapshot), even though the
+    // disk write below hasn't been awaited yet.
+    expect(getCurrentMarkdownMock).toHaveBeenCalledTimes(1);
+
+    // Drain background work: the save must land with the captured content.
+    await act(async () => { await result.current.awaitInFlightSaves(); });
+    expect(writeMock).toHaveBeenCalledWith("/notes/a.md", "queued at capture time");
+  });
+
+  it("is a no-op when there are no pending changes and the editor is clean", () => {
+    const { result } = renderAutoSave({ state: makeState({ isDirty: false }) });
+    act(() => result.current.captureAndQueueSave());
+    expect(writeMock).not.toHaveBeenCalled();
+    expect(getCurrentMarkdownMock).not.toHaveBeenCalled();
+  });
+
+  it("clears any pending debounce timer so the save runs once, not twice", async () => {
+    vi.useFakeTimers();
+    refs.editorContent = "captured";
+    const { result } = renderAutoSave({ state: makeState({ isDirty: true }) });
+
+    act(() => result.current.scheduleAutoSave());
+    act(() => result.current.captureAndQueueSave());
+
+    // Background save resolves; the debounce that captureAndQueueSave cleared
+    // must not also fire when its 1s window elapses.
+    await act(async () => { await result.current.awaitInFlightSaves(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+
+    expect(writeMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("useAutoSave — awaitInFlightSaves (close-handler guarantee)", () => {
+  it("blocks until a background save kicked off by captureAndQueueSave finishes", async () => {
+    let releaseBackup: () => void = () => {};
+    backupMock.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => {
+        releaseBackup = () => resolve(false);
+      }),
+    );
+    const { result } = renderAutoSave({ state: makeState({ isDirty: true }) });
+
+    act(() => result.current.captureAndQueueSave());
+
+    let drained = false;
+    const drain = act(async () => {
+      await result.current.awaitInFlightSaves();
+      drained = true;
+    });
+
+    // Microtask flush — drain must still be waiting on the suspended backup.
+    await Promise.resolve();
+    expect(drained).toBe(false);
+
+    releaseBackup();
+    await drain;
+    expect(drained).toBe(true);
+    expect(writeMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("useAutoSave — flushPendingSnapshots (orphaned-failure retry)", () => {
+  // After a fire-and-forget save fails, the snapshot stays in pendingSnapshotsRef
+  // without a timer attached. flushAutoSave alone would not catch it because it
+  // captures the *current* active doc, which may be a different one after a
+  // switch. flushPendingSnapshots is the close-time net that retries those.
+  it("retries a snapshot whose background save returned false", async () => {
+    // First write throws → first doSave returns false; second write succeeds.
+    refs.writeShouldThrow = new Error("EBUSY: cloud-sync hydration");
+    const { result } = renderAutoSave({ state: makeState({ isDirty: true }) });
+
+    act(() => result.current.captureAndQueueSave());
+    await act(async () => { await result.current.awaitInFlightSaves(); });
+
+    // First attempt failed (write threw). The snapshot is still pending and
+    // saveManifest hasn't been called.
+    expect(writeMock).toHaveBeenCalledTimes(1);
+    expect(saveManifestMock).not.toHaveBeenCalled();
+
+    // Clear the throw and run the close-time retry.
+    refs.writeShouldThrow = null;
+    await act(async () => { await result.current.flushPendingSnapshots(); });
+
+    expect(writeMock).toHaveBeenCalledTimes(2);
+    expect(saveManifestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("is a no-op when no snapshots are pending", async () => {
+    const { result } = renderAutoSave({ state: makeState({ isDirty: false }) });
+    await act(async () => { await result.current.flushPendingSnapshots(); });
+    expect(writeMock).not.toHaveBeenCalled();
+  });
+
+  it("drops a stranded snapshot whose revision was bumped past it (no zombie write)", async () => {
+    // First snapshot will be flushed via captureAndQueueSave and stranded by
+    // a write failure. Then a second flushAutoSave commits a newer revision,
+    // making the stranded one stale. flushPendingSnapshots must NOT replay it.
+    refs.writeShouldThrow = new Error("EBUSY");
+    const { result } = renderAutoSave({ state: makeState({ isDirty: true }) });
+
+    refs.editorContent = "older";
+    act(() => result.current.captureAndQueueSave());
+    await act(async () => { await result.current.awaitInFlightSaves(); });
+    expect(writeMock).toHaveBeenCalledTimes(1); // older threw
+
+    refs.writeShouldThrow = null;
+    refs.editorContent = "newer";
+    await act(async () => { await result.current.flushAutoSave(); });
+    expect(writeMock).toHaveBeenLastCalledWith("/notes/a.md", "newer");
+
+    // The older stranded snapshot must NOT be replayed — its revision is
+    // behind the newer one that just landed.
+    writeMock.mockClear();
+    await act(async () => { await result.current.flushPendingSnapshots(); });
+    expect(writeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useAutoSave — post-switch save uses activeDocRef (stale stateRef guard)", () => {
+  // codex review noted that doSave reads stateRef.current AFTER its await.
+  // If a fast-path switchDocument has already called notifyActiveDoc("b", ...)
+  // but the corresponding setDocs/setActiveIndex render hasn't committed yet,
+  // stateRef still reports "a" as active. Using that stale id would let the
+  // background save's setActiveIndex pin the leaving doc as active again.
+  // Fix: derive currentActiveId from activeDocRef.current (sync) first.
+  it("does not re-pin the leaving doc as active when the switch hasn't committed yet", async () => {
+    refs.editorContent = "leaving content";
+    const docs = [makeDoc("a"), makeDoc("b")];
+    const setDocs = vi.fn();
+    const setActiveIndex = vi.fn();
+    const tiptapRef = makeTiptapRef();
+    const groups: NoteGroup[] = [];
+    const state = makeState({ isDirty: true });
+
+    const { result } = renderHook(() =>
+      useAutoSave(state, tiptapRef, docs, setDocs, 0, setActiveIndex,
+        "en" as Locale, "updated-desc" as NotesSortOrder, groups),
+    );
+
+    // Simulate switchDocument fast path: captureAndQueueSave then notifyActiveDoc
+    // (the React render that would update stateRef has NOT happened yet —
+    // renderHook doesn't rerender automatically with new props).
+    act(() => result.current.captureAndQueueSave());
+    act(() => result.current.notifyActiveDoc("b", "/notes/b.md"));
+
+    await act(async () => { await result.current.awaitInFlightSaves(); });
+
+    // Body for the LEAVING doc still gets written (snapshot was captured
+    // before the switch), but the post-save setActiveIndex must NOT reselect
+    // the leaving doc — that would yank focus back from B to A.
+    expect(writeMock).toHaveBeenCalledWith("/notes/a.md", "leaving content");
+    // setActiveIndex may be called with B's position (1) or skipped, but never
+    // with A's position (0) in a way that would override the switch.
+    const calls = setActiveIndex.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContain(0);
+  });
+});
+
 describe("useAutoSave — notifyActiveDoc", () => {
   // INVARIANT: this test relies on the hook NOT re-rendering between
   // notifyActiveDoc and flushAutoSave. Re-render reapplies the

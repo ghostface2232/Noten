@@ -51,7 +51,12 @@ function useEditorStats(editor: Editor | null) {
   useEffect(() => {
     if (!editor) return;
 
-    const update = () => {
+    // rAF-coalesce: doc.textContent walks the entire doc on each call, which
+    // dominated per-keystroke work on larger notes. One pass per frame keeps
+    // the readout fluid without paying for selection-only transactions.
+    let frame: number | null = null;
+    const compute = () => {
+      frame = null;
       const doc = editor.state.doc;
       let row = 1;
       try {
@@ -69,10 +74,17 @@ function useEditorStats(editor: Editor | null) {
         return next;
       });
     };
+    const schedule = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(compute);
+    };
 
-    update();
-    editor.on("transaction", update);
-    return () => { editor.off("transaction", update); };
+    compute();
+    editor.on("transaction", schedule);
+    return () => {
+      editor.off("transaction", schedule);
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
   }, [editor]);
 
   return stats;

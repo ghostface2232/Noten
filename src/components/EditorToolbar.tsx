@@ -184,9 +184,23 @@ function EditorToolbarImpl({
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!editor) return;
-    const bump = () => setTick((n) => n + 1);
+    // rAF-coalesce: each render below calls 10+ editor.isActive(...) plus
+    // can().undo()/can().redo(), so a transaction storm (typing, IME) used to
+    // re-render the whole toolbar per keystroke. One render per frame keeps
+    // active-state feedback responsive without paying the cost N times per ms.
+    let frame: number | null = null;
+    const bump = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        setTick((n) => n + 1);
+      });
+    };
     editor.on("transaction", bump);
-    return () => { editor.off("transaction", bump); };
+    return () => {
+      editor.off("transaction", bump);
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
   }, [editor]);
 
   // ResizeObserver mutates layout styles directly to avoid render loops.

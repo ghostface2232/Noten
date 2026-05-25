@@ -164,8 +164,6 @@ function App() {
     : settings.themeMode === "dark";
   const locale = settings.locale;
   const state = useMarkdownState();
-  const isDirtyRef = useRef(state.isDirty);
-  isDirtyRef.current = state.isDirty;
   const styles = useStyles();
   const sidebarStyles = useSidebarStyles();
   const tiptapRef = useRef<TiptapEditorHandle>(null);
@@ -278,6 +276,9 @@ function App() {
   }, [isLoading, docs, activeIndex]);
 
   const flushAutoSaveRef = useRef<(() => Promise<boolean>) | null>(null);
+  const captureAndQueueSaveRef = useRef<(() => void) | null>(null);
+  const awaitInFlightSavesRef = useRef<(() => Promise<void>) | null>(null);
+  const flushPendingSnapshotsRef = useRef<(() => Promise<void>) | null>(null);
   const notifyActiveDocRef = useRef<((id: string, filePath: string) => void) | null>(null);
   const cancelDocSaveRef = useRef<((docId: string) => void) | null>(null);
 
@@ -298,9 +299,10 @@ function App() {
     flushAutoSaveRef,
     notifyActiveDocRef,
     cancelDocSaveRef,
+    captureAndQueueSaveRef,
   );
 
-  const { scheduleAutoSave, flushAutoSave, notifyActiveDoc, cancelDocSave } = useAutoSave(
+  const { scheduleAutoSave, flushAutoSave, captureAndQueueSave, awaitInFlightSaves, flushPendingSnapshots, notifyActiveDoc, cancelDocSave } = useAutoSave(
     state,
     tiptapRef,
     docs,
@@ -312,6 +314,9 @@ function App() {
     groups,
   );
   flushAutoSaveRef.current = flushAutoSave;
+  captureAndQueueSaveRef.current = captureAndQueueSave;
+  awaitInFlightSavesRef.current = awaitInFlightSaves;
+  flushPendingSnapshotsRef.current = flushPendingSnapshots;
   notifyActiveDocRef.current = notifyActiveDoc;
   cancelDocSaveRef.current = cancelDocSave;
 
@@ -412,8 +417,26 @@ function App() {
     }
   }, [tiptapEditor, docs, locale, groups, noteGroups.toggleGroupCollapsed, fs.switchDocument, fs.createNoteWithTitle, wikiDocIndexSignature]);
 
+  // Most upstream mutations (autosave, rename, pin, color, etc.) already sort
+  // via sortAndPersistDocs / doSave. But several setDocs sites outside the
+  // hook layer DO NOT sort: useFileWatcher.applyMetaChange / runReconcile /
+  // body-change setDocs, useWindowSync's doc-updated / note-color-updated.
+  // Without this effect the sidebar visibly drifts out of order whenever
+  // those paths fire (remote rename, remote color change, etc.).
+  //
+  // Cheap gate: hash only the fields the comparator looks at. Pure-content
+  // edits (most autosave commits) keep the same signature and skip the
+  // O(N log N) sort entirely; field changes that could move a row recompute.
+  const lastSortSignatureRef = useRef<string>("");
   useEffect(() => {
     if (!settingsLoaded || docs.length < 2) return;
+
+    let sig = `${settings.notesSortOrder}|${locale}|`;
+    for (const d of docs) {
+      sig += `${d.id}|${d.fileName}|${d.updatedAt}|${d.createdAt}|${d.pinned ? 1 : 0}`;
+    }
+    if (sig === lastSortSignatureRef.current) return;
+    lastSortSignatureRef.current = sig;
 
     const activeId = docs[activeIndexRef.current]?.id ?? null;
     const sortedDocs = sortNotes(docs, settings.notesSortOrder, locale);
@@ -429,6 +452,7 @@ function App() {
   }, [
     docs,
     settings.notesSortOrder,
+    locale,
     settingsLoaded,
     setActiveIndex,
     setDocs,
@@ -533,6 +557,8 @@ function App() {
 
     // Flush before moving paths; later saves are blocked by migrationInProgress.
     await flushAutoSaveRef.current?.().catch(() => {});
+    await awaitInFlightSavesRef.current?.().catch(() => {});
+    await flushPendingSnapshotsRef.current?.().catch(() => {});
     await saveManifest(
       docsRef.current,
       docsRef.current[activeIndexRef.current]?.id ?? null,
@@ -579,6 +605,8 @@ function App() {
 
     // Flush before moving paths.
     await flushAutoSaveRef.current?.().catch(() => {});
+    await awaitInFlightSavesRef.current?.().catch(() => {});
+    await flushPendingSnapshotsRef.current?.().catch(() => {});
     await saveManifest(
       docsRef.current,
       docsRef.current[activeIndexRef.current]?.id ?? null,
@@ -702,7 +730,15 @@ function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     getCurrentWindow().onCloseRequested(async () => {
+      // Three-step drain: (1) flushAutoSave commits the current doc's pending
+      // edits, (2) awaitInFlightSaves waits for any background save queued by
+      // switchDocument's fast path, (3) flushPendingSnapshots retries any
+      // snapshot whose background save failed and is otherwise orphaned in
+      // pendingSnapshotsRef — without step (3), a transient backup/write
+      // failure for a previously-active doc would silently lose data.
       await flushAutoSaveRef.current?.();
+      await awaitInFlightSavesRef.current?.();
+      await flushPendingSnapshotsRef.current?.();
     }).then((fn) => { unlisten = fn; });
     return () => unlisten?.();
   }, []);
@@ -710,13 +746,25 @@ function App() {
   const handleTiptapDirty = useCallback(
     (dirty: boolean) => {
       if (!dirty) return;
-      if (!isDirtyRef.current) {
-        isDirtyRef.current = true;
-        state.setIsDirty(true);
-      }
+      // No isDirtyRef gate: state.setIsDirty(true) is a no-op render when
+      // state is already true, and the setDocs updater early-returns prev
+      // when the doc is already dirty. Skipping the gate also avoids a
+      // narrow stale-ref window right after a fast-path switch, where
+      // isDirtyRef could still report the leaving doc's dirty state and
+      // make the first keystroke on the new doc invisible.
+      state.setIsDirty(true);
+      setDocs((prev) => {
+        const ai = activeIndexRef.current;
+        if (ai < 0 || ai >= prev.length) return prev;
+        const current = prev[ai];
+        if (current.isDirty) return prev;
+        const next = prev.slice();
+        next[ai] = { ...current, isDirty: true };
+        return next;
+      });
       scheduleAutoSave();
     },
-    [state, scheduleAutoSave],
+    [state, scheduleAutoSave, setDocs],
   );
 
   useDragDrop({

@@ -150,15 +150,21 @@ describe("contract: autosave failures remain flushable", () => {
     expect(text).toMatch(/!hasPendingChangesRef\.current && !stateRef\.current\.state\.isDirty/);
   });
 
-  it("timer callbacks clear pending snapshots only after doSave succeeds", () => {
+  it("background save tail clears pending snapshots only after doSave succeeds", () => {
+    // flushAutoSave / captureAndQueueSave / scheduleAutoSave's timer all funnel
+    // through startBackgroundSave. The contract is that clearPendingSnapshotIfCurrent
+    // runs ONLY inside the .then(saved => ...) success branch — clearing eagerly
+    // would let a write failure silently drop the retry trigger.
     const text = read(AUTOSAVE);
-    const timerMatch = text.match(/const timer = setTimeout[\s\S]*?\n    \}, DEBOUNCE_MS\);/);
-    expect(timerMatch, "autosave timer callback not found").not.toBeNull();
-    const body = timerMatch![0];
+    const helperMatch = text.match(/const startBackgroundSave = useCallback[\s\S]*?\n  \}, \[[^\]]*\]\);/);
+    expect(helperMatch, "startBackgroundSave helper not found").not.toBeNull();
+    const body = helperMatch![0];
     const saveAt = body.indexOf("doSave(snapshot)");
     const clearAt = body.indexOf("clearPendingSnapshotIfCurrent(snapshot)");
     expect(saveAt).toBeGreaterThanOrEqual(0);
     expect(clearAt).toBeGreaterThan(saveAt);
+    // The clear must be reachable only via `if (saved)`, not unconditionally.
+    expect(body).toMatch(/if\s*\(saved\)\s*clearPendingSnapshotIfCurrent/);
   });
 
   it("doSave runs backupIfRemoteWroteFirst before any writeTextFile in the same body", () => {
@@ -211,6 +217,44 @@ describe("contract: migration does not treat transient I/O as empty state", () =
     const fnMatch = text.match(/export async function hasExistingNotenData[\s\S]*?\n\}/);
     expect(fnMatch, "hasExistingNotenData not found").not.toBeNull();
     expect(fnMatch![0]).toMatch(/catch\s*\{\s*return true;\s*\}/);
+  });
+});
+
+describe("contract: App-level sort effect reacts to docs identity", () => {
+  // Regression class: useFileWatcher.applyMetaChange / runReconcile and
+  // useWindowSync's doc-updated / note-color-updated listeners all setDocs
+  // *without* sorting. App.tsx's sort effect is the only place that catches
+  // those out-of-band updates; if it stops depending on `docs`, sidebar order
+  // visibly drifts on remote rename / remote color / remote body updates.
+  const APP_FILE = resolve(SRC_ROOT, "App.tsx");
+
+  it("the sort effect's dependency array still includes docs", () => {
+    const text = read(APP_FILE);
+    // Find every useEffect deps array and verify the one wrapping a sortNotes
+    // call includes `docs`. Cheap grep, but pinned enough to catch the
+    // "removed docs from deps to skip per-autosave sort" regression.
+    const sortBlock = text.match(/useEffect\(\(\) => \{[\s\S]*?sortNotes\([\s\S]*?\}, \[([\s\S]*?)\]\);/);
+    expect(sortBlock, "sortNotes-driven useEffect not found in App.tsx").not.toBeNull();
+    const deps = sortBlock![1].split(",").map((s) => s.trim());
+    expect(deps).toContain("docs");
+  });
+});
+
+describe("contract: switchDocument's prune detector consults the live editor", () => {
+  // Regression class: the fast (fire-and-forget) switch path races
+  // pruneEmptyCurrentDoc when isPruneCandidate is computed only from the
+  // (potentially stale) docs[].content. A doc that the user just typed into
+  // after autosave would look empty in liveDocs and get its file deleted while
+  // a background save was still writing to it. The detector MUST read live
+  // markdown from the editor so an empty-on-disk-but-typed-in-memory doc is
+  // routed through the slow (await-flush) path.
+  const FS_FILE = resolve(SRC_ROOT, "hooks/useFileSystem.ts");
+
+  it("isPruneCandidate definition references getCurrentMarkdown(tiptapRef)", () => {
+    const text = read(FS_FILE);
+    const block = text.match(/const switchDocument[\s\S]*?const isPruneCandidate[\s\S]*?\n\n/);
+    expect(block, "switchDocument's isPruneCandidate definition not found").not.toBeNull();
+    expect(block![0]).toMatch(/getCurrentMarkdown\(tiptapRef\)/);
   });
 });
 

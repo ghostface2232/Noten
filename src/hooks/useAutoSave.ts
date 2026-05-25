@@ -46,6 +46,11 @@ export function useAutoSave(
   const latestEditSerialByDocRef = useRef(new Map<string, number>());
   const latestRevisionByDocRef = useRef(new Map<string, number>());
   const hasPendingChangesRef = useRef(false);
+  // Tracks every doSave promise still in flight. flushAutoSave awaits the full
+  // set so callers (window close, notes-dir migration) never quit before a
+  // background save lands. Without this the new fire-and-forget switch path
+  // could drop a save if the user closed mid-write.
+  const inFlightSavesRef = useRef(new Set<Promise<boolean>>());
   const stateRef = useRef({
     state,
     tiptapRef,
@@ -208,7 +213,15 @@ export function useAutoSave(
       }
 
       const live = stateRef.current;
-      const currentActiveId = live.docs[live.activeIndex]?.id ?? null;
+      // Prefer the synchronous activeDocRef over stateRef.current.docs/
+      // activeIndex: when a fast-path switchDocument has already called
+      // notifyActiveDoc but React hasn't committed the corresponding setDocs/
+      // setActiveIndex yet, stateRef still reflects the leaving doc. Using the
+      // stale id would let a post-switch background save flip isDirty on the
+      // wrong doc and resort/reselect the leaving doc as active.
+      const currentActiveId = activeDocRef.current?.id
+        ?? live.docs[live.activeIndex]?.id
+        ?? null;
       const activeDocStillMatches = currentActiveId === snapshot.docId
         ? live.state.getCachedMarkdown() === snapshot.content
         : false;
@@ -269,6 +282,29 @@ export function useAutoSave(
     }
   }, []);
 
+  // Wrap a doSave call so the promise lives in inFlightSavesRef until it
+  // settles. Returned promise still rejects/resolves identically.
+  const trackInFlight = useCallback((p: Promise<boolean>): Promise<boolean> => {
+    inFlightSavesRef.current.add(p);
+    void p.finally(() => { inFlightSavesRef.current.delete(p); });
+    return p;
+  }, []);
+
+  // Shared "register pending + track + reconcile" tail used by flushAutoSave,
+  // captureAndQueueSave, and the scheduleAutoSave timer callback. Side effects:
+  // sets pendingSnapshotsRef, marks hasPendingChangesRef, registers the doSave
+  // in the in-flight set, clears the pending entry on success, and refreshes
+  // the pending flag on failure.
+  const startBackgroundSave = useCallback((snapshot: SaveSnapshot): Promise<boolean> => {
+    pendingSnapshotsRef.current.set(snapshot.docId, snapshot);
+    hasPendingChangesRef.current = true;
+    return trackInFlight(doSave(snapshot)).then((saved) => {
+      if (saved) clearPendingSnapshotIfCurrent(snapshot);
+      else refreshHasPendingChanges();
+      return saved;
+    });
+  }, [clearPendingSnapshotIfCurrent, doSave, refreshHasPendingChanges, trackInFlight]);
+
   const flushAutoSave = useCallback((): Promise<boolean> => {
     for (const timer of timersRef.current.values()) {
       clearTimeout(timer);
@@ -282,15 +318,62 @@ export function useAutoSave(
     const freshSnapshot = createSnapshot();
     if (!freshSnapshot) return Promise.resolve(false);
 
-    hasPendingChangesRef.current = true;
-    pendingSnapshotsRef.current.set(freshSnapshot.docId, freshSnapshot);
+    return startBackgroundSave(freshSnapshot);
+  }, [createSnapshot, startBackgroundSave]);
 
-    return doSave(freshSnapshot).then((saved) => {
-      if (saved) clearPendingSnapshotIfCurrent(freshSnapshot);
-      else refreshHasPendingChanges();
-      return saved;
-    });
-  }, [clearPendingSnapshotIfCurrent, createSnapshot, doSave, refreshHasPendingChanges]);
+  // Awaits every save currently in flight (whether queued by scheduleAutoSave,
+  // flushAutoSave, or captureAndQueueSave). Used by close handlers and
+  // notes-dir migrations that must not quit while a background save is still
+  // writing to disk. Stale in-flight saves are expected to bail on the
+  // snapshot guard inside doSave; this just waits for them to settle.
+  const awaitInFlightSaves = useCallback(async (): Promise<void> => {
+    while (inFlightSavesRef.current.size > 0) {
+      const snapshot = Array.from(inFlightSavesRef.current);
+      await Promise.allSettled(snapshot);
+    }
+  }, []);
+
+  // Retry any snapshots whose background save settled with failure (returned
+  // false → still in pendingSnapshotsRef, no timer scheduled). Background
+  // saves come from captureAndQueueSave; without an explicit retry on close,
+  // a transient backup/write failure during a fire-and-forget switch would
+  // silently strand the leaving doc's unsaved content. flushAutoSave alone
+  // would not catch it because it only re-captures the *current* active doc.
+  const flushPendingSnapshots = useCallback(async (): Promise<void> => {
+    const stranded = Array.from(pendingSnapshotsRef.current.values());
+    for (const snapshot of stranded) {
+      if (!snapshotIsCurrent(snapshot)) {
+        clearPendingSnapshotIfCurrent(snapshot);
+        continue;
+      }
+      try {
+        const saved = await trackInFlight(doSave(snapshot));
+        if (saved) clearPendingSnapshotIfCurrent(snapshot);
+      } catch {
+        // doSave already logged; nothing more we can do at close time.
+      }
+    }
+    refreshHasPendingChanges();
+  }, [clearPendingSnapshotIfCurrent, doSave, refreshHasPendingChanges, snapshotIsCurrent, trackInFlight]);
+
+  // Fire-and-forget variant of flushAutoSave: captures the snapshot
+  // synchronously (so the editor can be repointed at a different doc
+  // immediately afterwards without poisoning the snapshot) and lets doSave run
+  // in the background. Used by doc-switch paths so the user sees the new doc
+  // load without waiting for cloud-sync I/O on the leaving doc.
+  const captureAndQueueSave = useCallback((): void => {
+    for (const timer of timersRef.current.values()) {
+      clearTimeout(timer);
+    }
+    timersRef.current.clear();
+
+    if (!hasPendingChangesRef.current && !stateRef.current.state.isDirty) return;
+
+    const freshSnapshot = createSnapshot();
+    if (!freshSnapshot) return;
+
+    void startBackgroundSave(freshSnapshot);
+  }, [createSnapshot, startBackgroundSave]);
 
   const scheduleAutoSave = useCallback(() => {
     if (migrationInProgress) return;
@@ -312,17 +395,12 @@ export function useAutoSave(
           discardPendingTarget(pending.docId);
           return;
         }
-        pendingSnapshotsRef.current.set(snapshot.docId, snapshot);
-        refreshHasPendingChanges();
-        void doSave(snapshot).then((saved) => {
-          if (saved) clearPendingSnapshotIfCurrent(snapshot);
-          else refreshHasPendingChanges();
-        });
+        void startBackgroundSave(snapshot);
       }
     }, DEBOUNCE_MS);
 
     timersRef.current.set(pending.docId, timer);
-  }, [clearPendingSnapshotIfCurrent, createSnapshot, discardPendingTarget, doSave, markActiveDocEdited, refreshHasPendingChanges]);
+  }, [createSnapshot, discardPendingTarget, markActiveDocEdited, startBackgroundSave]);
 
   useEffect(() => {
     return () => {
@@ -362,5 +440,5 @@ export function useAutoSave(
     refreshHasPendingChanges();
   }, [refreshHasPendingChanges]);
 
-  return { scheduleAutoSave, flushAutoSave, notifyActiveDoc, cancelDocSave };
+  return { scheduleAutoSave, flushAutoSave, captureAndQueueSave, awaitInFlightSaves, flushPendingSnapshots, notifyActiveDoc, cancelDocSave };
 }
