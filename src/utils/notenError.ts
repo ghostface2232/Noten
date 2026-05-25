@@ -9,6 +9,7 @@ export type NotenErrorCode =
   | "BACKUP_FAILED"
   | "CONFLICT_SCAN_FAILED"
   | "TRASH_PURGE_FAILED"
+  | "WATCH_SETUP_FAILED"
   | "MIGRATION_FAILED"
   | "UNCAUGHT";
 

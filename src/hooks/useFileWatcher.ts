@@ -118,7 +118,19 @@ export function useFileWatcher(
       targetGroupId !== null
       && !groupsRef.current.some((g) => g.id === targetGroupId)
     ) {
-      await reloadGroupsFromDisk().catch(() => {});
+      try {
+        await reloadGroupsFromDisk();
+      } catch (err) {
+        // Next reconcile re-resolves group membership, so this is recoverable
+        // — but the doc stays ungrouped in memory until then and the user has
+        // no signal that the sync stalled. Log so the stall is diagnosable.
+        void logNotenError(new NotenError(
+          "RECONCILE_FAILED",
+          "recoverable",
+          "useFileWatcher.applyMetaChange: reloadGroupsFromDisk failed; doc stays ungrouped until next reconcile",
+          { context: { noteId: id, targetGroupId, source: "watcher.metaChange" }, cause: err },
+        ));
+      }
       return;
     }
 
@@ -355,9 +367,16 @@ export function useFileWatcher(
         if (cancelled) unwatch();
         else rootUnwatch = unwatch;
       } catch (err) {
-        if (import.meta.env.DEV) {
-          console.warn("Root file watcher setup failed:", err);
-        }
+        // Without this watcher, no remote .md edits propagate into the UI
+        // until the user manually refocuses (focus/visibility/60s interval).
+        // Previously the only signal was a DEV-only console.warn, so a
+        // production user got silently degraded sync.
+        void logNotenError(new NotenError(
+          "WATCH_SETUP_FAILED",
+          "fatal",
+          err instanceof Error ? err.message : String(err),
+          { context: { dir, scope: "root" }, cause: err },
+        ));
       }
 
       const metaDir = metaDirFor(dir);
@@ -372,9 +391,14 @@ export function useFileWatcher(
         if (cancelled) unwatch();
         else metaUnwatch = unwatch;
       } catch (err) {
-        if (import.meta.env.DEV) {
-          console.warn("Meta file watcher setup failed:", err);
-        }
+        // Same as the root watcher: a silent setup failure here means
+        // remote pin/color/group changes never reach this window's UI.
+        void logNotenError(new NotenError(
+          "WATCH_SETUP_FAILED",
+          "fatal",
+          err instanceof Error ? err.message : String(err),
+          { context: { dir: metaDir, scope: "meta" }, cause: err },
+        ));
       }
     })();
 
