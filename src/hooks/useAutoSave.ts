@@ -104,7 +104,26 @@ export function useAutoSave(
       try {
         const dir = await getNotesDir();
         await backupIfRemoteWroteFirst(tauriFileSystem, dir, snapshot.filePath, snapshot.docId, snapshot.content);
-      } catch { /* best-effort, never block the save */ }
+      } catch (err) {
+        // The pre-save safety net (.conflicts/ backup of a possibly-newer
+        // remote body) could not run. Overwriting now risks remote data loss
+        // with no recovery, so defer this save — the doc stays dirty, the
+        // next autosave debounce retries, and a transient cloud-sync failure
+        // self-heals. A permanent failure repeatedly logs and surfaces via
+        // the dirty indicator instead of silently corrupting on disk.
+        void logNotenError(err instanceof NotenError
+          ? err
+          : new NotenError(
+              "BACKUP_FAILED",
+              "fatal",
+              err instanceof Error ? err.message : String(err),
+              {
+                context: { noteId: snapshot.docId, filePath: snapshot.filePath },
+                cause: err,
+              },
+            ));
+        return false;
+      }
 
       markOwnWrite(snapshot.filePath, snapshot.content);
       await tauriFileSystem.writeTextFile(snapshot.filePath, snapshot.content);

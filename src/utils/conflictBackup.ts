@@ -1,5 +1,6 @@
 import type { FileSystem } from "./fs";
 import { normalizeSep } from "./pathUtils";
+import { NotenError } from "./notenError";
 
 const README_BODY = `This folder holds backups of note bodies that were on disk
 when another change was about to overwrite them. Files are named
@@ -55,8 +56,18 @@ export async function backupRemoteVersion(
     await fs.writeTextFile(path, body);
     await ensureReadme(fs, notesDir, conflictsDir);
     return path;
-  } catch {
-    return null;
+  } catch (err) {
+    // The .conflicts safety net could not be written. Previously this returned
+    // null silently and the caller continued to overwrite the live file, so a
+    // backup failure was indistinguishable from "no backup needed". Throw so
+    // the caller (autosave) can defer the save instead of dropping the user's
+    // only recovery surface.
+    throw new NotenError(
+      "BACKUP_FAILED",
+      "fatal",
+      "backupRemoteVersion: conflict body write failed",
+      { context: { filePath: path, noteId }, cause: err },
+    );
   }
 }
 
@@ -69,13 +80,20 @@ export async function backupIfRemoteWroteFirst(
   intendedContent: string,
 ): Promise<boolean> {
   if (!filePath) return false;
-  let diskContent: string | null = null;
+  let diskContent: string;
   try {
     diskContent = await fs.readTextFile(filePath);
-  } catch {
-    diskContent = null;
+  } catch (err) {
+    // Previously this swallowed to diskContent=null and returned false ("no
+    // backup needed"), which lied: we couldn't check, so we don't know.
+    // Throw so the caller defers the save rather than overwriting blind.
+    throw new NotenError(
+      "BACKUP_FAILED",
+      "fatal",
+      "backupIfRemoteWroteFirst: pre-save read failed; cannot verify whether remote wrote first",
+      { context: { filePath, noteId }, cause: err },
+    );
   }
-  if (diskContent === null) return false;
 
   const lastKnown = getKnownDiskContent(filePath);
   // First save in this session: seed the baseline, don't back up speculatively.
