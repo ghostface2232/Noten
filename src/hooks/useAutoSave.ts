@@ -136,6 +136,16 @@ export function useAutoSave(
         return false;
       }
 
+      // Backup can stall for seconds on cloud-sync placeholder hydration. If
+      // the user deletes the note in that window, writing now would resurrect
+      // the file at its old path right after deleteNote moved it to .trash,
+      // leaving a ghost the next reconcile has to clean up. The post-write
+      // savedDocStillExists check below still guards the manifest commit, but
+      // skipping the write itself avoids the wasted I/O and the ghost file.
+      if (!stateRef.current.docs.some((d) => d.id === snapshot.docId)) {
+        return false;
+      }
+
       markOwnWrite(snapshot.filePath, snapshot.content);
       await tauriFileSystem.writeTextFile(snapshot.filePath, snapshot.content);
       setKnownDiskContent(snapshot.filePath, snapshot.content);
@@ -181,7 +191,11 @@ export function useAutoSave(
 
       latestSetDocs(sortedDocs);
       latestSetActiveIndex(nextIndex);
-      await saveManifest(sortedDocs, currentActiveId, stateRef.current.groups).catch(() => {});
+      try {
+        await saveManifest(sortedDocs, currentActiveId, stateRef.current.groups);
+      } catch {
+        return false;
+      }
 
       const saved = sortedDocs.find((d) => d.id === snapshot.docId);
       if (saved) emitDocUpdated(saved.id, snapshot.content, saved.fileName);

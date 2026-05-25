@@ -65,7 +65,7 @@ const EDITOR_MIN_WIDTH = 600;
 const WINDOW_MIN_HEIGHT = 620;
 const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
 
-type NotesDirConflictChoice = "merge" | "overwrite" | null;
+type NotesDirConflictChoice = "replace-with-current" | "use-selected-only" | "merge" | null;
 
 interface NotesDirConflictDialogState {
   path: string;
@@ -509,12 +509,12 @@ function App() {
     if (normalize(newDir) === normalize(oldDir)) return;
 
     const destHasData = await hasExistingNotenData(newDir);
-    let action: "move" | "merge" | "overwrite-current" = "move";
+    let action: "move" | "replace-with-current" | "use-selected-only" | "merge" = "move";
 
     if (destHasData) {
       const choice = await requestNotesDirConflictChoice(newDir);
       if (choice === null) return;
-      action = choice === "merge" ? "merge" : "overwrite-current";
+      action = choice;
     } else {
       const ok = await confirm(t("settings.notesDirectory.confirmMove", locale));
       if (!ok) return;
@@ -538,7 +538,7 @@ function App() {
 
     let result;
     try {
-      result = action === "overwrite-current"
+      result = action === "use-selected-only"
         ? await clearManagedNotesData(oldDir, newDir)
         : await migrateNotesDir(oldDir, newDir, action === "merge" ? "merge" : "overwrite");
     } catch (err) {
@@ -1020,14 +1020,11 @@ function App() {
           <div style={{ fontSize: "16px", fontWeight: 600, color: tokens.colorNeutralForeground1, userSelect: "none" }}>
             {t("settings.notesDirectory.conflictTitle", locale)}
           </div>
-          <div style={{ fontSize: "13px", color: tokens.colorNeutralForeground2, lineHeight: 1.55, marginTop: "10px", userSelect: "none" }}>
-            {t("settings.notesDirectory.conflictBody", locale)}
-          </div>
           <div
             style={{
               fontSize: "12px",
               color: tokens.colorNeutralForeground3,
-              marginTop: "12px",
+              marginTop: "10px",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -1036,29 +1033,61 @@ function App() {
           >
             {notesDirConflict?.path}
           </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "22px" }}>
-            <Button
-              size="medium"
-              appearance="subtle"
-              onClick={() => resolveNotesDirConflictChoice(null)}
+          <div style={{ display: "grid", gap: "8px", marginTop: "22px" }}>
+            <Tooltip
+              content={t("settings.notesDirectory.replaceWithCurrentHelp", locale)}
+              relationship="description"
+              positioning="above"
+              appearance={isDarkMode ? "inverted" : undefined}
             >
-              {t("trash.cancel", locale)}
-            </Button>
-            <Button
-              size="medium"
-              appearance="subtle"
-              onClick={() => resolveNotesDirConflictChoice("merge")}
+              <Button
+                size="medium"
+                appearance="subtle"
+                onClick={() => resolveNotesDirConflictChoice("replace-with-current")}
+                style={{ justifyContent: "flex-start", color: tokens.colorPaletteRedForeground1 }}
+              >
+                {t("dialog.replaceWithCurrent", locale)}
+              </Button>
+            </Tooltip>
+            <Tooltip
+              content={t("settings.notesDirectory.useSelectedOnlyHelp", locale)}
+              relationship="description"
+              positioning="above"
+              appearance={isDarkMode ? "inverted" : undefined}
             >
-              {t("dialog.merge", locale)}
-            </Button>
-            <Button
-              size="medium"
-              appearance="subtle"
-              onClick={() => resolveNotesDirConflictChoice("overwrite")}
-              style={{ color: tokens.colorPaletteRedForeground1 }}
+              <Button
+                size="medium"
+                appearance="subtle"
+                onClick={() => resolveNotesDirConflictChoice("use-selected-only")}
+                style={{ justifyContent: "flex-start", color: tokens.colorPaletteRedForeground1 }}
+              >
+                {t("dialog.useSelectedOnly", locale)}
+              </Button>
+            </Tooltip>
+            <Tooltip
+              content={t("settings.notesDirectory.mergeHelp", locale)}
+              relationship="description"
+              positioning="above"
+              appearance={isDarkMode ? "inverted" : undefined}
             >
-              {t("dialog.overwrite", locale)}
-            </Button>
+              <Button
+                size="medium"
+                appearance="subtle"
+                className={styles.notesDirMergeButton}
+                onClick={() => resolveNotesDirConflictChoice("merge")}
+              >
+                {t("dialog.merge", locale)}
+              </Button>
+            </Tooltip>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "6px" }}>
+              <Button
+                size="medium"
+                appearance="subtle"
+                onClick={() => resolveNotesDirConflictChoice(null)}
+              >
+                {t("trash.cancel", locale)}
+              </Button>
+            </div>
           </div>
         </DialogSurface>
       </Dialog>

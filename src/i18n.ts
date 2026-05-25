@@ -217,9 +217,17 @@ const dict = {
     en: "This folder already contains Noten data",
     ko: "이 폴더에 이미 Noten 데이터가 있습니다",
   },
-  "settings.notesDirectory.conflictBody": {
-    en: "Merge keeps notes, images, and groups from both locations. Overwrite deletes the current app notes and loads this folder instead.",
-    ko: "병합은 양쪽의 노트, 이미지, 그룹을 함께 보존합니다. 덮어쓰기는 현재 앱 노트를 삭제하고 이 폴더의 데이터를 불러옵니다.",
+  "settings.notesDirectory.replaceWithCurrentHelp": {
+    en: "Delete the selected folder's existing note data and move this app's current notes there.",
+    ko: "선택한 폴더의 기존 노트 데이터를 지우고, 앱에 있던 노트를 옮기기.",
+  },
+  "settings.notesDirectory.useSelectedOnlyHelp": {
+    en: "Discard this app's current notes and use only the notes already in the selected folder.",
+    ko: "앱에 있던 노트는 버리고, 선택한 폴더에 있던 노트만 사용하기.",
+  },
+  "settings.notesDirectory.mergeHelp": {
+    en: "Combine this app's current notes with the notes in the selected folder.",
+    ko: "지금 앱의 노트와 선택한 폴더의 노트를 합치기.",
   },
   "settings.notesDirectory.migrationFailed": {
     en: "Failed to migrate notes. The storage location was not changed.",
@@ -254,6 +262,8 @@ const dict = {
 
   /* Dialog */
   "dialog.merge": { en: "Merge", ko: "병합" },
+  "dialog.replaceWithCurrent": { en: "Replace with Current Notes", ko: "현재 노트로 대체" },
+  "dialog.useSelectedOnly": { en: "Use Selected Folder Only", ko: "선택한 폴더만 사용" },
   "dialog.overwrite": { en: "Overwrite", ko: "덮어쓰기" },
   "dialog.save": { en: "Save", ko: "저장" },
   "dialog.export": { en: "Export", ko: "내보내기" },

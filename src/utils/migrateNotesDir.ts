@@ -1,4 +1,4 @@
-import { mkdir, readDir, copyFile, readTextFile, exists, remove } from "@tauri-apps/plugin-fs";
+import { mkdir, readDir, copyFile, readTextFile, readFile, exists, remove } from "@tauri-apps/plugin-fs";
 import { tauriFileSystem } from "./fs";
 import { normalizeSep } from "./pathUtils";
 import {
@@ -141,6 +141,38 @@ async function assertReadableDirIfExists(dir: string): Promise<void> {
 async function assertReadableFileIfExists(path: string): Promise<void> {
   if (!(await exists(path))) return;
   await readTextFile(path);
+}
+
+async function assertReadableTreeIfExists(dir: string): Promise<void> {
+  if (!(await exists(dir))) return;
+  const entries = await readDir(dir);
+  const base = normalizeSep(dir);
+  for (const entry of entries) {
+    if (!entry.name) continue;
+    const path = `${base}${entry.name}`;
+    if (entry.isDirectory) {
+      await assertReadableTreeIfExists(path);
+    } else if (entry.isFile) {
+      await readFile(path);
+    }
+  }
+}
+
+async function assertOverwriteSourceReadable(fromDir: string): Promise<void> {
+  const base = normalizeSep(fromDir);
+  const entries = await readDir(fromDir);
+  for (const entry of entries) {
+    if (!entry.name) continue;
+    const path = `${base}${entry.name}`;
+    if (entry.isFile && entry.name.endsWith(".md")) {
+      await readTextFile(path);
+    }
+  }
+  await assertReadableTreeIfExists(`${base}.meta`);
+  await assertReadableFileIfExists(`${base}.groups.json`);
+  await assertReadableTreeIfExists(`${base}.trash`);
+  await assertReadableTreeIfExists(`${base}.assets`);
+  await assertReadableTreeIfExists(`${base}.conflicts`);
 }
 
 export async function clearManagedNotesData(dir: string, protectedPath?: string): Promise<MigrationResult> {
@@ -427,6 +459,7 @@ export async function migrateNotesDir(
     }
 
     if (mergeStrategy === "overwrite") {
+      await assertOverwriteSourceReadable(fromDir);
       await clearDirContents(toDir, undefined, true);
       await copySharedTreeForOverwrite(fromDir, toDir);
 

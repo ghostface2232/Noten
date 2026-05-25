@@ -401,13 +401,44 @@ describe("useAutoSave — writeTextFile failure logs SAVE_FAILED", () => {
   });
 });
 
+describe("useAutoSave — manifest failure remains retryable", () => {
+  it("returns false and leaves the editor dirty so a later flush retries saveManifest", async () => {
+    saveManifestMock.mockRejectedValueOnce(new Error("EPERM: meta sidecar locked"));
+    const setIsDirty = vi.fn();
+    const { result } = renderAutoSave({
+      state: makeState({ isDirty: true, setIsDirty }),
+    });
+
+    let first: boolean | undefined;
+    await act(async () => {
+      first = await result.current.flushAutoSave();
+    });
+
+    expect(first).toBe(false);
+    expect(writeMock).toHaveBeenCalledTimes(1);
+    expect(saveManifestMock).toHaveBeenCalledTimes(1);
+    expect(setIsDirty).not.toHaveBeenCalledWith(false);
+
+    let second: boolean | undefined;
+    await act(async () => {
+      second = await result.current.flushAutoSave();
+    });
+
+    expect(second).toBe(true);
+    expect(writeMock).toHaveBeenCalledTimes(2);
+    expect(saveManifestMock).toHaveBeenCalledTimes(2);
+    expect(setIsDirty).toHaveBeenCalledWith(false);
+  });
+});
+
 describe("useAutoSave — savedDocStillExists race", () => {
   // The user deletes the active note while its autosave is in flight. doSave
-  // has captured a snapshot, but by the time it reaches the post-write commit,
-  // stateRef.current.docs no longer contains the doc. The map() loop never
-  // sets savedDocStillExists, so doSave bails before saveManifest — the
-  // delete must not be partially undone by a stale autosave.
-  it("does not commit a manifest entry for a doc that was removed mid-save", async () => {
+  // has captured a snapshot, but by the time backupIfRemoteWroteFirst resolves
+  // the doc is gone from stateRef.current.docs. The pre-write existence check
+  // skips writeTextFile entirely so the deleted file is not resurrected at its
+  // old path. The post-write savedDocStillExists guard remains as a second
+  // line of defense against a doc removed between write and commit.
+  it("skips both the body write and manifest commit for a doc removed mid-save", async () => {
     vi.useFakeTimers();
     let releaseBackup: () => void = () => {};
     backupMock.mockImplementationOnce(
@@ -453,10 +484,10 @@ describe("useAutoSave — savedDocStillExists race", () => {
       await Promise.resolve();
     });
 
-    // Body write happens (it's idempotent — the deleted doc's file may even
-    // get rewritten before delete's `remove` lands), but the manifest commit
-    // path must bail at savedDocStillExists=false.
-    expect(writeMock).toHaveBeenCalledTimes(1);
+    // Pre-write existence check fires before writeTextFile, so neither the
+    // body nor the manifest is touched. Without this guard the file would
+    // reappear on disk right after delete moved it to .trash.
+    expect(writeMock).not.toHaveBeenCalled();
     expect(saveManifestMock).not.toHaveBeenCalled();
     expect(setDocs).not.toHaveBeenCalled();
   });

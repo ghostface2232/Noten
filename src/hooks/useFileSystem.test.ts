@@ -251,7 +251,7 @@ describe("useFileSystem — importFiles batch resilience", () => {
 
     // setDocs is called by sortAndPersistDocs with the two surviving imports.
     expect(setDocs).toHaveBeenCalled();
-    const lastDocs = setDocs.mock.calls.at(-1)![0] as NoteDoc[];
+    const lastDocs = setDocs.mock.calls[setDocs.mock.calls.length - 1][0] as NoteDoc[];
     const importedNames = lastDocs.map((d) => d.fileName).filter((n) => n === "a" || n === "c");
     expect(importedNames.sort()).toEqual(["a", "c"]);
   });
@@ -273,7 +273,7 @@ describe("useFileSystem — importFiles batch resilience", () => {
     expect(logged).toBeDefined();
     expect((logged![0] as NotenError).context).toMatchObject({ stage: "importFiles" });
 
-    const lastDocs = setDocs.mock.calls.at(-1)![0] as NoteDoc[];
+    const lastDocs = setDocs.mock.calls[setDocs.mock.calls.length - 1][0] as NoteDoc[];
     const imported = lastDocs.filter((d) => d.filePath.startsWith("/notes/uuid-"));
     expect(imported.length).toBe(2);
     // None of the committed docs should point at the failed-write path.
@@ -408,7 +408,7 @@ describe("useFileSystem — deleteNote last-note replacement", () => {
 
     expect(setDocs).toHaveBeenCalled();
     // The last setDocs call replaces the array with [replacement].
-    const lastDocs = setDocs.mock.calls.at(-1)![0] as NoteDoc[];
+    const lastDocs = setDocs.mock.calls[setDocs.mock.calls.length - 1][0] as NoteDoc[];
     expect(lastDocs).toHaveLength(1);
     // Critical invariant: write failed, so the manifest entry MUST advertise
     // the doc as dirty — autosave will then retry rather than the user
@@ -432,7 +432,7 @@ describe("useFileSystem — deleteNote last-note replacement", () => {
       await result.current.deleteNote(0);
     });
 
-    const lastDocs = setDocs.mock.calls.at(-1)![0] as NoteDoc[];
+    const lastDocs = setDocs.mock.calls[setDocs.mock.calls.length - 1][0] as NoteDoc[];
     expect(lastDocs).toHaveLength(1);
     expect(lastDocs[0].isDirty).toBe(false);
   });
@@ -460,7 +460,7 @@ describe("useFileSystem — renameNote partial-failure", () => {
     });
 
     expect(setDocs).toHaveBeenCalled();
-    const lastDocs = setDocs.mock.calls.at(-1)![0] as NoteDoc[];
+    const lastDocs = setDocs.mock.calls[setDocs.mock.calls.length - 1][0] as NoteDoc[];
     const ok = lastDocs.find((d) => d.id === "linker-ok")!;
     const fail = lastDocs.find((d) => d.id === "linker-fail")!;
 

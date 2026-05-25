@@ -189,4 +189,17 @@ export const useStyles = makeStyles({
     transitionTimingFunction: "ease",
     height: "100%",
   },
+  notesDirMergeButton: {
+    justifyContent: "flex-start",
+    backgroundColor: `${tokens.colorBrandBackground} !important`,
+    color: `${tokens.colorNeutralForegroundOnBrand} !important`,
+    ":hover, :focus-visible": {
+      backgroundColor: `${tokens.colorBrandBackgroundHover} !important`,
+      color: `${tokens.colorNeutralForegroundOnBrand} !important`,
+    },
+    ":hover:active": {
+      backgroundColor: `${tokens.colorBrandBackgroundPressed} !important`,
+      color: `${tokens.colorNeutralForegroundOnBrand} !important`,
+    },
+  },
 });

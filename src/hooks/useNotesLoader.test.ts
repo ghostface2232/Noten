@@ -11,6 +11,7 @@ import type { DecomposedState } from "../utils/decomposedState";
 // having to re-register mocks.
 const refs = vi.hoisted(() => ({
   fs: null as InMemoryFileSystem | null,
+  readFaultByPath: new Map<string, Error>(),
   reconcileThrow: null as Error | null,
   decomposedDocs: [] as NoteDoc[],
   decomposedGroups: [] as NoteGroup[],
@@ -28,7 +29,11 @@ vi.mock("@tauri-apps/plugin-fs", () => {
   };
   return {
     mkdir: (p: string, o?: { recursive?: boolean }) => get().mkdir(p, o),
-    readTextFile: (p: string) => get().readTextFile(p),
+    readTextFile: (p: string) => {
+      const fault = refs.readFaultByPath.get(p);
+      if (fault) throw fault;
+      return get().readTextFile(p);
+    },
     writeTextFile: (p: string, c: string) => get().writeTextFile(p, c),
     readFile: (p: string) => get().readFile(p),
     writeFile: (p: string, d: Uint8Array) => get().writeFile(p, d),
@@ -126,6 +131,7 @@ beforeEach(() => {
   refs.fs = createInMemoryFileSystem();
   refs.fs.seedDir("/test-appdata");
   refs.fs.seedDir("/test-appdata/notes");
+  refs.readFaultByPath = new Map();
   refs.reconcileThrow = null;
   refs.decomposedDocs = [];
   refs.decomposedGroups = [];
@@ -176,6 +182,26 @@ describe("useNotesLoader — outer catch preserves already-loaded docs (bug 3 re
     expect(result.current.docs).toHaveLength(1);
     expect(result.current.docs[0].id).toBe("local");
     expect(result.current.docs[0].filePath).toBe("");
+  });
+});
+
+describe("useNotesLoader — all body reads fail closed", () => {
+  it("does not create a new blank note when persisted docs exist but every body read fails", async () => {
+    const doc = makeDoc("id-0");
+    refs.fs!.seedTextFile(doc.filePath, "real body");
+    refs.decomposedDocs = [doc];
+    refs.readFaultByPath.set(doc.filePath, new Error("EBUSY: cloud hydration"));
+
+    const { result } = renderHook(() => useNotesLoader("en", "updated-desc"));
+    await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 2000 });
+
+    expect(result.current.docs).toHaveLength(1);
+    expect(result.current.docs[0].id).toBe("local");
+
+    const rootMarkdownFiles = Array.from(refs.fs!.snapshot().keys())
+      .filter((path) => path.startsWith("/test-appdata/notes/") && path.endsWith(".md"));
+    expect(rootMarkdownFiles).toEqual([doc.filePath]);
+    expect(await refs.fs!.readTextFile(doc.filePath)).toBe("real body");
   });
 });
 

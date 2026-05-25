@@ -574,6 +574,14 @@ export function useNotesLoader(
         const state = await loadDecomposedState(dir);
         await seedWriteSnapshots(dir);
         let docsLoaded = await attachDocContents(state.docs);
+        if (state.docs.length > 0 && docsLoaded.length === 0) {
+          throw new NotenError(
+            "BODY_READ_FAILED",
+            "recoverable",
+            "useNotesLoader: all persisted note bodies were unreadable; deferring blank-note creation",
+            { context: { dir, docCount: state.docs.length } },
+          );
+        }
         if (docsLoaded.length > 0) {
           safeDocs = docsLoaded;
           safeGroups = state.groups;
