@@ -4,6 +4,8 @@ import { groupsPathFor, writeGroupsWithMerge } from "./groupsIO";
 import { getMachineIdCached } from "./machineId";
 import { atomicWriteText } from "./atomicWrite";
 import { normalizeSep } from "./pathUtils";
+import { NotenError } from "./notenError";
+import { logNotenError } from "./crashLog";
 
 /** Known OneDrive/Dropbox conflict suffixes, anchored to the filename stem. */
 const CONFLICT_SUFFIX_RE = /(?:[- ]\(\d+\)|-\w+(?:-conflicted copy)?|-conflicted copy \d{4}-\d{2}-\d{2}|-DESKTOP-[A-Z0-9]+|-LAPTOP-[A-Z0-9]+|-PC-[A-Z0-9-]+| \(\w+[-\w]*'s conflicted copy \d{4}-\d{2}-\d{2}\))$/i;
@@ -52,7 +54,18 @@ export async function scanAndAbsorbConflicts(fs: FileSystem, notesDir: string): 
   let rootEntries: { name?: string; isFile?: boolean; isDirectory?: boolean }[] = [];
   try {
     rootEntries = await fs.readDir(notesDir);
-  } catch {
+  } catch (err) {
+    // Previously this swallowed and returned a zero-counter result, so a
+    // transient readDir failure (cloud-sync placeholder on the dir itself)
+    // looked identical to "no conflicts present". The next reconcile retries
+    // anyway, but a user who quits between cycles loses the absorb pass with
+    // no diagnostic trace.
+    void logNotenError(new NotenError(
+      "CONFLICT_SCAN_FAILED",
+      "recoverable",
+      "scanAndAbsorbConflicts: notes-dir readDir failed; skipping this pass",
+      { context: { notesDir }, cause: err },
+    ));
     return result;
   }
 

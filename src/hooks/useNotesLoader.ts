@@ -197,7 +197,20 @@ export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<Tr
   const now = Date.now();
   const kept: TrashedNote[] = [];
   let notesDir: string | null = null;
-  try { notesDir = await getNotesDir(); } catch { /* ignore */ }
+  try {
+    notesDir = await getNotesDir();
+  } catch (err) {
+    // Trash body removal below still works (absolute trashFilePath), but the
+    // asset-dir and meta sidecar cleanups depend on notesDir and now get
+    // skipped. Orphan files are recoverable on next launch's reconcile, but
+    // the partial-cleanup state should be diagnosable.
+    void logNotenError(new NotenError(
+      "TRASH_PURGE_FAILED",
+      "recoverable",
+      "purgeExpiredTrash: getNotesDir failed; bodies removed but meta/assets stay orphaned",
+      { cause: err },
+    ));
+  }
 
   for (const note of trashedNotes) {
     if (now - note.trashedAt > TRASH_RETENTION_MS) {

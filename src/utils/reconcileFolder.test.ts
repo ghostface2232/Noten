@@ -316,6 +316,48 @@ describe("reconcileFolder", () => {
     expect(logger).not.toHaveBeenCalled();
   });
 
+  it("logs META_WRITE_FAILED when meta sidecar write fails during ingest of an unmanaged .md", async () => {
+    // Previously the meta-write catch silently swallowed. The in-memory doc
+    // still appeared this session, but next reconcile re-entered the ingest
+    // branch and rebuilt meta from fresh stat — silent sort-order /
+    // groupUpdatedAt drift on every retry. Logging makes the drift visible.
+    const id = "99999999-9999-9999-9999-999999999999";
+    const mdPath = `${DIR}/${id}.md`;
+    fs.seedTextFile(mdPath, "body content");
+
+    const faultFs = wrapWithFaults(fs);
+    faultFs.injectFault({
+      op: "writeTextFile",
+      path: metaPathFor(DIR, id),
+      throwError: new Error("EPERM: meta dir read-only"),
+    });
+    // The tmp-then-rename path of atomicWriteText writes to the .tmp first.
+    faultFs.injectFault({
+      op: "writeTextFile",
+      path: `${metaPathFor(DIR, id)}.tmp`,
+      throwError: new Error("EPERM: meta dir read-only"),
+    });
+
+    const result = await reconcileFolder(faultFs, state, DIR, [], [], LOCALE);
+
+    // Doc still appears in memory so the user can keep working.
+    expect(result.docs.find((d) => d.id === id)).toBeDefined();
+    // Meta sidecar absent on disk — next reconcile will retry.
+    expect(await faultFs.exists(metaPathFor(DIR, id))).toBe(false);
+
+    const logger = await getMockedLogger();
+    // atomicWriteText emits its own META_WRITE_FAILED on tmp/rename failure
+    // before our explicit log fires, so we may see multiple entries; the
+    // reconcile-stage one is the contract we care about.
+    const reconcileEntry = (logger.mock.calls as Array<[NotenError]>)
+      .map((args) => args[0])
+      .find((e) => e.message.includes("reconcileFolder"));
+    expect(reconcileEntry).toBeInstanceOf(NotenError);
+    expect(reconcileEntry!.code).toBe("META_WRITE_FAILED");
+    expect(reconcileEntry!.severity).toBe("recoverable");
+    expect(reconcileEntry!.context).toMatchObject({ noteId: id });
+  });
+
   it("drops removed-doc ids from every group's noteIds", async () => {
     const liveId = "55555555-5555-5555-5555-555555555555";
     const goneId = "66666666-6666-6666-6666-666666666666";

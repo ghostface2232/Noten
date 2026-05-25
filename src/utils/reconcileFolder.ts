@@ -7,6 +7,7 @@ import {
   readAllMeta,
   writeMeta as writeMetaFile,
   removeMeta as removeMetaFile,
+  metaPathFor,
   type NoteMeta,
 } from "./metadataIO";
 import { getMachineIdCached } from "./machineId";
@@ -153,7 +154,22 @@ export async function reconcileFolder(
         groupUpdatedAt: fts.updatedAt,
         trashedAt: null,
       };
-      try { await writeMetaFile(fs, dir, meta, machineId); } catch { /* ignore */ }
+      try {
+        await writeMetaFile(fs, dir, meta, machineId);
+      } catch (err) {
+        // Meta write failed during ingest of a previously-unmanaged .md file.
+        // The in-memory doc still gets built so the user sees the note this
+        // session, but next reconcile re-enters this branch and rebuilds meta
+        // from fresh stat — causing sort order and groupUpdatedAt drift on
+        // every retry until the underlying write becomes possible. Logging
+        // surfaces the drift instead of leaving it silent.
+        void logNotenError(new NotenError(
+          "META_WRITE_FAILED",
+          "recoverable",
+          "reconcileFolder: meta sidecar write failed during unmanaged-file ingest",
+          { context: { filePath: metaPathFor(dir, id), noteId: id }, cause: err },
+        ));
+      }
     }
 
     const newDoc: NoteDoc = {

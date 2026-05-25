@@ -7,6 +7,8 @@ export type NotenErrorCode =
   | "META_WRITE_FAILED"
   | "BODY_READ_FAILED"
   | "BACKUP_FAILED"
+  | "CONFLICT_SCAN_FAILED"
+  | "TRASH_PURGE_FAILED"
   | "MIGRATION_FAILED"
   | "UNCAUGHT";
 
