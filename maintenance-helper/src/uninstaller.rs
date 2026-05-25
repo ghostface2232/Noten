@@ -144,9 +144,20 @@ fn remove_notes_dir_if_safe(path: &Path, additional_blocked: &[&Path]) -> Result
 
     let default_notes = normalize_existing_or_raw(&default_notes_dir());
     let is_default_notes = normalize_path(&resolved) == default_notes;
-    if !is_default_notes && !resolved.join("manifest.json").is_file() {
+
+    // Recognise both legacy (manifest.json) and current (.meta directory or
+    // .groups.json sidecar) notes-directory markers. Without `.meta` in this
+    // list, a fresh-install user with a custom notes path would never trip the
+    // marker check (manifest.json is never written by current code) and the
+    // uninstaller would silently refuse to delete the very data they opted
+    // into removing.
+    let has_legacy_manifest = resolved.join("manifest.json").is_file();
+    let has_meta_dir = resolved.join(".meta").is_dir();
+    let has_groups_sidecar = resolved.join(".groups.json").is_file();
+    let looks_like_notes_dir = has_legacy_manifest || has_meta_dir || has_groups_sidecar;
+    if !is_default_notes && !looks_like_notes_dir {
         return Err(format!(
-            "refusing to delete custom notes directory without manifest.json: {}",
+            "refusing to delete custom notes directory without a recognised marker (.meta/, .groups.json, or manifest.json): {}",
             resolved.display()
         ));
     }
