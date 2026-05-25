@@ -648,23 +648,25 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 여러 PC에서 공유 클라우드 폴더(OneDrive·Dropbox 등)를 통한 노트 동기화 지원 — 본문·메타데이터·그룹이 기기 간 병합됨<br />
-                          · 노트 고정(pin) 기능 추가 — 고정한 노트는 목록 최상단에 유지되며 PC 간 동기화됨<br />
-                          · 노트별 색상 라벨과 사이드바 색상 필터 추가<br />
-                          · 사이드바 "모든 노트" 보기 추가 — 그룹 구분 없이 전체 노트를 한 목록으로 표시<br />
-                          · 노트 폴더를 옮길 때 대상 폴더에 기존 데이터가 있으면 병합/덮어쓰기 선택 가능<br />
-                          · 설정 화면에 업데이트 알림 표시 추가<br />
-                          · 사이드바 UI 정리(호버 아이콘, 색상 팔레트, 선택 모드)와 그룹 접기 애니메이션 안정화
+                          · 휴지통 노트가 OneDrive·Dropbox 같은 클라우드 동기화 폴더에서 일시적 파일 잠금으로 잘못 복원되던 문제 수정<br />
+                          · 그룹 이름 변경·순서 변경·삭제가 일시적 디스크 쓰기 실패로 조용히 사라지던 문제 수정<br />
+                          · 동기화 중 일시적 오류로 노트 목록이 비어 보이던 문제 수정 (디스크의 실제 데이터는 항상 안전)<br />
+                          · 사용자 지정 노트 폴더에서 언인스톨러가 노트 데이터를 인식하지 못해 그대로 남기던 문제 수정<br />
+                          · 사이드바 우클릭 메뉴를 같은 행의 "..." 버튼으로 다시 닫을 수 있도록 수정<br />
+                          · RTF 내보내기 제거 — Markdown과 PDF 내보내기는 그대로<br />
+                          · 사이드바·설정 모달의 호버·간격·애니메이션 다듬기<br />
+                          · 내부: 예기치 못한 오류와 원자적 쓰기 강등 상황을 자동으로 진단 로그에 기록
                         </>
                       ) : (
                         <>
-                          · Sync notes across PCs through a shared cloud folder (OneDrive, Dropbox, etc.) — bodies, metadata, and groups merge between machines<br />
-                          · Added pinned notes — pinned notes stay at the top of the list and sync across PCs<br />
-                          · Added per-note color labels with a sidebar color filter<br />
-                          · Added an "All Notes" sidebar view — every note in a single list, groups ignored<br />
-                          · Moving the notes folder now offers a merge-or-replace choice when the target already holds data<br />
-                          · Added update-availability indicators to Settings<br />
-                          · Sidebar UI cleanup (hover icons, color palette, select mode) and steadier group collapse animations
+                          · Fixed: trashed notes could be wrongly restored in cloud-sync folders (OneDrive, Dropbox) when a transient file lock blocked stat<br />
+                          · Fixed: group renames, reorders, and deletes could be silently lost when a disk write failed transiently<br />
+                          · Fixed: a transient sync error could blank the note list view — on-disk data was always safe<br />
+                          · Fixed: the uninstaller now recognises notes data in custom folders set on a fresh install<br />
+                          · Fixed: a right-click sidebar menu can be closed again by clicking the same row's "..." button<br />
+                          · Removed: RTF export. Markdown and PDF exports are unchanged.<br />
+                          · Polish: sidebar and Settings modal hover, spacing, and animation refinements<br />
+                          · Internal: unexpected errors and atomic-write degradations are now captured to the diagnostic log
                         </>
                       )}
                     </div>
