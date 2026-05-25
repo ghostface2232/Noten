@@ -3,6 +3,7 @@ import { renderHook, act } from "@testing-library/react";
 import type { NoteDoc, NoteGroup } from "../utils/noteTypes";
 import type { MarkdownState } from "./useMarkdownState";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
+import type { Locale, NotesSortOrder } from "./useSettings";
 import { NotenError } from "../utils/notenError";
 
 // Shared module-state hoisted so tests can mutate without re-registering mocks.
@@ -37,6 +38,10 @@ vi.mock("./useNotesLoader", () => ({
   deriveTitle: (s: string) => s.split("\n")[0]?.replace(/^#+\s*/, "") || "",
   sortNotes: <T,>(docs: T[]) => docs,
   getNotesDir: vi.fn(async () => "/notes"),
+  // Exposed via a getter so tests can flip the value between render and a
+  // later doSave/scheduleAutoSave call. The real export is a `let` binding;
+  // ES module live bindings re-read on each access, and a getter preserves
+  // that semantic through vi.mock so the hook sees the current `refs` value.
   get migrationInProgress() { return refs.migrationInProgress; },
 }));
 
@@ -184,7 +189,7 @@ describe("useAutoSave — doSave golden path", () => {
   });
 });
 
-describe("useAutoSave — backup-failure defers save (A2 regression)", () => {
+describe("useAutoSave — backup-failure defers save", () => {
   it("returns false, skips writeTextFile, leaves isDirty alone, and logs the BACKUP_FAILED", async () => {
     refs.backupShouldThrow = new NotenError(
       "BACKUP_FAILED",
@@ -289,8 +294,11 @@ describe("useAutoSave — revision-mismatch guard", () => {
       await Promise.resolve();
     });
 
-    // The first call's body write actually completes (writeTextFile happens
-    // before the revision check), but the manifest commit must be skipped.
+    // Positive AND negative assertion: doSave must actually have advanced past
+    // backup and through writeTextFile (otherwise we'd be confirming nothing —
+    // a backup that never resolves would also leave saveManifest uncalled).
+    // The revision guard then blocks the manifest commit.
+    expect(writeMock).toHaveBeenCalledTimes(1);
     expect(saveManifestMock).not.toHaveBeenCalled();
   });
 });
@@ -364,7 +372,103 @@ describe("useAutoSave — cancelDocSave", () => {
   });
 });
 
+describe("useAutoSave — writeTextFile failure logs SAVE_FAILED", () => {
+  it("logs SAVE_FAILED (fatal) and skips saveManifest when the body write throws", async () => {
+    // doSave's outer catch warns in DEV ([SAVE_FAILED] ...); silence it so the
+    // intentional fault doesn't pollute test output.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    refs.writeShouldThrow = new Error("EACCES: file locked by antivirus");
+    const setIsDirty = vi.fn();
+    const { result } = renderAutoSave({ state: makeState({ isDirty: true, setIsDirty }) });
+
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await result.current.flushAutoSave();
+    });
+
+    expect(ok).toBe(false);
+    expect(writeMock).toHaveBeenCalledTimes(1);
+    expect(saveManifestMock).not.toHaveBeenCalled();
+    expect(setIsDirty).not.toHaveBeenCalled();
+    const logged = logMock.mock.calls.find(
+      (c) => (c[0] as NotenError).code === "SAVE_FAILED",
+    );
+    expect(logged).toBeDefined();
+    const ne = logged![0] as NotenError;
+    expect(ne.severity).toBe("fatal");
+    expect(ne.context).toMatchObject({ noteId: "a", filePath: "/notes/a.md" });
+    warnSpy.mockRestore();
+  });
+});
+
+describe("useAutoSave — savedDocStillExists race", () => {
+  // The user deletes the active note while its autosave is in flight. doSave
+  // has captured a snapshot, but by the time it reaches the post-write commit,
+  // stateRef.current.docs no longer contains the doc. The map() loop never
+  // sets savedDocStillExists, so doSave bails before saveManifest — the
+  // delete must not be partially undone by a stale autosave.
+  it("does not commit a manifest entry for a doc that was removed mid-save", async () => {
+    vi.useFakeTimers();
+    let releaseBackup: () => void = () => {};
+    backupMock.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => {
+        releaseBackup = () => resolve(false);
+      }),
+    );
+
+    const setDocs = vi.fn();
+    const setActiveIndex = vi.fn();
+    const state = makeState({ isDirty: true });
+    const tiptapRef = makeTiptapRef();
+    const groups: NoteGroup[] = [];
+
+    const { result, rerender } = renderHook(
+      ({ docs }: { docs: NoteDoc[] }) =>
+        useAutoSave(
+          state,
+          tiptapRef,
+          docs,
+          setDocs,
+          0,
+          setActiveIndex,
+          "en" as Locale,
+          "updated-desc" as NotesSortOrder,
+          groups,
+        ),
+      { initialProps: { docs: [makeDoc("a")] } },
+    );
+
+    act(() => result.current.scheduleAutoSave());
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    // doSave suspended inside backupIfRemoteWroteFirst.
+
+    // Simulate the user deleting the note: re-render with docs=[]. The hook's
+    // top-level reassignment of stateRef.current picks this up so the in-flight
+    // doSave sees the new docs list when it reads stateRef.current after the
+    // backup resolves.
+    rerender({ docs: [] });
+
+    await act(async () => {
+      releaseBackup();
+      await Promise.resolve();
+    });
+
+    // Body write happens (it's idempotent — the deleted doc's file may even
+    // get rewritten before delete's `remove` lands), but the manifest commit
+    // path must bail at savedDocStillExists=false.
+    expect(writeMock).toHaveBeenCalledTimes(1);
+    expect(saveManifestMock).not.toHaveBeenCalled();
+    expect(setDocs).not.toHaveBeenCalled();
+  });
+});
+
 describe("useAutoSave — notifyActiveDoc", () => {
+  // INVARIANT: this test relies on the hook NOT re-rendering between
+  // notifyActiveDoc and flushAutoSave. Re-render reapplies the
+  // `activeDocRef = docs[activeIndex]` override at useAutoSave.ts:65-68 and
+  // would clobber notifyActiveDoc's "b" back to "a". If a future change
+  // introduces a state update in this path, this test silently regresses to
+  // asserting the wrong filePath — re-check the invariant before edits.
   it("synchronously updates the active-doc ref so the next snapshot writes to the new path", async () => {
     refs.editorContent = "switched-doc content";
     const { result } = renderAutoSave({
