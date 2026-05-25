@@ -160,6 +160,26 @@ describe("contract: autosave failures remain flushable", () => {
     expect(saveAt).toBeGreaterThanOrEqual(0);
     expect(clearAt).toBeGreaterThan(saveAt);
   });
+
+  it("doSave runs backupIfRemoteWroteFirst before any writeTextFile in the same body", () => {
+    // Commit 4003532 introduced the pre-save .conflicts/ backup as the only
+    // recovery surface for "remote wrote first" overwrites in cloud-sync
+    // setups. If a refactor accidentally reorders these two calls, autosave
+    // overwrites a possibly-newer remote body without a backup and the user
+    // has no way to recover. Cheap, refactor-only contract guard.
+    //
+    // Strip line comments before searching so a `// await backupIfRemote...`
+    // doesn't satisfy this contract; the call must actually run.
+    const text = read(AUTOSAVE);
+    const fnMatch = text.match(/const doSave = useCallback[\s\S]*?\n  \}, \[\]\);/);
+    expect(fnMatch, "doSave function body not found").not.toBeNull();
+    const body = fnMatch![0].replace(/^\s*\/\/.*$/gm, "");
+    const backupMatch = body.match(/await\s+backupIfRemoteWroteFirst\(/);
+    const writeMatch = body.match(/await\s+tauriFileSystem\.writeTextFile\(/);
+    expect(backupMatch, "live `await backupIfRemoteWroteFirst(` call not found in doSave").not.toBeNull();
+    expect(writeMatch, "live `await tauriFileSystem.writeTextFile(` call not found in doSave").not.toBeNull();
+    expect(backupMatch!.index!).toBeLessThan(writeMatch!.index!);
+  });
 });
 
 describe("contract: migration does not treat transient I/O as empty state", () => {
