@@ -166,7 +166,6 @@ interface TitleBarProps {
   onUpdateParagraphSpacing: (v: ParagraphSpacing) => void;
   onExportMd: () => void;
   onExportPdf: () => void;
-  onExportRtf: () => void;
 }
 
 function TitleBarImpl({
@@ -182,7 +181,6 @@ function TitleBarImpl({
   onUpdateParagraphSpacing,
   onExportMd,
   onExportPdf,
-  onExportRtf,
 }: TitleBarProps) {
   const styles = useStyles();
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
@@ -202,7 +200,6 @@ function TitleBarImpl({
           onUpdateParagraphSpacing={onUpdateParagraphSpacing}
           onExportMd={onExportMd}
           onExportPdf={onExportPdf}
-          onExportRtf={onExportRtf}
         />
         <div className={styles.appTitle} data-tauri-drag-region>
           {i("app.name")}

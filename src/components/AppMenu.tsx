@@ -15,7 +15,6 @@ import {
   SettingsRegular,
   DocumentRegular,
   DocumentPdfRegular,
-  TextEditStyleRegular,
   ChevronRightRegular,
   WindowNewRegular,
 } from "@fluentui/react-icons";
@@ -135,7 +134,6 @@ interface AppMenuProps {
   onUpdateParagraphSpacing: (v: ParagraphSpacing) => void;
   onExportMd: () => void;
   onExportPdf: () => void;
-  onExportRtf: () => void;
 }
 
 const SPACING_OPTIONS: ParagraphSpacing[] = [0, 10, 20, 30, 40, 50];
@@ -152,7 +150,6 @@ export function AppMenu({
   onUpdateParagraphSpacing,
   onExportMd,
   onExportPdf,
-  onExportRtf,
 }: AppMenuProps) {
   const styles = useStyles();
   const [open, setOpen] = useState(false);
@@ -237,9 +234,6 @@ export function AppMenu({
                   </Button>
                   <Button appearance="subtle" icon={<DocumentPdfRegular />} className={styles.menuItem} onClick={() => act(onExportPdf)} size="small">
                     {i("menu.exportPdf")}
-                  </Button>
-                  <Button appearance="subtle" icon={<TextEditStyleRegular />} className={styles.menuItem} onClick={() => act(onExportRtf)} size="small">
-                    {i("menu.exportRtf")}
                   </Button>
                 </div>
               )}

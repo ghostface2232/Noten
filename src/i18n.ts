@@ -268,7 +268,6 @@ const dict = {
   "menu.export": { en: "Export", ko: "내보내기" },
   "menu.exportMd": { en: "Markdown (.md)", ko: "마크다운 (.md)" },
   "menu.exportPdf": { en: "PDF (.pdf)", ko: "PDF (.pdf)" },
-  "menu.exportRtf": { en: "Rich Text (.rtf)", ko: "서식 있는 텍스트 (.rtf)" },
   "menu.exit": { en: "Exit", ko: "종료" },
   "menu.edit": { en: "Edit", ko: "편집" },
   "menu.undo": { en: "Undo", ko: "실행취소" },

@@ -42,7 +42,7 @@ import { GoToLineBar } from "./components/GoToLineBar";
 import { searchPluginKey, type SearchPluginState } from "./extensions/SearchHighlight";
 import { refreshWikiLinkDecorations } from "./extensions/WikiLink";
 import { t } from "./i18n";
-import { exportAsMarkdown, exportAsPdf, exportAsRtf } from "./utils/exportHandlers";
+import { exportAsMarkdown, exportAsPdf } from "./utils/exportHandlers";
 import { clearManagedNotesData, hasExistingNotenData, migrateNotesDir } from "./utils/migrateNotesDir";
 import { colorHex } from "./utils/noteColors";
 import { clampMenuToViewport } from "./utils/clampMenuPosition";
@@ -453,12 +453,6 @@ function App() {
     if (el) exportAsPdf(el, activeDoc?.fileName ?? "untitled", locale);
   }, [activeDoc?.fileName, locale]);
 
-  const handleExportRtf = useCallback(() => {
-    const name = activeDoc?.fileName ?? "untitled";
-    const html = tiptapEditor?.getHTML() ?? "";
-    exportAsRtf(html, name, locale);
-  }, [activeDoc?.fileName, tiptapEditor, locale]);
-
   const handleDeleteNotes = useCallback((indices: number[]) => {
     const sorted = [...indices].sort((a, b) => b - a);
     for (const idx of sorted) fs.deleteNote(idx);
@@ -747,7 +741,6 @@ function App() {
           onUpdateParagraphSpacing={handleUpdateParagraphSpacing}
           onExportMd={handleExportMd}
           onExportPdf={handleExportPdf}
-          onExportRtf={handleExportRtf}
         />
 
         <div className={styles.body}>

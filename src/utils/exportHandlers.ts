@@ -1,7 +1,6 @@
 import { save, message } from "@tauri-apps/plugin-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
-import { htmlToRtf } from "./htmlToRtf";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
 
@@ -38,7 +37,6 @@ async function buildFontFaces(): Promise<string> {
 }
 
 const MD_FILTERS = [{ name: "Markdown", extensions: ["md", "markdown", "txt"] }];
-const RTF_FILTERS = [{ name: "Rich Text Format", extensions: ["rtf"] }];
 const PDF_FILTERS = [{ name: "PDF", extensions: ["pdf"] }];
 
 export async function exportAsMarkdown(markdown: string, defaultName: string, locale: Locale = "en") {
@@ -192,17 +190,3 @@ export async function exportAsPdf(editorEl: HTMLElement, defaultName: string, lo
   }
 }
 
-export async function exportAsRtf(html: string, defaultName: string, locale: Locale = "en") {
-  const selected = await save({
-    title: t("dialog.export", locale),
-    filters: RTF_FILTERS,
-    defaultPath: defaultName.replace(/\.[^.]+$/, "") + ".rtf",
-  });
-  if (!selected) return;
-  try {
-    const rtfContent = htmlToRtf(html);
-    await writeTextFile(selected, rtfContent);
-  } catch (err) {
-    await message(`${err}`, { title: t("dialog.exportFailed", locale), kind: "error" });
-  }
-}
