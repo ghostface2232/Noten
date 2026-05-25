@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { appDataDir } from "@tauri-apps/api/path";
-import { mkdir, readTextFile } from "@tauri-apps/plugin-fs";
+import { exists, mkdir, readTextFile } from "@tauri-apps/plugin-fs";
 import { atomicWriteText } from "../utils/atomicWrite";
 import { tauriFileSystem } from "../utils/fs";
 import { isNoteColorId, type NoteColorId } from "../utils/noteColors";
@@ -75,34 +75,28 @@ function migrateSortOrder(order: string): NotesSortOrder {
   return valid.includes(order as NotesSortOrder) ? (order as NotesSortOrder) : DEFAULTS.notesSortOrder;
 }
 
-function parseSettings(raw: string | null): Settings {
-  if (!raw) return DEFAULTS;
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<Settings> & Record<string, unknown>;
-    return {
-      locale: parsed.locale === "en" ? "en" : DEFAULTS.locale,
-      themeMode: parsed.themeMode === "dark" || parsed.themeMode === "system"
-        ? parsed.themeMode
-        : DEFAULTS.themeMode,
-      notesSortOrder: migrateSortOrder(String(parsed.notesSortOrder ?? DEFAULTS.notesSortOrder)),
-      wordWrap: parsed.wordWrap === "char" ? "char" : DEFAULTS.wordWrap,
-      paragraphSpacing: [0, 10, 20, 30, 40, 50].includes(parsed.paragraphSpacing as number)
-        ? (parsed.paragraphSpacing as ParagraphSpacing)
-        : DEFAULTS.paragraphSpacing,
-      keepFormatOnPaste: typeof parsed.keepFormatOnPaste === "boolean" ? parsed.keepFormatOnPaste : DEFAULTS.keepFormatOnPaste,
-      spellcheck: typeof parsed.spellcheck === "boolean" ? parsed.spellcheck : DEFAULTS.spellcheck,
-      groupLayout: parsed.groupLayout === "mixed" ? "mixed" : DEFAULTS.groupLayout,
-      fontFamily: parsed.fontFamily === "serif" ? "serif" : DEFAULTS.fontFamily,
-      notesDirectory: typeof parsed.notesDirectory === "string" ? parsed.notesDirectory : DEFAULTS.notesDirectory,
-      colorFilter: isNoteColorId(parsed.colorFilter) ? parsed.colorFilter : DEFAULTS.colorFilter,
-      persistColorFilterAcrossRestarts: typeof parsed.persistColorFilterAcrossRestarts === "boolean"
-        ? parsed.persistColorFilterAcrossRestarts
-        : DEFAULTS.persistColorFilterAcrossRestarts,
-    };
-  } catch {
-    return DEFAULTS;
-  }
+function parseSettings(raw: string): Settings {
+  const parsed = JSON.parse(raw) as Partial<Settings> & Record<string, unknown>;
+  return {
+    locale: parsed.locale === "en" ? "en" : DEFAULTS.locale,
+    themeMode: parsed.themeMode === "dark" || parsed.themeMode === "system"
+      ? parsed.themeMode
+      : DEFAULTS.themeMode,
+    notesSortOrder: migrateSortOrder(String(parsed.notesSortOrder ?? DEFAULTS.notesSortOrder)),
+    wordWrap: parsed.wordWrap === "char" ? "char" : DEFAULTS.wordWrap,
+    paragraphSpacing: [0, 10, 20, 30, 40, 50].includes(parsed.paragraphSpacing as number)
+      ? (parsed.paragraphSpacing as ParagraphSpacing)
+      : DEFAULTS.paragraphSpacing,
+    keepFormatOnPaste: typeof parsed.keepFormatOnPaste === "boolean" ? parsed.keepFormatOnPaste : DEFAULTS.keepFormatOnPaste,
+    spellcheck: typeof parsed.spellcheck === "boolean" ? parsed.spellcheck : DEFAULTS.spellcheck,
+    groupLayout: parsed.groupLayout === "mixed" ? "mixed" : DEFAULTS.groupLayout,
+    fontFamily: parsed.fontFamily === "serif" ? "serif" : DEFAULTS.fontFamily,
+    notesDirectory: typeof parsed.notesDirectory === "string" ? parsed.notesDirectory : DEFAULTS.notesDirectory,
+    colorFilter: isNoteColorId(parsed.colorFilter) ? parsed.colorFilter : DEFAULTS.colorFilter,
+    persistColorFilterAcrossRestarts: typeof parsed.persistColorFilterAcrossRestarts === "boolean"
+      ? parsed.persistColorFilterAcrossRestarts
+      : DEFAULTS.persistColorFilterAcrossRestarts,
+  };
 }
 
 async function persistSettings(settings: Settings) {
@@ -119,20 +113,18 @@ async function readMergeWriteSetting<K extends keyof Settings>(
   key: K,
   value: Settings[K],
 ): Promise<Settings> {
-  const onDisk = (await loadSettingsFromFile()) ?? DEFAULTS;
+  const existing = await loadSettingsFromFile();
+  const onDisk = existing === null ? DEFAULTS : existing;
   const merged = { ...onDisk, [key]: value };
   await persistSettings(merged);
   return merged;
 }
 
 async function loadSettingsFromFile(): Promise<Settings | null> {
-  try {
-    const path = await getSettingsPath();
-    const raw = await readTextFile(path);
-    return parseSettings(raw);
-  } catch {
-    return null;
-  }
+  const path = await getSettingsPath();
+  if (!(await exists(path))) return null;
+  const raw = await readTextFile(path);
+  return parseSettings(raw);
 }
 
 export function useSettings() {
@@ -148,7 +140,16 @@ export function useSettings() {
     let cancelled = false;
 
     (async () => {
-      const fileSettings = await loadSettingsFromFile();
+      let fileSettings: Settings | null = null;
+      try {
+        fileSettings = await loadSettingsFromFile();
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn("Failed to load settings:", err);
+        }
+        if (!cancelled) setIsLoaded(true);
+        return;
+      }
       if (fileSettings) {
         const shouldResetFilter =
           fileSettings.colorFilter != null && !fileSettings.persistColorFilterAcrossRestarts;

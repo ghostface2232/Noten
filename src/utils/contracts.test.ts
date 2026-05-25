@@ -81,3 +81,60 @@ describe("contract: crashLog line caps remain in place", () => {
     expect(body).toMatch(/MAX_STACK_CHARS/);
   });
 });
+
+describe("contract: settings read failures are not default settings", () => {
+  // Regression class: transient settings.json read/parse failures must not be
+  // collapsed into DEFAULTS and then written back over the user's settings.
+  const SETTINGS = resolve(SRC_ROOT, "hooks/useSettings.ts");
+
+  it("only a missing settings file returns null from loadSettingsFromFile", () => {
+    const text = read(SETTINGS);
+    const fnMatch = text.match(/async function loadSettingsFromFile[\s\S]*?\n\}/);
+    expect(fnMatch, "loadSettingsFromFile not found").not.toBeNull();
+    const body = fnMatch![0];
+    expect(body).toMatch(/exists\(path\)/);
+    expect(body).toMatch(/return null/);
+    expect(body).not.toMatch(/\bcatch\b/);
+  });
+
+  it("readMergeWriteSetting does not merge updates onto DEFAULTS after read failure", () => {
+    const text = read(SETTINGS);
+    const fnMatch = text.match(/async function readMergeWriteSetting[\s\S]*?\n\}/);
+    expect(fnMatch, "readMergeWriteSetting not found").not.toBeNull();
+    expect(fnMatch![0]).not.toMatch(/\?\?\s*DEFAULTS/);
+  });
+});
+
+describe("contract: notes directory setting is durable before migration", () => {
+  // Regression class: moving note files and then failing to save notesDirectory
+  // splits this session from the next launch. The setting must be persisted
+  // before destructive directory migration begins.
+  const APP = resolve(SRC_ROOT, "App.tsx");
+
+  it("change-notes-dir persists notesDirectory before moving managed data", () => {
+    const text = read(APP);
+    const fnMatch = text.match(/const handleChangeNotesDir[\s\S]*?\n  const handleResetNotesDir/);
+    expect(fnMatch, "handleChangeNotesDir not found").not.toBeNull();
+    const body = fnMatch![0];
+    const persistAt = body.indexOf("persistNotesDirectorySetting(newDir)");
+    const migrateAt = body.indexOf("migrateNotesDir(oldDir, newDir");
+    const clearAt = body.indexOf("clearManagedNotesData(oldDir, newDir)");
+    expect(persistAt).toBeGreaterThanOrEqual(0);
+    expect(migrateAt).toBeGreaterThanOrEqual(0);
+    expect(clearAt).toBeGreaterThanOrEqual(0);
+    expect(persistAt).toBeLessThan(migrateAt);
+    expect(persistAt).toBeLessThan(clearAt);
+  });
+
+  it("reset-notes-dir persists the default setting before overwriting data", () => {
+    const text = read(APP);
+    const fnMatch = text.match(/const handleResetNotesDir[\s\S]*?\n  const \{/);
+    expect(fnMatch, "handleResetNotesDir not found").not.toBeNull();
+    const body = fnMatch![0];
+    const persistAt = body.indexOf("persistNotesDirectorySetting(\"\")");
+    const migrateAt = body.indexOf("migrateNotesDir(oldDir, defaultDir");
+    expect(persistAt).toBeGreaterThanOrEqual(0);
+    expect(migrateAt).toBeGreaterThanOrEqual(0);
+    expect(persistAt).toBeLessThan(migrateAt);
+  });
+});

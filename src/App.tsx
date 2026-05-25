@@ -471,6 +471,12 @@ function App() {
     void updateSetting("paragraphSpacing", v);
   }, [updateSetting]);
 
+  const persistNotesDirectorySetting = useCallback(async (value: string) => {
+    let saved = await updateSetting("notesDirectory", value);
+    if (!saved) saved = await updateSetting("notesDirectory", value);
+    return saved;
+  }, [updateSetting]);
+
   const handleOpenSearch = useCallback(() => {
     setDocGoToLineOpen(false);
     setDocSearchReplace(false);
@@ -514,33 +520,38 @@ function App() {
     ).catch(() => {});
 
     setMigrationInProgress(true);
+    const previousNotesDirectory = settings.notesDirectory;
+    if (!(await persistNotesDirectorySetting(newDir))) {
+      setMigrationInProgress(false);
+      await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
+      return;
+    }
+
     let result;
     try {
       result = action === "overwrite-current"
         ? await clearManagedNotesData(oldDir, newDir)
         : await migrateNotesDir(oldDir, newDir, action === "merge" ? "merge" : "overwrite");
     } catch (err) {
+      setNotesDir(oldDir, reconcileStateRef.current);
+      await persistNotesDirectorySetting(previousNotesDirectory);
       setMigrationInProgress(false);
       throw err;
     }
 
     if (!result.success) {
+      setNotesDir(oldDir, reconcileStateRef.current);
+      await persistNotesDirectorySetting(previousNotesDirectory);
       setMigrationInProgress(false);
       await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
       return;
     }
 
-    let settingsSaved = await updateSetting("notesDirectory", newDir);
-    if (!settingsSaved) settingsSaved = await updateSetting("notesDirectory", newDir); // retry once for transient failures
-    if (!settingsSaved) {
-      // Migration already succeeded; reload so the guard is released.
-      await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
-    }
     setNotesDir(newDir, reconcileStateRef.current);
     setCurrentNotesDir(newDir);
     setReloadKey((k) => k + 1);
     // Reload owns releasing migrationInProgress.
-  }, [locale, requestNotesDirConflictChoice, updateSetting]);
+  }, [locale, persistNotesDirectorySetting, requestNotesDirConflictChoice, settings.notesDirectory]);
 
   const handleResetNotesDir = useCallback(async () => {
     if (!settings.notesDirectory) return;
@@ -558,36 +569,39 @@ function App() {
       groupsRef.current,
     ).catch(() => {});
 
+    setMigrationInProgress(true);
+    const previousNotesDirectory = settings.notesDirectory;
+    if (!(await persistNotesDirectorySetting(""))) {
+      setMigrationInProgress(false);
+      await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
+      return;
+    }
+
     resetNotesDir(reconcileStateRef.current);
     const defaultDir = await getNotesDir();
 
-    setMigrationInProgress(true);
     let result;
     try {
       result = await migrateNotesDir(oldDir, defaultDir, "overwrite");
     } catch (err) {
-      setMigrationInProgress(false);
       setNotesDir(oldDir, reconcileStateRef.current);
+      await persistNotesDirectorySetting(previousNotesDirectory);
+      setMigrationInProgress(false);
       throw err;
     }
 
     if (!result.success) {
-      setMigrationInProgress(false);
       setNotesDir(oldDir, reconcileStateRef.current);
+      await persistNotesDirectorySetting(previousNotesDirectory);
+      setMigrationInProgress(false);
       await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
       return;
     }
 
-    let settingsSaved = await updateSetting("notesDirectory", "");
-    if (!settingsSaved) settingsSaved = await updateSetting("notesDirectory", ""); // retry once for transient failures
-    if (!settingsSaved) {
-      // Migration already succeeded; reload so the guard is released.
-      await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
-    }
     setCurrentNotesDir(defaultDir);
     setReloadKey((k) => k + 1);
     // Reload owns releasing migrationInProgress.
-  }, [locale, settings.notesDirectory, updateSetting]);
+  }, [locale, persistNotesDirectorySetting, settings.notesDirectory]);
 
   const {
     chromeVisible,
