@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createInMemoryFileSystem, type InMemoryFileSystem } from "./fs.test-utils";
+import { wrapWithFaults } from "./fs.fault.test-utils";
 import {
   persistDecomposedState,
   loadDecomposedState,
@@ -240,6 +241,80 @@ describe("local cache", () => {
     await persistDecomposedState(fs, DIR, state, [doc], null, [], persistOpts({ cachePath: null }));
 
     expect(await fs.exists(CACHE_PATH)).toBe(false);
+  });
+});
+
+describe("writtenGroups commit semantics — only update on disk-write success", () => {
+  it("does not poison state.writtenGroups when writeGroupsWithMerge throws", async () => {
+    const faultFs = wrapWithFaults(fs);
+    // Fault both the atomicWrite tmp path and its direct-overwrite fallback so
+    // writeGroupsWithMerge actually rejects rather than degrading silently.
+    faultFs.injectFault({
+      op: "writeTextFile",
+      path: /\.groups\.json/,
+      throwError: new Error("EBUSY: groups write blocked"),
+    });
+
+    const group = makeGroup("g-doomed-write", { name: "First" });
+    await persistDecomposedState(faultFs, DIR, state, [], null, [group], persistOpts());
+
+    // The in-memory snapshot must remain empty so the next persist call
+    // recognises the group as unwritten and retries. Without the fix, the
+    // snapshot would be updated eagerly during iteration, making the next
+    // call compare snap-equal-to-prev and skip the write forever.
+    expect(state.writtenGroups.has("g-doomed-write")).toBe(false);
+  });
+
+  it("retries the write on the next call after a transient failure", async () => {
+    const faultFs = wrapWithFaults(fs);
+    // Two failures = one full atomicWrite attempt (tmp + direct fallback)
+    // gets fully blocked. The next call lands cleanly.
+    faultFs.injectFault({
+      op: "writeTextFile",
+      path: /\.groups\.json/,
+      times: 2,
+      throwError: new Error("EBUSY"),
+    });
+
+    const group = makeGroup("g-flaky", { name: "Flaky" });
+
+    // First call: write fails, groupsPromise.catch swallows the error.
+    await persistDecomposedState(faultFs, DIR, state, [], null, [group], persistOpts());
+    expect(state.writtenGroups.has("g-flaky")).toBe(false);
+    let file = await readGroupsFile(faultFs, DIR);
+    expect(file.groups["g-flaky"]).toBeUndefined();
+
+    // Second call: rule retired, write succeeds, snapshot committed.
+    await persistDecomposedState(faultFs, DIR, state, [], null, [group], persistOpts());
+    file = await readGroupsFile(faultFs, DIR);
+    expect(file.groups["g-flaky"]).toBeDefined();
+    expect(file.groups["g-flaky"].name).toBe("Flaky");
+    expect(state.writtenGroups.has("g-flaky")).toBe(true);
+  });
+
+  it("does not poison the tombstone path when the write fails", async () => {
+    // Seed a group on disk first (happy path).
+    const group = makeGroup("g-tomb-flaky", { name: "Pre" });
+    await persistDecomposedState(fs, DIR, state, [], null, [group], persistOpts());
+    expect(state.writtenGroups.has("g-tomb-flaky")).toBe(true);
+
+    // Stage the delete intent, then fault future writes.
+    state.pendingTombstones.add("g-tomb-flaky");
+    const faultFs = wrapWithFaults(fs);
+    faultFs.injectFault({
+      op: "writeTextFile",
+      path: /\.groups\.json/,
+      throwError: new Error("EBUSY"),
+    });
+
+    await persistDecomposedState(faultFs, DIR, state, [], null, [], persistOpts());
+
+    // Both the snapshot entry and the pending tombstone intent must survive so
+    // the next attempt can re-apply the delete. Without the fix, writtenGroups
+    // would have been emptied eagerly and the snapshot/disk drift would be
+    // invisible to subsequent persist calls.
+    expect(state.writtenGroups.has("g-tomb-flaky")).toBe(true);
+    expect(state.pendingTombstones.has("g-tomb-flaky")).toBe(true);
   });
 });
 

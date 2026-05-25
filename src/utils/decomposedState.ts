@@ -419,6 +419,13 @@ export async function persistDecomposedState(
   });
   const now = Date.now();
   let groupsChanged = false;
+  // Stage in-memory snapshot updates; apply them only after the disk write
+  // succeeds. Mutating state.writtenGroups before the write would make a
+  // failed write look like a successful one to the next persist call, which
+  // then compares snap-equal-to-prev and skips the retry — silently dropping
+  // the user's change. Mirrors the .then-gated pattern used for writtenMeta.
+  const pendingGroupSnapshots = new Map<string, SharedGroupSnapshot>();
+  const pendingGroupDeletes = new Set<string>();
   for (const g of orderedGroups) {
     if (!g.id) continue;
     let orderKey = g.orderKey;
@@ -438,7 +445,7 @@ export async function persistDecomposedState(
     };
     const prev = state.writtenGroups.get(g.id);
     if (!prev || !groupSnapshotEqual(prev, snap)) groupsChanged = true;
-    state.writtenGroups.set(g.id, snap);
+    pendingGroupSnapshots.set(g.id, snap);
 
     localGroupsMap[g.id] = {
       id: g.id,
@@ -471,7 +478,7 @@ export async function persistDecomposedState(
       createdAt: now,
       deletedAt: now,
     };
-    state.writtenGroups.delete(id);
+    pendingGroupDeletes.add(id);
     tombstoneApplied.push(id);
     groupsChanged = true;
   }
@@ -479,6 +486,8 @@ export async function persistDecomposedState(
   const groupsPromise = groupsChanged
     ? writeGroupsWithMerge(fs, dir, localGroupsMap).then(
         () => {
+          for (const [id, snap] of pendingGroupSnapshots) state.writtenGroups.set(id, snap);
+          for (const id of pendingGroupDeletes) state.writtenGroups.delete(id);
           for (const id of tombstoneApplied) state.pendingTombstones.delete(id);
         },
         () => { /* keep pending for retry */ },
