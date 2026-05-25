@@ -29,10 +29,14 @@ interface DirNode {
 type Node = FileNode | DirNode;
 
 // Windows drive letters become a child of `/` so they can't form a parallel
-// root invisible to `readDir("/")`: `C:\Users\x` → `/C:/Users/x`.
+// root invisible to `readDir("/")`: `C:\Users\x` → `/C:/Users/x`. Collapsing
+// `//` runs brings the test FS into parity with how real OS filesystems treat
+// repeated separators, so accidental `${dir}/${name}` patterns where `dir`
+// already ends in `/` don't fail here while silently succeeding in production.
 function normalize(path: string): string {
   let p = path.replace(/\\/g, "/");
   if (/^[A-Za-z]:/.test(p)) p = `/${p}`;
+  p = p.replace(/\/{2,}/g, "/");
   while (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
   return p;
 }
