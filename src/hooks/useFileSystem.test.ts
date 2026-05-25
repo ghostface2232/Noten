@@ -341,6 +341,39 @@ describe("useFileSystem — newNote disk-first invariant", () => {
 
     expect(focusEditor).toHaveBeenCalledTimes(1);
   });
+
+  it("replaces an empty auto-titled note in one state commit without an intermediate empty list", async () => {
+    const emptyDoc = makeDoc("empty", { content: "", customName: false });
+    const { result, setDocs, notifyActiveDoc } = renderFs({ docs: [emptyDoc] });
+
+    await act(async () => {
+      await result.current.newNote();
+    });
+
+    expect(setDocs).toHaveBeenCalledTimes(1);
+    const nextDocs = setDocs.mock.calls[0][0] as NoteDoc[];
+    expect(nextDocs).toHaveLength(1);
+    expect(nextDocs[0].id).toBe("uuid-1");
+    expect(nextDocs[0].fileName).toBe("Untitled");
+    expect(notifyActiveDoc).toHaveBeenCalledWith("uuid-1", "/notes/uuid-1.md");
+  });
+
+  it("ignores overlapping newNote calls so an empty note cannot spawn duplicates", async () => {
+    const emptyDoc = makeDoc("empty", { content: "", customName: false });
+    const { result, setDocs } = renderFs({ docs: [emptyDoc] });
+
+    await act(async () => {
+      const first = result.current.newNote();
+      const second = result.current.newNote();
+      await Promise.all([first, second]);
+    });
+
+    expect(writeMock).toHaveBeenCalledTimes(1);
+    expect(setDocs).toHaveBeenCalledTimes(1);
+    const nextDocs = setDocs.mock.calls[0][0] as NoteDoc[];
+    expect(nextDocs).toHaveLength(1);
+    expect(nextDocs[0].id).toBe("uuid-1");
+  });
 });
 
 // =============================================================================

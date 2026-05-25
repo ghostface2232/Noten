@@ -206,6 +206,7 @@ export function useFileSystem(
   docsRef.current = docs;
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
+  const newNoteInFlightRef = useRef(false);
 
   const leaveCurrentDoc = useCallback(async () => {
     if (!flushAutoSaveRef?.current) return !state.isDirty;
@@ -415,59 +416,60 @@ export function useFileSystem(
   }, [importFiles]);
 
   const newNote = useCallback(async () => {
-    const { docs: liveDocs, activeDocId, activeIndex: currentActiveIndex } = getLiveDocsSnapshot();
-    const didPersistCurrentDoc = await leaveCurrentDoc();
-    const baseDocs = didPersistCurrentDoc ? markDocClean(liveDocs, activeDocId) : liveDocs;
+    if (newNoteInFlightRef.current) return;
+    newNoteInFlightRef.current = true;
+    try {
+      const { docs: liveDocs, activeDocId, activeIndex: currentActiveIndex } = getLiveDocsSnapshot();
+      const didPersistCurrentDoc = await leaveCurrentDoc();
+      const baseDocs = didPersistCurrentDoc ? markDocClean(liveDocs, activeDocId) : liveDocs;
 
-    // Provision the blank body BEFORE any destructive state changes. If the
-    // write fails we want to leave the previous doc untouched rather than
-    // commit a clean manifest entry pointing at a missing file.
-    const id = crypto.randomUUID();
-    const timestamp = Date.now();
-    const { filePath, ok } = await provisionNoteFile(id, "", "newNote");
-    if (!ok) return;
+      // Provision the blank body BEFORE any destructive state changes. If the
+      // write fails we want to leave the previous doc untouched rather than
+      // commit a clean manifest entry pointing at a missing file.
+      const id = crypto.randomUUID();
+      const timestamp = Date.now();
+      const { filePath, ok } = await provisionNoteFile(id, "", "newNote");
+      if (!ok) return;
 
-    const inheritedGroupId = activeDocId
-      ? (groupsRef.current?.find((g) => g.noteIds.includes(activeDocId))?.id ?? null)
-      : null;
+      const inheritedGroupId = activeDocId
+        ? (groupsRef.current?.find((g) => g.noteIds.includes(activeDocId))?.id ?? null)
+        : null;
 
-    const currentDoc = baseDocs[currentActiveIndex];
-    const currentContent = currentDoc?.content.trim() ?? "";
-    const willReplace = !!currentDoc && !currentContent && !currentDoc.customName;
+      const currentDoc = baseDocs[currentActiveIndex];
+      const currentContent = currentDoc?.content.trim() ?? "";
+      const willReplace = !!currentDoc && !currentContent && !currentDoc.customName;
 
-    let prunedDocs = baseDocs;
-    let workingGroups: NoteGroup[] | undefined = groupsRef.current;
-    if (willReplace) {
-      if (currentDoc.filePath) {
-        try { markOwnWrite(currentDoc.filePath); remove(currentDoc.filePath).catch(() => {}); } catch {}
+      let prunedDocs = baseDocs;
+      let workingGroups: NoteGroup[] | undefined = groupsRef.current;
+      if (willReplace) {
+        if (currentDoc.filePath) {
+          try { markOwnWrite(currentDoc.filePath); remove(currentDoc.filePath).catch(() => {}); } catch {}
+        }
+        cancelDocSaveRef?.current?.(currentDoc.id);
+        const leavingId = currentDoc.id;
+        void getNotesDir().then((dir) => removeMetaFile(tauriFileSystem, dir, leavingId)).catch(() => {});
+        const beforePrune = workingGroups
+          ?.map((g) => ({ ...g, noteIds: g.noteIds.filter((noteId) => noteId !== leavingId) }));
+        workingGroups = beforePrune
+          ?.filter((g) => g.id === inheritedGroupId || g.noteIds.length > 0);
+        if (beforePrune && workingGroups && beforePrune.length !== workingGroups.length) {
+          const keptIds = new Set(workingGroups.map((g) => g.id));
+          for (const g of beforePrune) if (!keptIds.has(g.id)) markGroupAsDeleted(g.id);
+        }
+        setGroups?.(workingGroups ?? []);
+        prunedDocs = baseDocs.filter((d) => d.id !== currentDoc.id);
       }
-      cancelDocSaveRef?.current?.(currentDoc.id);
-      const leavingId = currentDoc.id;
-      void getNotesDir().then((dir) => removeMetaFile(tauriFileSystem, dir, leavingId)).catch(() => {});
-      const beforePrune = workingGroups
-        ?.map((g) => ({ ...g, noteIds: g.noteIds.filter((noteId) => noteId !== leavingId) }));
-      workingGroups = beforePrune
-        ?.filter((g) => g.id === inheritedGroupId || g.noteIds.length > 0);
-      if (beforePrune && workingGroups && beforePrune.length !== workingGroups.length) {
-        const keptIds = new Set(workingGroups.map((g) => g.id));
-        for (const g of beforePrune) if (!keptIds.has(g.id)) markGroupAsDeleted(g.id);
-      }
-      setGroups?.(workingGroups ?? []);
-      prunedDocs = baseDocs.filter((d) => d.id !== currentDoc.id);
-      setDocs(prunedDocs);
-    }
 
-    const newDoc: NoteDoc = {
-      id,
-      filePath,
-      fileName: getDefaultDocumentTitle(locale, prunedDocs.map((d) => d.fileName)),
-      isDirty: false,
-      content: "",
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
+      const newDoc: NoteDoc = {
+        id,
+        filePath,
+        fileName: getDefaultDocumentTitle(locale, prunedDocs.map((d) => d.fileName)),
+        isDirty: false,
+        content: "",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
 
-    const addNewDoc = () => {
       const nextDocs = [...prunedDocs, newDoc];
       let nextGroups = workingGroups;
       if (inheritedGroupId && nextGroups) {
@@ -487,12 +489,8 @@ export function useFileSystem(
       resetDocState(state, tiptapRef, id, filePath, "");
       notifyActiveDocRef?.current?.(id, filePath);
       focusEditor(tiptapRef);
-    };
-
-    if (willReplace) {
-      setTimeout(addNewDoc, 120);
-    } else {
-      addNewDoc();
+    } finally {
+      newNoteInFlightRef.current = false;
     }
   }, [cancelDocSaveRef, getLiveDocsSnapshot, leaveCurrentDoc, locale, markDocClean, notesSortOrder, setActiveIndex, setDocs, setGroups, state, tiptapRef]);
 
