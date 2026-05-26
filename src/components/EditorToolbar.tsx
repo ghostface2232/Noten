@@ -8,6 +8,9 @@ import {
   MenuPopover,
   MenuList,
   MenuItem,
+  Popover,
+  PopoverTrigger,
+  PopoverSurface,
   makeStyles,
   tokens,
 } from "@fluentui/react-components";
@@ -25,6 +28,7 @@ import {
   TextQuoteOpeningRegular,
   LineHorizontal1Regular,
   ImageAddRegular,
+  TableRegular,
   ArrowUndoRegular,
   ArrowRedoRegular,
   ChevronDownRegular,
@@ -144,6 +148,100 @@ const useStyles = makeStyles({
     fontWeight: 400,
   },
 });
+
+const TABLE_PICKER_ROWS = 6;
+const TABLE_PICKER_COLS = 8;
+
+interface TablePickerProps {
+  editor: Editor;
+  locale: Locale;
+  onPick: () => void;
+}
+
+function TableGridPicker({ editor, locale, onPick }: TablePickerProps) {
+  const [hover, setHover] = useState<{ row: number; col: number } | null>(null);
+  const rows = hover ? hover.row + 1 : 0;
+  const cols = hover ? hover.col + 1 : 0;
+  const label = rows && cols
+    ? `${rows} × ${cols}`
+    : t("table.gridPlaceholder", locale);
+
+  const insert = (r: number, c: number) => {
+    editor
+      .chain()
+      .focus()
+      .insertTable({ rows: r, cols: c, withHeaderRow: true })
+      .run();
+    onPick();
+  };
+
+  const cells: React.ReactElement[] = [];
+  for (let r = 0; r < TABLE_PICKER_ROWS; r++) {
+    for (let c = 0; c < TABLE_PICKER_COLS; c++) {
+      const active = hover != null && r <= hover.row && c <= hover.col;
+      cells.push(
+        <button
+          key={`${r}-${c}`}
+          type="button"
+          className={
+            active
+              ? "tiptap-table-grid-picker-cell is-active"
+              : "tiptap-table-grid-picker-cell"
+          }
+          onMouseEnter={() => setHover({ row: r, col: c })}
+          onFocus={() => setHover({ row: r, col: c })}
+          onClick={() => insert(r + 1, c + 1)}
+          aria-label={`${r + 1} × ${c + 1}`}
+        />,
+      );
+    }
+  }
+
+  return (
+    <div className="tiptap-table-grid-picker" onMouseLeave={() => setHover(null)}>
+      <div className="tiptap-table-grid-picker-grid">{cells}</div>
+      <div className="tiptap-table-grid-picker-label">{label}</div>
+    </div>
+  );
+}
+
+interface TableInsertButtonProps {
+  editor: Editor;
+  locale: Locale;
+  tooltip: string;
+  buttonClassName: string;
+}
+
+function TableInsertButton({ editor, locale, tooltip, buttonClassName }: TableInsertButtonProps) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(_, data) => setOpen(data.open)}
+      positioning="below"
+      withArrow={false}
+      trapFocus={false}
+    >
+      <PopoverTrigger disableButtonEnhancement>
+        <Tooltip content={tooltip} relationship="label">
+          <Button
+            appearance="subtle"
+            icon={<TableRegular />}
+            className={buttonClassName}
+            aria-label={tooltip}
+          />
+        </Tooltip>
+      </PopoverTrigger>
+      <PopoverSurface tabIndex={-1} style={{ padding: 8 }}>
+        <TableGridPicker
+          editor={editor}
+          locale={locale}
+          onPick={() => setOpen(false)}
+        />
+      </PopoverSurface>
+    </Popover>
+  );
+}
 
 function getHeadingLabel(editor: Editor | null, locale: Locale): string {
   if (!editor) return t("heading.body", locale);
@@ -390,6 +488,12 @@ function EditorToolbarImpl({
               {tb(i("tool.image"), <ImageAddRegular />,
                 () => { if (editor) pickAndInsertImage(editor); },
                 false)}
+              <TableInsertButton
+                editor={editor}
+                locale={locale}
+                tooltip={i("tool.table")}
+                buttonClassName={styles.toolBtn}
+              />
             </div>
 
           </>

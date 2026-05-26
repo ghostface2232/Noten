@@ -20,6 +20,7 @@ import {
   FlowchartRegular,
   LineHorizontal1Regular,
   ImageAddRegular,
+  TableRegular,
 } from "@fluentui/react-icons";
 import type { Editor, Range } from "@tiptap/core";
 import "../styles/slash-command.css";
@@ -54,6 +55,7 @@ const ICON_MAP: Record<string, React.ReactElement> = {
   Flowchart: <FlowchartRegular />,
   LineHorizontal1: <LineHorizontal1Regular />,
   ImageAdd: <ImageAddRegular />,
+  Table: <TableRegular />,
 };
 
 export const SlashCommandList = forwardRef<

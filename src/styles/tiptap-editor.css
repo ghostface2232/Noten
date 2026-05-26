@@ -347,10 +347,67 @@
 
 /* ─── 테이블 ─── */
 .ProseMirror table {
+  /* Fixed layout so column widths are pinned (initially equal, or whatever the
+     user drags them to via resizable handles) and don't twitch as the user
+     types. Long content wraps inside the cell — see overflow-wrap below. */
+  table-layout: fixed;
   border-collapse: collapse;
   width: 100%;
+  max-width: 100%;
   margin-bottom: 0;
-  overflow: auto;
+}
+
+/* Tiptap's resizable Table emits <col> elements per column. Allow them to keep
+   their resized width but never overflow the editor — anchor to fixed layout. */
+.ProseMirror table col {
+  min-width: 32px;
+}
+
+/* Tiptap renders an absolutely-positioned handle on each cell when resizable
+   is on. Keep it strictly inside the cell so the rightmost / bottom-row cells
+   don't paint a phantom outline past the table border. */
+.ProseMirror th,
+.ProseMirror td {
+  position: relative;
+}
+
+.ProseMirror th .column-resize-handle,
+.ProseMirror td .column-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background-color: var(--editor-color-accent, #0078d4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
+}
+
+/* Hide the handle on the rightmost cell of every row — there's no neighbour
+   column to redistribute width against, so it's just visual noise. */
+.ProseMirror tr > th:last-child .column-resize-handle,
+.ProseMirror tr > td:last-child .column-resize-handle {
+  display: none;
+}
+
+/* Only reveal handles when Tiptap signals the cursor is in the resize zone,
+   not on every table hover — that's what made the bars flash on every move. */
+.ProseMirror.resize-cursor .column-resize-handle {
+  opacity: 0.6;
+}
+
+.ProseMirror.resize-cursor {
+  cursor: col-resize;
+}
+
+.ProseMirror.resize-cursor * {
+  cursor: col-resize;
+}
+
+/* Selected cells (cellSelection) get a subtle wash. */
+.ProseMirror .selectedCell {
+  background-color: rgba(0, 120, 212, 0.12);
 }
 
 .ProseMirror :is(p, pre, blockquote, ul, ol, img, table, .noten-code-block) + :is(p, pre, blockquote, ul, ol, img, table, .noten-code-block) {
@@ -369,6 +426,10 @@
   padding: 0.5em 0.75em;
   text-align: left;
   vertical-align: top;
+  /* Wrap long content inside the cell instead of widening the table.
+     `anywhere` also breaks unspaced strings like URLs. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .ProseMirror th {
@@ -657,6 +718,134 @@
   box-shadow: none;
 }
 
+/* ─── 테이블 버블 툴바 ─── */
+.tiptap-table-bubble {
+  position: fixed;
+  z-index: 1190;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--editor-color-border);
+  background: var(--editor-color-bg);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  transform-origin: bottom center;
+  animation: tiptap-table-bubble-in 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes tiptap-table-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.tiptap-table-bubble-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--editor-color-text);
+  cursor: pointer;
+  line-height: 1;
+  outline: none;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.tiptap-table-bubble-button:hover:not(:disabled) {
+  background-color: var(--ui-active-bg);
+}
+
+.tiptap-table-bubble-button:active:not(:disabled) {
+  background-color: var(--ui-active-bg);
+  transform: scale(0.96);
+}
+
+.tiptap-table-bubble-button:focus,
+.tiptap-table-bubble-button:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.tiptap-table-bubble-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tiptap-table-bubble-button-danger {
+  color: #d13438;
+}
+
+.tiptap-table-bubble-button-danger:hover:not(:disabled) {
+  background-color: rgba(209, 52, 56, 0.10);
+}
+
+.tiptap-table-bubble-button-danger:active:not(:disabled) {
+  background-color: rgba(209, 52, 56, 0.18);
+}
+
+.tiptap-table-bubble-divider {
+  display: inline-block;
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background-color: var(--editor-color-border);
+  opacity: 0.6;
+}
+
+/* ─── 표 삽입 그리드 피커 ─── */
+.tiptap-table-grid-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 4px 2px 2px;
+  user-select: none;
+}
+
+.tiptap-table-grid-picker-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--editor-color-text-secondary);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  height: 16px;
+  line-height: 16px;
+}
+
+.tiptap-table-grid-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 18px);
+  grid-auto-rows: 18px;
+  gap: 3px;
+}
+
+.tiptap-table-grid-picker-cell {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--editor-color-border);
+  border-radius: 3px;
+  background: transparent;
+  transition: background-color 0.08s ease, border-color 0.08s ease;
+  cursor: pointer;
+}
+
+.tiptap-table-grid-picker-cell.is-active {
+  background-color: rgba(0, 120, 212, 0.18);
+  border-color: rgba(0, 120, 212, 0.55);
+}
+
 /* ═══════════════════════════════════════════
    다크 모드
    ═══════════════════════════════════════════ */
@@ -795,6 +984,41 @@
 
 [data-theme="dark"] .tiptap-link-popover-button-danger:active {
   background-color: rgba(255, 143, 143, 0.18);
+}
+
+[data-theme="dark"] .tiptap-table-bubble {
+  background: #2a2a2a;
+  border-color: #404040;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] .tiptap-table-bubble-button {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .tiptap-table-bubble-button-danger {
+  color: #ff8f8f;
+}
+
+[data-theme="dark"] .tiptap-table-bubble-button-danger:hover:not(:disabled) {
+  background-color: rgba(255, 143, 143, 0.14);
+}
+
+[data-theme="dark"] .tiptap-table-bubble-button-danger:active:not(:disabled) {
+  background-color: rgba(255, 143, 143, 0.22);
+}
+
+[data-theme="dark"] .tiptap-table-bubble-divider {
+  background-color: #404040;
+}
+
+[data-theme="dark"] .tiptap-table-grid-picker-cell {
+  border-color: #404040;
+}
+
+[data-theme="dark"] .tiptap-table-grid-picker-cell.is-active {
+  background-color: rgba(96, 165, 250, 0.22);
+  border-color: rgba(96, 165, 250, 0.6);
 }
 
 /* ═══════════════════════════════════════════

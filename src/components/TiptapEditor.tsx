@@ -45,6 +45,7 @@ import TextContextMenu, {
   showGenericContextMenu,
 } from "../extensions/TextContextMenu";
 import { SearchHighlight } from "../extensions/SearchHighlight";
+import { TableBubbleMenu } from "./TableBubbleMenu";
 import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
 import { isSafeLinkHref, normalizeLinkHref } from "../utils/linkHref";
@@ -120,6 +121,23 @@ function getScrollParent(element: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
+/**
+ * Paragraph.renderMarkdown emits "&nbsp;" for empty paragraphs so they survive
+ * the round-trip through Paragraph.parseMarkdown's empty-cell detection. But
+ * inside a table cell, Table.parseMarkdown calls parseInline directly and
+ * bypasses that rule — the entity then leaks through as visible text after a
+ * reload. Strip "&nbsp;" from table-row lines so empty cells round-trip clean.
+ */
+function stripTableCellNbsp(md: string): string {
+  return md.replace(/^\|[^\n]*\|[ \t]*$/gm, (line) =>
+    line.replace(/&nbsp;/g, ""),
+  );
+}
+
+function readEditorMarkdown(editor: Editor): string {
+  return stripTableCellNbsp(editor.getMarkdown());
+}
+
 function refreshRenderedContent(editor: Editor) {
   // Do not replace content while the browser owns an IME composition buffer.
   if (editor.view.composing) return;
@@ -128,7 +146,7 @@ function refreshRenderedContent(editor: Editor) {
   const scrollTop = scrollParent?.scrollTop ?? 0;
   const scrollLeft = scrollParent?.scrollLeft ?? 0;
   const { from, to } = editor.state.selection;
-  const markdown = editor.getMarkdown();
+  const markdown = readEditorMarkdown(editor);
   const wasReadonly = editor.storage.readonlyGuard.readonly;
 
   editor.storage.readonlyGuard.readonly = false;
@@ -809,7 +827,15 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         Underline,
         TaskList,
         TaskItem.configure({ nested: true }),
-        Table,
+        // `lastColumnResizable: false` pins the rightmost edge so dragging an
+        // inner column redistributes width between siblings instead of growing
+        // the whole table past the editor width.
+        Table.configure({
+          resizable: true,
+          handleWidth: 6,
+          cellMinWidth: 48,
+          lastColumnResizable: false,
+        }),
         TableRow,
         TableCell,
         TableHeader,
@@ -843,7 +869,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       const contextFilePath = editor.storage.documentContext.filePath;
       const key = currentSessionKeyRef.current ?? buildDocumentSessionKey(contextNoteId, contextFilePath);
       if (!key) return;
-      const markdown = editor.getMarkdown();
+      const markdown = readEditorMarkdown(editor);
       touchDocumentSession(key, {
         state: editor.state,
         markdownSignature: computeMarkdownSignature(markdown),
@@ -905,9 +931,11 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       const {
         noteId,
         filePath,
-        markdown,
         reason = "switch",
       } = params;
+      // Normalize legacy "&nbsp;" leakage from empty table cells before any
+      // signature or parse path sees the markdown.
+      const markdown = stripTableCellNbsp(params.markdown);
       const nextKey = buildDocumentSessionKey(noteId, filePath);
       const currentKey = currentSessionKeyRef.current;
       const sameSession = !!nextKey && nextKey === currentKey;
@@ -926,7 +954,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       let applied = false;
 
       if (sameSession) {
-        const currentSignature = computeMarkdownSignature(editor.getMarkdown());
+        const currentSignature = computeMarkdownSignature(readEditorMarkdown(editor));
         if (currentSignature !== expectedSignature) {
           const shouldTrackInHistory = reason === "window-sync" || reason === "file-watch";
           applied = replaceCurrentDocumentContent(markdown, shouldTrackInHistory);
@@ -1296,7 +1324,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       () => ({
         getMarkdown: () => {
           if (!editor) return "";
-          return editor.getMarkdown();
+          return readEditorMarkdown(editor);
         },
         setContent: (markdown: string) => {
           if (!editor) return;
@@ -1471,6 +1499,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         }}
       >
         <EditorContent editor={editor} />
+        <TableBubbleMenu editor={editor} locale={locale} />
         {linkHoverPopoverOpen && !linkPopoverOpen && (
           <div
             ref={linkHoverPopoverRef}

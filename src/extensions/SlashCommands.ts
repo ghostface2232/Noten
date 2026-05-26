@@ -176,6 +176,15 @@ const SLASH_DEFS: SlashItemDef[] = [
     command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).setHorizontalRule().run(); } },
   { titleKey: "slash.image", descKey: "slash.image.desc", searchTerms: ["image", "img", "사진", "이미지"], icon: "ImageAdd",
     command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).run(); pickAndInsertImage(editor); } },
+  { titleKey: "slash.table", descKey: "slash.table.desc", searchTerms: ["table", "grid", "표", "테이블"], icon: "Table",
+    command: ({ editor, range }) => {
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+        .run();
+    } },
 ];
 
 export function getSlashItems(locale: Locale): SlashCommandItem[] {
