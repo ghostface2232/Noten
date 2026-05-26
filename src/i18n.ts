@@ -97,10 +97,10 @@ const dict = {
 
   /* Sidebar */
   "sidebar.empty": {
-    en: "Open a file with Ctrl+O or create a new document with Ctrl+N.",
-    ko: "Ctrl+O로 파일을 열거나 Ctrl+N으로 새 문서를 만드세요.",
+    en: "Open a file with Ctrl+O or create a new note with Ctrl+N.",
+    ko: "Ctrl+O로 파일을 열거나 Ctrl+N으로 새 노트를 만드세요.",
   },
-  "sidebar.newNote": { en: "New document", ko: "새 문서" },
+  "sidebar.newNote": { en: "New note", ko: "새 노트" },
   "sidebar.import": { en: "Open", ko: "열기" },
   "sidebar.settings": { en: "Settings", ko: "설정" },
   "sidebar.pin": { en: "Pin", ko: "고정" },
@@ -175,7 +175,7 @@ const dict = {
   "settings.shortcut.showChrome": { en: "Show or hide editor chrome", ko: "편집 막대 표시 / 숨기기" },
   "settings.shortcut.import": { en: "Open file", ko: "파일 열기" },
   "settings.shortcut.save": { en: "Save now", ko: "즉시 저장" },
-  "settings.shortcut.newFile": { en: "New document", ko: "새 문서" },
+  "settings.shortcut.newFile": { en: "New note", ko: "새 노트" },
   "settings.shortcut.newWindow": { en: "New window", ko: "새 창" },
   "settings.shortcut.find": { en: "Find in document", ko: "문서에서 찾기" },
   "settings.shortcut.replace": { en: "Find and replace", ko: "찾기 및 바꾸기" },
@@ -284,7 +284,7 @@ const dict = {
 
   /* App Menu */
   "menu.file": { en: "File", ko: "파일" },
-  "menu.newDoc": { en: "New document", ko: "새 문서" },
+  "menu.newDoc": { en: "New note", ko: "새 노트" },
   "menu.newWindow": { en: "New window", ko: "새 창" },
   "menu.import": { en: "Open", ko: "열기" },
   "menu.export": { en: "Export", ko: "내보내기" },
