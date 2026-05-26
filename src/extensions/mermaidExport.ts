@@ -14,6 +14,8 @@
 
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
+import { t } from "../i18n";
+import type { Locale } from "../hooks/useSettings";
 
 // Visual CSS properties that need to be inlined onto every node so the
 // exported SVG is self-contained. We deliberately avoid layout-affecting
@@ -156,6 +158,7 @@ async function saveAs(
   bytes: Uint8Array,
   defaultFileName: string,
   format: "svg" | "png",
+  locale: Locale,
 ): Promise<string | null> {
   const filter =
     format === "svg"
@@ -163,7 +166,7 @@ async function saveAs(
       : { name: "PNG image", extensions: ["png"] };
 
   const path = await save({
-    title: format === "svg" ? "Export diagram as SVG" : "Export diagram as PNG",
+    title: t(format === "svg" ? "mermaid.exportSvgDialog" : "mermaid.exportPngDialog", locale),
     defaultPath: defaultFileName,
     filters: [filter],
   });
@@ -176,11 +179,11 @@ async function saveAs(
   return path;
 }
 
-export async function exportMermaidSvg(liveSvg: SVGSVGElement, fileName: string): Promise<boolean> {
+export async function exportMermaidSvg(liveSvg: SVGSVGElement, fileName: string, locale: Locale): Promise<boolean> {
   const exportSvg = buildExportSvg(liveSvg);
   const serialized = serializeSvg(exportSvg);
   const bytes = new TextEncoder().encode(serialized);
-  const result = await saveAs(bytes, fileName, "svg");
+  const result = await saveAs(bytes, fileName, "svg", locale);
   return result !== null;
 }
 
@@ -191,7 +194,7 @@ export async function exportMermaidSvg(liveSvg: SVGSVGElement, fileName: string)
  * Scale rule: base 2× pixels. If 2× width would still be ≤ 1000px, bump to 4×
  * so small diagrams stay crisp when scaled up in slides/docs.
  */
-export async function exportMermaidPng(liveSvg: SVGSVGElement, fileName: string): Promise<boolean> {
+export async function exportMermaidPng(liveSvg: SVGSVGElement, fileName: string, locale: Locale): Promise<boolean> {
   const exportSvg = buildExportSvg(liveSvg);
   const widthAttr = parseFloat(exportSvg.getAttribute("width") ?? "0");
   const heightAttr = parseFloat(exportSvg.getAttribute("height") ?? "0");
@@ -244,7 +247,7 @@ export async function exportMermaidPng(liveSvg: SVGSVGElement, fileName: string)
     throw err;
   }
 
-  const result = await saveAs(pngBytes, fileName, "png");
+  const result = await saveAs(pngBytes, fileName, "png", locale);
   return result !== null;
 }
 

@@ -73,6 +73,14 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 - Image drag reorder: `ImageView.ts` detects a 6px threshold on `pointerdown`, then delegates to `startReorder()` which creates a ghost preview, drop indicator, and handles the transaction in a single undo step.
 - Ctrl+C on a selected image copies the image blob to clipboard (not HTML), for both base64 and asset-path sources.
 
+## Tables and Mermaid
+
+- Tables use Tiptap v3 table extensions with `lastColumnResizable: false` so dragging an inner column redistributes width instead of growing the table past the editor width.
+- Table insertion uses the toolbar grid picker; row/column/header/delete commands live in `TableBubbleMenu`.
+- Empty table cells may serialize through `&nbsp;`; `stripTableCellNbsp` normalizes table-row markdown before load/save.
+- Mermaid diagrams are `mermaid` code blocks rendered by the custom `MermaidCodeBlock` NodeView. Keep its source/preview toggle and SVG/PNG export controls inside the NodeView.
+- Mermaid SVG/PNG export uses `src/extensions/mermaidExport.ts` and context-menu helpers from `contextMenuRegistry`; user-visible Mermaid labels must go through `src/i18n.ts`.
+
 ## Context Menus
 
 - All context menus use shared helpers from `src/utils/contextMenuRegistry.ts` (`createMenuShell`, `createMenuItem`, `createMenuSeparator`).
@@ -104,7 +112,7 @@ Do not use old community-package APIs such as `editor.storage.markdown.getMarkdo
 - Browser/WebView shortcuts that would interfere with app behavior are blocked. This includes reload, DevTools, print, source view, caret browsing, zoom, and browser back/forward. Ctrl+R is unblocked when sidebar has focus (used for rename).
 - The sidebar body slides between two panes: the root view (groups section + ungrouped notes section) and an "All Notes" drill-in — a flat list of every note (groups ignored, pinned first, current sort order). The "All Notes" entry atop the group list enters it; its header or `Escape` returns. Drag-to-group works only in the root view.
 - A note's color label is set from the note context menu (or, in select mode, the bulk right-click menu) and tints the note's sidebar icon. The sidebar "filter" button opens a swatch popover; picking a color filters the sidebar to a flat list of only that color's notes (composes with search; reuses the search flat-list rendering path, so drag is inert while filtered). The filter persists across restarts.
-- Sidebar shortcuts (Ctrl+D, Ctrl+R, F2, Ctrl+Alt+P, Ctrl+Alt+C, Delete) are active when last mousedown was inside the sidebar. Tracked via `data-sidebar-active` attribute on `document.documentElement`.
+- Sidebar shortcuts (Ctrl+D, Ctrl+R, F2, Ctrl+E, Ctrl+Alt+P, Ctrl+Alt+C, Delete) are active when last mousedown was inside the sidebar. Tracked via `data-sidebar-active` attribute on `document.documentElement`.
 - Editor shortcuts include `Ctrl+Shift+X` for strike-through, `Ctrl+G` for Go to Line, and `Ctrl+H` for Find and Replace. All are handled at the window level via `useKeyboardShortcuts`, not inside individual editor keymaps.
 - Sidebar shortcut hints are displayed in context menus. Shortcut style is unified across all menus (opacity 0.45, 12px, 24px left padding).
 
@@ -160,6 +168,7 @@ Required secrets: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWO
 - `src/utils/migrateImageAssets.ts` — one-time markdown migration from base64 image sources to `.assets/...` paths
 - `src/utils/contextMenuRegistry.ts` — `closeContextMenu`, `createMenuShell`, `createMenuItem`, `createMenuSeparator`, `isDarkTheme`
 - `src/utils/clampMenuPosition.ts` — `clampMenuToViewport`
+- `src/extensions/mermaidExport.ts` — self-contained SVG serialization and transparent-background PNG export for rendered Mermaid diagrams
 
 ## Code Style
 

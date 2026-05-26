@@ -2,6 +2,8 @@ import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import type { NodeViewRendererProps } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type { NodeView, ViewMutationRecord } from "@tiptap/pm/view";
+import { t } from "../i18n";
+import type { Locale } from "../hooks/useSettings";
 import { createMenuShell, createMenuItem, closeContextMenu } from "../utils/contextMenuRegistry";
 import { buildExportFileName, exportMermaidPng, exportMermaidSvg } from "./mermaidExport";
 
@@ -21,6 +23,7 @@ const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor
 const COPY_FEEDBACK_MS = 1000;
 type MermaidApi = typeof import("mermaid")["default"];
 type Rect = { x: number; y: number; width: number; height: number };
+type GetLocale = () => Locale;
 
 let mermaidInitialized = false;
 let mermaidRenderCount = 0;
@@ -110,7 +113,7 @@ class MermaidCodeBlockView implements NodeView {
   private exportFeedbackTimeout: number | null = null;
   private lastRenderKey = "";
 
-  constructor(node: ProseMirrorNode) {
+  constructor(node: ProseMirrorNode, private readonly getLocale: GetLocale) {
     this.node = node;
 
     this.dom = document.createElement("div");
@@ -144,8 +147,7 @@ class MermaidCodeBlockView implements NodeView {
     this.exportButton.type = "button";
     this.exportButton.className = "noten-mermaid-code-export";
     this.exportButton.innerHTML = DOWNLOAD_ICON;
-    this.exportButton.setAttribute("aria-label", "Export diagram");
-    this.exportButton.setAttribute("title", "Export diagram");
+    this.syncExportButtonLabel();
     this.exportButton.addEventListener("click", this.handleExportClick);
     this.preElement.append(this.exportButton);
 
@@ -237,6 +239,7 @@ class MermaidCodeBlockView implements NodeView {
       this.setCodeCollapsed(false);
     } else {
       this.syncToggleButton();
+      this.syncExportButtonLabel();
     }
 
     if (!isMermaid) {
@@ -340,10 +343,11 @@ class MermaidCodeBlockView implements NodeView {
       if (!svgElement) return;
       try {
         const fileName = buildExportFileName(format);
+        const locale = this.getLocale();
         const saved =
           format === "svg"
-            ? await exportMermaidSvg(svgElement, fileName)
-            : await exportMermaidPng(svgElement, fileName);
+            ? await exportMermaidSvg(svgElement, fileName, locale)
+            : await exportMermaidPng(svgElement, fileName, locale);
         if (saved) {
           this.showExportSuccessFeedback();
         }
@@ -355,14 +359,14 @@ class MermaidCodeBlockView implements NodeView {
       }
     };
 
-    const svgItem = createMenuItem("Export as SVG", null, {
+    const svgItem = createMenuItem(t("mermaid.exportSvg", this.getLocale()), null, {
       disabled: !hasDiagram,
       isDark,
     });
     svgItem.addEventListener("click", () => void runExport("svg"));
     menu.appendChild(svgItem);
 
-    const pngItem = createMenuItem("Export as PNG", null, {
+    const pngItem = createMenuItem(t("mermaid.exportPng", this.getLocale()), null, {
       disabled: !hasDiagram,
       isDark,
     });
@@ -393,8 +397,15 @@ class MermaidCodeBlockView implements NodeView {
   private syncToggleButton() {
     this.toggleButton.dataset.collapsed = this.codeCollapsed ? "true" : "false";
     this.toggleButton.setAttribute("aria-pressed", this.codeCollapsed ? "true" : "false");
-    this.toggleButton.setAttribute("aria-label", this.codeCollapsed ? "Expand Mermaid source" : "Collapse Mermaid source");
-    this.toggleButton.setAttribute("title", this.codeCollapsed ? "Expand Mermaid source" : "Collapse Mermaid source");
+    const label = t(this.codeCollapsed ? "mermaid.expandSource" : "mermaid.collapseSource", this.getLocale());
+    this.toggleButton.setAttribute("aria-label", label);
+    this.toggleButton.setAttribute("title", label);
+  }
+
+  private syncExportButtonLabel() {
+    const label = t("mermaid.exportDiagram", this.getLocale());
+    this.exportButton.setAttribute("aria-label", label);
+    this.exportButton.setAttribute("title", label);
   }
 
   private applyEdgeLabelPillShape(svgElement: SVGSVGElement) {
@@ -601,7 +612,11 @@ class MermaidCodeBlockView implements NodeView {
 
 export const MermaidCodeBlock = CodeBlockLowlight.extend({
   addNodeView() {
-    return ({ node }: NodeViewRendererProps) => new MermaidCodeBlockView(node);
+    const editor = this.editor;
+    return ({ node }: NodeViewRendererProps) => new MermaidCodeBlockView(
+      node,
+      () => editor.storage.slashCommands?.locale === "ko" ? "ko" : "en",
+    );
   },
 
   renderHTML({ node, HTMLAttributes }) {

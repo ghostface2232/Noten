@@ -18,14 +18,16 @@ Powered by [Tiptap](https://tiptap.dev/), edited as WYSIWYM with Markdown as the
 
 ## Features
 - **WYSIWYM Markdown editor** - A single always-editable Tiptap surface backed by Markdown on disk
-- **Slash commands** - Type `/` to insert headings, lists, code blocks, images, and more
+- **Slash commands** - Type `/` to insert headings, lists, code blocks, images, tables, Mermaid diagrams, and more
+- **Tables** - Insert with a grid picker, resize columns in-place, and edit rows/columns from the table bubble toolbar
+- **Mermaid diagrams** - Render Mermaid code blocks inline, collapse source, and export diagrams as SVG or PNG
 - **Image support** - Drag & drop, paste, resize with corner handles, and drag to reorder
-- **Note management** - Sidebar with grouping, pinned notes, multi-select, drag reorder, full-text search, and context menus
+- **Note management** - Sidebar with grouping, pinned notes, color labels/filtering, multi-select, drag reorder, full-text search, and context menus
 - **Recently deleted** - Soft-delete with 14-day retention and restore
 - **Shared folder sync** - Use OneDrive, Dropbox, or another synced folder to share notes across PCs with metadata merge and conflict backups
 - **Multi-window** - Open notes in separate windows with real-time cross-window sync
 - **Mica theme** - Native Windows 11 Mica material with dark/light mode
-- **Export** - Save notes as Markdown or PDF
+- **Export** - Save notes as Markdown or PDF; save Mermaid diagrams as SVG or PNG
 
 ## Tech Stack
 
@@ -47,7 +49,7 @@ Powered by [Tiptap](https://tiptap.dev/), edited as WYSIWYM with Markdown as the
 ### Global
 | Action | Shortcut |
 |---|---|
-| New document | `Ctrl+N` |
+| New note | `Ctrl+N` |
 | New window | `Ctrl+Shift+N` |
 | Open file | `Ctrl+O` |
 | Save now | `Ctrl+S` |
@@ -70,7 +72,8 @@ Powered by [Tiptap](https://tiptap.dev/), edited as WYSIWYM with Markdown as the
 ## Development
 
 - Use `npm run tauri:dev` for local app development. It prepares `maintenance-helper.exe` in Tauri resources and then starts `tauri dev`.
-- Use `.\scripts\build-release.ps1` only when you want the full release output, including the final setup executable.
+- Use `npm run check` before shipping changes. It runs typecheck, lint, and tests.
+- Treat `.\scripts\build-release.ps1` as a local smoke test only. Real release installers are built and signed by GitHub Actions after a `v*` tag is pushed.
 
 ## License
 MIT
