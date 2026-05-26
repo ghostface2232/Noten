@@ -1357,12 +1357,16 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           }
         },
         focus: () => {
-          // Pass 'start' explicitly so the selection is collapsed at the
-          // document start. Without a position arg, focus() preserves the
-          // current selection — which, right after openDocument's
-          // view.updateState() swap, can still span the previous document's
-          // range and render as a select-all on the new (often empty) doc.
-          editor?.commands.focus("start");
+          // Hand DOM focus to the editor without dispatching any selection
+          // transaction. After openDocument's view.updateState() swap, the
+          // new state's default selection is already Selection.atStart(doc)
+          // (collapsed). editor.commands.focus(...) would dispatch a fresh
+          // setSelection transaction that re-resolves a textblock range — on
+          // an empty paragraph this has been observed to render as a blue
+          // selection band on the first line instead of a plain caret.
+          // view.focus() only transfers native focus; the existing collapsed
+          // selection stays collapsed.
+          editor?.view.focus();
         },
         getEditor: () => editor,
       }),
