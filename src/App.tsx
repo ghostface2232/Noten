@@ -399,6 +399,7 @@ function App() {
     const storage = tiptapEditor.storage.wikiLink;
     storage.docs = docs;
     storage.locale = locale;
+    storage.activeNoteId = docs[activeIndex]?.id ?? null;
     storage.navigateToTitle = (title: string) => {
       const needle = title.normalize("NFC").trim().toLowerCase();
       if (!needle) return;
@@ -418,7 +419,7 @@ function App() {
       lastWikiRefreshSignatureRef.current = refreshSignature;
       refreshWikiLinkDecorations(tiptapEditor);
     }
-  }, [tiptapEditor, docs, locale, groups, noteGroups.toggleGroupCollapsed, fs.switchDocument, fs.createNoteWithTitle, wikiDocIndexSignature]);
+  }, [tiptapEditor, docs, activeIndex, locale, groups, noteGroups.toggleGroupCollapsed, fs.switchDocument, fs.createNoteWithTitle, wikiDocIndexSignature]);
 
   // Most upstream mutations (autosave, rename, pin, color, etc.) already sort
   // via sortAndPersistDocs / doSave. But several setDocs sites outside the

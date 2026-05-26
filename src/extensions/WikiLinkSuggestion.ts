@@ -84,11 +84,13 @@ function normalizeQuery(query: string): string {
 
 function buildItems(storage: WikiLinkStorage, rawQuery: string): WikiSuggestionItem[] {
   const docs = storage.docs ?? [];
+  const activeNoteId = storage.activeNoteId;
   const needle = normalizeQuery(rawQuery);
   const trimmed = rawQuery.trim();
 
   const matches: WikiSuggestionItem[] = docs
     .filter((doc) => {
+      if (activeNoteId && doc.id === activeNoteId) return false;
       if (!needle) return true;
       return normalizeQuery(doc.fileName).includes(needle);
     })

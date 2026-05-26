@@ -15,6 +15,7 @@ import type { Locale } from "../hooks/useSettings";
 export interface WikiLinkStorage {
   docs: NoteDoc[];
   locale: Locale;
+  activeNoteId: string | null;
   navigateToTitle: (title: string) => void;
   createNoteWithTitle: (title: string) => Promise<string | null>;
 }
@@ -113,6 +114,7 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
     return {
       docs: [],
       locale: "en",
+      activeNoteId: null,
       navigateToTitle: () => {},
       createNoteWithTitle: async () => null,
     };
