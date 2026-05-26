@@ -622,7 +622,6 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
             {tab === "about" && (
               <div className={styles.section} style={{ justifyContent: "space-between", height: "100%" }}>
                 <div>
-                  {/* App info */}
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "18px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                       <img
@@ -651,7 +650,6 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     )}
                   </div>
 
-                  {/* Version notes */}
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
                     <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.1</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
@@ -681,7 +679,6 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     </div>
                   </div>
 
-                  {/* Update section */}
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
                     {updaterState.status === "checking" && (
                       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -740,7 +737,6 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   </div>
                 </div>
 
-                {/* Copyright */}
                 <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, marginBottom: "-4px" }}>
                   {i("about.copyright")}
                 </div>

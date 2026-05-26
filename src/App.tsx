@@ -101,7 +101,6 @@ function App() {
   }, [sidebarWidth]);
   useEffect(() => { try { localStorage.setItem("sidebar-open", String(sidebarOpen)); } catch {} }, [sidebarOpen]);
   useEffect(() => { try { localStorage.setItem("sidebar-width", String(sidebarWidth)); } catch {} }, [sidebarWidth]);
-  // Keep the native window minimum aligned with the current sidebar width.
   useEffect(() => {
     const effectiveSidebar = sidebarOpen ? sidebarWidth : 0;
     const minWidth = EDITOR_MIN_WIDTH + effectiveSidebar;
@@ -227,7 +226,6 @@ function App() {
     reconcileStateRef.current,
   );
 
-  // Refs used by async handlers without retriggering effects.
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
   const docsRef = useRef(docs);
@@ -515,7 +513,6 @@ function App() {
     return index === activeIndex ? state.getCachedMarkdown() : doc.content;
   }, [activeIndex, docs, state]);
 
-  // Stable handlers preserve memoized editor chrome.
   const handleOpenSettings = useCallback(() => setSettingsOpen(true), []);
 
   const handleUpdateParagraphSpacing = useCallback((v: ParagraphSpacing) => {

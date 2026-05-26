@@ -1,4 +1,3 @@
-/* ─── ProseMirror 기본 레이아웃 ─── */
 .tiptap-editable,
 .tiptap-readonly {
   height: 100%;
@@ -44,7 +43,6 @@
   caret-color: transparent;
 }
 
-/* ─── GapCursor: 가로 커서 → 세로 캐럿으로 변경 ─── */
 .ProseMirror .ProseMirror-gapcursor {
   position: relative;
   pointer-events: none;
@@ -67,18 +65,15 @@
   50% { opacity: 0; }
 }
 
-/* ─── 텍스트 선택: 모든 모드에서 허용 ─── */
 .ProseMirror {
   -webkit-user-select: text !important;
   user-select: text !important;
 }
 
-/* ─── Note quiet 상태 ─── */
 .tiptap-readonly .ProseMirror {
   cursor: default;
   caret-color: transparent;
 }
-/* 실제 텍스트 요소 위에서만 I-beam */
 .tiptap-readonly .ProseMirror p,
 .tiptap-readonly .ProseMirror h1,
 .tiptap-readonly .ProseMirror h2,
@@ -96,12 +91,10 @@
   cursor: text;
 }
 
-/* Note quiet 상태에서 placeholder 숨김 */
 .tiptap-readonly .is-editor-empty::before {
   display: none !important;
 }
 
-/* ─── 헤딩 ─── */
 .ProseMirror h1 {
   font-size: var(--heading1-size);
   font-weight: 600;
@@ -140,12 +133,10 @@
   margin-top: 0;
 }
 
-/* ─── 단락 ─── */
 .ProseMirror p {
   margin-bottom: 0;
 }
 
-/* ─── 인라인 코드 ─── */
 .ProseMirror code {
   background-color: var(--editor-color-code-bg);
   padding: 0.15em 0.4em;
@@ -154,7 +145,6 @@
   font-size: 0.9em;
 }
 
-/* ─── 코드블럭 ─── */
 .ProseMirror .noten-code-block {
   margin-bottom: 0;
 }
@@ -171,7 +161,7 @@
   line-height: 1.5;
 }
 
-/* 코드블럭 상단 타이틀 바 */
+/* Language label rendered from the code block's data-language attribute. */
 .ProseMirror pre::before {
   content: attr(data-language);
   box-sizing: border-box;
@@ -236,7 +226,6 @@
   overflow-x: auto;
 }
 
-/* ─── 인용문 ─── */
 .ProseMirror blockquote {
   border-left: 3px solid var(--editor-color-border);
   padding-left: 1em;
@@ -246,13 +235,11 @@
   color: var(--editor-color-text-secondary);
 }
 
-/* 중첩 인용문 */
 .ProseMirror blockquote blockquote {
   margin-top: 0.5em;
   margin-bottom: 0.5em;
 }
 
-/* ─── 리스트 ─── */
 .ProseMirror ul,
 .ProseMirror ol {
   padding-left: 1.5em;
@@ -267,14 +254,12 @@
   margin-bottom: 0.25em;
 }
 
-/* 중첩 리스트: 상위 리스트의 margin-bottom 제거 */
 .ProseMirror li > ul,
 .ProseMirror li > ol {
   margin-top: 0.25em;
   margin-bottom: 0.25em;
 }
 
-/* 중첩 리스트 스타일 변경 */
 .ProseMirror ul { list-style-type: disc; }
 .ProseMirror ul ul { list-style-type: circle; }
 .ProseMirror ul ul ul { list-style-type: square; }
@@ -282,7 +267,6 @@
 .ProseMirror ol ol { list-style-type: lower-alpha; }
 .ProseMirror ol ol ol { list-style-type: lower-roman; }
 
-/* ─── 체크박스 리스트 ─── */
 .ProseMirror ul[data-type="taskList"] {
   list-style: none;
   padding-left: 0;
@@ -306,7 +290,6 @@
   accent-color: var(--editor-color-accent);
 }
 
-/* Note quiet 상태에서 체크박스 비활성 */
 .tiptap-readonly ul[data-type="taskList"] li > label input[type="checkbox"] {
   pointer-events: none;
   opacity: 0.6;
@@ -319,14 +302,12 @@
   flex: 1;
 }
 
-/* ─── 수평선 ─── */
 .ProseMirror hr {
   border: none;
   border-top: 2px solid var(--editor-color-border);
   margin: 2em 0;
 }
 
-/* ─── 링크 ─── */
 .ProseMirror a {
   color: var(--editor-color-accent);
   text-decoration: underline;
@@ -337,7 +318,6 @@
   cursor: pointer;
 }
 
-/* ─── 이미지 ─── */
 .ProseMirror img {
   max-width: 100%;
   height: auto;
@@ -345,7 +325,6 @@
   margin-bottom: 0;
 }
 
-/* ─── 테이블 ─── */
 .ProseMirror table {
   /* Fixed layout so column widths are pinned (initially equal, or whatever the
      user drags them to via resizable handles) and don't twitch as the user
@@ -414,7 +393,7 @@
   margin-top: var(--editor-paragraph-spacing);
 }
 
-/* 이미지(블록 NodeView)는 위·아래의 다른 블록과 더 넉넉한 간격을 갖는다 */
+/* Image NodeViews need more breathing room than text-to-text spacing. */
 .ProseMirror :is(p, pre, blockquote, ul, ol, table, .noten-code-block) + .tiptap-image-node,
 .ProseMirror .tiptap-image-node + :is(p, pre, blockquote, ul, ol, table, .noten-code-block, .tiptap-image-node) {
   margin-top: calc(var(--editor-paragraph-spacing) * 1.5);
@@ -437,14 +416,12 @@
   font-weight: 500;
 }
 
-/* 테이블 NodeSelection 하이라이트 */
 .ProseMirror table.ProseMirror-selectednode {
   outline: 2px solid var(--editor-color-accent);
   outline-offset: 2px;
   border-radius: 4px;
 }
 
-/* ─── Placeholder ─── */
 .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
@@ -461,7 +438,6 @@
   display: none;
 }
 
-/* ─── hljs 구문 강조 색상 ─── */
 .ProseMirror pre .hljs-comment,
 .ProseMirror pre .hljs-quote {
   color: var(--editor-color-text-secondary);
@@ -489,7 +465,6 @@
   font-weight: 500;
 }
 
-/* ─── 검색 하이라이트 ─── */
 .ProseMirror .search-match {
   background-color: rgba(255, 210, 0, 0.35);
   border-radius: 2px;
@@ -502,7 +477,6 @@
   outline-offset: -1px;
 }
 
-/* ─── 이미지 드래그 재배치 ─── */
 .image-drag-ghost {
   position: fixed;
   pointer-events: none;
@@ -531,7 +505,6 @@
   transition: opacity 0.08s ease;
 }
 
-/* ─── 링크 팝오버 ─── */
 .tiptap-link-hover-popover {
   position: fixed;
   z-index: 1190;
@@ -718,7 +691,6 @@
   box-shadow: none;
 }
 
-/* ─── 테이블 버블 툴바 ─── */
 .tiptap-table-bubble {
   position: fixed;
   z-index: 1190;
@@ -803,7 +775,6 @@
   opacity: 0.6;
 }
 
-/* ─── 표 삽입 그리드 피커 ─── */
 .tiptap-table-grid-picker {
   display: flex;
   flex-direction: column;
@@ -846,9 +817,6 @@
   border-color: rgba(0, 120, 212, 0.55);
 }
 
-/* ═══════════════════════════════════════════
-   다크 모드
-   ═══════════════════════════════════════════ */
 [data-theme="dark"] .ProseMirror {
   color: #e0e0e0;
 }
@@ -901,7 +869,6 @@
   outline-color: rgba(255, 150, 0, 0.6);
 }
 
-/* hljs 다크 */
 [data-theme="dark"] .ProseMirror pre .hljs-comment,
 [data-theme="dark"] .ProseMirror pre .hljs-quote {
   color: #6e7681;
@@ -1021,11 +988,7 @@
   border-color: rgba(96, 165, 250, 0.6);
 }
 
-/* ═══════════════════════════════════════════
-   @media print
-   ═══════════════════════════════════════════ */
 @media print {
-  /* 앱 셸 UI 숨김: ProseMirror 외 모든 요소 */
   [data-tauri-drag-region] {
     display: none !important;
   }
@@ -1036,7 +999,6 @@
     background: white !important;
   }
 
-  /* 배경색 제거, 깨끗한 흑백 */
   .ProseMirror {
     color: #000;
     background: white;
@@ -1046,12 +1008,10 @@
     line-height: 1.6;
   }
 
-  /* 적절한 페이지 여백 */
   @page {
     margin: 2cm;
   }
 
-  /* 코드블럭 배경 유지, 줄바꿈 보장 */
   .ProseMirror pre {
     background-color: #f5f5f5 !important;
     white-space: pre-wrap;
@@ -1063,20 +1023,17 @@
     background-color: #f5f5f5 !important;
   }
 
-  /* 이미지 페이지 넘김 방지 */
   .ProseMirror img {
     page-break-inside: avoid;
     max-width: 100%;
   }
 
-  /* 헤딩 다음에 페이지 넘김 방지 */
   .ProseMirror h1,
   .ProseMirror h2,
   .ProseMirror h3 {
     page-break-after: avoid;
   }
 
-  /* 링크 URL 표시 */
   .ProseMirror a::after {
     content: " (" attr(href) ")";
     font-size: 0.8em;

@@ -1,13 +1,11 @@
 import type { Locale } from "./hooks/useSettings";
 
 const dict = {
-  /* TitleBar */
   "app.name": { en: "Noten", ko: "Noten" },
   "theme.light": { en: "Light", ko: "라이트" },
   "theme.dark": { en: "Dark", ko: "다크" },
   "theme.system": { en: "System", ko: "시스템" },
 
-  /* EditorToolbar */
   "heading.body": { en: "Body", ko: "본문" },
   "heading.h1": { en: "Heading 1", ko: "제목 1" },
   "heading.h2": { en: "Heading 2", ko: "제목 2" },
@@ -49,7 +47,6 @@ const dict = {
   "link.hover.copyShort": { en: "Copy", ko: "복사" },
   "link.hover.editShort": { en: "Edit", ko: "편집" },
 
-  /* Slash commands */
   "slash.text": { en: "Text", ko: "텍스트" },
   "slash.text.desc": { en: "Plain body text", ko: "일반 본문 텍스트" },
   "slash.h1": { en: "Heading 1", ko: "제목 1" },
@@ -77,17 +74,14 @@ const dict = {
   "slash.table": { en: "Table", ko: "표" },
   "slash.table.desc": { en: "Insert a 3 × 3 table", ko: "3 × 3 표 삽입" },
 
-  /* Wiki links */
   "wiki.createNew": { en: "Create new note", ko: "새 노트 만들기" },
   "wiki.hover.edit": { en: "Edit wiki link", ko: "위키 링크 편집" },
 
-  /* Image context menu */
   "image.save": { en: "Save image", ko: "이미지 저장" },
   "image.copy": { en: "Copy image", ko: "이미지 복사" },
   "image.replace": { en: "Replace image", ko: "이미지 대체" },
   "image.delete": { en: "Delete image", ko: "이미지 삭제" },
 
-  /* Text context menu */
   "ctx.cut": { en: "Cut", ko: "잘라내기" },
   "ctx.copy": { en: "Copy", ko: "복사" },
   "ctx.paste": { en: "Paste", ko: "붙여넣기" },
@@ -95,7 +89,6 @@ const dict = {
   "ctx.selectAll": { en: "Select all", ko: "모두 선택" },
   "ctx.emoji": { en: "Emoji", ko: "이모지" },
 
-  /* Sidebar */
   "sidebar.empty": {
     en: "Open a file with Ctrl+O or create a new note with Ctrl+N.",
     ko: "Ctrl+O로 파일을 열거나 Ctrl+N으로 새 노트를 만드세요.",
@@ -146,16 +139,13 @@ const dict = {
   "sidebar.colorFilterChip":       { en: "Filter on",     ko: "필터 적용 중" },
   "sidebar.colorFilterChip.clear": { en: "Clear filter",  ko: "필터 해제" },
 
-  /* StatusBar */
   "status.chars": { en: " chars", ko: " 자" },
   "status.lines": { en: " lines", ko: " 줄" },
   "status.cursorRow": { en: "Line ", ko: "" },
   "status.cursorRowSuffix": { en: "", ko: "행" },
 
-  /* Placeholder */
   "placeholder": { en: "Start writing here...", ko: "여기에 글을 작성하세요..." },
 
-  /* Settings modal */
   "settings.title": { en: "Settings", ko: "설정" },
   "settings.language": { en: "Language", ko: "언어" },
   "settings.theme": { en: "Theme", ko: "테마" },
@@ -195,7 +185,6 @@ const dict = {
   "settings.fontFamily.serif": { en: "Serif", ko: "세리프" },
   "settings.spellcheck": { en: "Spelling & grammar indicators", ko: "맞춤법 및 문법 표시" },
   "settings.persistColorFilter": { en: "Keep color filter after restart", ko: "재시작 후 색상 필터 유지" },
-  /* About tab */
   "settings.tab.about": { en: "About", ko: "정보" },
   "about.checkUpdate": { en: "Check for updates", ko: "업데이트 확인" },
   "about.checking": { en: "Checking for updates...", ko: "업데이트를 확인하는 중..." },
@@ -208,7 +197,6 @@ const dict = {
   "about.error": { en: "Unable to check for updates. Please try again later.", ko: "업데이트를 확인할 수 없습니다. 나중에 다시 시도하세요." },
   "about.copyright": { en: "© 2026 Mingwan Bae", ko: "© 2026 Mingwan Bae" },
 
-  /* Notes Directory */
   "settings.notesDirectory": { en: "Notes folder", ko: "저장 위치" },
   "settings.notesDirectory.description": {
     en: "Set the path where notes are stored. Use a cloud folder (OneDrive, Google Drive, etc.) to sync across devices.",
@@ -250,7 +238,6 @@ const dict = {
     ko: "폴더 설정을 저장하지 못했습니다. 저장 위치가 변경되지 않았습니다.",
   },
 
-  /* Trash */
   "settings.tab.trash": { en: "Recently Deleted", ko: "최근 삭제한 노트" },
   "trash.count": { en: "{n} deleted notes", ko: "삭제된 노트 {n}개" },
   "trash.empty": { en: "No deleted notes", ko: "삭제된 노트가 없습니다" },
@@ -262,7 +249,6 @@ const dict = {
   "trash.confirmDelete": { en: "Delete", ko: "삭제" },
   "trash.cancel": { en: "Cancel", ko: "취소" },
 
-  /* Search */
   "search.placeholder": { en: "Find", ko: "찾을 내용" },
   "search.replacePlaceholder": { en: "Replace with", ko: "바꿀 내용" },
   "search.replace": { en: "Replace", ko: "바꾸기" },
@@ -272,7 +258,6 @@ const dict = {
   "search.noResults": { en: "No matching notes", ko: "일치하는 노트 없음" },
   "search.label": { en: "Search", ko: "검색" },
 
-  /* Dialog */
   "dialog.merge": { en: "Merge", ko: "병합" },
   "dialog.replaceWithCurrent": { en: "Replace with Current Notes", ko: "현재 노트로 대체" },
   "dialog.useSelectedOnly": { en: "Use Selected Folder Only", ko: "선택한 폴더만 사용" },
@@ -282,7 +267,6 @@ const dict = {
   "dialog.saveImage": { en: "Save image", ko: "이미지 저장" },
   "dialog.exportFailed": { en: "Export failed", ko: "내보내기 실패" },
 
-  /* App Menu */
   "menu.file": { en: "File", ko: "파일" },
   "menu.newDoc": { en: "New note", ko: "새 노트" },
   "menu.newWindow": { en: "New window", ko: "새 창" },

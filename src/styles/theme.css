@@ -1,12 +1,9 @@
 /*
- * theme.css
- * Tiptap 에디터가 사용하는 공유 CSS 변수.
- *
- * 색상은 Fluent UI v9 FluentProvider가 DOM에 주입하는 CSS 변수를 직접 참조하므로,
- * webLightTheme ↔ webDarkTheme 전환 시 별도 다크모드 오버라이드 없이 자동 반영된다.
+ * Shared CSS variables for the Tiptap editor.
+ * Colors reference Fluent UI v9 tokens injected by FluentProvider, so theme
+ * switches do not need a separate dark-mode override here.
  */
 
-/* ─── @font-face ─── */
 @font-face {
   font-family: "Pretendard JP";
   src: url("/fonts/PretendardJP-Regular.woff2") format("woff2");
@@ -72,7 +69,6 @@
 }
 
 :root {
-  /* ─── 색상 (Fluent UI 토큰 매핑 + fallback) ─── */
   --editor-color-text: var(--colorNeutralForeground1, #1b1b1f);
   --editor-color-text-secondary: var(--colorNeutralForeground2, #616161);
   --editor-color-bg: var(--colorNeutralBackground1, #ffffff);
@@ -82,22 +78,18 @@
   --editor-color-code-bg: var(--colorNeutralBackground3, #f6f6f6);
   --editor-color-selection: var(--colorBrandBackground2, rgba(0, 120, 212, 0.2));
 
-  /* ─── UI 컨트롤 active/hover ─── */
   --ui-active-bg: rgba(0, 0, 0, 0.06);
   --ui-hover-bg: rgba(0, 0, 0, 0.04);
   --ui-pressed-bg: rgba(0, 0, 0, 0.08);
 
-  /* ─── 셸 레이아웃 ─── */
   --shell-sidebar-width: 260px;
   --shell-card-gap: 6px;
 
-  /* ─── 폰트 ─── */
   --editor-font-family-sans: "Pretendard JP", system-ui, sans-serif;
   --editor-font-family-mono: "JetBrains Mono", "Pretendard JP", ui-monospace, monospace;
   --editor-font-family-serif: "Noto Serif", Georgia, serif;
   --editor-font-family: var(--editor-font-family-sans);
 
-  /* ─── 레이아웃 (테마와 무관, 독립 정의) ─── */
   --editor-font-size: 16px;
   --editor-line-height: 1.7;
   --editor-max-width: 720px;

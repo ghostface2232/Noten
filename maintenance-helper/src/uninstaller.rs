@@ -103,10 +103,7 @@ pub fn remove_app_data(remove_user_data: bool) {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Safe-deletion helpers (ported from bootstrapper/src/cleanup.rs)
-// ---------------------------------------------------------------------------
-
 fn resolve_notes_dir() -> Option<PathBuf> {
     let configured = read_notes_directory_setting().unwrap_or_default();
     let configured = configured.trim();

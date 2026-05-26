@@ -181,7 +181,6 @@ export function AppMenu({
     fn();
   }, [close]);
 
-  // Close on Escape
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {

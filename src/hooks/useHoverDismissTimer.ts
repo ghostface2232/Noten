@@ -1,18 +1,13 @@
 import { useCallback, useEffect, useRef } from "react";
 
 interface UseHoverDismissTimerOptions {
-  /** Invoked when the timer fires or closeNow is called. Latest-ref'd, no need to memoize. */
   onClose: () => void;
-  /** Delay before the close fires after schedule(). */
   delayMs?: number;
 }
 
 interface UseHoverDismissTimerResult {
-  /** Start the close countdown if not already pending. Idempotent. */
   schedule: () => void;
-  /** Cancel any pending close without firing onClose. */
   clear: () => void;
-  /** Cancel any pending close and invoke onClose immediately. */
   closeNow: () => void;
 }
 

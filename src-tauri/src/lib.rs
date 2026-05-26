@@ -28,12 +28,10 @@ fn toggle_devtools<R: Runtime>(window: tauri::WebviewWindow<R>) {
 
 #[tauri::command]
 async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
-    // Write HTML to a temp file
     let temp_dir = std::env::temp_dir();
     let temp_html = temp_dir.join("noten_print_preview.html");
     fs::write(&temp_html, &html).map_err(|e| format!("Failed to write temp HTML: {e}"))?;
 
-    // Find Edge executable
     let edge_paths = [
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
         r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
@@ -44,7 +42,6 @@ async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
         .find(|p| std::path::Path::new(p).exists())
         .ok_or_else(|| "Microsoft Edge not found".to_string())?;
 
-    // Run Edge headless to generate PDF
     let temp_html_url = format!("file:///{}", temp_html.to_string_lossy().replace('\\', "/"));
     let print_arg = format!("--print-to-pdf={}", output_path);
 
@@ -60,7 +57,6 @@ async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
         .output()
         .map_err(|e| format!("Failed to run Edge: {e}"))?;
 
-    // Clean up temp file
     let _ = fs::remove_file(&temp_html);
 
     if !output.status.success() {
@@ -147,8 +143,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
             std::thread::spawn(move || ensure_maintenance_helper(app_handle));
 
-            // Mica는 tauri.conf.json의 windowEffects와 프론트엔드의
-            // setEffects() 호출로 적용됨 — 여기서 중복 적용하지 않음
+            // Mica is applied by tauri.conf.json windowEffects and frontend setEffects().
             Ok(())
         })
         .run(tauri::generate_context!())

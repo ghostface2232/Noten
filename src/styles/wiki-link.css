@@ -1,4 +1,3 @@
-/* ─── Wiki-link mark ─── */
 .ProseMirror .wiki-link {
   color: var(--editor-color-accent);
   text-decoration: underline;

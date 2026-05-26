@@ -4,7 +4,6 @@ import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
 import { useStyles } from "./Sidebar.styles";
 
-/** i18n key for each color's display label (swatch tooltip / aria-label). */
 const COLOR_LABEL_KEY: Record<NoteColorId, Parameters<typeof t>[0]> = {
   red: "sidebar.colorRed",
   orange: "sidebar.colorOrange",
@@ -16,18 +15,12 @@ const COLOR_LABEL_KEY: Record<NoteColorId, Parameters<typeof t>[0]> = {
 };
 
 interface ColorSwatchRowProps {
-  /** Currently selected color, or `null` for "no color". */
   value: NoteColorId | null;
   onSelect: (color: NoteColorId | null) => void;
-  /** Render the trailing "no color" control. Default true. */
   includeNone?: boolean;
   locale: Locale;
 }
 
-/**
- * Horizontal row of color swatches — shared by the note context menu, the
- * select-mode bulk menu, and the sidebar color-filter popover.
- */
 export function ColorSwatchRow({ value, onSelect, includeNone = true, locale }: ColorSwatchRowProps) {
   const styles = useStyles();
 
@@ -49,8 +42,6 @@ export function ColorSwatchRow({ value, onSelect, includeNone = true, locale }: 
         );
       })}
       {includeNone && (
-        // "No color" — an empty swatch (no icon), distinguished from the
-        // colored swatches purely by having no fill.
         <button
           type="button"
           title={t("sidebar.colorNone", locale)}

@@ -10,7 +10,6 @@
   inherits: false;
 }
 
-/* 전역 리셋 */
 *,
 *::before,
 *::after {
@@ -38,18 +37,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* FluentProvider가 자체 font-family(Segoe UI)를 설정하므로,
-   타이틀바 drag region 요소에 PretendardJP를 직접 적용 */
+/* FluentProvider sets its own font family, so drag-region text needs this override. */
 [data-tauri-drag-region] {
   font-family: "Pretendard JP", system-ui, sans-serif;
 }
 
-/* ─── 에디터 스크롤바 트랙: 툴바 아래부터 시작 ─── */
 .editor-scroll-area::-webkit-scrollbar-track {
   margin-top: var(--scrollbar-offset, 0);
 }
 
-/* ─── 스크롤바: 얇고 둥글고, 호버 시에만 표시 ─── */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -65,7 +61,6 @@ body {
   transition: background 0.2s ease;
 }
 
-/* 컨테이너 호버 시에만 thumb 표시 */
 *:hover > ::-webkit-scrollbar-thumb,
 *:hover::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.12);
@@ -81,7 +76,6 @@ body {
   background: rgba(0, 0, 0, 0.35);
 }
 
-/* 다크 모드 */
 [data-theme="dark"] *:hover > ::-webkit-scrollbar-thumb,
 [data-theme="dark"] *:hover::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.12);
@@ -97,7 +91,6 @@ body {
   background: rgba(255, 255, 255, 0.35);
 }
 
-/* ─── 사이드바 드래그 앤 드롭 ─── */
 .sidebar-drag-ghost {
   position: fixed;
   top: 0;
@@ -166,7 +159,6 @@ body {
 }
 
 
-/* ─── 사이드바 문서 애니메이션 ─── */
 @keyframes docSlideIn {
   0%   { opacity: 0; max-height: 0px; transform: translateY(-4px); }
   40%  { opacity: 0; max-height: 40px; }
@@ -198,13 +190,11 @@ body {
 }
 
 
-/* ─── 다크 모드 전환: 대상 한정 트랜지션 ─── */
 .fui-FluentProvider,
 .ProseMirror {
   transition: color 0.3s ease, background-color 0.3s ease;
 }
 
-/* ─── Fluent UI Button hover/pressed: 투명 검정 오버레이 ─── */
 .fui-Button:hover {
   background-color: var(--ui-hover-bg) !important;
 }
@@ -212,7 +202,6 @@ body {
   background-color: var(--ui-pressed-bg) !important;
 }
 
-/* ─── 다크 모드에서 active 배경 변수 오버라이드 ─── */
 [data-theme="dark"] {
   color-scheme: dark;
   --ui-active-bg: rgba(255, 255, 255, 0.12);
@@ -221,21 +210,17 @@ body {
   --sidebar-search-bg: rgba(255, 255, 255, 0.08);
 }
 
-/* ─── 다크 모드 Dialog backdrop 강화 ─── */
 .fui-DialogSurface__backdrop {
   transition: background-color 0.2s ease;
 }
 
-/* ─── Print / PDF export ─── */
 @media print {
-  /* Hide everything except the editor content */
   body, html, #root {
     height: auto !important;
     overflow: visible !important;
     background: white !important;
   }
 
-  /* Hide app shell */
   [data-tauri-drag-region],
   .fui-FluentProvider > div > div:first-child, /* mica overlay */
   [class*="titleBar"],
@@ -282,4 +267,3 @@ body {
     color: #555 !important;
   }
 }
-

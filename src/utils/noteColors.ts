@@ -24,7 +24,6 @@ export const NOTE_COLORS: NoteColorDef[] = [
 
 const HEX_BY_ID = new Map<NoteColorId, string>(NOTE_COLORS.map((c) => [c.id, c.hex]));
 
-/** Resolve a color id to its hex value. Returns undefined for no/unknown color. */
 export function colorHex(id: NoteColorId | null | undefined): string | undefined {
   return id ? HEX_BY_ID.get(id) : undefined;
 }

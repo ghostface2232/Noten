@@ -235,9 +235,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-// =============================================================================
 // importFiles — batch resilience: one bad file must not abort the whole import.
-// =============================================================================
 
 describe("useFileSystem — importFiles batch resilience", () => {
   it("skips a single read-failure source, logs BODY_READ_FAILED, and imports the rest", async () => {
@@ -302,10 +300,8 @@ describe("useFileSystem — importFiles batch resilience", () => {
   });
 });
 
-// =============================================================================
 // newNote — disk-first invariant: if the body write fails, the previous doc
 // must be left exactly as it was. No setDocs, no destructive group prune.
-// =============================================================================
 
 describe("useFileSystem — newNote disk-first invariant", () => {
   it("aborts without touching state when provisionNoteFile fails", async () => {
@@ -376,9 +372,7 @@ describe("useFileSystem — newNote disk-first invariant", () => {
   });
 });
 
-// =============================================================================
 // duplicateNote — disk-first invariant: source doc untouched on write failure.
-// =============================================================================
 
 describe("useFileSystem — duplicateNote disk-first invariant", () => {
   it("aborts without committing the duplicate when provisionNoteFile fails", async () => {
@@ -404,12 +398,10 @@ describe("useFileSystem — duplicateNote disk-first invariant", () => {
   });
 });
 
-// =============================================================================
 // deleteNote — three distinct safety nets:
 //   1. trash copyFile failure → deletion aborted (no orphan removal).
 //   2. cancelDocSave runs before disk work → no stale autosave.
 //   3. last-note replacement write failure → replacement isDirty=true.
-// =============================================================================
 
 describe("useFileSystem — deleteNote trash-copy guard", () => {
   it("aborts deletion when copyFile to .trash fails (no setDocs, no remove)", async () => {
@@ -546,11 +538,9 @@ describe("useFileSystem — deleteNote last-note replacement", () => {
   });
 });
 
-// =============================================================================
 // renameNote — back-link rewrite invariant: in-memory body only updates if the
 // disk write lands. A failed rewrite must leave that doc's content at the old
 // value so memory matches disk and autosave can retry from a coherent state.
-// =============================================================================
 
 describe("useFileSystem — renameNote partial-failure", () => {
   it("when one back-link rewrite fails, only the successful docs' bodies update in memory", async () => {
@@ -588,7 +578,6 @@ describe("useFileSystem — renameNote partial-failure", () => {
   });
 
   it("when the active doc's rewrite fails, isDirty stays true and openDocument is NOT called", async () => {
-    // Set up: active doc has a back-link to the renamed target.
     const target = makeDoc("target", { fileName: "Old", customName: true });
     const activeWithLink = makeDoc("active", { content: "see [[Old]]" });
     refs.writeFaultByPath.set("/notes/active.md", new Error("EACCES"));
@@ -615,11 +604,9 @@ describe("useFileSystem — renameNote partial-failure", () => {
   });
 });
 
-// =============================================================================
 // restoreNote — copyFile succeeded but readTextFile fails. The trashed entry
 // must stay (so the user can retry / next reconcile picks it up) and no new
 // doc gets committed.
-// =============================================================================
 
 describe("useFileSystem — restoreNote read-failure", () => {
   it("logs BODY_READ_FAILED and bails without committing the restored doc when the read after copy fails", async () => {
@@ -663,11 +650,9 @@ describe("useFileSystem — restoreNote read-failure", () => {
   });
 });
 
-// =============================================================================
 // markOwnWrite ordering — must happen before writeTextFile so the file-watcher
 // doesn't bounce our own write back as a "remote change". Guards the saveFile
 // happy path that doesn't go through provisionNoteFile.
-// =============================================================================
 
 describe("useFileSystem — markOwnWrite happens before writeTextFile", () => {
   it("saveFile marks the write BEFORE writeTextFile fires (file-watcher loop guard)", async () => {
