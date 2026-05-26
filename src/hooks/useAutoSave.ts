@@ -40,6 +40,7 @@ export function useAutoSave(
   notesSortOrder: NotesSortOrder,
   groups: NoteGroup[],
 ) {
+  // Save lifecycle per doc: edit → pendingTargetsRef (debounced 1s) → snapshot captured into pendingSnapshotsRef → doSave promise tracked in inFlightSavesRef → cleared on success, kept (no timer) on failure so flushPendingSnapshots can retry at close.
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const pendingTargetsRef = useRef(new Map<string, PendingSaveTarget>());
   const pendingSnapshotsRef = useRef(new Map<string, SaveSnapshot>());
