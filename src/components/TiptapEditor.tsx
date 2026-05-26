@@ -882,6 +882,17 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       if (!editor?.markdown) return null;
       try {
         const parsed = editor.markdown.parse(markdown);
+        // @tiptap/markdown's parse("") returns { type: "doc", content: [] }
+        // — a doc with no children. The schema requires `block+`, so the
+        // resulting state has no valid textblock for the selection to land
+        // in, and Selection.atStart(doc) falls back to a GapCursor-style
+        // selection that renders as a thick blue bar on the first line
+        // instead of a normal collapsed caret. Fill in an empty paragraph
+        // so the doc is schema-valid and Selection.atStart resolves to a
+        // collapsed TextSelection inside it.
+        if (!parsed.content || parsed.content.length === 0) {
+          parsed.content = [{ type: "paragraph" }];
+        }
         const doc = editor.schema.nodeFromJSON(parsed);
         return EditorState.create({
           doc,
