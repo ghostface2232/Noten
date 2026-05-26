@@ -651,29 +651,27 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   </div>
 
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.1</div>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.2</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 휴지통 노트가 OneDrive·Dropbox 같은 클라우드 동기화 폴더에서 일시적 파일 잠금으로 잘못 복원되던 문제 수정<br />
-                          · 그룹 이름 변경·순서 변경·삭제가 일시적 디스크 쓰기 실패로 조용히 사라지던 문제 수정<br />
-                          · 동기화 중 일시적 오류로 노트 목록이 비어 보이던 문제 수정 (디스크의 실제 데이터는 항상 안전)<br />
-                          · 사용자 지정 노트 폴더에서 언인스톨러가 노트 데이터를 인식하지 못해 그대로 남기던 문제 수정<br />
-                          · 사이드바 우클릭 메뉴를 같은 행의 "..." 버튼으로 다시 닫을 수 있도록 수정<br />
-                          · RTF 내보내기 제거 — Markdown과 PDF 내보내기는 그대로<br />
-                          · 사이드바·설정 모달의 호버·간격·애니메이션 다듬기<br />
-                          · 내부: 예기치 못한 오류와 원자적 쓰기 강등 상황을 자동으로 진단 로그에 기록
+                          · 표 삽입 그리드, 행/열 편집 버블 툴바, 열 너비 조절 추가<br />
+                          · Mermaid 다이어그램 렌더링 개선 및 SVG/PNG 내보내기 추가<br />
+                          · 새 노트 생성 직후 포커스와 커서 위치가 더 안정적으로 동작하도록 수정<br />
+                          · 빠른 노트 전환 중 자동 저장이 잘못된 노트에 반영될 수 있는 경합 수정<br />
+                          · 입력 중 툴바/상태바/사이드바 렌더링 비용 감소로 편집 반응성 개선<br />
+                          · 위키 링크 제안에서 현재 노트를 제외하도록 개선<br />
+                          · 앱 전반의 "문서" 표현을 "노트" 중심으로 정리
                         </>
                       ) : (
                         <>
-                          · Fixed: trashed notes could be wrongly restored in cloud-sync folders (OneDrive, Dropbox) when a transient file lock blocked stat<br />
-                          · Fixed: group renames, reorders, and deletes could be silently lost when a disk write failed transiently<br />
-                          · Fixed: a transient sync error could blank the note list view — on-disk data was always safe<br />
-                          · Fixed: the uninstaller now recognises notes data in custom folders set on a fresh install<br />
-                          · Fixed: a right-click sidebar menu can be closed again by clicking the same row's "..." button<br />
-                          · Removed: RTF export. Markdown and PDF exports are unchanged.<br />
-                          · Polish: sidebar and Settings modal hover, spacing, and animation refinements<br />
-                          · Internal: unexpected errors and atomic-write degradations are now captured to the diagnostic log
+                          · Added: table grid insertion, row/column bubble toolbar, and column resizing<br />
+                          · Added: Mermaid diagram rendering improvements and SVG/PNG export<br />
+                          · Fixed: focus and cursor placement are more reliable after creating a new note<br />
+                          · Fixed: autosave races during fast note switching could update the wrong note<br />
+                          · Improved: lower toolbar, status bar, and sidebar render cost while typing<br />
+                          · Improved: wiki-link suggestions now exclude the current note<br />
+                          · Polish: app wording now consistently uses "note" instead of "document"
                         </>
                       )}
                     </div>
