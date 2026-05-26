@@ -1368,35 +1368,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           }
         },
         focus: () => {
-          if (!editor) return;
-          // The thick blue band observed on freshly created empty notes is
-          // ProseMirror's GapCursor (styled by .ProseMirror-gapcursor::after
-          // — a 2px left border at 1.2em height, blinking via blink-caret).
-          // It appears because Selection.atStart(doc) — the default
-          // selection for the EditorState.create that backs a new empty
-          // doc — can resolve to a GapCursor *between* the doc's start and
-          // its first block instead of a TextSelection inside the empty
-          // paragraph.
-          //
-          // Force the selection into the first textblock so we get a normal
-          // collapsed text caret, then transfer DOM focus.
-          const { state, view } = editor;
-          let textPos: number | null = null;
-          state.doc.descendants((node, pos) => {
-            if (textPos !== null) return false;
-            if (node.isTextblock) {
-              textPos = pos + 1;
-              return false;
-            }
-            return true;
-          });
-          if (textPos !== null) {
-            const tr = state.tr.setSelection(TextSelection.create(state.doc, textPos));
-            tr.setMeta("preventUpdate", true);
-            tr.setMeta("addToHistory", false);
-            view.dispatch(tr);
-          }
-          view.focus();
+          editor?.commands.focus();
         },
         getEditor: () => editor,
       }),
