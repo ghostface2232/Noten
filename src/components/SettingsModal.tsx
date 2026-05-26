@@ -34,6 +34,10 @@ import {
   Delete20Regular,
   Link20Regular,
   ArrowSwap20Regular,
+  ArrowUndo20Regular,
+  ArrowRedo20Regular,
+  Pin20Regular,
+  KeyboardTab20Regular,
 } from "@fluentui/react-icons";
 import { getVersion } from "@tauri-apps/api/app";
 import { t } from "../i18n";
@@ -537,14 +541,18 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   ["settings.shortcut.save", "Ctrl+S", Save20Regular],
                   ["settings.shortcut.import", "Ctrl+O", ArrowDownload20Regular],
                   ["settings.shortcut.showChrome", "Click / Scroll", Code20Regular],
+                  ["settings.shortcut.focusEditor", "Tab", KeyboardTab20Regular],
                   ["settings.shortcut.find", "Ctrl+F", Search20Regular],
                   ["settings.shortcut.replace", "Ctrl+H", ArrowSwap20Regular],
                   ["settings.shortcut.gotoLine", "Ctrl+G", TextNumberListLtr20Regular],
+                  ["settings.shortcut.undo", "Ctrl+Z", ArrowUndo20Regular],
+                  ["settings.shortcut.redo", "Ctrl+Y", ArrowRedo20Regular],
                   ["settings.shortcut.link", "Ctrl+K", Link20Regular],
                   ["settings.shortcut.strike", "Ctrl+Shift+X", TextStrikethrough20Regular],
                   ["settings.shortcut.rename", "Ctrl+R / F2", Rename20Regular],
                   ["settings.shortcut.duplicate", "Ctrl+D", DocumentCopy20Regular],
                   ["settings.shortcut.export", "Ctrl+E", ArrowExportUp20Regular],
+                  ["settings.shortcut.pin", "Ctrl+Alt+P", Pin20Regular],
                   ["settings.shortcut.copyContent", "Ctrl+Alt+C", CopySelect20Regular],
                   ["settings.shortcut.delete", "Delete", Delete20Regular],
                 ] as [Parameters<typeof t>[0], string, React.ComponentType][]).map(([labelKey, key, Icon], idx) => (
