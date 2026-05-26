@@ -1357,39 +1357,12 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           }
         },
         focus: () => {
-          if (!editor) return;
-          // Right after openDocument's view.updateState() swap, the browser's
-          // window selection can still reference DOM ranges from the previous
-          // document. If we focus synchronously, ProseMirror re-syncs from
-          // that stale browser selection and the new (often empty) doc
-          // renders with a blue selection band instead of a collapsed caret.
-          //
-          // Defend in three steps:
-          //   1. Clear any browser-level selection ranges so nothing stale
-          //      can leak back into the editor when it refocuses.
-          //   2. Defer to the next frame so React's render from the
-          //      newNote() flow and PM's DOM swap fully settle first.
-          //   3. Dispatch a transaction that sets a collapsed TextSelection
-          //      at the document start, then call view.focus() — this
-          //      guarantees an explicit empty selection, not whatever PM
-          //      inferred from the freshly mounted DOM.
-          if (typeof window !== "undefined") {
-            window.getSelection()?.removeAllRanges();
-          }
-          const applyFocus = () => {
-            if (!editor || editor.isDestroyed) return;
-            const { state, view } = editor;
-            const tr = state.tr.setSelection(Selection.atStart(state.doc));
-            tr.setMeta("preventUpdate", true);
-            tr.setMeta("addToHistory", false);
-            view.dispatch(tr);
-            view.focus();
-          };
-          if (typeof requestAnimationFrame === "function") {
-            requestAnimationFrame(applyFocus);
-          } else {
-            applyFocus();
-          }
+          // Pass 'start' explicitly so the selection is collapsed at the
+          // document start. Without a position arg, focus() preserves the
+          // current selection — which, right after openDocument's
+          // view.updateState() swap, can still span the previous document's
+          // range and render as a select-all on the new (often empty) doc.
+          editor?.commands.focus("start");
         },
         getEditor: () => editor,
       }),
