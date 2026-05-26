@@ -17,17 +17,17 @@
   display: flex;
   align-items: center;
   line-height: 1;
-  padding-right: 4.5rem;
+  padding-right: 6rem;
 }
 
-.ProseMirror .noten-code-block.is-mermaid pre .noten-code-copy {
-  right: 1.8rem;
-}
-
-.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle {
+/* Make all three header buttons share the same 22x22 footprint so visual
+   spacing stays consistent. Positions are spaced 30px apart center-to-center
+   (22px button + 8px gap), anchored from the right edge. */
+.ProseMirror .noten-code-block.is-mermaid pre .noten-code-copy,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export {
   position: absolute;
   top: 4px;
-  right: 8px;
   z-index: 2;
   width: 22px;
   height: 22px;
@@ -44,26 +44,58 @@
   cursor: pointer;
 }
 
-.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle svg {
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle {
+  right: 8px;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export {
+  right: 38px;
+}
+
+.ProseMirror .noten-code-block.is-mermaid pre .noten-code-copy {
+  right: 68px;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle svg,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export svg {
   width: 16px;
   height: 16px;
   display: block;
   transition: transform 0.2s ease;
 }
 
-.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle:hover {
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle:hover,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export:hover {
   background-color: var(--ui-active-bg);
   color: var(--editor-color-text);
 }
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle:focus,
-.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle:focus-visible {
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle:focus-visible,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export:focus,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export:focus-visible {
   outline: none;
   box-shadow: none;
 }
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle[data-collapsed="true"] svg {
   transform: rotate(180deg);
+}
+
+/* Reuse the copy button's success-feedback fade for the export button so the
+   check-icon swap on a completed Save As animates the same way. */
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export.is-copied svg,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export.is-restoring svg {
+  animation: noten-copy-fade-in 0.15s ease;
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export.is-copied {
+  color: var(--editor-color-text-secondary);
 }
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-body {

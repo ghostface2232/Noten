@@ -2,6 +2,8 @@ import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import type { NodeViewRendererProps } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type { NodeView, ViewMutationRecord } from "@tiptap/pm/view";
+import { createMenuShell, createMenuItem, closeContextMenu } from "../utils/contextMenuRegistry";
+import { buildExportFileName, exportMermaidPng, exportMermaidSvg } from "./mermaidExport";
 
 const MERMAID_LANGUAGE = "mermaid";
 const MERMAID_RENDER_DELAY_MS = 120;
@@ -15,6 +17,7 @@ const EDGE_LABEL_PILL_MIN_SIDE_CAP_PX = 14;
 const MERMAID_TOGGLE_ICON_UP = '<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M10.53 7.22a.75.75 0 0 0-1.06 0L5.22 11.47a.75.75 0 1 0 1.06 1.06L10 8.81l3.72 3.72a.75.75 0 0 0 1.06-1.06l-4.25-4.25Z"/></svg>';
 const COPY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 const CHECK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="20 6 9 17 4 12"/></svg>';
+const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
 const COPY_FEEDBACK_MS = 1000;
 type MermaidApi = typeof import("mermaid")["default"];
 type Rect = { x: number; y: number; width: number; height: number };
@@ -97,12 +100,14 @@ class MermaidCodeBlockView implements NodeView {
   private readonly codeElement: HTMLElement;
   private readonly copyButton: HTMLButtonElement;
   private readonly toggleButton: HTMLButtonElement;
+  private readonly exportButton: HTMLButtonElement;
   private readonly previewElement: HTMLDivElement;
   private readonly errorElement: HTMLDivElement;
   private codeCollapsed = false;
   private renderToken = 0;
   private renderTimeout: number | null = null;
   private copyFeedbackTimeout: number | null = null;
+  private exportFeedbackTimeout: number | null = null;
   private lastRenderKey = "";
 
   constructor(node: ProseMirrorNode) {
@@ -134,6 +139,15 @@ class MermaidCodeBlockView implements NodeView {
     this.toggleButton.addEventListener("click", this.handleToggleClick);
     this.toggleButton.addEventListener("keydown", this.handleToggleKeyDown);
     this.preElement.append(this.toggleButton);
+
+    this.exportButton = document.createElement("button");
+    this.exportButton.type = "button";
+    this.exportButton.className = "noten-mermaid-code-export";
+    this.exportButton.innerHTML = DOWNLOAD_ICON;
+    this.exportButton.setAttribute("aria-label", "Export diagram");
+    this.exportButton.setAttribute("title", "Export diagram");
+    this.exportButton.addEventListener("click", this.handleExportClick);
+    this.preElement.append(this.exportButton);
 
     this.contentDOM = this.codeElement;
 
@@ -173,7 +187,8 @@ class MermaidCodeBlockView implements NodeView {
       mutation.target === this.preElement ||
       mutation.target === this.codeBody ||
       this.copyButton.contains(mutation.target) ||
-      this.toggleButton.contains(mutation.target)
+      this.toggleButton.contains(mutation.target) ||
+      this.exportButton.contains(mutation.target)
     ) {
       return true;
     }
@@ -187,7 +202,11 @@ class MermaidCodeBlockView implements NodeView {
       return false;
     }
 
-    return this.copyButton.contains(target) || this.toggleButton.contains(target);
+    return (
+      this.copyButton.contains(target) ||
+      this.toggleButton.contains(target) ||
+      this.exportButton.contains(target)
+    );
   }
 
   destroy() {
@@ -196,9 +215,13 @@ class MermaidCodeBlockView implements NodeView {
     if (this.copyFeedbackTimeout !== null) {
       window.clearTimeout(this.copyFeedbackTimeout);
     }
+    if (this.exportFeedbackTimeout !== null) {
+      window.clearTimeout(this.exportFeedbackTimeout);
+    }
     this.copyButton.removeEventListener("click", this.handleCopyClick);
     this.toggleButton.removeEventListener("click", this.handleToggleClick);
     this.toggleButton.removeEventListener("keydown", this.handleToggleKeyDown);
+    this.exportButton.removeEventListener("click", this.handleExportClick);
   }
 
   private syncStructureFromNode() {
@@ -209,6 +232,7 @@ class MermaidCodeBlockView implements NodeView {
     const isMermaid = isMermaidLanguage(language);
     this.dom.classList.toggle("is-mermaid", isMermaid);
     this.toggleButton.hidden = !isMermaid;
+    this.exportButton.hidden = !isMermaid;
     if (!isMermaid) {
       this.setCodeCollapsed(false);
     } else {
@@ -280,6 +304,71 @@ class MermaidCodeBlockView implements NodeView {
     event.stopPropagation();
     this.setCodeCollapsed(!this.codeCollapsed);
   };
+
+  private readonly handleExportClick = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    this.openExportMenu();
+  };
+
+  private showExportSuccessFeedback() {
+    this.exportButton.innerHTML = CHECK_ICON;
+    this.exportButton.classList.add("is-copied");
+    if (this.exportFeedbackTimeout !== null) {
+      window.clearTimeout(this.exportFeedbackTimeout);
+    }
+    this.exportFeedbackTimeout = window.setTimeout(() => {
+      this.exportButton.innerHTML = DOWNLOAD_ICON;
+      this.exportButton.classList.remove("is-copied");
+      this.exportButton.classList.add("is-restoring");
+      requestAnimationFrame(() => {
+        setTimeout(() => this.exportButton.classList.remove("is-restoring"), 150);
+      });
+      this.exportFeedbackTimeout = null;
+    }, COPY_FEEDBACK_MS);
+  }
+
+  private openExportMenu() {
+    const svgElement = this.previewElement.querySelector<SVGSVGElement>("svg");
+    const hasDiagram = !!svgElement && !this.previewElement.hidden;
+
+    const rect = this.exportButton.getBoundingClientRect();
+    const { menu, isDark } = createMenuShell({ x: rect.left, y: rect.bottom + 4 }, 132);
+
+    const runExport = async (format: "svg" | "png") => {
+      closeContextMenu();
+      if (!svgElement) return;
+      try {
+        const fileName = buildExportFileName(format);
+        const saved =
+          format === "svg"
+            ? await exportMermaidSvg(svgElement, fileName)
+            : await exportMermaidPng(svgElement, fileName);
+        if (saved) {
+          this.showExportSuccessFeedback();
+        }
+      } catch (error) {
+        // Export failures are logged for diagnostics but intentionally do
+        // not surface in the UI — they'd clobber the Mermaid render-error
+        // element, which is reserved for actual diagram-syntax problems.
+        console.error("[mermaid-export] Export failed:", error);
+      }
+    };
+
+    const svgItem = createMenuItem("Export as SVG", null, {
+      disabled: !hasDiagram,
+      isDark,
+    });
+    svgItem.addEventListener("click", () => void runExport("svg"));
+    menu.appendChild(svgItem);
+
+    const pngItem = createMenuItem("Export as PNG", null, {
+      disabled: !hasDiagram,
+      isDark,
+    });
+    pngItem.addEventListener("click", () => void runExport("png"));
+    menu.appendChild(pngItem);
+  }
 
   private readonly handleToggleKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Enter" && event.key !== " ") {
