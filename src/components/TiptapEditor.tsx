@@ -1357,7 +1357,12 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           }
         },
         focus: () => {
-          editor?.commands.focus();
+          // Pass 'start' explicitly so the selection is collapsed at the
+          // document start. Without a position arg, focus() preserves the
+          // current selection — which, right after openDocument's
+          // view.updateState() swap, can still span the previous document's
+          // range and render as a select-all on the new (often empty) doc.
+          editor?.commands.focus("start");
         },
         getEditor: () => editor,
       }),
