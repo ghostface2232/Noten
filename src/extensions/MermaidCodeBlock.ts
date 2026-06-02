@@ -346,7 +346,7 @@ class MermaidCodeBlockView implements NodeView {
         const locale = this.getLocale();
         const saved =
           format === "svg"
-            ? await exportMermaidSvg(svgElement, fileName, locale)
+            ? await exportMermaidSvg(svgElement, this.node.textContent, fileName, locale)
             : await exportMermaidPng(svgElement, fileName, locale);
         if (saved) {
           this.showExportSuccessFeedback();

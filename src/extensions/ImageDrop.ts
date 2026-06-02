@@ -12,6 +12,7 @@ import {
   persistBinaryAsAsset,
   readImageBinary,
 } from "../utils/imageAssetUtils";
+import { extractMermaidSourceFromSvg } from "./mermaidSourceMetadata";
 
 const IMAGE_MIME = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
@@ -53,30 +54,73 @@ export function isImagePath(path: string): boolean {
   return ext ? IMAGE_EXTENSIONS.includes(ext.toLowerCase()) : false;
 }
 
-async function loadImageAttrsFromPath(editor: Editor, path: string): Promise<{
-  src: string;
-  width: number;
-  height: number;
-}> {
+function isSvg(mime: string, fileName?: string): boolean {
+  if (mime === "image/svg+xml") return true;
+  const ext = fileName?.split(".").pop()?.toLowerCase();
+  return ext === "svg";
+}
+
+/**
+ * If `bytes` is an SVG we previously exported with an embedded Mermaid source,
+ * return that source; otherwise null. Lets a round-tripped diagram come back as
+ * editable text instead of a flat picture.
+ */
+function readEmbeddedMermaidSource(bytes: Uint8Array): string | null {
+  return extractMermaidSourceFromSvg(new TextDecoder("utf-8").decode(bytes));
+}
+
+function mermaidCodeBlockContent(source: string): Content {
+  return {
+    type: "codeBlock",
+    attrs: { language: "mermaid" },
+    content: [{ type: "text", text: source }],
+  };
+}
+
+/**
+ * Build the editor node for an ingested file: a Mermaid code block when the
+ * file is an SVG carrying our embedded source, otherwise an image node.
+ */
+async function buildNodeFromBinary(
+  editor: Editor,
+  bytes: Uint8Array,
+  mime: string,
+  fileName?: string,
+): Promise<Content> {
+  if (isSvg(mime, fileName)) {
+    const source = readEmbeddedMermaidSource(bytes);
+    if (source) return mermaidCodeBlockContent(source);
+  }
+  const { src, width, height } = await buildImageAttributesFromBinary(editor, bytes, mime);
+  return { type: "image", attrs: { src, width, height } };
+}
+
+async function buildNodeFromPath(editor: Editor, path: string): Promise<Content> {
   const ext = path.split(".").pop() ?? "png";
   const mime = mimeFromExt(ext);
   const bytes = await readFile(path);
-  return buildImageAttributesFromBinary(editor, bytes, mime);
+  return buildNodeFromBinary(editor, bytes, mime, path);
 }
 
 export async function buildImageContentFromPaths(editor: Editor, paths: string[]): Promise<Content[]> {
-  const images = await Promise.all(paths.map((path) => loadImageAttrsFromPath(editor, path)));
-  return images.map(({ src, width, height }) => ({
-    type: "image",
-    attrs: { src, width, height },
-  }));
+  return Promise.all(paths.map((path) => buildNodeFromPath(editor, path)));
 }
 
 export async function buildImageMarkdownFromPaths(editor: Editor, paths: string[]): Promise<string> {
-  const images = await Promise.all(paths.map((path) => loadImageAttrsFromPath(editor, path)));
-  return images
-    .map(({ src, width, height }) => `<img src="${src}" alt="" width="${width}" height="${height}" />`)
-    .join("\n\n");
+  const blocks = await Promise.all(
+    paths.map(async (path) => {
+      const ext = path.split(".").pop() ?? "png";
+      const mime = mimeFromExt(ext);
+      const bytes = await readFile(path);
+      if (isSvg(mime, path)) {
+        const source = readEmbeddedMermaidSource(bytes);
+        if (source) return `\`\`\`mermaid\n${source}\n\`\`\``;
+      }
+      const { src, width, height } = await buildImageAttributesFromBinary(editor, bytes, mime);
+      return `<img src="${src}" alt="" width="${width}" height="${height}" />`;
+    }),
+  );
+  return blocks.join("\n\n");
 }
 
 export async function insertImagesAtPosition(
@@ -155,13 +199,10 @@ const ImageDrop = Extension.create({
               void (async () => {
                 const bytes = new Uint8Array(await file.arrayBuffer());
                 const mime = file.type || mimeFromExt(file.name.split(".").pop() ?? "png");
-                const { src, width, height } = await buildImageAttributesFromBinary(editor, bytes, mime);
+                const node = await buildNodeFromBinary(editor, bytes, mime, file.name);
                 const chain = editor.chain().focus();
                 if (pos) chain.setTextSelection(pos.pos);
-                chain.insertContent({
-                  type: "image",
-                  attrs: { src, width, height },
-                }).run();
+                chain.insertContent(node).run();
               })();
             });
 
@@ -186,8 +227,8 @@ const ImageDrop = Extension.create({
               void (async () => {
                 const bytes = new Uint8Array(await file.arrayBuffer());
                 const mime = file.type || mimeFromExt(file.name.split(".").pop() ?? "png");
-                const { src, width, height } = await buildImageAttributesFromBinary(editor, bytes, mime);
-                editor.chain().focus().setImage({ src, width, height }).run();
+                const node = await buildNodeFromBinary(editor, bytes, mime, file.name);
+                editor.chain().focus().insertContent(node).run();
               })();
             });
 
