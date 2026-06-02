@@ -164,6 +164,15 @@ class MermaidCodeBlockView implements NodeView {
     this.dom.append(this.preElement, this.previewElement, this.errorElement);
 
     this.syncStructureFromNode();
+    // Mermaid blocks that already exist when the note opens start with the
+    // source collapsed (preview-only) by default. This applies per note view,
+    // so re-entering a note re-collapses. We gate on the construction-time
+    // language so that a block the user is actively typing into a fresh
+    // ```mermaid fence (non-mermaid at construction, promoted via update())
+    // is not collapsed out from under them mid-edit.
+    if (isMermaidLanguage(this.node.attrs.language)) {
+      this.setCodeCollapsed(true);
+    }
     this.scheduleRender(true);
   }
 
