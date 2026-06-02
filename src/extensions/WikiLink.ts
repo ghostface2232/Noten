@@ -35,10 +35,34 @@ function normalizeTitle(value: string): string {
   return value.normalize("NFC").trim().toLowerCase();
 }
 
+// Cache a normalized-title -> doc index keyed by the `docs` array reference.
+// Typing keeps the same array instance, so the per-keystroke decoration pass
+// (buildMissingDecorations -> findDocByTitle per wiki mark) reuses one index
+// instead of re-scanning and re-normalizing every note for each mark. A new
+// `docs` array (note added / renamed / reconciled) builds a fresh index once and
+// the old one is GC'd with the array, so reference identity is the version and
+// no explicit invalidation is needed.
+const docTitleIndexCache = new WeakMap<NoteDoc[], Map<string, NoteDoc>>();
+
+function getDocTitleIndex(docs: NoteDoc[]): Map<string, NoteDoc> {
+  let index = docTitleIndexCache.get(docs);
+  if (!index) {
+    index = new Map();
+    for (const doc of docs) {
+      const key = normalizeTitle(doc.fileName);
+      // Preserve the previous `docs.find` semantics: on duplicate titles the
+      // first doc in array order wins, so earlier entries are not overwritten.
+      if (key && !index.has(key)) index.set(key, doc);
+    }
+    docTitleIndexCache.set(docs, index);
+  }
+  return index;
+}
+
 export function findDocByTitle(docs: NoteDoc[], title: string): NoteDoc | null {
   const needle = normalizeTitle(title);
   if (!needle) return null;
-  return docs.find((doc) => normalizeTitle(doc.fileName) === needle) ?? null;
+  return getDocTitleIndex(docs).get(needle) ?? null;
 }
 
 function getWikiLinkMarkTarget(mark: ProseMirrorMark): string {
