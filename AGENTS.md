@@ -54,7 +54,7 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 
 ## Current Settings Model
 
-- Theme, note sort order, paste formatting, spellcheck, wrap mode, font family, group layout, paragraph spacing, notes directory, and the active sidebar color filter (`colorFilter`) are user settings.
+- Theme, locale, note sort order, paste formatting, spellcheck, wrap mode, font family, group layout, paragraph spacing, notes directory, and the active sidebar color filter (`colorFilter`) are user settings.
 - Note sort order supports six options: `updated-desc`, `updated-asc`, `created-desc`, `created-asc`, `title-asc`, `title-desc` (default: `updated-desc`).
 - Old values `recent-first`/`recent-last` are auto-migrated on load.
 
@@ -80,6 +80,7 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 - Empty table cells may serialize through `&nbsp;`; `stripTableCellNbsp` normalizes table-row markdown before load/save.
 - Mermaid diagrams are `mermaid` code blocks rendered by the custom `MermaidCodeBlock` NodeView. Keep its source/preview toggle and SVG/PNG export controls inside the NodeView.
 - Mermaid SVG/PNG export uses `src/extensions/mermaidExport.ts` and context-menu helpers from `contextMenuRegistry`; user-visible Mermaid labels must go through `src/i18n.ts`.
+- Exported SVGs round-trip their source: `mermaidExport.ts` embeds the original Mermaid source via `embedMermaidSourceInSvg` (from `src/extensions/mermaidSourceMetadata.ts`), and `ImageDrop.ts` restores a marked SVG back into an editable Mermaid block via `extractMermaidSourceFromSvg`.
 
 ## Context Menus
 
@@ -169,6 +170,7 @@ Required secrets: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWO
 - `src/utils/contextMenuRegistry.ts` — `closeContextMenu`, `createMenuShell`, `createMenuItem`, `createMenuSeparator`, `isDarkTheme`
 - `src/utils/clampMenuPosition.ts` — `clampMenuToViewport`
 - `src/extensions/mermaidExport.ts` — self-contained SVG serialization and transparent-background PNG export for rendered Mermaid diagrams
+- `src/extensions/mermaidSourceMetadata.ts` — `embedMermaidSourceInSvg` / `extractMermaidSourceFromSvg`, storing the Mermaid source in the SVG `<metadata>` under a private namespace so export/import round-trips losslessly
 
 ## Code Style
 
