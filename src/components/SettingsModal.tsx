@@ -659,27 +659,27 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   </div>
 
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.2</div>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.3</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 표 삽입 그리드, 행/열 편집 버블 툴바, 열 너비 조절 추가<br />
-                          · Mermaid 다이어그램 렌더링 개선 및 SVG/PNG 내보내기 추가<br />
-                          · 새 노트 생성 직후 포커스와 커서 위치가 더 안정적으로 동작하도록 수정<br />
-                          · 빠른 노트 전환 중 자동 저장이 잘못된 노트에 반영될 수 있는 경합 수정<br />
-                          · 입력 중 툴바/상태바/사이드바 렌더링 비용 감소로 편집 반응성 개선<br />
-                          · 위키 링크 제안에서 현재 노트를 제외하도록 개선<br />
-                          · 앱 전반의 "문서" 표현을 "노트" 중심으로 정리
+                          · 매우 큰 단일 블록 노트를 열 때 수 분간 멈추던 현상 수정<br />
+                          · 타이핑 중 위키 링크·인라인 이미지·스크롤 처리 비용을 줄여 편집 반응성 개선<br />
+                          · Mermaid 소스를 내보낸 SVG에 보존해, 다시 열면 편집 가능한 코드 블록으로 복원<br />
+                          · Mermaid 내보내기 개선: 앱 폰트 임베드, CJK PNG 빈 텍스트 및 간트 프레이밍 수정<br />
+                          · 찾기 하이라이트가 문서 맨 아래에서 사라지던 문제 수정<br />
+                          · 설정 단축키 탭에 누락됐던 단축키(Tab, 실행 취소/다시 실행, 노트 고정) 표시<br />
+                          · 사이드바 여백·하단 페이드 등 세부 다듬기 및 의존성 보안 패치
                         </>
                       ) : (
                         <>
-                          · Added: table grid insertion, row/column bubble toolbar, and column resizing<br />
-                          · Added: Mermaid diagram rendering improvements and SVG/PNG export<br />
-                          · Fixed: focus and cursor placement are more reliable after creating a new note<br />
-                          · Fixed: autosave races during fast note switching could update the wrong note<br />
-                          · Improved: lower toolbar, status bar, and sidebar render cost while typing<br />
-                          · Improved: wiki-link suggestions now exclude the current note<br />
-                          · Polish: app wording now consistently uses "note" instead of "document"
+                          · Fixed: opening very large single-block notes no longer freezes for minutes<br />
+                          · Improved: lower editing cost while typing (wiki links, inline images, scrolling)<br />
+                          · Added: Mermaid source is preserved in exported SVGs and restored as an editable code block on re-open<br />
+                          · Fixed: Mermaid exports — embedded app fonts, CJK text in PNG, and gantt framing<br />
+                          · Fixed: find highlights no longer vanish at the document bottom<br />
+                          · Added: settings shortcuts tab now lists previously missing shortcuts (Tab, undo/redo, pin note)<br />
+                          · Polish: sidebar spacing and bottom-fade refinements, plus dependency security patches
                         </>
                       )}
                     </div>
