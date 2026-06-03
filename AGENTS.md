@@ -65,6 +65,7 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 - Startup migration converts `data:image/...` sources in markdown to asset files and marks completion via `imageAssetMigrationV1CompletedAt`.
 - On insert/replace/drop/paste, images are written to note-local assets and inserted with relative `.assets/...` sources.
 - The Image extension keeps a custom NodeView (`createImageNodeView`) for resize handles, drag reorder, context menu, and asset-source rendering.
+- Image NodeViews share one per-editor `transaction` subscription (`registerImageSelectionSync` in `ImageView.ts`) that re-syncs selection outlines only when the node-selected position or readonly flag changes. Do not re-add a per-NodeView `editor.on("transaction")` listener — that made selection bookkeeping O(images) on every keystroke.
 - Asset-path images are rendered by reading file bytes and resolving to displayable data URLs in the NodeView.
 - When `width`/`height` are set, `renderMarkdown` outputs `<img>` HTML tags to preserve dimensions through markdown round-trips.
 - On insert (pick, drop, paste), images are capped to 560px width with aspect ratio preserved. Clamping uses `clampImageDimensions` from `imageUtils.ts`.
@@ -81,6 +82,11 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 - Mermaid diagrams are `mermaid` code blocks rendered by the custom `MermaidCodeBlock` NodeView. Keep its source/preview toggle and SVG/PNG export controls inside the NodeView.
 - Mermaid SVG/PNG export uses `src/extensions/mermaidExport.ts` and context-menu helpers from `contextMenuRegistry`; user-visible Mermaid labels must go through `src/i18n.ts`.
 - Exported SVGs round-trip their source: `mermaidExport.ts` embeds the original Mermaid source via `embedMermaidSourceInSvg` (from `src/extensions/mermaidSourceMetadata.ts`), and `ImageDrop.ts` restores a marked SVG back into an editable Mermaid block via `extractMermaidSourceFromSvg`.
+
+## Editor Decorations
+
+- In-editor find (`SearchHighlight.ts`): `findSearchMatches` is the single match finder shared by `SearchBar` and the plugin. The full match list backs the counter, next/prev, and replace-all, but only `SEARCH_DECORATION_CAP` (2000) decorations are drawn — `selectMatchesToDecorate` picks those nearest the visible range, fed by a scroll-driven plugin `view` (falling back to a window around the active match). Keep the count truthful and the drawn set bounded; do not decorate every match.
+- Wiki-link "missing link" decorations (`WikiLink.ts`): a target note's existence changes only via the forced refresh meta (`refreshWikiLinkDecorations`, dispatched from `App.tsx` when the docs/title set or locale changes), so a plain edit remaps the existing `DecorationSet` and recomputes only the changed range — it does not rebuild the whole set per keystroke. `findDocByTitle` is O(1) via a title map cached per `docs` array reference.
 
 ## Context Menus
 
