@@ -107,6 +107,8 @@ Use the official `@tiptap/markdown` API only:
 
 Do not use old community-package APIs such as `editor.storage.markdown.getMarkdown()`.
 
+- The `Markdown` extension is configured with a custom marked instance (`Markdown.configure({ marked: createFastMarked() })` from `src/extensions/fastMarkdownLexer.ts`). Stock marked's inline lexer is O(n²) on a single large block (no blank lines) dense with code spans, links, HTML, or escapes — a multi-million-char note on one line froze the app for minutes. `FastLexer` builds marked's inline mask in one linear pass; its output is byte-identical, so do not revert to the bare `Markdown` extension. `fastMarkdownLexer.test.ts` fuzzes token-tree equivalence against stock marked and will fail if a marked upgrade reshapes `Lexer.inlineTokens` — when that happens, re-transcribe only the main tokenization loop from the new version.
+
 ## UI Conventions
 
 - Use Fluent UI v9 components for app chrome.
