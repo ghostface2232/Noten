@@ -46,13 +46,7 @@ const SlashCommands = Extension.create({
         ...this.options.suggestion,
         items: ({ query }: { query: string }) => {
           const locale = this.storage.locale as Locale;
-          return getSlashItems(locale).filter((item) => {
-            const q = query.toLowerCase();
-            return (
-              item.title.toLowerCase().includes(q) ||
-              item.searchTerms.some((st) => st.includes(q))
-            );
-          });
+          return filterSlashItems(getSlashItems(locale), query);
         },
         render: () => {
           let component: ReactRenderer<SlashCommandListRef> | null = null;
@@ -152,31 +146,31 @@ interface SlashItemDef {
 }
 
 const SLASH_DEFS: SlashItemDef[] = [
-  { titleKey: "slash.text", descKey: "slash.text.desc", searchTerms: ["paragraph", "text", "본문", "텍스트"], icon: "TextT",
+  { titleKey: "slash.text", descKey: "slash.text.desc", searchTerms: ["paragraph", "text", "plain", "body", "본문", "텍스트", "문단"], icon: "TextT",
     command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).setParagraph().run(); } },
-  { titleKey: "slash.h1", descKey: "slash.h1.desc", searchTerms: ["heading", "h1", "제목"], icon: "TextHeader1",
+  { titleKey: "slash.h1", descKey: "slash.h1.desc", searchTerms: ["heading", "heading1", "h1", "title", "제목", "큰제목"], icon: "TextHeader1",
     command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).setHeading({ level: 1 }).run(); } },
-  { titleKey: "slash.h2", descKey: "slash.h2.desc", searchTerms: ["heading", "h2", "제목"], icon: "TextHeader2",
+  { titleKey: "slash.h2", descKey: "slash.h2.desc", searchTerms: ["heading", "heading2", "h2", "subtitle", "제목", "소제목"], icon: "TextHeader2",
     command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).setHeading({ level: 2 }).run(); } },
-  { titleKey: "slash.h3", descKey: "slash.h3.desc", searchTerms: ["heading", "h3", "제목"], icon: "TextHeader3",
+  { titleKey: "slash.h3", descKey: "slash.h3.desc", searchTerms: ["heading", "heading3", "h3", "제목"], icon: "TextHeader3",
     command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).setHeading({ level: 3 }).run(); } },
-  { titleKey: "slash.bulletList", descKey: "slash.bulletList.desc", searchTerms: ["bullet", "list", "unordered", "리스트"], icon: "TextBulletList",
+  { titleKey: "slash.bulletList", descKey: "slash.bulletList.desc", searchTerms: ["bullet", "list", "unordered", "ul", "리스트", "목록", "글머리"], icon: "TextBulletList",
     command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).toggleBulletList().run(); } },
-  { titleKey: "slash.orderedList", descKey: "slash.orderedList.desc", searchTerms: ["ordered", "number", "list", "리스트", "번호"], icon: "TextNumberListLtr",
+  { titleKey: "slash.orderedList", descKey: "slash.orderedList.desc", searchTerms: ["ordered", "number", "numbered", "list", "ol", "리스트", "번호", "목록"], icon: "TextNumberListLtr",
     command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).toggleOrderedList().run(); } },
-  { titleKey: "slash.taskList", descKey: "slash.taskList.desc", searchTerms: ["task", "todo", "checkbox", "체크", "할일"], icon: "TaskListLtr",
+  { titleKey: "slash.taskList", descKey: "slash.taskList.desc", searchTerms: ["task", "todo", "checkbox", "checklist", "체크", "할일", "체크리스트"], icon: "TaskListLtr",
     command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).toggleTaskList().run(); } },
-  { titleKey: "slash.blockquote", descKey: "slash.blockquote.desc", searchTerms: ["quote", "blockquote", "인용"], icon: "TextQuoteOpening",
+  { titleKey: "slash.blockquote", descKey: "slash.blockquote.desc", searchTerms: ["quote", "blockquote", "citation", "인용", "인용문"], icon: "TextQuoteOpening",
     command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).toggleBlockquote().run(); } },
-  { titleKey: "slash.codeBlock", descKey: "slash.codeBlock.desc", searchTerms: ["code", "codeblock", "코드"], icon: "CodeBlock",
+  { titleKey: "slash.codeBlock", descKey: "slash.codeBlock.desc", searchTerms: ["code", "codeblock", "snippet", "pre", "fence", "코드", "코드블록"], icon: "CodeBlock",
     command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).toggleCodeBlock().run(); } },
-  { titleKey: "slash.mermaid", descKey: "slash.mermaid.desc", searchTerms: ["mermaid", "diagram", "flowchart", "다이어그램"], icon: "Flowchart",
+  { titleKey: "slash.mermaid", descKey: "slash.mermaid.desc", searchTerms: ["mermaid", "diagram", "flowchart", "chart", "graph", "다이어그램", "도표"], icon: "Flowchart",
     command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).run(); insertMermaidCodeBlock(editor); } },
-  { titleKey: "slash.hr", descKey: "slash.hr.desc", searchTerms: ["hr", "divider", "horizontal", "구분"], icon: "LineHorizontal1",
+  { titleKey: "slash.hr", descKey: "slash.hr.desc", searchTerms: ["hr", "divider", "horizontal", "rule", "separator", "line", "구분", "구분선"], icon: "LineHorizontal1",
     command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).setHorizontalRule().run(); } },
-  { titleKey: "slash.image", descKey: "slash.image.desc", searchTerms: ["image", "img", "사진", "이미지"], icon: "ImageAdd",
+  { titleKey: "slash.image", descKey: "slash.image.desc", searchTerms: ["image", "img", "picture", "photo", "사진", "이미지", "그림"], icon: "ImageAdd",
     command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).run(); pickAndInsertImage(editor); } },
-  { titleKey: "slash.table", descKey: "slash.table.desc", searchTerms: ["table", "grid", "표", "테이블"], icon: "Table",
+  { titleKey: "slash.table", descKey: "slash.table.desc", searchTerms: ["table", "grid", "spreadsheet", "표", "테이블", "도표"], icon: "Table",
     command: ({ editor, range }) => {
       editor
         .chain()
@@ -195,6 +189,22 @@ export function getSlashItems(locale: Locale): SlashCommandItem[] {
     icon: d.icon,
     command: d.command,
   }));
+}
+
+// Shared, case-insensitive filter over the localized title and the EN/KO
+// searchTerms aliases. Exported so the matching rules are unit-tested
+// independently of the Suggestion plugin wiring.
+export function filterSlashItems(
+  items: SlashCommandItem[],
+  query: string,
+): SlashCommandItem[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return items;
+  return items.filter(
+    (item) =>
+      item.title.toLowerCase().includes(q) ||
+      item.searchTerms.some((st) => st.toLowerCase().includes(q)),
+  );
 }
 
 export default SlashCommands;
