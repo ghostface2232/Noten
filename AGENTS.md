@@ -38,6 +38,13 @@ Windows-native Markdown note app built with Tauri v2, React, and TypeScript.
 - `appDataDir()` may not include a trailing separator; always check before joining paths.
 - The app is Tauri-only. Do not add browser fallbacks unless explicitly requested.
 
+## Capability Surface
+
+Noten's privacy posture is "your notes never leave the disk," and it should stay verifiable through the Tauri capability allowlist in `src-tauri/capabilities/default.json`:
+
+- File access uses the broad `fs:read-all` / `fs:write-all` commands but is constrained by `fs:scope` to `$APPDATA`, `$APPLOCALDATA`, and `$HOME`. Do not widen this scope without a concrete need.
+- There is no HTTP-client plugin. The only outbound network is `tauri-plugin-updater` (checks GitHub releases) and `opener` (hands links to the system browser; it does not transmit note content). Do not add `http:` or other network permissions just to make a feature easier — a local-first note app should not phone home.
+
 ## External vs Internal Documents
 
 - Internal documents live in the app's `notes` directory and are auto-saved (1s debounce).
