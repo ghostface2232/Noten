@@ -122,9 +122,12 @@ function findScrollParent(el: HTMLElement): HTMLElement | null {
   return null;
 }
 
-// Visible position range (with a screenful of pre-render margin) derived from the
-// scroll container, so decorations track the user's scroll position. Returns null
-// if coordinates can't be resolved (e.g. detached / no layout).
+// Visible position range derived from the scroll container, so decorations track
+// the user's scroll position. Probes the exact viewport edges — no pixel margin,
+// because the decoration window (selectMatchesToDecorate) already pads to the cap
+// (~hundreds of matches above and below the fold), and an over-wide probe at the
+// document bottom collapses `from` to 0 and pulls the window back to the top.
+// Returns null if coordinates can't be resolved (e.g. detached / no layout).
 function computeVisibleRange(
   view: EditorView,
   scroller: HTMLElement | null,
@@ -132,13 +135,11 @@ function computeVisibleRange(
   try {
     const domRect = view.dom.getBoundingClientRect();
     const left = domRect.left + Math.min(8, domRect.width / 2);
-    const top = scroller ? scroller.getBoundingClientRect().top : 0;
-    const bottom = scroller
-      ? scroller.getBoundingClientRect().bottom
-      : (typeof window !== "undefined" ? window.innerHeight : 0);
-    const margin = Math.max(bottom - top, 200);
-    const topHit = view.posAtCoords({ left, top: top - margin });
-    const botHit = view.posAtCoords({ left, top: bottom + margin });
+    const rect = scroller ? scroller.getBoundingClientRect() : null;
+    const top = rect ? rect.top : 0;
+    const bottom = rect ? rect.bottom : (typeof window !== "undefined" ? window.innerHeight : 0);
+    const topHit = view.posAtCoords({ left, top });
+    const botHit = view.posAtCoords({ left, top: bottom });
     const from = topHit ? topHit.pos : 0;
     const to = botHit ? botHit.pos : view.state.doc.content.size;
     return { from: Math.min(from, to), to: Math.max(from, to) };
