@@ -6,7 +6,7 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 
 - Markdown string is the serialization format and single source of truth on disk.
 - Editing uses a single persistent Tiptap v3 instance with `@tiptap/markdown`. The user always edits WYSIWYM.
-- `Tiptap editable: true` whenever a document is ready; the editor remains readonly until the first document loads.
+- The editor is `editable: true` whenever a document is ready, and stays readonly until the first document loads.
 
 ## Editor Chrome Visibility
 
@@ -26,7 +26,11 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 
 - App settings are stored in `AppData/Roaming/com.noten.app/settings.json` via Tauri fs plugin.
 - Shared note state is decomposed into note bodies (`<noteId>.md`), per-note metadata (`.meta/<noteId>.json`), and shared groups (`.groups.json`). Legacy `manifest.json` is migrated to `manifest.legacy.json`.
-- Note metadata includes title/customName, created/updated timestamps, group membership (with its own `groupUpdatedAt` clock so group moves resolve independently of body last-write-wins), trash state, shared `pinned` state, and a shared `color` label (one of a fixed 7-color palette in `src/utils/noteColors.ts`). `color` syncs like `pinned` — independent metadata that propagates even while the body is locally dirty — and does not bump `updatedAt`.
+- Note metadata fields:
+  - title / customName, created / updated timestamps, trash state.
+  - group membership — has its own `groupUpdatedAt` clock so group moves resolve independently of body last-write-wins.
+  - shared `pinned` state.
+  - shared `color` label — one of a fixed 7-color palette in `src/utils/noteColors.ts`. Syncs like `pinned` (independent metadata that propagates even while the body is locally dirty) and does not bump `updatedAt`.
 - Active note and group collapsed state are per-machine UI state, not shared sync state.
 - Local cache includes `imageAssetMigrationV1CompletedAt` to track one-time image asset migration completion per notes directory.
 - Sidebar open/close state and width are stored in localStorage.
@@ -39,7 +43,9 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 - Internal documents live in the app's `notes` directory and are auto-saved (1s debounce).
 - Shared notes directories such as OneDrive/Dropbox are supported by file-based sync; metadata/group writes are merged so different PCs do not rely on one monolithic manifest.
 - Remote body conflicts are last-write-wins with previous remote body backups under `.conflicts/`. `.conflicts/` travels with the notes directory on a folder change/migration; a `merge` migration also backs up an about-to-be-overwritten destination body there before applying last-write-wins.
-- `reconcileFolder` does not delete a `.meta/<noteId>.json` the instant its body file is missing — on a mid-sync cloud folder the sidecar can arrive before its body. An orphan meta is deleted only after a per-id grace (observed bodyless on a prior non-bulk reconcile pass), and the whole sweep is skipped when many metas are bodyless at once (bulk guard — likely mid-sync).
+- `reconcileFolder` does not delete a `.meta/<noteId>.json` the instant its body file is missing — on a mid-sync cloud folder the sidecar can arrive before its body:
+  - An orphan meta is deleted only after a per-id grace (observed bodyless on a prior non-bulk reconcile pass).
+  - The whole sweep is skipped when many metas are bodyless at once (bulk guard — likely mid-sync).
 - Auto-save uses `activeDocRef` (sync ref) to track the active document, not React state's `activeIndex`, to prevent wrong-doc writes after rapid switching.
 - `notifyActiveDoc(id, filePath)` must be called in every code path that switches the active document (switchDocument, newNote, importFiles, duplicateNote, restoreNote). `deleteNote` does not call it directly because it relies on the subsequent active-index change to flow through normal state.
 - `cancelDocSave(docId)` cancels pending autosave timers for a specific doc. Called in deleteNote to prevent orphan writes.
@@ -50,7 +56,7 @@ Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
 - Imported notes are treated the same as other internal notes (auto-save enabled, normal delete/duplicate/restore flow).
 - Rename updates the note title metadata (and sets `customName`), not the underlying `.md` file path.
 - `customName` flag on a document means the user manually renamed it; auto-title derivation is permanently disabled for that document.
-- Pinned notes sort before unpinned notes while preserving the selected note sort order within each pinned/unpinned partition. In groups, pinned notes stay at the top of that group; ungrouped pinned notes stay at the top of the ungrouped notes list.
+- Pinned notes sort before unpinned notes, with the active sort order preserved within each partition. In groups, pinned notes stay at the top of that group; ungrouped pinned notes stay at the top of the ungrouped list.
 
 ## Current Settings Model
 
@@ -107,7 +113,9 @@ Use the official `@tiptap/markdown` API only:
 
 Do not use old community-package APIs such as `editor.storage.markdown.getMarkdown()`.
 
-- The `Markdown` extension is configured with a custom marked instance (`Markdown.configure({ marked: createFastMarked() })` from `src/extensions/fastMarkdownLexer.ts`). Stock marked's inline lexer is O(n²) on a single large block (no blank lines) dense with code spans, links, HTML, or escapes — a multi-million-char note on one line froze the app for minutes. `FastLexer` builds marked's inline mask in one linear pass; its output is byte-identical, so do not revert to the bare `Markdown` extension. `fastMarkdownLexer.test.ts` fuzzes token-tree equivalence against stock marked and will fail if a marked upgrade reshapes `Lexer.inlineTokens` — when that happens, re-transcribe only the main tokenization loop from the new version.
+- The `Markdown` extension is configured with a custom marked instance: `Markdown.configure({ marked: createFastMarked() })` from `src/extensions/fastMarkdownLexer.ts`.
+  - Why: stock marked's inline lexer is O(n²) on a single large block (no blank lines) dense with code spans, links, HTML, or escapes — a multi-million-char note on one line froze the app for minutes. `FastLexer` builds marked's inline mask in one linear pass; its output is byte-identical, so do not revert to the bare `Markdown` extension.
+  - Guard: `fastMarkdownLexer.test.ts` fuzzes token-tree equivalence against stock marked and fails if a marked upgrade reshapes `Lexer.inlineTokens`. When that happens, re-transcribe only the main tokenization loop from the new version.
 
 ## UI Conventions
 
@@ -119,7 +127,7 @@ Do not use old community-package APIs such as `editor.storage.markdown.getMarkdo
 - Toolbar and status bar share the same scroll-driven visibility behavior.
 - Toolbar layout: Undo/Redo in column 1, formatting tools centered in column 2, Search and Go-to-line in column 3; when width < 740px the formatting tools wrap to row 2.
 - Browser/WebView shortcuts that would interfere with app behavior are blocked. This includes reload, DevTools, print, source view, caret browsing, zoom, and browser back/forward. Ctrl+R is unblocked when sidebar has focus (used for rename).
-- The sidebar body slides between two panes: the root view (groups section + ungrouped notes section) and an "All Notes" drill-in — a flat list of every note (groups ignored, pinned first, current sort order). The "All Notes" entry atop the group list enters it; its header or `Escape` returns. Drag-to-group works only in the root view.
+- The sidebar body slides between two panes: the root view (groups section + ungrouped notes section) and an "All Notes" drill-in — a flat list of every note (groups ignored, pinned first, current sort order). Clicking the "All Notes" entry atop the group list opens the drill-in; its header or `Escape` returns. Drag-to-group works only in the root view.
 - A note's color label is set from the note context menu (or, in select mode, the bulk right-click menu) and tints the note's sidebar icon. The sidebar "filter" button opens a swatch popover; picking a color filters the sidebar to a flat list of only that color's notes (composes with search; reuses the search flat-list rendering path, so drag is inert while filtered). The filter persists across restarts.
 - Sidebar shortcuts (Ctrl+D, Ctrl+R, F2, Ctrl+E, Ctrl+Alt+P, Ctrl+Alt+C, Delete) are active when last mousedown was inside the sidebar. Tracked via `data-sidebar-active` attribute on `document.documentElement`.
 - Editor shortcuts include `Ctrl+Shift+X` for strike-through, `Ctrl+G` for Go to Line, and `Ctrl+H` for Find and Replace. All are handled at the window level via `useKeyboardShortcuts`, not inside individual editor keymaps.
@@ -147,11 +155,24 @@ Releases are fully automated by `.github/workflows/release.yml`, triggered by pu
 
 To cut a release:
 
-1. Edit `package.json`'s `version`, then run `npm run sync-version`. The script (`scripts/sync-version.mjs`) propagates the new version to `package-lock.json` (root + root package entry), `src-tauri/tauri.conf.json`, the four `Cargo.toml` (`src-tauri`, `bootstrapper`, `maintenance-helper`, `noten-splash-ui`), our entries in `Cargo.lock` + `src-tauri/Cargo.lock`, and the `v…` label in `SettingsModal.tsx`. Add a new entry only if you introduce another hardcoded version site.
+1. Edit `package.json`'s `version`, then run `npm run sync-version`. The script (`scripts/sync-version.mjs`) propagates the new version to:
+   - `package-lock.json` (root + root package entry)
+   - `src-tauri/tauri.conf.json`
+   - the four `Cargo.toml` (`src-tauri`, `bootstrapper`, `maintenance-helper`, `noten-splash-ui`)
+   - our entries in `Cargo.lock` + `src-tauri/Cargo.lock`
+   - the `v…` label in `SettingsModal.tsx`
+
+   Add a new entry only if you introduce another hardcoded version site.
 2. Rewrite the SettingsModal changelog block (Korean + English) — this is human-written copy and is intentionally not touched by the script.
 3. Commit, `git push origin main`, then `git tag -a vX.Y.Z <commit> -m …` and `git push origin vX.Y.Z`.
 
-CI then builds the helper, runs `tauri-action@v0` (signs updater artifacts using `TAURI_SIGNING_PRIVATE_KEY`/`_PASSWORD` secrets and creates a **draft** release with the NSIS bundle, `.sig`, and `latest.json`), copies the NSIS into `bootstrapper/assets/nsis-payload.exe`, builds `noten-setup.exe`, Authenticode-signs it via `signtool` with `CODE_SIGN_PFX`/`_PASSWORD`, and uploads the signed bootstrapper to the same draft release.
+CI then:
+
+1. Builds the helper.
+2. Runs `tauri-action@v0` — signs updater artifacts with `TAURI_SIGNING_PRIVATE_KEY`/`_PASSWORD` and creates a **draft** release holding the NSIS bundle, `.sig`, and `latest.json`.
+3. Copies the NSIS into `bootstrapper/assets/nsis-payload.exe` and builds `noten-setup.exe`.
+4. Authenticode-signs `noten-setup.exe` via `signtool` with `CODE_SIGN_PFX`/`_PASSWORD`.
+5. Uploads the signed bootstrapper to the same draft release.
 
 The draft must be reviewed and **manually published** on GitHub — only then does the in-app updater see it.
 
