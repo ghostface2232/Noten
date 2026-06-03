@@ -120,6 +120,8 @@ Use the official `@tiptap/markdown` API only:
 
 Do not use old community-package APIs such as `editor.storage.markdown.getMarkdown()`.
 
+- Copying selected text uses a `clipboardTextSerializer` (`sliceToPlainText` in `src/utils/clipboardText.ts`) that joins block boundaries with a single `\n` (and hard breaks with `\n`) so pasted plain text matches the on-screen line count. Only `text/plain` is overridden; `text/html` is left to ProseMirror, so rich targets (e.g. Notion) keep formatting and in-app paste still round-trips via `data-pm-slice`.
+
 - The `Markdown` extension is configured with a custom marked instance: `Markdown.configure({ marked: createFastMarked() })` from `src/extensions/fastMarkdownLexer.ts`.
   - Why: stock marked's inline lexer is O(n²) on a single large block (no blank lines) dense with code spans, links, HTML, or escapes — a multi-million-char note on one line froze the app for minutes. `FastLexer` builds marked's inline mask in one linear pass; its output is byte-identical, so do not revert to the bare `Markdown` extension.
   - Guard: `fastMarkdownLexer.test.ts` fuzzes token-tree equivalence against stock marked and fails if a marked upgrade reshapes `Lexer.inlineTokens`. When that happens, re-transcribe only the main tokenization loop from the new version.
@@ -129,14 +131,16 @@ Do not use old community-package APIs such as `editor.storage.markdown.getMarkdo
 - Use Fluent UI v9 components for app chrome.
 - Use only `@fluentui/react-icons`.
 - The editor surface (`.ProseMirror`) should read shared colors from CSS variables in `src/styles/theme.css`.
+- The editor content column (`.ProseMirror`) is capped at `--editor-max-width` (1400px) and centered, leaving gutters on wide windows; the surrounding area stays clickable/scrollable.
 - Preserve the existing visual language; do not introduce unrelated icon sets or browser-style controls.
 - All user-visible strings must go through the i18n system (`src/i18n.ts`). Do not hardcode locale checks inline.
 - Toolbar and status bar share the same scroll-driven visibility behavior.
 - Toolbar layout: Undo/Redo in column 1, formatting tools centered in column 2, Search and Go-to-line in column 3; when width < 740px the formatting tools wrap to row 2.
-- Browser/WebView shortcuts that would interfere with app behavior are blocked. This includes reload, DevTools, print, source view, caret browsing, zoom, and browser back/forward. Ctrl+R is unblocked when sidebar has focus (used for rename).
+- Browser/WebView shortcuts that would interfere with app behavior are blocked. This includes reload, DevTools, print, source view, caret browsing, zoom, and browser back/forward. Ctrl+R is unblocked when sidebar has focus (used for rename). Ctrl+S is swallowed (no-op) since autosave persists continuously — there is no manual-save shortcut.
 - The sidebar body slides between two panes: the root view (groups section + ungrouped notes section) and an "All Notes" drill-in — a flat list of every note (groups ignored, pinned first, current sort order). Clicking the "All Notes" entry atop the group list opens the drill-in; its header or `Escape` returns. Drag-to-group works only in the root view.
 - A note's color label is set from the note context menu (or, in select mode, the bulk right-click menu) and tints the note's sidebar icon. The sidebar "filter" button opens a swatch popover; picking a color filters the sidebar to a flat list of only that color's notes (composes with search; reuses the search flat-list rendering path, so drag is inert while filtered). The filter persists across restarts.
 - Sidebar shortcuts (Ctrl+D, Ctrl+R, F2, Ctrl+E, Ctrl+Alt+P, Ctrl+Alt+C, Delete) are active when last mousedown was inside the sidebar. Tracked via `data-sidebar-active` attribute on `document.documentElement`.
+- Toggling/resizing the sidebar updates the OS window min-size and grows a too-narrow window to fit (`ensureWindowFitsSidebar` in `App.tsx`). This is skipped while the window is maximized or fullscreen — mutating window size there pops it back to windowed (and shifts position) on Windows — and the deferred min-size is re-applied when the window is later restored, detected via `onResized`.
 - Editor shortcuts include `Ctrl+Shift+X` for strike-through, `Ctrl+G` for Go to Line, and `Ctrl+H` for Find and Replace. All are handled at the window level via `useKeyboardShortcuts`, not inside individual editor keymaps.
 - Sidebar shortcut hints are displayed in context menus. Shortcut style is unified across all menus (opacity 0.45, 12px, 24px left padding).
 
@@ -205,6 +209,7 @@ Required secrets: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWO
 - `src/utils/migrateImageAssets.ts` — one-time markdown migration from base64 image sources to `.assets/...` paths
 - `src/utils/contextMenuRegistry.ts` — `closeContextMenu`, `createMenuShell`, `createMenuItem`, `createMenuSeparator`, `isDarkTheme`
 - `src/utils/clampMenuPosition.ts` — `clampMenuToViewport`
+- `src/utils/clipboardText.ts` — `sliceToPlainText` (clipboard `text/plain` serialization)
 - `src/extensions/mermaidExport.ts` — self-contained SVG serialization and transparent-background PNG export for rendered Mermaid diagrams
 - `src/extensions/mermaidSourceMetadata.ts` — `embedMermaidSourceInSvg` / `extractMermaidSourceFromSvg`, storing the Mermaid source in the SVG `<metadata>` under a private namespace so export/import round-trips losslessly
 

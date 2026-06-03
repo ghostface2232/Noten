@@ -52,7 +52,6 @@ Powered by [Tiptap](https://tiptap.dev/), edited as WYSIWYM with Markdown as the
 | New note | `Ctrl+N` |
 | New window | `Ctrl+Shift+N` |
 | Open file | `Ctrl+O` |
-| Save now | `Ctrl+S` |
 | Show toolbar / status bar | `Click editor` / scroll up / top of document |
 | Find in document | `Ctrl+F` |
 | Find and replace | `Ctrl+H` |
