@@ -33,6 +33,7 @@ import { HOVER_SAFE_ZONE_PX, isPointInExpandedRect } from "../utils/popoverGeome
 import { CopySelectRegular, RenameRegular } from "@fluentui/react-icons";
 import { common, createLowlight } from "lowlight";
 import { createFastMarked } from "../extensions/fastMarkdownLexer";
+import { isProbablyMarkdown } from "../extensions/isProbablyMarkdown";
 import MermaidCodeBlock from "../extensions/MermaidCodeBlock";
 import SlashCommands from "../extensions/SlashCommands";
 import ImageDrop from "../extensions/ImageDrop";
@@ -64,7 +65,6 @@ declare module "@tiptap/core" {
   }
 }
 
-const MD_PATTERN = /^#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|^>\s|^```|^\|.+\||\[.+\]\(.+\)/m;
 type TextRange = { from: number; to: number };
 const DOC_SESSION_CACHE_LIMIT = 20;
 
@@ -343,7 +343,7 @@ const MarkdownPaste = Extension.create({
             }
 
             if (clipboard?.getData("text/html")) return false;
-            if (!MD_PATTERN.test(text) || !editor.markdown) return false;
+            if (!isProbablyMarkdown(text) || !editor.markdown) return false;
 
             const parsed = editor.markdown.parse(text);
             if (!parsed) return false;
