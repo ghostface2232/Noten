@@ -24,6 +24,7 @@ const DEFINITE: RegExp[] = [
   /^[ \t]*>\s+\S/m, // blockquote
   /^[ \t]*```/m, // fenced code block
   /!\[[^\]]*\]\([^)\s]+\)/, // image
+  /^\s*\[[^\]]+\]\([^)\s]+\)\s*$/, // the whole payload is a single inline link
 ];
 
 const POSITIVE: ScoredPattern[] = [
