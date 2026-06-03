@@ -1,4 +1,4 @@
-import { Fragment, memo, useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Fragment, memo, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { Button, Tooltip, tokens, mergeClasses } from "@fluentui/react-components";
 import {
   ChevronLeftRegular,
@@ -383,10 +383,28 @@ export function Sidebar({
   const [inAllNotes, setInAllNotes] = useState(false);
 
   const sidebarBodyRef = useRef<HTMLDivElement>(null);
+  const allNotesScrollRef = useRef<HTMLDivElement>(null);
   const [scrollAtTop, setScrollAtTop] = useState(true);
   const [scrollAtBottom, setScrollAtBottom] = useState(true);
   const [allScrollTop, setAllScrollTop] = useState(true);
   const [allScrollBottom, setAllScrollBottom] = useState(true);
+
+  // Sync the fade masks to a scroll container's true overflow state. The mask
+  // is keyed off being parked at an edge, so this must run on mount and after
+  // any content/size change — not just on scroll — or a list that overflows on
+  // first paint would render with no bottom fade until the user scrolls.
+  const measureScrollEdges = useCallback(
+    (
+      el: HTMLElement | null,
+      setTop: (atEdge: boolean) => void,
+      setBottom: (atEdge: boolean) => void,
+    ) => {
+      if (!el) return;
+      setTop(el.scrollTop <= 0);
+      setBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 1);
+    },
+    [],
+  );
   const inputRef = useRef<HTMLInputElement>(null);
   const groupInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -778,6 +796,28 @@ export function Sidebar({
     return { groupRenderList: gList, noteItems: nItems };
   }, [flatListMode, filteredDocs, docs, groups, groupedNoteIds, notesSortOrder, locale, collapsingGroupIds]);
 
+  // Re-measure the fade masks when the rendered lists or container size change,
+  // so an overflowing list always shows its bottom fade — even before any scroll.
+  useLayoutEffect(() => {
+    const el = sidebarBodyRef.current;
+    if (!el) return;
+    const measure = () => measureScrollEdges(el, setScrollAtTop, setScrollAtBottom);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [measureScrollEdges, groupRenderList, noteItems, inAllNotes, flatListMode]);
+
+  useLayoutEffect(() => {
+    const el = allNotesScrollRef.current;
+    if (!el) return;
+    const measure = () => measureScrollEdges(el, setAllScrollTop, setAllScrollBottom);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [measureScrollEdges, filteredDocs, inAllNotes]);
+
   const cancelEditing = useCallback(() => {
     setEditingIndex(null);
   }, []);
@@ -1006,9 +1046,7 @@ export function Sidebar({
             data-scroll-top={scrollAtTop ? "true" : "false"}
             data-scroll-bottom={scrollAtBottom ? "true" : "false"}
             onScroll={(e) => {
-              const el = e.target as HTMLElement;
-              setScrollAtTop(el.scrollTop <= 0);
-              setScrollAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 1);
+              measureScrollEdges(e.target as HTMLElement, setScrollAtTop, setScrollAtBottom);
             }}
             onContextMenu={(e) => {
               if ((e.target as HTMLElement).closest("[data-doc-item]")) return;
@@ -1106,13 +1144,12 @@ export function Sidebar({
               <span className={styles.allNotesHeaderLabel}>{i("sidebar.allNotes")}</span>
             </Button>
             <div
+              ref={allNotesScrollRef}
               className={styles.allNotesScroll}
               data-scroll-top={allScrollTop ? "true" : "false"}
               data-scroll-bottom={allScrollBottom ? "true" : "false"}
               onScroll={(e) => {
-                const el = e.target as HTMLElement;
-                setAllScrollTop(el.scrollTop <= 0);
-                setAllScrollBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 1);
+                measureScrollEdges(e.target as HTMLElement, setAllScrollTop, setAllScrollBottom);
               }}
               onContextMenu={(e) => {
                 if ((e.target as HTMLElement).closest("[data-doc-item]")) return;
