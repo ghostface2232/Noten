@@ -756,6 +756,27 @@ function App() {
     return () => unlisten?.();
   }, []);
 
+  useEffect(() => {
+    // Complementary autosave flush triggers. onCloseRequested is the primary
+    // guarantee, but alt-tabbing away or minimizing mid-type can strand the
+    // last debounce window unsaved until the window is closed. Flushing when
+    // the window loses focus or the page is hidden closes that gap.
+    // flushAutoSave is a cheap no-op when nothing is pending.
+    const flush = () => { void flushAutoSaveRef.current?.(); };
+    const onVisibility = () => { if (document.hidden) flush(); };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    let unlisten: (() => void) | undefined;
+    getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => { if (!focused) flush(); })
+      .then((fn) => { unlisten = fn; });
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      unlisten?.();
+    };
+  }, []);
+
   const handleTiptapDirty = useCallback(
     (dirty: boolean) => {
       if (!dirty) return;
