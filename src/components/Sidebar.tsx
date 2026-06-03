@@ -461,10 +461,16 @@ export function Sidebar({
   const strippedCacheRef = useRef(new Map<string, { content: string; stripped: string }>());
   const strippedContentMap = useMemo(() => {
     const cache = strippedCacheRef.current;
+    // When search is inactive, filteredDocs short-circuits and never reads this
+    // map — so drop the stripped body copies rather than retaining one per note
+    // for the rest of the session (a third in-memory copy of every body).
+    if (!debouncedQuery) {
+      cache.clear();
+      return cache;
+    }
     const activeIds = new Set<string>();
     for (const doc of docs) {
       activeIds.add(doc.id);
-      if (!debouncedQuery) continue;
       const cached = cache.get(doc.id);
       if (cached && cached.content === doc.content) continue;
       cache.set(doc.id, { content: doc.content, stripped: stripMarkdownContent(doc.content) });
