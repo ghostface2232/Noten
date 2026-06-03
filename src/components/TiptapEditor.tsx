@@ -34,6 +34,7 @@ import { CopySelectRegular, RenameRegular } from "@fluentui/react-icons";
 import { common, createLowlight } from "lowlight";
 import { createFastMarked } from "../extensions/fastMarkdownLexer";
 import { isProbablyMarkdown } from "../extensions/isProbablyMarkdown";
+import EscapeFirstBlock from "../extensions/EscapeFirstBlock";
 import MermaidCodeBlock from "../extensions/MermaidCodeBlock";
 import SlashCommands from "../extensions/SlashCommands";
 import ImageDrop from "../extensions/ImageDrop";
@@ -847,6 +848,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         TableCell,
         TableHeader,
         TableNodeSelect,
+        EscapeFirstBlock,
         MarkdownPaste,
         DocumentContext,
         IMEGuard,
