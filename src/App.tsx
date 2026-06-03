@@ -101,52 +101,99 @@ function App() {
   }, [sidebarWidth]);
   useEffect(() => { try { localStorage.setItem("sidebar-open", String(sidebarOpen)); } catch {} }, [sidebarOpen]);
   useEffect(() => { try { localStorage.setItem("sidebar-width", String(sidebarWidth)); } catch {} }, [sidebarWidth]);
+  // Latest desired min window width (editor + open sidebar), read by the
+  // resize listener after the window is restored from a maximized state.
+  const minWidthRef = useRef(EDITOR_MIN_WIDTH);
+  // Tracks the in-flight sizing animation so a newer invocation cancels it.
+  const sizingRunRef = useRef<{ cancelled: boolean } | null>(null);
+  // Apply the window min-size for the current sidebar state and, if the window
+  // is narrower than that minimum, animate it wider. No-op while maximized or
+  // fullscreen, where mutating size/min-size would pop the window back to
+  // windowed mode (the sidebar reflows via CSS inside the existing window).
+  const ensureWindowFitsSidebar = useCallback(async (minWidth: number) => {
+    if (sizingRunRef.current) sizingRunRef.current.cancelled = true;
+    const run = { cancelled: false };
+    sizingRunRef.current = run;
+    try {
+      const win = getCurrentWindow();
+      const [maximized, fullscreen] = await Promise.all([
+        win.isMaximized().catch(() => false),
+        win.isFullscreen().catch(() => false),
+      ]);
+      if (run.cancelled || maximized || fullscreen) return;
+      await win.setMinSize(new LogicalSize(minWidth, WINDOW_MIN_HEIGHT));
+      if (run.cancelled) return;
+      const scale = await win.scaleFactor();
+      const size = await win.innerSize();
+      const currentLogicalW = size.width / scale;
+      const currentLogicalH = size.height / scale;
+      if (currentLogicalW >= minWidth - 1) return;
+
+      const pos = await win.outerPosition();
+      if (run.cancelled) return;
+      const fromX = pos.x / scale;
+      const fromW = currentLogicalW;
+      const toW = minWidth;
+      const toX = fromX;
+
+      const DURATION = 280;
+      const startTime = performance.now();
+      let lastW = fromW;
+      const tick = () => {
+        if (run.cancelled) return;
+        const elapsed = performance.now() - startTime;
+        const t = Math.min(1, elapsed / DURATION);
+        const e = 1 - Math.pow(1 - t, 3);
+        const w = fromW + (toW - fromW) * e;
+        const x = fromX + (toX - fromX) * e;
+        if (t >= 1 || Math.abs(w - lastW) * scale >= 1) {
+          lastW = w;
+          void Promise.all([
+            win.setPosition(new LogicalPosition(x, pos.y / scale)),
+            win.setSize(new LogicalSize(w, currentLogicalH)),
+          ]).catch(() => {});
+        }
+        if (t < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    } catch {}
+  }, []);
+
   useEffect(() => {
     const effectiveSidebar = sidebarOpen ? sidebarWidth : 0;
     const minWidth = EDITOR_MIN_WIDTH + effectiveSidebar;
-    let cancelled = false;
-    (async () => {
-      try {
-        const win = getCurrentWindow();
-        await win.setMinSize(new LogicalSize(minWidth, WINDOW_MIN_HEIGHT));
-        if (cancelled) return;
-        const scale = await win.scaleFactor();
-        const size = await win.innerSize();
-        const currentLogicalW = size.width / scale;
-        const currentLogicalH = size.height / scale;
-        if (currentLogicalW >= minWidth - 1) return;
+    minWidthRef.current = minWidth;
+    void ensureWindowFitsSidebar(minWidth);
+    return () => { if (sizingRunRef.current) sizingRunRef.current.cancelled = true; };
+  }, [sidebarOpen, sidebarWidth, ensureWindowFitsSidebar]);
 
-        const pos = await win.outerPosition();
-        if (cancelled) return;
-        const fromX = pos.x / scale;
-        const fromW = currentLogicalW;
-        const toW = minWidth;
-        const toX = fromX;
-
-        const DURATION = 280;
-        const startTime = performance.now();
-        let lastW = fromW;
-        const tick = () => {
-          if (cancelled) return;
-          const elapsed = performance.now() - startTime;
-          const t = Math.min(1, elapsed / DURATION);
-          const e = 1 - Math.pow(1 - t, 3);
-          const w = fromW + (toW - fromW) * e;
-          const x = fromX + (toX - fromX) * e;
-          if (t >= 1 || Math.abs(w - lastW) * scale >= 1) {
-            lastW = w;
-            void Promise.all([
-              win.setPosition(new LogicalPosition(x, pos.y / scale)),
-              win.setSize(new LogicalSize(w, currentLogicalH)),
-            ]).catch(() => {});
+  // When the window is restored from maximized (or fullscreen) we deferred the
+  // min-size update, so re-apply it now and grow the restored window to fit an
+  // open sidebar. Detect the transition by watching resize events.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    let prevMaximized = false;
+    const win = getCurrentWindow();
+    win.isMaximized().then((m) => { prevMaximized = m; }).catch(() => {});
+    win
+      .onResized(() => {
+        void (async () => {
+          const maximized = await win.isMaximized().catch(() => false);
+          const wasMaximized = prevMaximized;
+          prevMaximized = maximized;
+          if (wasMaximized && !maximized) {
+            void ensureWindowFitsSidebar(minWidthRef.current);
           }
-          if (t < 1) requestAnimationFrame(tick);
-        };
-        requestAnimationFrame(tick);
-      } catch {}
-    })();
-    return () => { cancelled = true; };
-  }, [sidebarOpen, sidebarWidth]);
+        })();
+      })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => { disposed = true; unlisten?.(); };
+  }, [ensureWindowFitsSidebar]);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [docSearchOpen, setDocSearchOpen] = useState(false);
