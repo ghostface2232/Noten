@@ -18,6 +18,60 @@ const HANDLE_SIZE = 10;
 const HANDLE_HIT = 32;
 const MIN_WIDTH = 60;
 
+// All image NodeViews of one editor share a single `transaction` subscription
+// instead of each registering its own. With N images, a per-NodeView listener
+// re-ran updateSelection N times on every keystroke even though only a
+// selection or readonly change can alter an image's outline. The shared handler
+// recomputes a tiny signature (node-selected position + readonly flag) and only
+// re-syncs the registered NodeViews when it actually changes — so plain typing,
+// which keeps a TextSelection, costs O(1) instead of O(images). The brute-force
+// "re-sync every image on any selection change" behaviour is preserved, which is
+// what covers PM's unreliable selectNode/deselectNode bookkeeping.
+interface ImageSelectionSync {
+  controllers: Set<() => void>;
+  handler: () => void;
+  lastSignature: string;
+}
+
+const imageSelectionSyncByEditor = new WeakMap<Editor, ImageSelectionSync>();
+
+function selectionSignature(editor: Editor): string {
+  const readonly = editor.storage.readonlyGuard?.readonly ? "1" : "0";
+  const { selection } = editor.state;
+  const nodePos = selection instanceof NodeSelection ? selection.from : -1;
+  return `${readonly}:${nodePos}`;
+}
+
+function registerImageSelectionSync(editor: Editor, updateSelection: () => void): () => void {
+  let sync = imageSelectionSyncByEditor.get(editor);
+  if (!sync) {
+    const state: ImageSelectionSync = {
+      controllers: new Set(),
+      lastSignature: selectionSignature(editor),
+      handler: () => {},
+    };
+    state.handler = () => {
+      const next = selectionSignature(editor);
+      if (next === state.lastSignature) return;
+      state.lastSignature = next;
+      state.controllers.forEach((fn) => fn());
+    };
+    editor.on("transaction", state.handler);
+    imageSelectionSyncByEditor.set(editor, state);
+    sync = state;
+  }
+  sync.controllers.add(updateSelection);
+  return () => {
+    const current = imageSelectionSyncByEditor.get(editor);
+    if (!current) return;
+    current.controllers.delete(updateSelection);
+    if (current.controllers.size === 0) {
+      editor.off("transaction", current.handler);
+      imageSelectionSyncByEditor.delete(editor);
+    }
+  };
+}
+
 function showContextMenu(
   pos: { x: number; y: number },
   editor: Editor,
@@ -305,12 +359,11 @@ export function createImageNodeView(editor: Editor) {
       showContextMenu({ x: e.clientX, y: e.clientY }, editor, pos, currentSrc, getContext(), locale);
     });
 
-    editor.on("selectionUpdate", updateSelection);
-    // Also re-sync on every transaction so outline state never lags behind PM state,
-    // even when PM's selection-sync bookkeeping (lastSelectedViewDesc) skips firing
-    // selectNode/deselectNode (e.g. on rapid select → deselect → re-select sequences).
-    editor.on("transaction", updateSelection);
-    syncDragState();
+    // Selection re-sync is driven by a single shared transaction subscription
+    // (see registerImageSelectionSync) rather than a per-image listener. Run once
+    // now so a session-restored NodeSelection paints its outline immediately.
+    const unregisterSelectionSync = registerImageSelectionSync(editor, updateSelection);
+    updateSelection();
 
     return {
       dom,
@@ -334,8 +387,7 @@ export function createImageNodeView(editor: Editor) {
       deselectNode: () => { dom.style.outline = "none"; hideHandles(); },
       destroy: () => {
         imageSourceToken += 1;
-        editor.off("selectionUpdate", updateSelection);
-        editor.off("transaction", updateSelection);
+        unregisterSelectionSync();
         activeDragCleanup?.();
       },
     };

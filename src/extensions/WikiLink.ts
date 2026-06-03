@@ -35,10 +35,31 @@ function normalizeTitle(value: string): string {
   return value.normalize("NFC").trim().toLowerCase();
 }
 
+// Normalized-title lookup, cached per `docs` array reference. App.tsx swaps
+// storage.docs to a fresh array whenever the note list changes (App.tsx:398),
+// so keying the cache on array identity rebuilds exactly when the data changes.
+// This keeps findDocByTitle O(1): without it, decoration rebuilds re-normalized
+// every note's title for every wiki link on every keystroke — O(links × notes).
+const titleMapCache = new WeakMap<NoteDoc[], Map<string, NoteDoc>>();
+
+function getTitleMap(docs: NoteDoc[]): Map<string, NoteDoc> {
+  let map = titleMapCache.get(docs);
+  if (!map) {
+    map = new Map();
+    // First occurrence wins, matching the previous Array.find() semantics.
+    for (const doc of docs) {
+      const key = normalizeTitle(doc.fileName);
+      if (key && !map.has(key)) map.set(key, doc);
+    }
+    titleMapCache.set(docs, map);
+  }
+  return map;
+}
+
 export function findDocByTitle(docs: NoteDoc[], title: string): NoteDoc | null {
   const needle = normalizeTitle(title);
   if (!needle) return null;
-  return docs.find((doc) => normalizeTitle(doc.fileName) === needle) ?? null;
+  return getTitleMap(docs).get(needle) ?? null;
 }
 
 function getWikiLinkMarkTarget(mark: ProseMirrorMark): string {
