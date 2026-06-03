@@ -32,6 +32,7 @@ import { useHoverDismissTimer } from "../hooks/useHoverDismissTimer";
 import { HOVER_SAFE_ZONE_PX, isPointInExpandedRect } from "../utils/popoverGeometry";
 import { CopySelectRegular, RenameRegular } from "@fluentui/react-icons";
 import { common, createLowlight } from "lowlight";
+import { createFastMarked } from "../extensions/fastMarkdownLexer";
 import MermaidCodeBlock from "../extensions/MermaidCodeBlock";
 import SlashCommands from "../extensions/SlashCommands";
 import ImageDrop from "../extensions/ImageDrop";
@@ -607,6 +608,12 @@ const ImageFocusGuard = Extension.create({
 
 const lowlight = createLowlight(common);
 
+// Parse markdown through a marked instance with a linear-time inline lexer.
+// Stock marked is O(n²) on a single large block dense with code spans, links,
+// HTML, or escapes, which freezes the app when opening very large notes kept on
+// one line / one paragraph. See fastMarkdownLexer.ts.
+const fastMarked = createFastMarked();
+
 export interface TiptapEditorHandle {
   getMarkdown: () => string;
   setContent: (markdown: string) => void;
@@ -791,7 +798,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     const editor = useEditor({
       extensions: [
         StarterKit.configure({ codeBlock: false, underline: false, link: false }),
-        Markdown,
+        Markdown.configure({ marked: fastMarked }),
         Link.configure({
           autolink: true,
           linkOnPaste: true,
