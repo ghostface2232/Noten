@@ -21,7 +21,6 @@ import {
   CheckmarkCircle20Regular,
   DocumentAdd20Regular,
   WindowNew20Regular,
-  Save20Regular,
   ArrowDownload20Regular,
   Code20Regular,
   Search20Regular,
@@ -538,7 +537,6 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                 {([
                   ["settings.shortcut.newFile", "Ctrl+N", DocumentAdd20Regular],
                   ["settings.shortcut.newWindow", "Ctrl+Shift+N", WindowNew20Regular],
-                  ["settings.shortcut.save", "Ctrl+S", Save20Regular],
                   ["settings.shortcut.import", "Ctrl+O", ArrowDownload20Regular],
                   ["settings.shortcut.showChrome", "Click / Scroll", Code20Regular],
                   ["settings.shortcut.focusEditor", "Tab", KeyboardTab20Regular],

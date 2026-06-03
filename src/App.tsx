@@ -720,7 +720,6 @@ function App() {
     setDocGoToLineOpen,
     onNewNote: fs.newNote,
     onImportFile: fs.importFile,
-    onSaveFile: fs.saveFile,
   });
 
   useEffect(() => {
