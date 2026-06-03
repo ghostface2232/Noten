@@ -30,6 +30,7 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { usePopoverAnchor, type PopoverReference } from "../hooks/usePopoverAnchor";
 import { useHoverDismissTimer } from "../hooks/useHoverDismissTimer";
 import { HOVER_SAFE_ZONE_PX, isPointInExpandedRect } from "../utils/popoverGeometry";
+import { sliceToPlainText } from "../utils/clipboardText";
 import { CopySelectRegular, RenameRegular } from "@fluentui/react-icons";
 import { common, createLowlight } from "lowlight";
 import { createFastMarked } from "../extensions/fastMarkdownLexer";
@@ -324,6 +325,11 @@ const MarkdownPaste = Extension.create({
       new Plugin({
         key: new PluginKey("markdownPaste"),
         props: {
+          // Override only the text/plain clipboard channel: join block
+          // boundaries with a single "\n" (and hard breaks with "\n") so the
+          // pasted line count matches what's on screen. text/html is left to
+          // ProseMirror's default serializer, so rich targets keep formatting.
+          clipboardTextSerializer: (slice) => sliceToPlainText(slice),
           handlePaste(view, event) {
             const clipboard = event.clipboardData;
             const hasFiles = Array.from(clipboard?.items ?? []).some((item) => item.kind === "file");
