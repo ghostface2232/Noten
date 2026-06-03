@@ -1,6 +1,6 @@
 # Noten
 
-Windows-native Markdown editor built with Tauri v2, React, and TypeScript.
+Windows-native Markdown note app built with Tauri v2, React, and TypeScript.
 
 ## Core Architecture
 
