@@ -8,6 +8,14 @@ export const SIDE_PADDING = "6px";
 const SCROLLBAR_GUTTER = "6px";
 const LIST_SIDE_PADDING = "2px";
 const NONSCROLL_SIDE_PADDING = `calc(${LIST_SIDE_PADDING} + ${SCROLLBAR_GUTTER})`;
+// A small extra inset on the editor-facing right edge so the list (pills,
+// trailing timestamps/badges/more-buttons) reads a touch further from the
+// editor pane. Applied as container padding on `.sidebar` so every child —
+// scrolling lists, the fixed new-note area, and the footer — shifts left
+// together, keeping their existing left alignment and internal gutter math
+// intact. The absolutely-positioned top buttons in App.styles.ts are nudged
+// by the same amount to stay level with the pills.
+const LIST_RIGHT_GAP = "4px";
 
 export const useStyles = makeStyles({
   sidebar: {
@@ -18,6 +26,9 @@ export const useStyles = makeStyles({
     backgroundColor: "transparent",
     flexShrink: 0,
     userSelect: "none",
+    // border-box keeps the sidebar's overall width pinned to the slot while
+    // this padding pushes all content in from the editor-facing edge.
+    paddingRight: LIST_RIGHT_GAP,
     "--update-dot-color": tokens.colorBrandBackground,
   },
   sidebarFixed: {
