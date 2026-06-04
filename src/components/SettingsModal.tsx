@@ -656,6 +656,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     )}
                   </div>
 
+                  {!updateAvailable && (
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
                     <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.3</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
@@ -682,6 +683,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                       )}
                     </div>
                   </div>
+                  )}
 
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
                     {updaterState.status === "checking" && (
@@ -707,14 +709,14 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                         <span style={{ fontSize: "13px", fontWeight: 500 }}>
                           {i("about.available")}: v{updaterState.version}
                         </span>
+                        <Button appearance="primary" size="medium" onClick={onInstallUpdate} style={{ borderRadius: "6px" }}>
+                          {i("about.install")}
+                        </Button>
                         {updaterState.body && (
                           <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, whiteSpace: "pre-wrap", maxHeight: "120px", overflow: "auto" }}>
                             {updaterState.body}
                           </div>
                         )}
-                        <Button appearance="primary" size="medium" onClick={onInstallUpdate} style={{ borderRadius: "6px" }}>
-                          {i("about.install")}
-                        </Button>
                       </div>
                     )}
 
