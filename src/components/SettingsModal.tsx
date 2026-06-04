@@ -658,27 +658,29 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
 
                   {!updateAvailable && (
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.3</div>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.4</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 매우 큰 단일 블록 노트를 열 때 수 분간 멈추던 현상 수정<br />
-                          · 타이핑 중 위키 링크·인라인 이미지·스크롤 처리 비용을 줄여 편집 반응성 개선<br />
-                          · Mermaid 소스를 내보낸 SVG에 보존해, 다시 열면 편집 가능한 코드 블록으로 복원<br />
-                          · Mermaid 내보내기 개선: 앱 폰트 임베드, CJK PNG 빈 텍스트 및 간트 프레이밍 수정<br />
-                          · 찾기 하이라이트가 문서 맨 아래에서 사라지던 문제 수정<br />
-                          · 설정 단축키 탭에 누락됐던 단축키(Tab, 실행 취소/다시 실행, 노트 고정) 표시<br />
-                          · 사이드바 여백·하단 페이드 등 세부 다듬기 및 의존성 보안 패치
+                          · 창이 비활성화되거나 숨겨질 때 자동 저장을 강제로 반영해 데이터 유실 방지<br />
+                          · 외형만 바뀐 본문에서 잘못된 저장 충돌 경고가 뜨던 문제 수정<br />
+                          · 마크다운 붙여넣기 감지를 점수 기반으로 개선해 오탐 감소<br />
+                          · 복사한 텍스트의 블록 사이를 빈 줄 없이 단일 개행으로 정리<br />
+                          · 문서 맨 앞에 갇힌 코드 블록에서 커서가 빠져나올 수 있도록 수정<br />
+                          · 슬래시 명령 별칭 확대 및 사이드바 토글 시 창 최대화 상태 유지<br />
+                          · 넓은 창에서 본문 열 너비 상한 적용, 업데이트 설치 버튼을 릴리스 노트 위로 이동<br />
+                          · 중복되던 저장 단축키(Ctrl+S) 제거
                         </>
                       ) : (
                         <>
-                          · Fixed: opening very large single-block notes no longer freezes for minutes<br />
-                          · Improved: lower editing cost while typing (wiki links, inline images, scrolling)<br />
-                          · Added: Mermaid source is preserved in exported SVGs and restored as an editable code block on re-open<br />
-                          · Fixed: Mermaid exports — embedded app fonts, CJK text in PNG, and gantt framing<br />
-                          · Fixed: find highlights no longer vanish at the document bottom<br />
-                          · Added: settings shortcuts tab now lists previously missing shortcuts (Tab, undo/redo, pin note)<br />
-                          · Polish: sidebar spacing and bottom-fade refinements, plus dependency security patches
+                          · Fixed: autosave is now flushed when the window is blurred or hidden, preventing data loss<br />
+                          · Fixed: cosmetic-only body changes no longer trigger false save-conflict warnings<br />
+                          · Improved: markdown paste detection is now score-based, reducing false positives<br />
+                          · Improved: copied text uses single newlines between blocks instead of blank lines<br />
+                          · Fixed: the cursor can now escape a code block trapped at the start of the document<br />
+                          · Improved: broader slash-command aliases, and the window stays maximized when toggling the sidebar<br />
+                          · Polish: editor content width is capped on wide windows, and the update install button moved above the release notes<br />
+                          · Removed: the redundant Save now (Ctrl+S) shortcut
                         </>
                       )}
                     </div>
