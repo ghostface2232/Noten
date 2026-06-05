@@ -254,11 +254,25 @@ export function fastLex(src: string, options?: any): Token[] {
 // `new markedInstance.Lexer().lex(...)` and lexes nested content via
 // `markedInstance.lexer(...)`, both of which we route through FastLexer. Typed
 // as `typeof marked` because that is the shape the extension's option expects.
+//
+// The top-level parse path constructs `new markedInstance.Lexer()` with NO
+// options, so the bound Lexer must fall back to `instance.defaults` itself.
+// Otherwise it lexes with marked's bare global defaults instead of this
+// instance's configuration — which silently disables GFM extras like task
+// lists, so `- [ ] x` degrades to a plain bullet whose `listItem` ends up with
+// raw text instead of a wrapping paragraph (a schema-invalid node that throws
+// the moment the user edits it). The nested `lexer(...)` path already forwards
+// `instance.defaults`; binding the class keeps both paths in lockstep.
 export function createFastMarked(): typeof marked {
   const instance = new Marked();
-  (instance as any).Lexer = FastLexer;
+  class BoundFastLexer extends FastLexer {
+    constructor(options?: any) {
+      super(options ?? (instance as any).defaults);
+    }
+  }
+  (instance as any).Lexer = BoundFastLexer;
   (instance as any).lexer = (src: string, options?: any) =>
-    fastLex(src, options ?? (instance as any).defaults);
+    new BoundFastLexer(options ?? (instance as any).defaults).lex(src);
   return instance as unknown as typeof marked;
 }
 

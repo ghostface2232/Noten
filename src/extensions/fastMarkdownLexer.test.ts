@@ -3,6 +3,8 @@ import { marked, Lexer } from "marked";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
+import TaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
 import { createFastMarked, fastLex, FastLexer } from "./fastMarkdownLexer";
 
 // FastLexer must produce byte-identical tokens to stock marked — it only
@@ -150,9 +152,13 @@ describe("FastLexer performance", () => {
 });
 
 describe("createFastMarked", () => {
-  it("exposes FastLexer as the instance Lexer and routes lexer()", () => {
+  it("exposes a FastLexer-derived instance Lexer and routes lexer()", () => {
     const instance = createFastMarked();
-    expect((instance as unknown as { Lexer: unknown }).Lexer).toBe(FastLexer);
+    // The instance Lexer is a FastLexer subclass bound to instance.defaults, so
+    // the manager's no-arg `new markedInstance.Lexer()` inherits this instance's
+    // configuration (GFM task lists etc.) instead of marked's bare globals.
+    const LexerClass = (instance as unknown as { Lexer: new () => unknown }).Lexer;
+    expect(new LexerClass()).toBeInstanceOf(FastLexer);
     // The injected instance must lex equivalently to the stock singleton.
     const md = "**b** `c` [l](http://x.io) \\* <b>t</b>";
     const viaInstance = JSON.parse(JSON.stringify(instance.lexer(md)));
@@ -170,7 +176,12 @@ describe("Markdown extension integration", () => {
 
   function parseToDoc(md: string, marked?: ReturnType<typeof createFastMarked>) {
     const editor = new Editor({
-      extensions: [StarterKit, marked ? Markdown.configure({ marked }) : Markdown],
+      extensions: [
+        StarterKit,
+        marked ? Markdown.configure({ marked }) : Markdown,
+        TaskList,
+        TaskItem.configure({ nested: true }),
+      ],
       content: md,
       contentType: "markdown",
     } as ConstructorParameters<typeof Editor>[0]);
@@ -187,6 +198,12 @@ describe("Markdown extension integration", () => {
       "```\ncode block\n```\n\ntext after",
       "Para one with a `span` and a [ref][r].\n\n[r]: http://example.com",
       "Inline html <strong>x</strong> and an escape \\# here.",
+      // Task lists must round-trip to a `taskList` node, not degrade to a
+      // `bulletList` with raw text in its `listItem` (schema-invalid, crashes
+      // on the first edit). Regression guard for the bound-Lexer fix.
+      "- [ ] todo\n- [x] done",
+      "- [ ] parent\n  - [ ] nested child",
+      "- [ ] first line\n  continuation line",
     ];
     for (const md of cases) {
       expect(parseToDoc(md, fast)).toEqual(parseToDoc(md));
