@@ -658,29 +658,15 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
 
                   {!updateAvailable && (
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.4</div>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.5</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 창이 비활성화되거나 숨겨질 때 자동 저장을 강제로 반영해 데이터 유실 방지<br />
-                          · 외형만 바뀐 본문에서 잘못된 저장 충돌 경고가 뜨던 문제 수정<br />
-                          · 마크다운 붙여넣기 감지를 점수 기반으로 개선해 오탐 감소<br />
-                          · 복사한 텍스트의 블록 사이를 빈 줄 없이 단일 개행으로 정리<br />
-                          · 문서 맨 앞에 갇힌 코드 블록에서 커서가 빠져나올 수 있도록 수정<br />
-                          · 슬래시 명령 별칭 확대 및 사이드바 토글 시 창 최대화 상태 유지<br />
-                          · 넓은 창에서 본문 열 너비 상한 적용, 업데이트 설치 버튼을 릴리스 노트 위로 이동<br />
-                          · 중복되던 저장 단축키(Ctrl+S) 제거
+                          · 체크박스 목록이 일반 목록으로 바뀌고 목록 안 텍스트가 편집되지 않던 문제 수정
                         </>
                       ) : (
                         <>
-                          · Fixed: autosave is now flushed when the window is blurred or hidden, preventing data loss<br />
-                          · Fixed: cosmetic-only body changes no longer trigger false save-conflict warnings<br />
-                          · Improved: markdown paste detection is now score-based, reducing false positives<br />
-                          · Improved: copied text uses single newlines between blocks instead of blank lines<br />
-                          · Fixed: the cursor can now escape a code block trapped at the start of the document<br />
-                          · Improved: broader slash-command aliases, and the window stays maximized when toggling the sidebar<br />
-                          · Polish: editor content width is capped on wide windows, and the update install button moved above the release notes<br />
-                          · Removed: the redundant Save now (Ctrl+S) shortcut
+                          · Fixed: checkbox lists no longer turn into plain lists, and text inside list items is editable again
                         </>
                       )}
                     </div>
