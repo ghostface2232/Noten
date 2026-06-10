@@ -91,6 +91,10 @@ vi.mock("./ownWriteTracker", () => ({
   markOwnWrite: vi.fn(),
 }));
 
+vi.mock("../utils/conflictBackup", () => ({
+  setKnownDiskContent: vi.fn(),
+}));
+
 vi.mock("../utils/metadataIO", () => ({
   removeMeta: vi.fn(async () => {}),
   readMeta: vi.fn(async () => null),
@@ -120,6 +124,7 @@ import * as fsPlugin from "@tauri-apps/plugin-fs";
 import * as crashLogModule from "../utils/crashLog";
 import * as ownWriteModule from "./ownWriteTracker";
 import * as metadataIOModule from "../utils/metadataIO";
+import * as conflictBackupModule from "../utils/conflictBackup";
 
 const writeMock = fsPlugin.writeTextFile as ReturnType<typeof vi.fn>;
 const readMock = fsPlugin.readTextFile as ReturnType<typeof vi.fn>;
@@ -774,6 +779,14 @@ describe("useFileSystem — renameNote partial-failure", () => {
     const linkerOk = makeDoc("linker-ok", { content: "see [[Old]]" });
     const linkerFail = makeDoc("linker-fail", { content: "ref [[Old]]" });
     refs.writeFaultByPath.set("/notes/linker-fail.md", new Error("EACCES"));
+    // Non-active rewrites are computed from the on-disk body, not entry.content.
+    readMock.mockImplementation(async (path: string) => {
+      const fault = refs.readFaultByPath.get(path);
+      if (fault) throw fault;
+      if (path === "/notes/linker-ok.md") return "see [[Old]]";
+      if (path === "/notes/linker-fail.md") return "ref [[Old]]";
+      return "";
+    });
 
     const { result, setDocs } = renderFs({
       docs: [target, linkerOk, linkerFail],
@@ -827,6 +840,149 @@ describe("useFileSystem — renameNote partial-failure", () => {
     // would silently lose the user's content. Both side effects must be skipped.
     expect(openDocument).not.toHaveBeenCalled();
     expect(setIsDirty).not.toHaveBeenCalledWith(false);
+  });
+});
+
+// renameNote — autosave coordination: every doc we may rewrite gets its
+// pending/in-flight save flushed BEFORE the rewrite write, so a late doSave
+// can never land after the rewrite and revert it on disk.
+
+describe("useFileSystem — renameNote autosave coordination", () => {
+  it("flushes back-link docs before rewriting and skips docs whose flush failed", async () => {
+    const target = makeDoc("target", { fileName: "Old", customName: true });
+    const linkerA = makeDoc("linker-a", { content: "see [[Old]]" });
+    const linkerB = makeDoc("linker-b", { content: "ref [[Old]]" });
+    readMock.mockImplementation(async (path: string) => {
+      const fault = refs.readFaultByPath.get(path);
+      if (fault) throw fault;
+      if (path === "/notes/linker-a.md") return "see [[Old]]";
+      if (path === "/notes/linker-b.md") return "ref [[Old]]";
+      return "";
+    });
+
+    const flushDocSave = vi.fn(async (docId: string) => docId !== "linker-b");
+    const { result, setDocs } = renderFs({
+      docs: [target, linkerA, linkerB],
+      flushDocSave,
+    });
+
+    await act(async () => {
+      await result.current.renameNote(0, "New");
+    });
+
+    expect(flushDocSave).toHaveBeenCalledWith("linker-a");
+    expect(flushDocSave).toHaveBeenCalledWith("linker-b");
+
+    // Every flush happens before the first rewrite write.
+    const rewriteIdx = writeMock.mock.calls.findIndex((c) => c[0] === "/notes/linker-a.md");
+    expect(rewriteIdx).toBeGreaterThanOrEqual(0);
+    const rewriteOrder = writeMock.mock.invocationCallOrder[rewriteIdx];
+    expect(Math.max(...flushDocSave.mock.invocationCallOrder)).toBeLessThan(rewriteOrder);
+
+    // linker-b's flush failed: its unsaved content could not land, so neither
+    // its file nor its in-memory body is rewritten.
+    expect(writeMock.mock.calls.some((c) => c[0] === "/notes/linker-b.md")).toBe(false);
+    const lastDocs = setDocs.mock.calls[setDocs.mock.calls.length - 1][0] as NoteDoc[];
+    expect(lastDocs.find((d) => d.id === "linker-a")!.content).toBe("see [[New]]");
+    expect(lastDocs.find((d) => d.id === "linker-b")!.content).toBe("ref [[Old]]");
+  });
+
+  it("rewrites the on-disk body when it is newer than the in-memory copy", async () => {
+    const target = makeDoc("target", { fileName: "Old", customName: true });
+    // entry.content lags a background save that already landed on disk.
+    const linker = makeDoc("linker", { content: "see [[Old]]" });
+    readMock.mockImplementation(async (path: string) => {
+      const fault = refs.readFaultByPath.get(path);
+      if (fault) throw fault;
+      return path === "/notes/linker.md" ? "edited [[Old]] tail" : "";
+    });
+
+    const { result, setDocs } = renderFs({ docs: [target, linker] });
+
+    await act(async () => {
+      await result.current.renameNote(0, "New");
+    });
+
+    const rewriteCall = writeMock.mock.calls.find((c) => c[0] === "/notes/linker.md");
+    expect(rewriteCall).toBeDefined();
+    expect(rewriteCall![1]).toBe("edited [[New]] tail");
+
+    // The disk-derived rewrite also refreshes the lagging in-memory copy and
+    // the conflict-backup baseline.
+    const lastDocs = setDocs.mock.calls[setDocs.mock.calls.length - 1][0] as NoteDoc[];
+    expect(lastDocs.find((d) => d.id === "linker")!.content).toBe("edited [[New]] tail");
+    expect(conflictBackupModule.setKnownDiskContent).toHaveBeenCalledWith(
+      "/notes/linker.md",
+      "edited [[New]] tail",
+    );
+  });
+
+  it("skips a back-link doc whose body cannot be read back after the flush", async () => {
+    const target = makeDoc("target", { fileName: "Old", customName: true });
+    const linker = makeDoc("linker", { content: "see [[Old]]" });
+    refs.readFaultByPath.set("/notes/linker.md", new Error("EBUSY: placeholder hydration"));
+
+    const { result, setDocs } = renderFs({ docs: [target, linker] });
+
+    await act(async () => {
+      await result.current.renameNote(0, "New");
+    });
+
+    // Rewriting from the stale in-memory copy could regress the doc's latest
+    // save, so the doc must be left untouched on disk AND in memory.
+    expect(writeMock.mock.calls.some((c) => c[0] === "/notes/linker.md")).toBe(false);
+    const lastDocs = setDocs.mock.calls[setDocs.mock.calls.length - 1][0] as NoteDoc[];
+    expect(lastDocs.find((d) => d.id === "linker")!.content).toBe("see [[Old]]");
+    // The rename itself still commits.
+    expect(lastDocs.find((d) => d.id === "target")!.fileName).toBe("New");
+  });
+});
+
+// createNoteWithTitle — wiki-link note creation must route through the same
+// atomic provisioning path as every other managed-note body write.
+
+describe("useFileSystem — createNoteWithTitle provisioning", () => {
+  it("provisions the empty note atomically with markOwnWrite before the write", async () => {
+    const { result, setDocs } = renderFs();
+
+    let id: string | null = null;
+    await act(async () => {
+      id = await result.current.createNoteWithTitle("Linked");
+    });
+
+    expect(id).toBe("uuid-1");
+    const writeIdx = writeMock.mock.calls.findIndex((c) => c[0] === "/notes/uuid-1.md");
+    expect(writeIdx).toBeGreaterThanOrEqual(0);
+    expect(writeMock.mock.calls[writeIdx][1]).toBe("");
+
+    const markIdx = markOwnWriteMock.mock.calls.findIndex((c) => c[0] === "/notes/uuid-1.md");
+    expect(markIdx).toBeGreaterThanOrEqual(0);
+    expect(markOwnWriteMock.mock.invocationCallOrder[markIdx])
+      .toBeLessThan(writeMock.mock.invocationCallOrder[writeIdx]);
+
+    const lastDocs = setDocs.mock.calls[setDocs.mock.calls.length - 1][0] as NoteDoc[];
+    expect(lastDocs.find((d) => d.id === "uuid-1")!.fileName).toBe("Linked");
+  });
+
+  it("returns null and logs SAVE_FAILED when the provisioning write fails", async () => {
+    refs.writeShouldThrow = new Error("ENOSPC");
+    const { result, setDocs } = renderFs();
+
+    let id: string | null = "sentinel";
+    await act(async () => {
+      id = await result.current.createNoteWithTitle("Linked");
+    });
+
+    expect(id).toBeNull();
+    expect(setDocs).not.toHaveBeenCalled();
+    const saveFailed = logMock.mock.calls.find(
+      (c) => (c[0] as NotenError).code === "SAVE_FAILED",
+    );
+    expect(saveFailed).toBeDefined();
+    expect((saveFailed![0] as NotenError).context).toMatchObject({
+      stage: "createNoteWithTitle",
+      noteId: "uuid-1",
+    });
   });
 });
 

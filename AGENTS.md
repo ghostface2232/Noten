@@ -56,6 +56,7 @@ Noten's privacy posture is "your notes never leave the disk," and it should stay
 - Auto-save uses `activeDocRef` (sync ref) to track the active document, not React state's `activeIndex`, to prevent wrong-doc writes after rapid switching.
 - `notifyActiveDoc(id, filePath)` must be called in every code path that switches the active document (switchDocument, newNote, importFiles, duplicateNote, restoreNote). `deleteNote` does not call it directly because it relies on the subsequent active-index change to flow through normal state.
 - `cancelDocSave(docId)` cancels pending autosave timers for a specific doc. Called in deleteNote to prevent orphan writes.
+- `renameNote` flushes each back-link doc's pending/in-flight save (`flushDocSave`) before rewriting `[[OldTitle]]` links, then computes non-active rewrites from the on-disk body (the in-memory copy can lag a just-landed background save). Docs whose flush or read-back fails are skipped entirely so memory never diverges from disk.
 - `hasPendingChangesRef` (sync ref) tracks whether `scheduleAutoSave` was called, used by `flushAutoSave` to skip saving view-only documents.
 - `onCloseRequested` handler in App.tsx awaits `flushAutoSave` before window close.
 - Empty notes (no content, no customName) are auto-deleted when leaving via `pruneEmptyCurrentDoc`. Applied in switchDocument, newNote, importFiles, duplicateNote, and restoreNote. Pruning removes both the `.md` body and its `.meta/<noteId>.json` sidecar so no orphan metadata is left behind.

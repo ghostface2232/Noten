@@ -24,6 +24,7 @@ import { removeNoteAssetDir } from "../utils/imageAssetUtils";
 import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsUpdated, emitNoteColorUpdated, emitNotePinnedUpdated, emitTrashUpdated } from "./useWindowSync";
 import type { NoteColorId } from "../utils/noteColors";
 import { markOwnWrite } from "./ownWriteTracker";
+import { setKnownDiskContent } from "../utils/conflictBackup";
 import { removeMeta as removeMetaFile, readMeta, writeMeta, type NoteMeta } from "../utils/metadataIO";
 import { getMachineIdCached } from "../utils/machineId";
 import { logNotenError } from "../utils/crashLog";
@@ -116,6 +117,10 @@ async function rewriteNoteFile(
   try {
     markOwnWrite(filePath, content);
     await atomicWriteText(tauriFileSystem, filePath, content);
+    // Keep the conflict-backup baseline in sync, or the next autosave of this
+    // doc would treat our own rewrite as an unseen remote write and back it
+    // up to .conflicts.
+    setKnownDiskContent(filePath, content);
     return true;
   } catch (error) {
     void logNotenError(new NotenError(
@@ -582,19 +587,8 @@ export function useFileSystem(
 
     const id = crypto.randomUUID();
     const timestamp = Date.now();
-    let filePath = "";
-    try {
-      const notesDir = await getNotesDir();
-      await mkdir(notesDir, { recursive: true }).catch(() => {});
-      filePath = `${notesDir}/${id}.md`;
-      markOwnWrite(filePath, "");
-      await writeTextFile(filePath, "");
-    } catch (error) {
-      if (import.meta.env.DEV) {
-        console.warn("Failed to create note for wiki link:", error);
-      }
-      return null;
-    }
+    const { filePath, ok } = await provisionNoteFile(id, "", "createNoteWithTitle", { title });
+    if (!ok) return null;
 
     const newDoc: NoteDoc = {
       id,
@@ -914,21 +908,54 @@ export function useFileSystem(
     const replacement = `[[${trimmed}]]`;
     const now = Date.now();
 
+    // Settle the autosave machine for every doc we may rewrite BEFORE touching
+    // disk: an in-flight or stranded doSave landing after the rewrite would
+    // overwrite it with pre-rename content while memory keeps the rewritten
+    // body (isDirty false), silently splitting memory from disk. For the
+    // active doc, captureAndQueueSave also disarms the debounce timer so it
+    // can't fire mid-rename with the pre-rewrite editor content.
+    const candidates = liveDocs.filter(
+      (entry) => entry.id !== doc.id && entry.content.includes("[["),
+    );
+    const flushFailed = new Set<string>();
+    for (const entry of candidates) {
+      if (entry.id === activeDocId) captureAndQueueSaveRef?.current?.();
+      const flushed = await flushDocSaveRef?.current?.(entry.id);
+      if (flushed === false) flushFailed.add(entry.id);
+    }
+
     // Compute proposed rewrites without mutating memory yet; we only commit a
     // rewrite to the in-memory doc once its disk write lands, so memory stays
     // in sync with disk if a write fails.
     interface ProposedRewrite { docId: string; updated: string; filePath: string | null; isActive: boolean; }
     const proposed: ProposedRewrite[] = [];
-    for (const entry of liveDocs) {
-      if (entry.id === doc.id) continue;
-      if (!entry.content.includes("[[")) continue;
-      const updated = entry.content.replace(rewritePattern, replacement);
-      if (updated === entry.content) continue;
+    for (const entry of candidates) {
+      // A failed flush means this doc has unsaved content we could not land;
+      // rewriting its file now would be undone by the close-time retry of the
+      // stranded snapshot. Leave both disk and memory untouched.
+      if (flushFailed.has(entry.id)) continue;
+      const isActive = entry.id === activeDocId;
+      // The active doc's truth is the live editor (already folded into
+      // entry.content by getLiveDocsSnapshot). For background docs the just-
+      // flushed save can be newer than entry.content (React hasn't committed
+      // doSave's setDocs yet), so rewrite what is actually on disk. If the
+      // body can't be read back, skip the doc — rewriting from the stale
+      // in-memory copy could regress its latest save.
+      let base = entry.content;
+      if (!isActive && entry.filePath) {
+        try {
+          base = await readTextFile(entry.filePath);
+        } catch {
+          continue;
+        }
+      }
+      const updated = base.replace(rewritePattern, replacement);
+      if (updated === base) continue;
       proposed.push({
         docId: entry.id,
         updated,
         filePath: entry.filePath || null,
-        isActive: entry.id === activeDocId,
+        isActive,
       });
     }
 
@@ -991,7 +1018,7 @@ export function useFileSystem(
 
     sortAndPersistDocs(nextDocs, doc.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
     emitDocRenamed(doc.id, doc.filePath, doc.filePath, trimmed);
-  }, [getLiveDocsSnapshot, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
+  }, [captureAndQueueSaveRef, flushDocSaveRef, getLiveDocsSnapshot, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
 
   const toggleNotePinned = useCallback((index: number) => {
     const doc = docsRef.current[index];
