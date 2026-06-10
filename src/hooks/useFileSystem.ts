@@ -24,7 +24,8 @@ import { removeNoteAssetDir } from "../utils/imageAssetUtils";
 import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsUpdated, emitNoteColorUpdated, emitNotePinnedUpdated, emitTrashUpdated } from "./useWindowSync";
 import type { NoteColorId } from "../utils/noteColors";
 import { markOwnWrite } from "./ownWriteTracker";
-import { removeMeta as removeMetaFile } from "../utils/metadataIO";
+import { removeMeta as removeMetaFile, readMeta, writeMeta, type NoteMeta } from "../utils/metadataIO";
+import { getMachineIdCached } from "../utils/machineId";
 import { logNotenError } from "../utils/crashLog";
 import { NotenError } from "../utils/notenError";
 import { t } from "../i18n";
@@ -166,7 +167,9 @@ export interface FileSystemActions {
   newNote: () => Promise<void>;
   createNoteWithTitle: (title: string) => Promise<string | null>;
   switchDocument: (index: number) => Promise<void>;
-  deleteNote: (index: number) => Promise<void>;
+  /** Both return the ids actually moved to .trash, so callers can offer undo. */
+  deleteNote: (index: number) => Promise<string[]>;
+  deleteNotes: (noteIds: string[]) => Promise<string[]>;
   duplicateNote: (index: number) => Promise<void>;
   exportNote: (index: number) => Promise<void>;
   renameNote: (index: number, newName: string) => void;
@@ -671,82 +674,117 @@ export function useFileSystem(
     void saveManifest(nextDocs, target.id, groupsRef.current).catch(() => {});
   }, [captureAndQueueSaveRef, getLiveDocsSnapshot, leaveCurrentDoc, markDocClean, setActiveIndex, setDocs, state, tiptapRef, pruneEmptyCurrentDoc]);
 
-  const deleteNote = useCallback(async (index: number) => {
-    const initialDoc = docsRef.current[index];
-    if (!initialDoc) return;
+  // Batch delete core. The per-note trash I/O runs sequentially, but the doc
+  // list / groups / trash list / active-doc handoff commit exactly ONCE at the
+  // end. Firing N independent deleteNote calls without awaiting (the old bulk
+  // path) let every call snapshot the same stale docs array in the same
+  // microtask; last-writer-wins setDocs then resurrected N-1 ghost rows whose
+  // files were already in .trash.
+  //
+  // Returns the ids that actually landed in the trash, so the caller can offer
+  // an undo. Notes whose autosave flush or trash copy failed are skipped (not
+  // deleted) rather than aborting the rest of the batch.
+  const deleteNotes = useCallback(async (noteIds: string[]): Promise<string[]> => {
+    const requested: NoteDoc[] = [];
+    const seen = new Set<string>();
+    for (const id of noteIds) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const doc = docsRef.current.find((d) => d.id === id);
+      if (doc) requested.push(doc);
+    }
+    if (requested.length === 0) return [];
 
-    const didFlushDeletedDoc = await flushDocSaveRef?.current?.(initialDoc.id);
-    if (didFlushDeletedDoc === false) return;
+    // Flush in-flight saves first; a failed flush means the on-disk body may
+    // be stale, so trashing it would lose the unsaved edits.
+    const flushed: NoteDoc[] = [];
+    for (const doc of requested) {
+      const didFlush = await flushDocSaveRef?.current?.(doc.id);
+      if (didFlush === false) continue;
+      flushed.push(doc);
+    }
+    if (flushed.length === 0) return [];
 
     const { docs: liveDocs, activeDocId, activeIndex: currentActiveIndex } = getLiveDocsSnapshot();
-    const deleteIndex = liveDocs.findIndex((entry) => entry.id === initialDoc.id);
-    if (deleteIndex < 0) return;
-    const doc = liveDocs[deleteIndex];
+    const targets = flushed
+      .map((d) => liveDocs.find((entry) => entry.id === d.id))
+      .filter((d): d is NoteDoc => d !== undefined);
+    if (targets.length === 0) return [];
 
-
-    // Cancel any pending autosave timer for this doc to prevent orphan writes after deletion
-    cancelDocSaveRef?.current?.(doc.id);
+    // Cancel pending autosave timers to prevent orphan writes after deletion.
+    for (const doc of targets) cancelDocSaveRef?.current?.(doc.id);
 
     // Flush pending auto-save so the on-disk file is up-to-date before trash copy
-    const didPersistCurrentDoc = deleteIndex === currentActiveIndex ? await leaveCurrentDoc() : false;
-    const baseDocs = deleteIndex === currentActiveIndex && didPersistCurrentDoc
+    const deletingActive = activeDocId !== null && targets.some((d) => d.id === activeDocId);
+    const didPersistCurrentDoc = deletingActive ? await leaveCurrentDoc() : false;
+    const baseDocs = deletingActive && didPersistCurrentDoc
       ? markDocClean(liveDocs, activeDocId)
       : liveDocs;
 
-    const group = getGroupForNote?.(doc.id) ?? null;
+    const trashedNotes: TrashedNote[] = [];
+    const deletedIds = new Set<string>();
+    for (const doc of targets) {
+      if (doc.filePath) {
+        try {
+          const trashDir = await ensureTrashDir();
+          const fileName = getFileBaseName(doc.filePath);
+          const trashPath = `${trashDir}/${fileName}`;
 
-    if (doc.filePath) {
-      try {
-        const trashDir = await ensureTrashDir();
-        const fileName = getFileBaseName(doc.filePath);
-        const trashPath = `${trashDir}/${fileName}`;
+          markOwnWrite(doc.filePath);
+          await copyFile(doc.filePath, trashPath);
+          try { await remove(doc.filePath); } catch { /* original stays; reconcile picks it up */ }
 
-        markOwnWrite(doc.filePath);
-        await copyFile(doc.filePath, trashPath);
-        try { await remove(doc.filePath); } catch { /* original stays; reconcile picks it up */ }
-
-        const trashedNote: TrashedNote = {
-          id: doc.id,
-          fileName: doc.fileName,
-          originalFilePath: doc.filePath,
-          trashFilePath: trashPath,
-          trashedAt: Date.now(),
-          groupId: group?.id ?? null,
-          createdAt: doc.createdAt,
-          updatedAt: doc.updatedAt,
-          pinned: doc.pinned === true,
-          color: doc.color,
-        };
-
-        if (setTrashedNotes) {
-          setTrashedNotes((prev) => [...prev, trashedNote]);
-          emitTrashUpdated(getTrashedNotesCache());
+          trashedNotes.push({
+            id: doc.id,
+            fileName: doc.fileName,
+            originalFilePath: doc.filePath,
+            trashFilePath: trashPath,
+            trashedAt: Date.now(),
+            groupId: getGroupForNote?.(doc.id)?.id ?? null,
+            createdAt: doc.createdAt,
+            updatedAt: doc.updatedAt,
+            pinned: doc.pinned === true,
+            color: doc.color,
+          });
+        } catch {
+          // Skip this note if the trash copy failed; the rest of the batch
+          // proceeds. The skipped note stays in the list untouched.
+          if (import.meta.env.DEV) {
+            console.warn("Failed to move note to trash, deletion aborted:", doc.filePath);
+          }
+          continue;
         }
-      } catch {
-        // Abort deletion if the trash copy failed.
-        if (import.meta.env.DEV) {
-          console.warn("Failed to move note to trash, deletion aborted:", doc.filePath);
-        }
-        return;
       }
+      deletedIds.add(doc.id);
+    }
+    if (deletedIds.size === 0) return [];
+
+    if (setTrashedNotes && trashedNotes.length > 0) {
+      setTrashedNotes((prev) => [...prev, ...trashedNotes]);
+      emitTrashUpdated(getTrashedNotesCache());
     }
 
-    const nextDocs = baseDocs.filter((entry) => entry.id !== doc.id);
-    tiptapRef.current?.invalidateDocumentSession?.(doc.id, doc.filePath);
-    emitDocDeleted(doc.id);
+    const nextDocs = baseDocs.filter((entry) => !deletedIds.has(entry.id));
+    for (const doc of targets) {
+      if (!deletedIds.has(doc.id)) continue;
+      tiptapRef.current?.invalidateDocumentSession?.(doc.id, doc.filePath);
+      emitDocDeleted(doc.id);
+    }
 
     const cleanedGroups = (groupsRef.current ?? []).map((g) =>
-      g.noteIds.includes(doc.id)
-        ? { ...g, noteIds: g.noteIds.filter((id) => id !== doc.id) }
+      g.noteIds.some((id) => deletedIds.has(id))
+        ? { ...g, noteIds: g.noteIds.filter((id) => !deletedIds.has(id)) }
         : g,
     );
     setGroups?.(cleanedGroups);
     emitGroupsUpdated(cleanedGroups);
 
+    const deletedList = Array.from(deletedIds);
+
     if (nextDocs.length === 0) {
       const id = crypto.randomUUID();
       const timestamp = Date.now();
-      // The user just emptied the last note; we can't unwind the delete above.
+      // The user just emptied the note list; we can't unwind the deletes above.
       // On write failure, surface SAVE_FAILED and flag the replacement as
       // dirty so the manifest doesn't claim a clean entry with no body on disk.
       const { filePath, ok: writeOk } = await provisionNoteFile(id, "", "deleteNote.replacement");
@@ -766,23 +804,41 @@ export function useFileSystem(
       resetDocState(state, tiptapRef, id, filePath, "");
       notifyActiveDocRef?.current?.(id, filePath);
       void saveManifest([newDoc], newDoc.id, cleanedGroups).catch(() => {});
-      return;
+      return deletedList;
     }
 
-    const wasActive = deleteIndex === currentActiveIndex;
+    const activeDeleted = activeDocId !== null && deletedIds.has(activeDocId);
     let nextActiveId: string;
 
-    if (wasActive) {
-      const target = nextDocs[Math.min(deleteIndex, nextDocs.length - 1)];
+    if (activeDeleted) {
+      // Hand off to the nearest survivor at or after the old active position,
+      // falling back to the nearest one before it.
+      let replacement: NoteDoc | undefined;
+      for (let i = currentActiveIndex; i < baseDocs.length; i++) {
+        if (!deletedIds.has(baseDocs[i].id)) { replacement = baseDocs[i]; break; }
+      }
+      if (!replacement) {
+        for (let i = Math.min(currentActiveIndex, baseDocs.length - 1); i >= 0; i--) {
+          if (!deletedIds.has(baseDocs[i].id)) { replacement = baseDocs[i]; break; }
+        }
+      }
+      const target = replacement ?? nextDocs[nextDocs.length - 1];
       nextActiveId = target.id;
       resetDocState(state, tiptapRef, target.id, target.filePath, target.content);
       notifyActiveDocRef?.current?.(target.id, target.filePath);
     } else {
-      nextActiveId = baseDocs[currentActiveIndex].id;
+      nextActiveId = activeDocId ?? nextDocs[0].id;
     }
 
     sortAndPersistDocs(nextDocs, nextActiveId, notesSortOrder, locale, setDocs, setActiveIndex, cleanedGroups);
+    return deletedList;
   }, [cancelDocSaveRef, flushDocSaveRef, getLiveDocsSnapshot, getGroupForNote, leaveCurrentDoc, locale, markDocClean, notesSortOrder, setActiveIndex, setDocs, setGroups, setTrashedNotes, state, tiptapRef]);
+
+  const deleteNote = useCallback(async (index: number): Promise<string[]> => {
+    const doc = docsRef.current[index];
+    if (!doc) return [];
+    return deleteNotes([doc.id]);
+  }, [deleteNotes]);
 
   const duplicateNote = useCallback(async (index: number) => {
     const { docs: liveDocs, activeDocId } = getLiveDocsSnapshot();
@@ -993,10 +1049,47 @@ export function useFileSystem(
     const fileName = getFileBaseName(trashed.trashFilePath);
     const restoredPath = `${notesDir}/${fileName}`;
 
+    // Flip the sidecar to "not trashed" on disk BEFORE the body copy lands.
+    // Windows copyFile preserves the source mtime, so the restored body stays
+    // older than meta.trashedAt; if the watcher's reconcile (fires ~1.5s after
+    // the copy) still reads trashedAt != null, its root-vs-trash arbitration
+    // deterministically moves the body straight back to .trash and the restore
+    // silently undoes itself a moment later. The async saveManifest below also
+    // rewrites the meta, but it races that reconcile — only an awaited
+    // meta-first write closes the window.
+    let previousMeta: NoteMeta | null = null;
+    let metaKnownAbsent = false;
+    try {
+      previousMeta = await readMeta(tauriFileSystem, notesDir, trashed.id);
+      metaKnownAbsent = previousMeta === null;
+    } catch { /* unreadable sidecar — rebuild from the trash entry below */ }
+    const restoredMeta: NoteMeta = {
+      version: 2,
+      id: trashed.id,
+      fileName: trashed.fileName,
+      createdAt: trashed.createdAt,
+      updatedAt: trashed.updatedAt,
+      groupId: trashed.groupId ?? null,
+      pinned: trashed.pinned === true,
+      color: trashed.color,
+      ...(previousMeta ?? {}),
+      trashedAt: null,
+      trashedFromPath: null,
+    };
+    try {
+      await writeMeta(tauriFileSystem, notesDir, restoredMeta, getMachineIdCached());
+    } catch { /* best-effort; saveManifest below rewrites it */ }
+
     markOwnWrite(restoredPath);
     try {
       await copyFile(trashed.trashFilePath, restoredPath);
     } catch (err) {
+      // Roll the sidecar back so disk state stays consistent with the trash
+      // entry that this function leaves untouched on failure.
+      try {
+        if (previousMeta) await writeMeta(tauriFileSystem, notesDir, previousMeta, getMachineIdCached());
+        else if (metaKnownAbsent) await removeMetaFile(tauriFileSystem, notesDir, trashed.id);
+      } catch { /* best-effort */ }
       if (import.meta.env.DEV) {
         console.warn("Failed to restore note from trash:", err);
       }
@@ -1110,5 +1203,5 @@ export function useFileSystem(
     void saveManifest(docsRef.current, docsRef.current[activeIndexRef.current]?.id ?? null, groupsRef.current).catch(() => {});
   }, [setTrashedNotes]);
 
-  return { importFile, importFiles, saveFile, saveFileAs, newNote, createNoteWithTitle, switchDocument, deleteNote, duplicateNote, exportNote, renameNote, toggleNotePinned, setNotesPinned, setNoteColor, setNotesColor, restoreNote, permanentlyDeleteNote, emptyTrash };
+  return { importFile, importFiles, saveFile, saveFileAs, newNote, createNoteWithTitle, switchDocument, deleteNote, deleteNotes, duplicateNote, exportNote, renameNote, toggleNotePinned, setNotesPinned, setNoteColor, setNotesColor, restoreNote, permanentlyDeleteNote, emptyTrash };
 }

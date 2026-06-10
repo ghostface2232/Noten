@@ -315,7 +315,7 @@ interface SidebarProps {
   onMoveNotesToGroup: (noteIds: string[], groupId: string) => void;
   onToggleGroupCollapsed: (groupId: string) => void;
   onReorderGroups: (fromIndex: number, insertionIndex: number) => void;
-  onDeleteNotes: (indices: number[]) => void;
+  onDeleteNotes: (noteIds: string[]) => void;
   selectMode: boolean;
   onSelectModeChange: (mode: boolean) => void;
   pendingRenameGroupId: string | null;
@@ -324,6 +324,11 @@ interface SidebarProps {
   isDarkMode: boolean;
   colorFilter: NoteColorId | null;
   onClearColorFilter: () => void;
+  deleteUndoToast: { ids: string[]; key: number } | null;
+  onUndoDelete: (ids: string[]) => void | Promise<void>;
+  onDismissDeleteUndoToast: () => void;
+  onDeleteUndoToastHoverStart: () => void;
+  onDeleteUndoToastHoverEnd: () => void;
 }
 
 export function Sidebar({
@@ -368,13 +373,21 @@ export function Sidebar({
   isDarkMode,
   colorFilter,
   onClearColorFilter,
+  deleteUndoToast,
+  onUndoDelete,
+  onDismissDeleteUndoToast,
+  onDeleteUndoToastHoverStart,
+  onDeleteUndoToastHoverEnd,
 }: SidebarProps) {
   const styles = useStyles();
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
 
   const colorFilterActive = colorFilter != null;
 
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  // Rename targeting is id-based: the sort effect reorders docs on every
+  // autosave, so an index captured when editing began can point at a
+  // different note by the time the rename commits.
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editingGroupValue, setEditingGroupValue] = useState("");
@@ -421,7 +434,7 @@ export function Sidebar({
     docs,
     selectedNoteIds,
     selectMode,
-    editingIndex,
+    editingNoteId,
     editingGroupId,
     searchActive: !!sidebarSearchQuery || colorFilterActive,
     sidebarBodyRef,
@@ -434,7 +447,7 @@ export function Sidebar({
   const { handleGroupDragPointerDown, isDraggingGroup } = useSidebarGroupDrag({
     groups,
     searchActive: !!sidebarSearchQuery || colorFilterActive,
-    editingIndex,
+    editingNoteId,
     editingGroupId,
     sidebarBodyRef,
     onReorderGroups,
@@ -531,11 +544,11 @@ export function Sidebar({
   }, [docs, debouncedQuery, strippedContentMap, notesSortOrder, locale, colorFilter]);
 
   useEffect(() => {
-    if (editingIndex !== null && inputRef.current) {
+    if (editingNoteId !== null && inputRef.current) {
       inputRef.current.focus();
       inputRef.current.select();
     }
-  }, [editingIndex]);
+  }, [editingNoteId]);
 
   useEffect(() => {
     if (editingGroupId !== null && groupInputRef.current) {
@@ -546,14 +559,17 @@ export function Sidebar({
 
 
   const commitRename = useCallback(() => {
-    if (editingIndex !== null) {
+    if (editingNoteId !== null) {
+      // Resolve the index at commit time — docs may have re-sorted since
+      // editing began.
+      const index = docs.findIndex((d) => d.id === editingNoteId);
       const trimmed = editingValue.trim();
-      if (trimmed && trimmed !== docs[editingIndex]?.fileName) {
-        onRenameNote(editingIndex, trimmed);
+      if (index >= 0 && trimmed && trimmed !== docs[index].fileName) {
+        onRenameNote(index, trimmed);
       }
-      setEditingIndex(null);
+      setEditingNoteId(null);
     }
-  }, [editingIndex, editingValue, docs, onRenameNote]);
+  }, [editingNoteId, editingValue, docs, onRenameNote]);
 
   const commitGroupRename = useCallback(() => {
     if (editingGroupId !== null) {
@@ -575,16 +591,18 @@ export function Sidebar({
   }, [locale, onCreateGroup]);
 
   const handleDoubleClick = useCallback((index: number) => {
-    setEditingIndex(index);
-    setEditingValue(docs[index].fileName);
+    const doc = docs[index];
+    if (!doc) return;
+    setEditingNoteId(doc.id);
+    setEditingValue(doc.fileName);
   }, [docs]);
 
-  const handleMoreClick = useCallback((index: number, e: React.MouseEvent) => {
+  const handleMoreClick = useCallback((index: number, doc: NoteDoc, e: React.MouseEvent) => {
     e.stopPropagation();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setContextMenu((prev) => {
-      if (prev && prev.anchorIndex === index) return null;
-      return { type: "note", index, anchorIndex: index, x: rect.left, y: rect.bottom + 2 };
+      if (prev && prev.anchorNoteId === doc.id) return null;
+      return { type: "note", index, noteId: doc.id, anchorIndex: index, anchorNoteId: doc.id, x: rect.left, y: rect.bottom + 2 };
     });
   }, []);
 
@@ -594,16 +612,16 @@ export function Sidebar({
     setContextMenu({ type: "group", index: -1, groupId, x: rect.left, y: rect.bottom + 2 });
   }, []);
 
-  const handleContextMenu = useCallback((index: number, e: React.MouseEvent) => {
+  const handleContextMenu = useCallback((index: number, doc: NoteDoc, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const wrapper = (e.currentTarget as HTMLElement);
     const moreBtn = wrapper.querySelector<HTMLElement>("[data-more-btn]");
     if (moreBtn) {
       const rect = moreBtn.getBoundingClientRect();
-      setContextMenu({ type: "note", index, anchorIndex: index, x: rect.left, y: rect.bottom + 2 });
+      setContextMenu({ type: "note", index, noteId: doc.id, anchorIndex: index, anchorNoteId: doc.id, x: rect.left, y: rect.bottom + 2 });
     } else {
-      setContextMenu({ type: "note", index, anchorIndex: index, x: e.clientX, y: e.clientY });
+      setContextMenu({ type: "note", index, noteId: doc.id, anchorIndex: index, anchorNoteId: doc.id, x: e.clientX, y: e.clientY });
     }
   }, []);
 
@@ -634,7 +652,7 @@ export function Sidebar({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (editingIndex !== null || editingGroupId !== null) return;
+      if (editingNoteId !== null || editingGroupId !== null) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       if ((e.target as HTMLElement)?.isContentEditable) return;
@@ -646,31 +664,54 @@ export function Sidebar({
         return;
       }
 
+      // While a note context menu is open, its items display these shortcut
+      // hints next to actions for the RIGHT-CLICKED note. Acting on
+      // activeIndex here would teach the wrong mental model ("Delete │
+      // Delete" shown for note B, keypress deletes open note A) — so route
+      // the shortcut to the menu's target note and close the menu, exactly
+      // as if the item had been clicked.
+      let targetIndex = activeIndex;
+      let viaMenu = false;
+      if (contextMenu?.type === "note" && contextMenu.noteId) {
+        const idx = docs.findIndex((d) => d.id === contextMenu.noteId);
+        if (idx >= 0) {
+          targetIndex = idx;
+          viaMenu = true;
+        }
+      }
+      const closeMenuIfRouted = () => { if (viaMenu) setContextMenu(null); };
+
       const ctrl = e.ctrlKey || e.metaKey;
       if (ctrl && e.key === "d") {
         e.preventDefault();
-        onDuplicateNote(activeIndex);
+        onDuplicateNote(targetIndex);
+        closeMenuIfRouted();
       } else if (ctrl && !e.shiftKey && !e.altKey && e.key === "e") {
         e.preventDefault();
-        onExportNote(activeIndex);
+        onExportNote(targetIndex);
+        closeMenuIfRouted();
       } else if ((ctrl && e.key === "r") || e.key === "F2") {
         e.preventDefault();
-        handleDoubleClick(activeIndex);
+        handleDoubleClick(targetIndex);
+        closeMenuIfRouted();
       } else if (ctrl && e.altKey && e.key === "p") {
         e.preventDefault();
-        onToggleNotePinned(activeIndex);
+        onToggleNotePinned(targetIndex);
+        closeMenuIfRouted();
       } else if (ctrl && e.altKey && e.key === "c") {
         e.preventDefault();
-        const content = getDocumentContent(activeIndex);
+        const content = getDocumentContent(targetIndex);
         navigator.clipboard.writeText(content).catch(() => {});
+        closeMenuIfRouted();
       } else if (e.key === "Delete" && !ctrl && !e.altKey && !e.shiftKey) {
         e.preventDefault();
-        onDeleteNote(activeIndex);
+        onDeleteNote(targetIndex);
+        closeMenuIfRouted();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeIndex, editingIndex, editingGroupId, getDocumentContent, onDuplicateNote, onExportNote, onToggleNotePinned, onDeleteNote, handleDoubleClick, inAllNotes]);
+  }, [activeIndex, contextMenu, docs, editingNoteId, editingGroupId, getDocumentContent, onDuplicateNote, onExportNote, onToggleNotePinned, onDeleteNote, handleDoubleClick, inAllNotes]);
 
   const toggleNoteSelection = useCallback((noteId: string) => {
     setSelectedNoteIds((prev) => {
@@ -715,7 +756,7 @@ export function Sidebar({
       e.stopPropagation();
       setContextMenu({ type: "empty", index: -3, x: e.clientX, y: e.clientY });
     } else {
-      handleContextMenu(index, e);
+      handleContextMenu(index, doc, e);
     }
   }, [handleContextMenu, isDragging, toggleNoteSelection]);
 
@@ -735,7 +776,7 @@ export function Sidebar({
         y: rect.bottom + 2,
       });
     } else {
-      handleMoreClick(index, e);
+      handleMoreClick(index, doc, e);
     }
   }, [handleMoreClick, toggleNoteSelection]);
 
@@ -746,6 +787,20 @@ export function Sidebar({
   const getGroupForNote = useCallback((noteId: string): NoteGroup | null => {
     return groups.find((g) => g.noteIds.includes(noteId)) ?? null;
   }, [groups]);
+
+  // Re-resolve the note menu's row index from its noteId on every render so
+  // menu actions always hit the right-clicked note even after the sort effect
+  // reshuffles docs. Resolves to null (and closes) if the note vanished.
+  const resolvedContextMenu = useMemo(() => {
+    if (!contextMenu || contextMenu.type !== "note" || !contextMenu.noteId) return contextMenu;
+    const index = docs.findIndex((d) => d.id === contextMenu.noteId);
+    if (index < 0) return null;
+    return index === contextMenu.index ? contextMenu : { ...contextMenu, index };
+  }, [contextMenu, docs]);
+
+  useEffect(() => {
+    if (contextMenu && resolvedContextMenu === null) setContextMenu(null);
+  }, [contextMenu, resolvedContextMenu]);
 
 
   const isSearching = !!debouncedQuery;
@@ -819,7 +874,7 @@ export function Sidebar({
   }, [measureScrollEdges, filteredDocs, inAllNotes]);
 
   const cancelEditing = useCallback(() => {
-    setEditingIndex(null);
+    setEditingNoteId(null);
   }, []);
 
   const renderNoteItem = (
@@ -831,8 +886,8 @@ export function Sidebar({
     const { snippet = null, searchIndex, noDrag = false, paneActive = true, groupId } = opts;
     const isActive = originalIndex === activeIndex;
     const isSelected = selectedNoteIds.has(doc.id);
-    const isContextTarget = contextMenu?.type === "note" && contextMenu.index === originalIndex;
-    const isEditing = editingIndex === originalIndex && paneActive;
+    const isContextTarget = contextMenu?.type === "note" && contextMenu.noteId === doc.id;
+    const isEditing = editingNoteId === doc.id && paneActive;
     const isNew = newDocIds.has(doc.id);
     const slideUp = slideUpFromIndex >= 0 && originalIndex >= slideUpFromIndex;
 
@@ -1232,10 +1287,7 @@ export function Sidebar({
                 className={mergeClasses(styles.selectActionBtn, styles.contextMenuDanger)}
                 size="small"
                 onClick={() => {
-                  const indices = docs
-                    .map((d, idx) => selectedNoteIds.has(d.id) ? idx : -1)
-                    .filter((idx) => idx >= 0);
-                  onDeleteNotes(indices);
+                  onDeleteNotes(docs.filter((d) => selectedNoteIds.has(d.id)).map((d) => d.id));
                   onSelectModeChange(false);
                 }}
               />
@@ -1252,6 +1304,36 @@ export function Sidebar({
               onClick={() => onSelectModeChange(false)}
             />
           </Tooltip>
+        </div>
+      )}
+
+      {deleteUndoToast && (
+        <div
+          key={deleteUndoToast.key}
+          className={styles.undoToast}
+          onMouseEnter={onDeleteUndoToastHoverStart}
+          onMouseLeave={onDeleteUndoToastHoverEnd}
+        >
+          <span className={styles.undoToastText}>
+            {deleteUndoToast.ids.length > 1
+              ? `${deleteUndoToast.ids.length}${i("sidebar.nNotesDeleted")}`
+              : i("sidebar.noteDeleted")}
+          </span>
+          <Button
+            appearance="subtle"
+            size="small"
+            className={styles.undoToastBtn}
+            onClick={() => { void onUndoDelete(deleteUndoToast.ids); }}
+          >
+            {i("sidebar.undo")}
+          </Button>
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<DismissRegular fontSize={12} />}
+            className={styles.undoToastDismiss}
+            onClick={onDismissDeleteUndoToast}
+          />
         </div>
       )}
 
@@ -1276,7 +1358,7 @@ export function Sidebar({
         groupedNoteIds={groupedNoteIds}
         selectedNoteIds={selectedNoteIds}
         locale={locale}
-        contextMenu={contextMenu}
+        contextMenu={resolvedContextMenu}
         onContextMenuChange={setContextMenu}
         onNewNote={onNewNote}
         onDeleteNote={onDeleteNote}

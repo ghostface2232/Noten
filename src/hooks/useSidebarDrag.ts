@@ -37,7 +37,7 @@ interface UseSidebarDragOptions {
   docs: NoteDoc[];
   selectedNoteIds: Set<string>;
   selectMode: boolean;
-  editingIndex: number | null;
+  editingNoteId: string | null;
   editingGroupId: string | null;
   searchActive: boolean;
   sidebarBodyRef: React.RefObject<HTMLElement | null>;
@@ -168,7 +168,7 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
   const handleDragPointerDown = useCallback((e: React.PointerEvent, noteId: string) => {
     if (e.button !== 0) return;
     const o = optsRef.current;
-    if (o.editingIndex !== null || o.editingGroupId !== null || o.searchActive) return;
+    if (o.editingNoteId !== null || o.editingGroupId !== null || o.searchActive) return;
 
     const startX = e.clientX;
     const startY = e.clientY;

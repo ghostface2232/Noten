@@ -549,10 +549,55 @@ function App() {
     if (el) exportAsPdf(el, activeDoc?.fileName ?? "untitled", locale);
   }, [activeDoc?.fileName, locale]);
 
-  const handleDeleteNotes = useCallback((indices: number[]) => {
-    const sorted = [...indices].sort((a, b) => b - a);
-    for (const idx of sorted) fs.deleteNote(idx);
-  }, [fs.deleteNote]);
+  // Undo toast for note deletion: no confirm dialog (deleting stays one
+  // keypress), but every delete offers a one-click restore from .trash for a
+  // few seconds. Rendered by the Sidebar just above its settings button.
+  const [deleteUndoToast, setDeleteUndoToast] = useState<{ ids: string[]; key: number } | null>(null);
+  const deleteUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showDeleteUndoToast = useCallback((deletedIds: string[]) => {
+    if (deletedIds.length === 0) return;
+    if (deleteUndoTimerRef.current) clearTimeout(deleteUndoTimerRef.current);
+    setDeleteUndoToast({ ids: deletedIds, key: Date.now() });
+    deleteUndoTimerRef.current = setTimeout(() => {
+      deleteUndoTimerRef.current = null;
+      setDeleteUndoToast(null);
+    }, 6000);
+  }, []);
+  const dismissDeleteUndoToast = useCallback(() => {
+    if (deleteUndoTimerRef.current) clearTimeout(deleteUndoTimerRef.current);
+    deleteUndoTimerRef.current = null;
+    setDeleteUndoToast(null);
+  }, []);
+  // Hovering the toast pauses auto-dismiss; leaving restarts the full window.
+  const pauseDeleteUndoToast = useCallback(() => {
+    if (deleteUndoTimerRef.current) clearTimeout(deleteUndoTimerRef.current);
+    deleteUndoTimerRef.current = null;
+  }, []);
+  const resumeDeleteUndoToast = useCallback(() => {
+    if (deleteUndoTimerRef.current) clearTimeout(deleteUndoTimerRef.current);
+    deleteUndoTimerRef.current = setTimeout(() => {
+      deleteUndoTimerRef.current = null;
+      setDeleteUndoToast(null);
+    }, 6000);
+  }, []);
+  useEffect(() => () => {
+    if (deleteUndoTimerRef.current) clearTimeout(deleteUndoTimerRef.current);
+  }, []);
+
+  const handleUndoDelete = useCallback(async (ids: string[]) => {
+    dismissDeleteUndoToast();
+    // Sequential: each restore commits the doc list before the next runs, and
+    // the last restored note ends up active.
+    for (const id of ids) await fs.restoreNote(id);
+  }, [dismissDeleteUndoToast, fs.restoreNote]);
+
+  const handleDeleteNote = useCallback((index: number) => {
+    void fs.deleteNote(index).then(showDeleteUndoToast);
+  }, [fs.deleteNote, showDeleteUndoToast]);
+
+  const handleDeleteNotes = useCallback((noteIds: string[]) => {
+    void fs.deleteNotes(noteIds).then(showDeleteUndoToast);
+  }, [fs.deleteNotes, showDeleteUndoToast]);
 
   const getSidebarDocumentContent = useCallback((index: number) => {
     const doc = docs[index];
@@ -1008,7 +1053,7 @@ function App() {
               getDocumentContent={getSidebarDocumentContent}
               onSwitchDocument={fs.switchDocument}
               onNewNote={fs.newNote}
-              onDeleteNote={fs.deleteNote}
+              onDeleteNote={handleDeleteNote}
 
               onDuplicateNote={fs.duplicateNote}
               onExportNote={fs.exportNote}
@@ -1045,6 +1090,11 @@ function App() {
               isDarkMode={isDarkMode}
               colorFilter={settings.colorFilter}
               onClearColorFilter={() => { void updateSetting("colorFilter", null); }}
+              deleteUndoToast={deleteUndoToast}
+              onUndoDelete={handleUndoDelete}
+              onDismissDeleteUndoToast={dismissDeleteUndoToast}
+              onDeleteUndoToastHoverStart={pauseDeleteUndoToast}
+              onDeleteUndoToastHoverEnd={resumeDeleteUndoToast}
             />
             <div
               className={mergeClasses(

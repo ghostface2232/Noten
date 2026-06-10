@@ -26,7 +26,7 @@ interface DragSession {
 interface UseSidebarGroupDragOptions {
   groups: NoteGroup[];
   searchActive: boolean;
-  editingIndex: number | null;
+  editingNoteId: string | null;
   editingGroupId: string | null;
   sidebarBodyRef: React.RefObject<HTMLElement | null>;
   onReorderGroups: (fromIndex: number, insertionIndex: number) => void;
@@ -161,7 +161,7 @@ export function useSidebarGroupDrag(opts: UseSidebarGroupDragOptions) {
   const handleGroupDragPointerDown = useCallback((e: React.PointerEvent, groupId: string) => {
     if (e.button !== 0) return;
     const o = optsRef.current;
-    if (o.editingIndex !== null || o.editingGroupId !== null || o.searchActive) return;
+    if (o.editingNoteId !== null || o.editingGroupId !== null || o.searchActive) return;
 
     const target = e.target as HTMLElement;
     if (target.closest("[data-more-btn]")) return;

@@ -93,6 +93,8 @@ vi.mock("./ownWriteTracker", () => ({
 
 vi.mock("../utils/metadataIO", () => ({
   removeMeta: vi.fn(async () => {}),
+  readMeta: vi.fn(async () => null),
+  writeMeta: vi.fn(async () => ""),
 }));
 
 vi.mock("../utils/crashLog", () => ({
@@ -117,6 +119,7 @@ import { useFileSystem } from "./useFileSystem";
 import * as fsPlugin from "@tauri-apps/plugin-fs";
 import * as crashLogModule from "../utils/crashLog";
 import * as ownWriteModule from "./ownWriteTracker";
+import * as metadataIOModule from "../utils/metadataIO";
 
 const writeMock = fsPlugin.writeTextFile as ReturnType<typeof vi.fn>;
 const readMock = fsPlugin.readTextFile as ReturnType<typeof vi.fn>;
@@ -546,6 +549,110 @@ describe("useFileSystem — deleteNote last-note replacement", () => {
     const lastDocs = setDocs.mock.calls[setDocs.mock.calls.length - 1][0] as NoteDoc[];
     expect(lastDocs).toHaveLength(1);
     expect(lastDocs[0].isDirty).toBe(false);
+  });
+});
+
+// deleteNotes — batch deletion must commit the doc list exactly once. The old
+// bulk path fired N un-awaited deleteNote calls that each snapshotted the same
+// stale docs array; last-writer-wins setDocs then left N-1 ghost rows whose
+// files were already in .trash.
+
+describe("useFileSystem — deleteNotes batch", () => {
+  it("deletes multiple notes in one commit with no ghost rows and returns the trashed ids", async () => {
+    const docs = [makeDoc("a"), makeDoc("b"), makeDoc("c"), makeDoc("d")];
+    const { result, setDocs, setTrashedNotes } = renderFs({ docs, activeIndex: 0 });
+
+    let deleted: string[] = [];
+    await act(async () => {
+      deleted = await result.current.deleteNotes(["b", "c"]);
+    });
+
+    expect(deleted.sort()).toEqual(["b", "c"]);
+    // Exactly one doc-list commit (sortAndPersistDocs), containing neither
+    // deleted note — the ghost-row symptom was a commit still containing one.
+    expect(setDocs).toHaveBeenCalledTimes(1);
+    const committed = setDocs.mock.calls[0][0] as NoteDoc[];
+    expect(committed.map((d) => d.id).sort()).toEqual(["a", "d"]);
+    // Single batched trash-list update with both entries.
+    expect(setTrashedNotes).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed trash copy skips that note but the rest of the batch still lands", async () => {
+    const docs = [makeDoc("a"), makeDoc("b"), makeDoc("c")];
+    // vi.clearAllMocks (afterEach) clears calls but NOT implementations, so
+    // restore the module-mock implementation after this test.
+    copyFileMock.mockImplementation(async (from: string) => {
+      if (from === "/notes/b.md") throw new Error("EBUSY");
+    });
+    try {
+      const { result, setDocs } = renderFs({ docs, activeIndex: 0 });
+
+      let deleted: string[] = [];
+      await act(async () => {
+        deleted = await result.current.deleteNotes(["b", "c"]);
+      });
+
+      // b's copy failed → b stays in the list untouched; c is gone.
+      expect(deleted).toEqual(["c"]);
+      const committed = setDocs.mock.calls[0][0] as NoteDoc[];
+      expect(committed.map((d) => d.id).sort()).toEqual(["a", "b"]);
+    } finally {
+      copyFileMock.mockImplementation(async () => {
+        if (refs.copyFileShouldThrow) throw refs.copyFileShouldThrow;
+      });
+    }
+  });
+
+  it("hands the active doc off to the nearest survivor when it is in the batch", async () => {
+    const docs = [makeDoc("a"), makeDoc("b"), makeDoc("c")];
+    const { result, notifyActiveDoc } = renderFs({ docs, activeIndex: 0 });
+
+    await act(async () => {
+      await result.current.deleteNotes(["a", "b"]);
+    });
+
+    expect(notifyActiveDoc).toHaveBeenCalledWith("c", "/notes/c.md");
+  });
+});
+
+// restoreNote — the un-trashed sidecar must hit the disk BEFORE the body copy.
+// Windows copyFile preserves the source mtime, so the restored root body stays
+// older than meta.trashedAt; if the watcher's reconcile (~1.5s after the copy)
+// still reads trashedAt != null, its root-vs-trash arbitration moves the body
+// straight back to .trash and the restore silently undoes itself.
+
+describe("useFileSystem — restoreNote meta-first ordering", () => {
+  it("writes trashedAt:null meta to disk before copying the body back", async () => {
+    const trashed: TrashedNote = {
+      id: "t1",
+      fileName: "Trashed",
+      originalFilePath: "/notes/t1.md",
+      trashFilePath: "/notes/.trash/t1.md",
+      trashedAt: 2000,
+      groupId: null,
+      createdAt: 1000,
+      updatedAt: 1500,
+      pinned: false,
+      color: undefined,
+    };
+    const callOrder: string[] = [];
+    const writeMetaMock = metadataIOModule.writeMeta as ReturnType<typeof vi.fn>;
+    writeMetaMock.mockImplementation(async (_fs: unknown, _dir: string, meta: { trashedAt: number | null }) => {
+      callOrder.push(`writeMeta:${meta.trashedAt === null ? "null" : meta.trashedAt}`);
+      return "";
+    });
+    copyFileMock.mockImplementationOnce(async () => { callOrder.push("copyFile"); });
+
+    const { result } = renderFs({ docs: [makeDoc("a")], trashedNotes: [trashed] });
+    await act(async () => {
+      await result.current.restoreNote("t1");
+    });
+
+    const metaIdx = callOrder.indexOf("writeMeta:null");
+    const copyIdx = callOrder.indexOf("copyFile");
+    expect(metaIdx).toBeGreaterThanOrEqual(0);
+    expect(copyIdx).toBeGreaterThanOrEqual(0);
+    expect(metaIdx).toBeLessThan(copyIdx);
   });
 });
 

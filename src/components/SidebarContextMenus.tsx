@@ -33,13 +33,21 @@ export const FolderSubtractRegular = () => (
 
 export interface ContextMenuState {
   type: "note" | "empty" | "group";
+  /** Resolved row index. For "note" menus this is derived from `noteId` at
+   * render time — never trust an index captured at open time: the sort effect
+   * reorders docs on every autosave, so a stale index would point the menu's
+   * actions at a different note. */
   index: number;
+  /** Identity of the note this menu targets (type "note"). */
+  noteId?: string;
   groupId?: string;
   x: number;
   y: number;
   /** Original row index the menu was anchored to (set when opened from a row's
    * "…" button). Used to toggle the menu shut on re-click of the same anchor. */
   anchorIndex?: number;
+  /** Id-based anchor for note rows (sort-shift safe toggle). */
+  anchorNoteId?: string;
 }
 
 interface SidebarContextMenusProps {
@@ -65,7 +73,7 @@ interface SidebarContextMenusProps {
   onAddNoteToGroup: (noteId: string, groupId: string) => void;
   onRemoveNoteFromGroup: (noteId: string) => void;
   onMoveNotesToGroup: (noteIds: string[], groupId: string) => void;
-  onDeleteNotes: (indices: number[]) => void;
+  onDeleteNotes: (noteIds: string[]) => void;
   onSelectModeChange: (mode: boolean) => void;
   getDocumentContent: (index: number) => string;
   getGroupForNote: (noteId: string) => NoteGroup | null;
@@ -359,10 +367,7 @@ export function SidebarContextMenus({
                 icon={<DeleteRegular />}
                 className={mergeClasses(styles.contextMenuItem, styles.contextMenuDanger)}
                 onClick={() => {
-                  const indices = docs
-                    .map((d, idx) => selectedNoteIds.has(d.id) ? idx : -1)
-                    .filter((idx) => idx >= 0);
-                  onDeleteNotes(indices);
+                  onDeleteNotes(docs.filter((d) => selectedNoteIds.has(d.id)).map((d) => d.id));
                   onSelectModeChange(false);
                   closeContextMenu();
                 }}
@@ -628,10 +633,7 @@ export function SidebarContextMenus({
                     setConfirmDeleteGroupId(null);
                     animateGroupRemoval(gid, noteIds, () => {
                       if (group) {
-                        const indices = noteIds
-                          .map((nid) => docs.findIndex((d) => d.id === nid))
-                          .filter((idx) => idx >= 0);
-                        onDeleteNotes(indices);
+                        onDeleteNotes(noteIds.filter((nid) => docs.some((d) => d.id === nid)));
                       }
                       onDeleteGroup(gid);
                     });
