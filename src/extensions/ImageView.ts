@@ -18,6 +18,74 @@ const HANDLE_SIZE = 10;
 const HANDLE_HIT = 32;
 const MIN_WIDTH = 60;
 
+interface ImageSelectionState {
+  pos: number | null;
+  readonly: boolean;
+}
+
+interface ImageSelectionSync {
+  controllers: Set<() => void>;
+  handler: () => void;
+  last: ImageSelectionState;
+}
+
+const imageSelectionSyncByEditor = new WeakMap<Editor, ImageSelectionSync>();
+
+function selectedImagePos(editor: Editor): number | null {
+  const { selection } = editor.state;
+  if (selection instanceof NodeSelection && selection.node.type.name === "image") {
+    return selection.from;
+  }
+  return null;
+}
+
+function readImageSelectionState(editor: Editor): ImageSelectionState {
+  return {
+    pos: selectedImagePos(editor),
+    readonly: !!editor.storage.readonlyGuard?.readonly,
+  };
+}
+
+export function shouldRefreshImageSelection(
+  prev: ImageSelectionState,
+  next: ImageSelectionState,
+): boolean {
+  const changed = next.pos !== prev.pos || next.readonly !== prev.readonly;
+  if (!changed && next.pos === null) return false;
+  return true;
+}
+
+function registerImageSelectionSync(editor: Editor, updateSelection: () => void): () => void {
+  let sync = imageSelectionSyncByEditor.get(editor);
+  if (!sync) {
+    const state: ImageSelectionSync = {
+      controllers: new Set(),
+      last: readImageSelectionState(editor),
+      handler: () => {},
+    };
+    state.handler = () => {
+      const next = readImageSelectionState(editor);
+      const needsRefresh = shouldRefreshImageSelection(state.last, next);
+      state.last = next;
+      if (!needsRefresh) return;
+      state.controllers.forEach((fn) => fn());
+    };
+    editor.on("transaction", state.handler);
+    imageSelectionSyncByEditor.set(editor, state);
+    sync = state;
+  }
+  sync.controllers.add(updateSelection);
+  return () => {
+    const current = imageSelectionSyncByEditor.get(editor);
+    if (!current) return;
+    current.controllers.delete(updateSelection);
+    if (current.controllers.size === 0) {
+      editor.off("transaction", current.handler);
+      imageSelectionSyncByEditor.delete(editor);
+    }
+  };
+}
+
 function showContextMenu(
   pos: { x: number; y: number },
   editor: Editor,
@@ -103,77 +171,6 @@ function showContextMenu(
     btn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); item.action(); });
     menu.appendChild(btn);
   });
-}
-
-interface ImageSelectionController {
-  refresh: () => void;
-}
-
-interface ImageSelectionState {
-  pos: number | null;
-  readonly: boolean;
-}
-
-interface ImageSelectionRegistry {
-  controllers: Set<ImageSelectionController>;
-  last: ImageSelectionState;
-}
-
-const imageSelectionRegistries = new WeakMap<Editor, ImageSelectionRegistry>();
-
-function selectedImagePos(editor: Editor): number | null {
-  const { selection } = editor.state;
-  if (selection instanceof NodeSelection && selection.node.type.name === "image") {
-    return selection.from;
-  }
-  return null;
-}
-
-function readImageSelectionState(editor: Editor): ImageSelectionState {
-  return {
-    pos: selectedImagePos(editor),
-    readonly: !!editor.storage.readonlyGuard?.readonly,
-  };
-}
-
-// Whether a transaction needs an image-selection refresh. The common typing case
-// — nothing selected, nothing changed — returns false so the editor-level handler
-// can early-out before touching any NodeView. While an image IS selected we keep
-// refreshing every transaction even if the position is unchanged, preserving the
-// guard the old per-node `transaction` listener provided against PM skipping
-// selectNode/deselectNode on rapid select → deselect → re-select sequences.
-export function shouldRefreshImageSelection(
-  prev: ImageSelectionState,
-  next: ImageSelectionState,
-): boolean {
-  const changed = next.pos !== prev.pos || next.readonly !== prev.readonly;
-  if (!changed && next.pos === null) return false;
-  return true;
-}
-
-// Previously every image NodeView attached its own `selectionUpdate` + `transaction`
-// listeners, so one keystroke in an image-heavy note ran a selection refresh per
-// image. Install ONE transaction listener per editor instead and refresh NodeViews
-// only when shouldRefreshImageSelection() says the image selection materially moved.
-function getImageSelectionRegistry(editor: Editor): ImageSelectionRegistry {
-  let registry = imageSelectionRegistries.get(editor);
-  if (!registry) {
-    registry = {
-      controllers: new Set(),
-      last: readImageSelectionState(editor),
-    };
-    imageSelectionRegistries.set(editor, registry);
-    editor.on("transaction", () => {
-      const reg = imageSelectionRegistries.get(editor);
-      if (!reg) return;
-      const next = readImageSelectionState(editor);
-      const needsRefresh = shouldRefreshImageSelection(reg.last, next);
-      reg.last = next;
-      if (!needsRefresh) return;
-      reg.controllers.forEach((controller) => controller.refresh());
-    });
-  }
-  return registry;
 }
 
 export function createImageNodeView(editor: Editor) {
@@ -376,13 +373,11 @@ export function createImageNodeView(editor: Editor) {
       showContextMenu({ x: e.clientX, y: e.clientY }, editor, pos, currentSrc, getContext(), locale);
     });
 
-    // Register this NodeView's refresh with the editor-level selection handler
-    // (see getImageSelectionRegistry) instead of subscribing to every transaction
-    // per image.
-    const selectionRegistry = getImageSelectionRegistry(editor);
-    const selectionController: ImageSelectionController = { refresh: updateSelection };
-    selectionRegistry.controllers.add(selectionController);
-    syncDragState();
+    // Selection re-sync is driven by a single shared transaction subscription
+    // (see registerImageSelectionSync) rather than a per-image listener. Run once
+    // now so a session-restored NodeSelection paints its outline immediately.
+    const unregisterSelectionSync = registerImageSelectionSync(editor, updateSelection);
+    updateSelection();
 
     return {
       dom,
@@ -406,7 +401,7 @@ export function createImageNodeView(editor: Editor) {
       deselectNode: () => { dom.style.outline = "none"; hideHandles(); },
       destroy: () => {
         imageSourceToken += 1;
-        selectionRegistry.controllers.delete(selectionController);
+        unregisterSelectionSync();
         activeDragCleanup?.();
       },
     };

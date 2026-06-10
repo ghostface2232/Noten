@@ -6,8 +6,8 @@ import type {
   MarkdownToken,
 } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
-import type { EditorState } from "@tiptap/pm/state";
-import type { Mark as ProseMirrorMark } from "@tiptap/pm/model";
+import type { EditorState, Transaction } from "@tiptap/pm/state";
+import type { Mark as ProseMirrorMark, Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { NoteDoc } from "../hooks/useNotesLoader";
 import type { Locale } from "../hooks/useSettings";
@@ -35,34 +35,31 @@ function normalizeTitle(value: string): string {
   return value.normalize("NFC").trim().toLowerCase();
 }
 
-// Cache a normalized-title -> doc index keyed by the `docs` array reference.
-// Typing keeps the same array instance, so the per-keystroke decoration pass
-// (buildMissingDecorations -> findDocByTitle per wiki mark) reuses one index
-// instead of re-scanning and re-normalizing every note for each mark. A new
-// `docs` array (note added / renamed / reconciled) builds a fresh index once and
-// the old one is GC'd with the array, so reference identity is the version and
-// no explicit invalidation is needed.
-const docTitleIndexCache = new WeakMap<NoteDoc[], Map<string, NoteDoc>>();
+// Normalized-title lookup, cached per `docs` array reference. App.tsx swaps
+// storage.docs to a fresh array whenever the note list changes (App.tsx:398),
+// so keying the cache on array identity rebuilds exactly when the data changes.
+// This keeps findDocByTitle O(1): without it, decoration rebuilds re-normalized
+// every note's title for every wiki link on every keystroke — O(links × notes).
+const titleMapCache = new WeakMap<NoteDoc[], Map<string, NoteDoc>>();
 
-function getDocTitleIndex(docs: NoteDoc[]): Map<string, NoteDoc> {
-  let index = docTitleIndexCache.get(docs);
-  if (!index) {
-    index = new Map();
+function getTitleMap(docs: NoteDoc[]): Map<string, NoteDoc> {
+  let map = titleMapCache.get(docs);
+  if (!map) {
+    map = new Map();
+    // First occurrence wins, matching the previous Array.find() semantics.
     for (const doc of docs) {
       const key = normalizeTitle(doc.fileName);
-      // Preserve the previous `docs.find` semantics: on duplicate titles the
-      // first doc in array order wins, so earlier entries are not overwritten.
-      if (key && !index.has(key)) index.set(key, doc);
+      if (key && !map.has(key)) map.set(key, doc);
     }
-    docTitleIndexCache.set(docs, index);
+    titleMapCache.set(docs, map);
   }
-  return index;
+  return map;
 }
 
 export function findDocByTitle(docs: NoteDoc[], title: string): NoteDoc | null {
   const needle = normalizeTitle(title);
   if (!needle) return null;
-  return getDocTitleIndex(docs).get(needle) ?? null;
+  return getTitleMap(docs).get(needle) ?? null;
 }
 
 function getWikiLinkMarkTarget(mark: ProseMirrorMark): string {
@@ -223,10 +220,30 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
         state: {
           init: (_, state) => buildMissingDecorations(state.doc, extension.storage.docs),
           apply: (tr, value, _oldState, newState) => {
-            if (!tr.docChanged && !tr.getMeta(WIKI_LINK_DECORATION_KEY)) {
-              return value;
-            }
-            return buildMissingDecorations(newState.doc, extension.storage.docs);
+            const forced = tr.getMeta(WIKI_LINK_DECORATION_KEY);
+            if (!tr.docChanged && !forced) return value;
+
+            const docs = extension.storage.docs;
+            // A forced refresh means the docs list (and thus which targets exist)
+            // changed — see App.tsx — so the whole set must be re-evaluated.
+            if (forced) return buildMissingDecorations(newState.doc, docs);
+
+            // Plain edit: missing-status only changes where text changed (docs
+            // changes always arrive via the forced path above). Remap existing
+            // decorations to their new positions and recompute just the edited
+            // span instead of walking the whole document every keystroke.
+            const set = value.map(tr.mapping, tr.doc);
+            const range = changedRange(tr, newState.doc);
+            if (!range) return set;
+            const stale = set.find(range.from, range.to);
+            const pruned = stale.length ? set.remove(stale) : set;
+            const fresh = buildMissingDecorationsInRange(
+              newState.doc,
+              docs,
+              range.from,
+              range.to,
+            );
+            return fresh.length ? pruned.add(newState.doc, fresh) : pruned;
           },
         },
         props: {
@@ -395,30 +412,59 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
   },
 });
 
-function buildMissingDecorations(
-  doc: import("@tiptap/pm/model").Node,
+// Push a wiki-link-missing decoration for a text node whose wiki-link target is
+// not among the known docs. Uses the node's full bounds so a run that straddles
+// a recompute range is still decorated correctly.
+function pushMissingDecoration(
+  node: ProseMirrorNode,
+  pos: number,
   docs: NoteDoc[],
-): DecorationSet {
+  out: Decoration[],
+): void {
+  if (!node.isText) return;
+  const wikiMark = node.marks.find((m) => m.type.name === "wikiLink");
+  if (!wikiMark) return;
+  const target = (wikiMark.attrs as WikiLinkAttributes).target ?? "";
+  if (!findDocByTitle(docs, target)) {
+    out.push(Decoration.inline(pos, pos + node.nodeSize, { class: "wiki-link-missing" }));
+  }
+}
+
+function buildMissingDecorations(doc: ProseMirrorNode, docs: NoteDoc[]): DecorationSet {
   const decorations: Decoration[] = [];
-
-  doc.descendants((node, pos) => {
-    if (!node.isText) return;
-    const wikiMark = node.marks.find((m) => m.type.name === "wikiLink");
-    if (!wikiMark) return;
-
-    const from = pos;
-    const to = pos + node.nodeSize;
-
-    const target = (wikiMark.attrs as WikiLinkAttributes).target ?? "";
-    const exists = !!findDocByTitle(docs, target);
-    if (!exists) {
-      decorations.push(
-        Decoration.inline(from, to, { class: "wiki-link-missing" }),
-      );
-    }
-  });
-
+  doc.descendants((node, pos) => pushMissingDecoration(node, pos, docs, decorations));
   return DecorationSet.create(doc, decorations);
+}
+
+function buildMissingDecorationsInRange(
+  doc: ProseMirrorNode,
+  docs: NoteDoc[],
+  from: number,
+  to: number,
+): Decoration[] {
+  const decorations: Decoration[] = [];
+  doc.nodesBetween(from, to, (node, pos) => pushMissingDecoration(node, pos, docs, decorations));
+  return decorations;
+}
+
+// Bounding span of a transaction's content changes, in post-transaction
+// coordinates, padded by one position so a wiki-link run edited at its very edge
+// is fully re-scanned. Returns null when nothing in the document changed.
+function changedRange(tr: Transaction, doc: ProseMirrorNode): { from: number; to: number } | null {
+  let from = Infinity;
+  let to = -Infinity;
+  tr.mapping.maps.forEach((stepMap, i) => {
+    stepMap.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+      const rest = tr.mapping.slice(i + 1);
+      from = Math.min(from, rest.map(newStart, -1));
+      to = Math.max(to, rest.map(newEnd, 1));
+    });
+  });
+  if (from > to) return null;
+  return {
+    from: Math.max(0, from - 1),
+    to: Math.min(doc.content.size, to + 1),
+  };
 }
 
 export function refreshWikiLinkDecorations(editor: import("@tiptap/core").Editor): void {

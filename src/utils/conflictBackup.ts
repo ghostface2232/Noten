@@ -1,6 +1,7 @@
 import type { FileSystem } from "./fs";
 import { normalizeSep } from "./pathUtils";
 import { NotenError } from "./notenError";
+import { markdownEqual } from "./markdownEqual";
 
 const README_BODY = `This folder holds backups of note bodies that were on disk
 when another change was about to overwrite them. Files are named
@@ -102,9 +103,13 @@ export async function backupIfRemoteWroteFirst(
     return false;
   }
 
-  if (diskContent === lastKnown) return false;
+  // Cosmetic-only divergence (line endings / trailing newline rewritten by a
+  // cloud client) is not a real remote edit — skip the backup. markdownEqual is
+  // intentionally conservative, so any meaningful change still falls through to
+  // the backup below rather than being silently dropped.
+  if (markdownEqual(diskContent, lastKnown)) return false;
 
-  if (diskContent === intendedContent) return false;
+  if (markdownEqual(diskContent, intendedContent)) return false;
 
   await backupRemoteVersion(fs, notesDir, noteId, diskContent);
   return true;

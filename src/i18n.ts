@@ -171,7 +171,6 @@ const dict = {
   "settings.shortcuts": { en: "Keyboard Shortcuts", ko: "단축키 안내" },
   "settings.shortcut.showChrome": { en: "Show or hide editor chrome", ko: "편집 막대 표시 / 숨기기" },
   "settings.shortcut.import": { en: "Open file", ko: "파일 열기" },
-  "settings.shortcut.save": { en: "Save now", ko: "즉시 저장" },
   "settings.shortcut.newFile": { en: "New note", ko: "새 노트" },
   "settings.shortcut.newWindow": { en: "New window", ko: "새 창" },
   "settings.shortcut.focusEditor": { en: "Focus editor", ko: "편집기로 포커스 이동" },

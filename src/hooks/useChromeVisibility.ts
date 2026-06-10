@@ -28,7 +28,15 @@ export function useChromeVisibility(
     const el = contentRef.current;
     if (!el) return;
 
-    const updateChromeVisibility = () => {
+    // Coalesce to one evaluation per frame: a fling fires dozens of scroll
+    // events per frame, and each one read scrollTop (a layout-forcing read) and
+    // could setState. Reading inside the rAF collapses that to a single read +
+    // at most one state change per frame. Behavior is unchanged — only the
+    // latest scroll position per frame matters for the show/hide decision.
+    let frame: number | null = null;
+
+    const evaluate = () => {
+      frame = null;
       const nextTop = el.scrollTop;
       const now = Date.now();
 
@@ -57,10 +65,17 @@ export function useChromeVisibility(
       lastScrollTopRef.current = nextTop;
     };
 
+    const onScroll = () => {
+      if (frame === null) frame = requestAnimationFrame(evaluate);
+    };
+
     lastScrollTopRef.current = el.scrollTop;
-    updateChromeVisibility();
-    el.addEventListener("scroll", updateChromeVisibility, { passive: true });
-    return () => el.removeEventListener("scroll", updateChromeVisibility);
+    evaluate();
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
   }, []);
 
   useEffect(() => {

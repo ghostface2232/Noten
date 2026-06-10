@@ -102,7 +102,10 @@ export const useStyles = makeStyles({
   sidebarSearchBtn: {
     position: "absolute",
     top: "16px",
-    right: "8px",
+    // Top-button row right offsets carry the sidebar's LIST_RIGHT_GAP (4px) on
+    // top of the base 8/36/64/92 spacing so the icons stay level with the note
+    // list's right edge.
+    right: "12px",
     zIndex: 10,
     borderRadius: "6px",
     border: "none",
@@ -114,7 +117,7 @@ export const useStyles = makeStyles({
   sidebarNewGroupBtn: {
     position: "absolute",
     top: "16px",
-    right: "92px",
+    right: "96px",
     zIndex: 10,
     borderRadius: "6px",
     border: "none",
@@ -126,7 +129,7 @@ export const useStyles = makeStyles({
   sidebarFilterBtn: {
     position: "absolute",
     top: "16px",
-    right: "64px",
+    right: "68px",
     zIndex: 10,
     borderRadius: "6px",
     border: "none",
@@ -138,7 +141,7 @@ export const useStyles = makeStyles({
   sidebarSelectBtn: {
     position: "absolute",
     top: "16px",
-    right: "36px",
+    right: "40px",
     zIndex: 10,
     borderRadius: "6px",
     border: "none",

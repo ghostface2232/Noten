@@ -21,7 +21,6 @@ import {
   CheckmarkCircle20Regular,
   DocumentAdd20Regular,
   WindowNew20Regular,
-  Save20Regular,
   ArrowDownload20Regular,
   Code20Regular,
   Search20Regular,
@@ -538,7 +537,6 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                 {([
                   ["settings.shortcut.newFile", "Ctrl+N", DocumentAdd20Regular],
                   ["settings.shortcut.newWindow", "Ctrl+Shift+N", WindowNew20Regular],
-                  ["settings.shortcut.save", "Ctrl+S", Save20Regular],
                   ["settings.shortcut.import", "Ctrl+O", ArrowDownload20Regular],
                   ["settings.shortcut.showChrome", "Click / Scroll", Code20Regular],
                   ["settings.shortcut.focusEditor", "Tab", KeyboardTab20Regular],
@@ -658,32 +656,22 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     )}
                   </div>
 
+                  {!updateAvailable && (
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.2</div>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.5</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 표 삽입 그리드, 행/열 편집 버블 툴바, 열 너비 조절 추가<br />
-                          · Mermaid 다이어그램 렌더링 개선 및 SVG/PNG 내보내기 추가<br />
-                          · 새 노트 생성 직후 포커스와 커서 위치가 더 안정적으로 동작하도록 수정<br />
-                          · 빠른 노트 전환 중 자동 저장이 잘못된 노트에 반영될 수 있는 경합 수정<br />
-                          · 입력 중 툴바/상태바/사이드바 렌더링 비용 감소로 편집 반응성 개선<br />
-                          · 위키 링크 제안에서 현재 노트를 제외하도록 개선<br />
-                          · 앱 전반의 "문서" 표현을 "노트" 중심으로 정리
+                          · 체크박스 목록이 일반 목록으로 바뀌고 목록 안 텍스트가 편집되지 않던 문제 수정
                         </>
                       ) : (
                         <>
-                          · Added: table grid insertion, row/column bubble toolbar, and column resizing<br />
-                          · Added: Mermaid diagram rendering improvements and SVG/PNG export<br />
-                          · Fixed: focus and cursor placement are more reliable after creating a new note<br />
-                          · Fixed: autosave races during fast note switching could update the wrong note<br />
-                          · Improved: lower toolbar, status bar, and sidebar render cost while typing<br />
-                          · Improved: wiki-link suggestions now exclude the current note<br />
-                          · Polish: app wording now consistently uses "note" instead of "document"
+                          · Fixed: checkbox lists no longer turn into plain lists, and text inside list items is editable again
                         </>
                       )}
                     </div>
                   </div>
+                  )}
 
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
                     {updaterState.status === "checking" && (
@@ -709,14 +697,14 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                         <span style={{ fontSize: "13px", fontWeight: 500 }}>
                           {i("about.available")}: v{updaterState.version}
                         </span>
+                        <Button appearance="primary" size="medium" onClick={onInstallUpdate} style={{ borderRadius: "6px" }}>
+                          {i("about.install")}
+                        </Button>
                         {updaterState.body && (
                           <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, whiteSpace: "pre-wrap", maxHeight: "120px", overflow: "auto" }}>
                             {updaterState.body}
                           </div>
                         )}
-                        <Button appearance="primary" size="medium" onClick={onInstallUpdate} style={{ borderRadius: "6px" }}>
-                          {i("about.install")}
-                        </Button>
                       </div>
                     )}
 

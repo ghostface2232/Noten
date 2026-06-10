@@ -7,7 +7,7 @@ import {
   DismissRegular,
 } from "@fluentui/react-icons";
 import type { Editor } from "@tiptap/core";
-import { searchPluginKey, type SearchPluginState } from "../extensions/SearchHighlight";
+import { searchPluginKey, findSearchMatches, type SearchPluginState } from "../extensions/SearchHighlight";
 import { scrollToPos } from "../utils/scrollToPos";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
@@ -127,20 +127,7 @@ export function SearchBar({ editor, onClose, replaceOpen, onToggleReplace, local
   const dispatchTiptap = useCallback(
     (q: string, activeIdx: number) => {
       if (!editor) return { count: 0, clamped: 0 };
-      const matches: { from: number; to: number }[] = [];
-      if (q) {
-        const lower = q.toLowerCase();
-        editor.state.doc.descendants((node, pos) => {
-          if (node.isText && node.text) {
-            const text = node.text.toLowerCase();
-            let idx = text.indexOf(lower);
-            while (idx !== -1) {
-              matches.push({ from: pos + idx, to: pos + idx + q.length });
-              idx = text.indexOf(lower, idx + 1);
-            }
-          }
-        });
-      }
+      const matches = findSearchMatches(editor.state.doc, q);
       const clamped = matches.length > 0
         ? ((activeIdx % matches.length) + matches.length) % matches.length
         : 0;

@@ -28,7 +28,6 @@ export interface UseKeyboardShortcutsParams {
   setDocGoToLineOpen: Dispatch<SetStateAction<boolean>>;
   onNewNote: () => Promise<void>;
   onImportFile: () => void;
-  onSaveFile: () => void;
 }
 
 export function useKeyboardShortcuts({
@@ -40,7 +39,6 @@ export function useKeyboardShortcuts({
   setDocGoToLineOpen,
   onNewNote,
   onImportFile,
-  onSaveFile,
 }: UseKeyboardShortcutsParams) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -75,11 +73,13 @@ export function useKeyboardShortcuts({
       if (ctrl && (key === "p" || key === "u")) { e.preventDefault(); return; }
       if (ctrl && (key === "=" || key === "+" || key === "-" || key === "0")) { e.preventDefault(); return; }
       if (ctrl && (e.key === "Add" || e.key === "Subtract")) { e.preventDefault(); return; }
+      // Ctrl+S has no action — autosave persists every ~1s — but is swallowed so
+      // the WebView's "save page" dialog never appears.
+      if (ctrl && !e.shiftKey && key === "s") { e.preventDefault(); return; }
       if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); return; }
       if (e.key === "BrowserBack" || e.key === "BrowserForward") { e.preventDefault(); return; }
 
       if (ctrl && key === "o") { e.preventDefault(); onImportFile(); }
-      if (ctrl && !e.shiftKey && key === "s") { e.preventDefault(); onSaveFile(); }
       if (ctrl && !e.shiftKey && key === "n") { e.preventDefault(); void onNewNote(); }
       if (ctrl && e.shiftKey && key === "n") { e.preventDefault(); openNewWindow(); }
       if (ctrl && !e.shiftKey && key === "f") {
@@ -123,7 +123,6 @@ export function useKeyboardShortcuts({
     docSearchOpen,
     onImportFile,
     onNewNote,
-    onSaveFile,
     setDocGoToLineOpen,
     setDocSearchOpen,
     setDocSearchReplace,

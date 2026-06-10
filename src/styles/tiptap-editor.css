@@ -20,6 +20,10 @@
     var(--editor-padding-x)
     var(--editor-padding-y);
   min-height: 100%;
+  /* Cap the content column on wide windows and center it, leaving empty
+     gutters on both sides for readability instead of stretching forever. */
+  max-width: var(--editor-max-width);
+  margin-inline: auto;
 }
 
 .tiptap-wrap-word .ProseMirror :is(p, h1, h2, h3, h4, h5, h6, li, blockquote, td, th) {

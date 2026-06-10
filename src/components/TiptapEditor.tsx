@@ -30,8 +30,12 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { usePopoverAnchor, type PopoverReference } from "../hooks/usePopoverAnchor";
 import { useHoverDismissTimer } from "../hooks/useHoverDismissTimer";
 import { HOVER_SAFE_ZONE_PX, isPointInExpandedRect } from "../utils/popoverGeometry";
+import { sliceToPlainText } from "../utils/clipboardText";
 import { CopySelectRegular, RenameRegular } from "@fluentui/react-icons";
 import { common, createLowlight } from "lowlight";
+import { createFastMarked } from "../extensions/fastMarkdownLexer";
+import { isProbablyMarkdown } from "../extensions/isProbablyMarkdown";
+import EscapeFirstBlock from "../extensions/EscapeFirstBlock";
 import MermaidCodeBlock from "../extensions/MermaidCodeBlock";
 import SlashCommands from "../extensions/SlashCommands";
 import ImageDrop from "../extensions/ImageDrop";
@@ -63,7 +67,6 @@ declare module "@tiptap/core" {
   }
 }
 
-const MD_PATTERN = /^#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|^>\s|^```|^\|.+\||\[.+\]\(.+\)/m;
 type TextRange = { from: number; to: number };
 const DOC_SESSION_CACHE_LIMIT = 20;
 
@@ -322,6 +325,11 @@ const MarkdownPaste = Extension.create({
       new Plugin({
         key: new PluginKey("markdownPaste"),
         props: {
+          // Override only the text/plain clipboard channel: join block
+          // boundaries with a single "\n" (and hard breaks with "\n") so the
+          // pasted line count matches what's on screen. text/html is left to
+          // ProseMirror's default serializer, so rich targets keep formatting.
+          clipboardTextSerializer: (slice) => sliceToPlainText(slice),
           handlePaste(view, event) {
             const clipboard = event.clipboardData;
             const hasFiles = Array.from(clipboard?.items ?? []).some((item) => item.kind === "file");
@@ -342,7 +350,7 @@ const MarkdownPaste = Extension.create({
             }
 
             if (clipboard?.getData("text/html")) return false;
-            if (!MD_PATTERN.test(text) || !editor.markdown) return false;
+            if (!isProbablyMarkdown(text) || !editor.markdown) return false;
 
             const parsed = editor.markdown.parse(text);
             if (!parsed) return false;
@@ -607,6 +615,12 @@ const ImageFocusGuard = Extension.create({
 
 const lowlight = createLowlight(common);
 
+// Parse markdown through a marked instance with a linear-time inline lexer.
+// Stock marked is O(n²) on a single large block dense with code spans, links,
+// HTML, or escapes, which freezes the app when opening very large notes kept on
+// one line / one paragraph. See fastMarkdownLexer.ts.
+const fastMarked = createFastMarked();
+
 export interface TiptapEditorHandle {
   getMarkdown: () => string;
   setContent: (markdown: string) => void;
@@ -791,7 +805,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     const editor = useEditor({
       extensions: [
         StarterKit.configure({ codeBlock: false, underline: false, link: false }),
-        Markdown,
+        Markdown.configure({ marked: fastMarked }),
         Link.configure({
           autolink: true,
           linkOnPaste: true,
@@ -840,6 +854,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         TableCell,
         TableHeader,
         TableNodeSelect,
+        EscapeFirstBlock,
         MarkdownPaste,
         DocumentContext,
         IMEGuard,

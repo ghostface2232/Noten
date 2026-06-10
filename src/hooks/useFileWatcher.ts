@@ -22,6 +22,7 @@ import { getFileTimestamps } from "../utils/fileTimestamps";
 import { readMeta } from "../utils/metadataIO";
 import { scanAndAbsorbConflicts } from "../utils/conflictFileDetector";
 import { setKnownDiskContent } from "../utils/conflictBackup";
+import { markdownEqual } from "../utils/markdownEqual";
 import { NotenError } from "../utils/notenError";
 import { logNotenError } from "../utils/crashLog";
 import type { Locale } from "./useSettings";
@@ -279,9 +280,15 @@ export function useFileWatcher(
       }
 
       if (await isOwnWriteContentMatch(doc.filePath, content)) continue;
-      if (content === doc.content) continue;
 
+      // Track the actual disk bytes as the conflict baseline regardless of
+      // whether we reload, so backupIfRemoteWroteFirst compares against reality.
       setKnownDiskContent(doc.filePath, content);
+
+      // A purely cosmetic external rewrite (line endings / trailing newline) is
+      // not a real edit — accept it silently without reloading the open editor
+      // and jarring the cursor.
+      if (markdownEqual(content, doc.content)) continue;
 
       const { updatedAt: fileUpdatedAt } = await getFileTimestamps(tauriFileSystem, doc.filePath);
 
