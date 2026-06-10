@@ -39,24 +39,42 @@ export const SEARCH_DECORATION_CAP = 2000;
 // Far above any realistic single-note match count.
 const SEARCH_MATCH_LIMIT = 50000;
 
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export function findSearchMatches(doc: Node, query: string): SearchMatch[] {
   const results: SearchMatch[] = [];
   if (!query) return results;
-  const lower = query.toLowerCase();
+  // Case-insensitive regex over the ORIGINAL text. The previous
+  // implementation searched text.toLowerCase() and reused those indices as
+  // document positions; case folding can change string length (İ → i̇), so
+  // every index after such a character drifted and Replace deleted the wrong
+  // characters. Regex 'i' matching never changes offsets.
+  const re = new RegExp(escapeRegExp(query), "gi");
   let stop = false;
 
   doc.descendants((node, pos) => {
     if (stop) return false;
-    if (node.isText && node.text) {
-      const text = node.text.toLowerCase();
-      let idx = text.indexOf(lower);
-      while (idx !== -1) {
-        if (results.length >= SEARCH_MATCH_LIMIT) { stop = true; break; }
-        results.push({ from: pos + idx, to: pos + idx + query.length });
-        idx = text.indexOf(lower, idx + 1);
-      }
+    if (!node.isTextblock) return undefined; // keep descending
+
+    // Aggregate the block's inline content so a match can span mark
+    // boundaries — per-text-node search reported "0 matches" for any phrase
+    // with mixed formatting (e.g. one bold word inside it). Inline leaf nodes
+    // (hard breaks, inline images) map to a single placeholder char, which
+    // keeps string index i aligned with document position pos + 1 + i; the
+    // placeholder can never match query characters.
+    const text = node.textBetween(0, node.content.size, undefined, "￼");
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (results.length >= SEARCH_MATCH_LIMIT) { stop = true; break; }
+      results.push({ from: pos + 1 + m.index, to: pos + 1 + m.index + m[0].length });
+      // Restart one char after the match start (not its end) to keep the old
+      // overlapping-match semantics of indexOf(idx + 1).
+      re.lastIndex = m.index + 1;
     }
-    return undefined;
+    return false; // inline content already covered
   });
 
   return results;

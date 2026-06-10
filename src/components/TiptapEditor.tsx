@@ -53,6 +53,7 @@ import { TableBubbleMenu } from "./TableBubbleMenu";
 import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
 import { isSafeLinkHref, normalizeLinkHref } from "../utils/linkHref";
+import { serializeImageMarkdown } from "../utils/imageMarkdownSerialize";
 import "../styles/tiptap-editor.css";
 import "../styles/mermaid-theme.css";
 import "../styles/wiki-link.css";
@@ -818,19 +819,13 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         MermaidCodeBlock.configure({ lowlight }),
         Image.configure({ allowBase64: true }).extend({
           renderMarkdown(node) {
-            const src = node.attrs?.src ?? "";
-            const alt = node.attrs?.alt ?? "";
-            const title = node.attrs?.title ?? "";
-            const width = node.attrs?.width;
-            const height = node.attrs?.height;
-            if (width || height) {
-              const parts = [`src="${src}"`, `alt="${alt}"`];
-              if (title) parts.push(`title="${title}"`);
-              if (width) parts.push(`width="${width}"`);
-              if (height) parts.push(`height="${height}"`);
-              return `<img ${parts.join(" ")} />`;
-            }
-            return title ? `![${alt}](${src} "${title}")` : `![${alt}](${src})`;
+            return serializeImageMarkdown({
+              src: node.attrs?.src,
+              alt: node.attrs?.alt,
+              title: node.attrs?.title,
+              width: node.attrs?.width,
+              height: node.attrs?.height,
+            });
           },
           addNodeView() {
             return createImageNodeView(this.editor);

@@ -13,7 +13,10 @@ import { Extension, type Editor } from "@tiptap/core";
 const TRAPPING_FIRST_NODES = new Set(["codeBlock"]);
 
 /** Exported for unit testing; returns true when it handled the key. */
-export function escapeLeadingBlock(editor: Editor): boolean {
+export function escapeLeadingBlock(
+  editor: Editor,
+  opts: { requireBlockStart?: boolean } = {},
+): boolean {
   const { selection, doc } = editor.state;
   if (!selection.empty) return false;
 
@@ -23,6 +26,11 @@ export function escapeLeadingBlock(editor: Editor): boolean {
   const $from = selection.$from;
   // Cursor must sit inside the first top-level node.
   if ($from.depth < 1 || $from.before(1) !== 0) return false;
+
+  // ArrowLeft only escapes from the very start of the block. Mid-line it must
+  // keep its normal caret-movement meaning — hijacking it there inserted an
+  // empty paragraph (dirty + undo step + autosave) instead of moving left.
+  if (opts.requireBlockStart && $from.parentOffset !== 0) return false;
 
   // Only act on the first visual line: if there is a newline before the cursor,
   // ArrowUp should move within the block as usual rather than escape.
@@ -43,7 +51,7 @@ export const EscapeFirstBlock = Extension.create({
   addKeyboardShortcuts() {
     return {
       ArrowUp: ({ editor }) => escapeLeadingBlock(editor),
-      ArrowLeft: ({ editor }) => escapeLeadingBlock(editor),
+      ArrowLeft: ({ editor }) => escapeLeadingBlock(editor, { requireBlockStart: true }),
     };
   },
 });

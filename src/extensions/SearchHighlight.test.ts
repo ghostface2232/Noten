@@ -45,6 +45,44 @@ describe("findSearchMatches", () => {
     active = editor;
     expect(findSearchMatches(doc, "a").length).toBe(2500);
   });
+
+  it("reports offsets in original-string space even after length-changing case folding", () => {
+    // "İ".toLowerCase() is "i̇" (two code units) — the old lowercase-index
+    // implementation shifted every later match by one per İ, so Replace
+    // deleted the wrong characters.
+    const { editor, doc } = docFromText("İİİ target");
+    active = editor;
+    const matches = findSearchMatches(doc, "target");
+    expect(matches.length).toBe(1);
+    // <p> content starts at pos 1; "İİİ " is 4 chars in the original string.
+    expect(matches[0].from).toBe(1 + 4);
+    expect(matches[0].to).toBe(1 + 4 + "target".length);
+    expect(doc.textBetween(matches[0].from, matches[0].to)).toBe("target");
+  });
+
+  it("treats regex metacharacters in the query as literals", () => {
+    const { editor, doc } = docFromText("price (USD) is 3.50");
+    active = editor;
+    expect(findSearchMatches(doc, "(USD)").length).toBe(1);
+    expect(findSearchMatches(doc, "3.50").length).toBe(1);
+    expect(findSearchMatches(doc, "3x50").length).toBe(0);
+  });
+
+  it("finds a phrase that spans mark boundaries (mixed formatting)", () => {
+    // "quick brown" with "brown" bold splits into two text nodes; per-node
+    // search reported 0 matches for the phrase.
+    const { editor, doc } = docFromText("the quick <strong>brown</strong> fox");
+    active = editor;
+    const matches = findSearchMatches(doc, "quick brown");
+    expect(matches.length).toBe(1);
+    expect(doc.textBetween(matches[0].from, matches[0].to)).toBe("quick brown");
+  });
+
+  it("keeps overlapping-match semantics", () => {
+    const { editor, doc } = docFromText("aaa");
+    active = editor;
+    expect(findSearchMatches(doc, "aa").length).toBe(2);
+  });
 });
 
 describe("selectMatchesToDecorate", () => {

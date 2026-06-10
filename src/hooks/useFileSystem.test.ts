@@ -615,6 +615,114 @@ describe("useFileSystem — deleteNotes batch", () => {
   });
 });
 
+// switchDocument + pruneEmptyCurrentDoc — the deletion path that runs on every
+// switch/new/import/restore. Two invariants:
+//   1. An empty, auto-titled leaving doc is pruned (file + meta + group refs).
+//   2. The body .md is removed BEFORE the .meta sidecar. The reverse order is
+//      the dangerous one — a body without a sidecar gets re-ingested by the
+//      watcher's reconcile as a fresh unmanaged doc with groupId: null ("the
+//      deleted note reappeared outside its group").
+
+describe("useFileSystem — switchDocument prunes an empty leaving doc", () => {
+  const removeMock = fsPlugin.remove as ReturnType<typeof vi.fn>;
+  const removeMetaMock = metadataIOModule.removeMeta as ReturnType<typeof vi.fn>;
+
+  it("removes the empty doc's body BEFORE its meta sidecar", async () => {
+    const empty = makeDoc("a", { content: "" });
+    const other = makeDoc("b", { content: "real note" });
+    const callOrder: string[] = [];
+    removeMock.mockImplementation(async (path: string) => { callOrder.push(`remove:${path}`); });
+    removeMetaMock.mockImplementation(async (_fs: unknown, _dir: string, id: string) => { callOrder.push(`removeMeta:${id}`); });
+    try {
+      const { result, setDocs, notifyActiveDoc } = renderFs({ docs: [empty, other], activeIndex: 0 });
+
+      await act(async () => {
+        await result.current.switchDocument(1);
+      });
+
+      const bodyIdx = callOrder.indexOf("remove:/notes/a.md");
+      const metaIdx = callOrder.indexOf("removeMeta:a");
+      expect(bodyIdx).toBeGreaterThanOrEqual(0);
+      expect(metaIdx).toBeGreaterThanOrEqual(0);
+      expect(bodyIdx).toBeLessThan(metaIdx);
+
+      // The pruned doc is gone from the committed list and the target doc
+      // becomes active.
+      const lastDocs = setDocs.mock.calls[setDocs.mock.calls.length - 1][0] as NoteDoc[];
+      expect(lastDocs.map((d) => d.id)).toEqual(["b"]);
+      expect(notifyActiveDoc).toHaveBeenCalledWith("b", "/notes/b.md");
+    } finally {
+      removeMock.mockImplementation(async () => {});
+      removeMetaMock.mockImplementation(async () => {});
+    }
+  });
+
+  it("drops the pruned id from groups and deletes the emptied group", async () => {
+    const empty = makeDoc("a", { content: "" });
+    const other = makeDoc("b", { content: "real note" });
+    const groups: NoteGroup[] = [
+      { id: "g1", name: "G1", noteIds: ["a"], collapsed: false, createdAt: 1000 },
+      { id: "g2", name: "G2", noteIds: ["b"], collapsed: false, createdAt: 1000 },
+    ];
+    const { result, setGroups } = renderFs({ docs: [empty, other], activeIndex: 0, groups });
+
+    await act(async () => {
+      await result.current.switchDocument(1);
+    });
+
+    expect(setGroups).toHaveBeenCalled();
+    const updater = setGroups.mock.calls[0][0] as (prev: NoteGroup[]) => NoteGroup[];
+    const next = updater(groups);
+    // g1 lost its only note and is dropped entirely; g2 is untouched.
+    expect(next.map((g) => g.id)).toEqual(["g2"]);
+    expect(next[0].noteIds).toEqual(["b"]);
+  });
+
+  it("does not prune a non-empty leaving doc", async () => {
+    const filled = makeDoc("a", { content: "has content" });
+    const other = makeDoc("b", { content: "x" });
+    const { result, setDocs } = renderFs({ docs: [filled, other], activeIndex: 0 });
+
+    await act(async () => {
+      await result.current.switchDocument(1);
+    });
+
+    expect(removeMock).not.toHaveBeenCalledWith("/notes/a.md");
+    const lastDocs = setDocs.mock.calls[setDocs.mock.calls.length - 1][0] as NoteDoc[];
+    expect(lastDocs.map((d) => d.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("does not prune an empty doc the user explicitly named (customName)", async () => {
+    const named = makeDoc("a", { content: "", customName: true });
+    const other = makeDoc("b", { content: "x" });
+    const { result, setDocs } = renderFs({ docs: [named, other], activeIndex: 0 });
+
+    await act(async () => {
+      await result.current.switchDocument(1);
+    });
+
+    expect(removeMock).not.toHaveBeenCalledWith("/notes/a.md");
+    const lastDocs = setDocs.mock.calls[setDocs.mock.calls.length - 1][0] as NoteDoc[];
+    expect(lastDocs.map((d) => d.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("treats unsaved editor content as content (no prune) even when docs lag", async () => {
+    // leaving.content in the docs list can lag the live editor: autosave just
+    // committed (isDirty false) but the user typed one more char before
+    // clicking. Pruning based on the stale list would delete a non-empty note.
+    const lagging = makeDoc("a", { content: "" });
+    const other = makeDoc("b", { content: "x" });
+    refs.editorContent = "typed after last autosave";
+    const { result } = renderFs({ docs: [lagging, other], activeIndex: 0 });
+
+    await act(async () => {
+      await result.current.switchDocument(1);
+    });
+
+    expect(removeMock).not.toHaveBeenCalledWith("/notes/a.md");
+  });
+});
+
 // restoreNote — the un-trashed sidecar must hit the disk BEFORE the body copy.
 // Windows copyFile preserves the source mtime, so the restored root body stays
 // older than meta.trashedAt; if the watcher's reconcile (~1.5s after the copy)

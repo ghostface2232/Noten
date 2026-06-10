@@ -266,7 +266,14 @@ export function useFileSystem(
     const leaving = baseDocs.find((d) => d.id === leavingDocId);
     if (!leaving) return baseDocs;
     const currentContent = leaving.content.trim();
-    if (currentContent || leaving.customName || baseDocs.length <= 1) return baseDocs;
+    // The docs list can lag the live editor: autosave just committed (isDirty
+    // false) but the user typed once more before triggering the switch. Every
+    // caller passes the doc the editor is still showing at this point, so
+    // consult the editor directly — pruning on the stale list alone would
+    // remove the file while a queued background save for it exists, and the
+    // cancelDocSave below would then drop that save, losing the input.
+    const liveContent = getCurrentMarkdown(tiptapRef).trim();
+    if (currentContent || liveContent || leaving.customName || baseDocs.length <= 1) return baseDocs;
 
     // Order matters: remove the .md BEFORE the .meta. The reverse order
     // (meta gone, body still present) is the dangerous one — the watcher's

@@ -70,3 +70,32 @@ describe("escapeLeadingBlock", () => {
     expect(firstType(e)).toBe("paragraph");
   });
 });
+
+// ArrowLeft binds with requireBlockStart: mid-line it must keep its normal
+// caret-movement meaning. The regression being pinned: pressing ArrowLeft at
+// offset 5 of a leading code block's first line inserted an empty paragraph
+// (dirty + undo step + autosave) instead of moving the caret left.
+describe("escapeLeadingBlock — requireBlockStart (ArrowLeft binding)", () => {
+  it("does nothing mid-line so ArrowLeft falls through to caret movement", () => {
+    const e = make("<pre><code>const x = 1</code></pre>");
+    e.commands.setTextSelection(6); // offset 5 inside the first line
+    const before = e.state.doc.childCount;
+    expect(escapeLeadingBlock(e, { requireBlockStart: true })).toBe(false);
+    expect(e.state.doc.childCount).toBe(before);
+    expect(firstType(e)).toBe("codeBlock");
+  });
+
+  it("still escapes from the very start of the block", () => {
+    const e = make("<pre><code>const x = 1</code></pre>");
+    e.commands.setTextSelection(1); // parentOffset === 0
+    expect(escapeLeadingBlock(e, { requireBlockStart: true })).toBe(true);
+    expect(firstType(e)).toBe("paragraph");
+  });
+
+  it("ArrowUp keeps escaping from anywhere on the first line", () => {
+    const e = make("<pre><code>const x = 1</code></pre>");
+    e.commands.setTextSelection(6);
+    expect(escapeLeadingBlock(e)).toBe(true);
+    expect(firstType(e)).toBe("paragraph");
+  });
+});
