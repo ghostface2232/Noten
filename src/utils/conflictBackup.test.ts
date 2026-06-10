@@ -47,6 +47,45 @@ describe("backupIfRemoteWroteFirst", () => {
     });
   });
 
+  it("returns false (save proceeds) when the file is simply gone", async () => {
+    // Models the remote-delete race: PC B deleted the note and the deletion
+    // synced here while this doc is still dirty. There is no remote body to
+    // protect, and the body write right after this call recreates the file.
+    // Previously this threw BACKUP_FAILED, which made the dirty note
+    // permanently unsaveable and silently dropped the session's edits.
+    setKnownDiskContent(FILE_PATH, "stale baseline");
+    // FILE_PATH intentionally not seeded: readTextFile rejects, exists() is false.
+
+    const result = await backupIfRemoteWroteFirst(fs, DIR, FILE_PATH, NOTE_ID, "dirty content");
+
+    expect(result).toBe(false);
+  });
+
+  it("still throws BACKUP_FAILED when the existence check itself fails", async () => {
+    // If we can't even stat the path we cannot distinguish "gone" from
+    // "unreadable", so the save must stay deferred.
+    inner.seedTextFile(FILE_PATH, "remote body");
+    setKnownDiskContent(FILE_PATH, "stale baseline");
+    fs.injectFault({
+      op: "readTextFile",
+      path: FILE_PATH,
+      throwError: new Error("EBUSY: hydration"),
+    });
+    fs.injectFault({
+      op: "exists",
+      path: FILE_PATH,
+      throwError: new Error("EBUSY: hydration"),
+    });
+
+    await expect(
+      backupIfRemoteWroteFirst(fs, DIR, FILE_PATH, NOTE_ID, "intended"),
+    ).rejects.toMatchObject({
+      name: "NotenError",
+      code: "BACKUP_FAILED",
+      severity: "fatal",
+    });
+  });
+
   it("throws BACKUP_FAILED when the conflict body write fails", async () => {
     // The disk read succeeds and reveals a remote write; we attempt to back up
     // the remote body before overwriting; but the .conflicts/ write itself

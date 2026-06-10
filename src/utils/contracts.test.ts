@@ -167,7 +167,7 @@ describe("contract: autosave failures remain flushable", () => {
     expect(body).toMatch(/if\s*\(saved\)\s*clearPendingSnapshotIfCurrent/);
   });
 
-  it("doSave runs backupIfRemoteWroteFirst before any writeTextFile in the same body", () => {
+  it("doSave runs backupIfRemoteWroteFirst before the body write in the same body", () => {
     // Commit 4003532 introduced the pre-save .conflicts/ backup as the only
     // recovery surface for "remote wrote first" overwrites in cloud-sync
     // setups. If a refactor accidentally reorders these two calls, autosave
@@ -181,9 +181,9 @@ describe("contract: autosave failures remain flushable", () => {
     expect(fnMatch, "doSave function body not found").not.toBeNull();
     const body = fnMatch![0].replace(/^\s*\/\/.*$/gm, "");
     const backupMatch = body.match(/await\s+backupIfRemoteWroteFirst\(/);
-    const writeMatch = body.match(/await\s+tauriFileSystem\.writeTextFile\(/);
+    const writeMatch = body.match(/await\s+atomicWriteText\(/);
     expect(backupMatch, "live `await backupIfRemoteWroteFirst(` call not found in doSave").not.toBeNull();
-    expect(writeMatch, "live `await tauriFileSystem.writeTextFile(` call not found in doSave").not.toBeNull();
+    expect(writeMatch, "live `await atomicWriteText(` body write not found in doSave").not.toBeNull();
     expect(backupMatch!.index!).toBeLessThan(writeMatch!.index!);
   });
 });

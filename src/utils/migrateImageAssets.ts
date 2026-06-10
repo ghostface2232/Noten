@@ -32,7 +32,14 @@ async function buildAssetSource(
   noteFilePath: string,
   cache: Map<string, string>,
 ): Promise<string> {
-  const cached = cache.get(dataUrl);
+  // The cache key MUST include the noteId. Asset paths are per-note
+  // (.assets/<noteId>/<hash>.ext), so a dataUrl-only key would make a second
+  // note containing the same image reuse the FIRST note's asset path — its
+  // markdown then points into another note's asset dir and its own asset file
+  // is never written. Deleting the first note later (removeNoteAssetDir)
+  // permanently breaks the second note's image.
+  const cacheKey = `${noteId}\n${dataUrl}`;
+  const cached = cache.get(cacheKey);
   if (cached) return cached;
 
   const bytes = dataUrlToUint8Array(dataUrl);
@@ -44,7 +51,7 @@ async function buildAssetSource(
 
   await mkdir(dirname(absolutePath), { recursive: true }).catch(() => {});
   await writeFile(absolutePath, bytes);
-  cache.set(dataUrl, relativePath);
+  cache.set(cacheKey, relativePath);
   return relativePath;
 }
 

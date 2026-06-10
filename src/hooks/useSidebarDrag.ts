@@ -227,9 +227,19 @@ export function useSidebarDrag(opts: UseSidebarDragOptions) {
     ghost.className = "sidebar-drag-ghost";
     const doc = o.docs.find((d) => d.id === noteId);
     const iconSvg = '<svg fill="currentColor" width="16" height="16" viewBox="0 0 20 20"><path d="M6 2a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8h-3a2 2 0 0 1-2-2V3H6Zm5 1.07V6a1 1 0 0 0 1 1h2.93L11 3.07ZM5 4a1 1 0 0 1 1-1h4v3a2 2 0 0 0 2 2h3v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4Z"/></svg>';
-    ghost.innerHTML = iconSvg + `<span>${doc?.fileName ?? ""}</span>`;
+    // innerHTML only for the static icon markup. The note title is arbitrary
+    // user/remote data (titles are not constrained to a filename charset and
+    // can arrive via synced .meta sidecars), so it must go in via textContent
+    // — interpolating it into innerHTML is an XSS sink with full IPC access.
+    ghost.innerHTML = iconSvg;
+    const titleSpan = document.createElement("span");
+    titleSpan.textContent = doc?.fileName ?? "";
+    ghost.appendChild(titleSpan);
     if (allNoteIds.length > 1) {
-      ghost.innerHTML += `<span class="sidebar-drag-count">+${allNoteIds.length - 1}</span>`;
+      const countSpan = document.createElement("span");
+      countSpan.className = "sidebar-drag-count";
+      countSpan.textContent = `+${allNoteIds.length - 1}`;
+      ghost.appendChild(countSpan);
     }
     ghost.style.transform = `translate3d(${startX + 8}px, ${startY - 14}px, 0)`;
     document.body.appendChild(ghost);

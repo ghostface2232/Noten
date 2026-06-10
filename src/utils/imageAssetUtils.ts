@@ -153,7 +153,12 @@ export async function resolveRenderableImageSource(
   context: DocumentImageContext,
 ): Promise<string | null> {
   if (isDataImageSource(src)) return src;
-  if (!isRelativeAssetSource(src)) return src;
+  // Only data:image and managed .assets/ sources are renderable. Anything
+  // else — http(s), protocol-relative, file:, absolute local paths — is
+  // refused (null → the <img> gets no src). A remote URL here would fire a
+  // network request the moment the note is opened, violating the "notes
+  // never leave the disk" invariant and acting as a tracking pixel.
+  if (!isRelativeAssetSource(src)) return null;
 
   const absolutePath = resolveAssetAbsolutePath(src, context.filePath);
   if (!absolutePath) return null;

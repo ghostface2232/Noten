@@ -65,6 +65,15 @@ vi.mock("../utils/fs", () => ({
   },
 }));
 
+// doSave routes the body write through atomicWriteText (temp+rename).
+// Delegate straight to fs.writeTextFile so existing writeMock assertions
+// (final path, content, fault injection) keep observing the body write.
+vi.mock("../utils/atomicWrite", () => ({
+  atomicWriteText: vi.fn(async (fs: { writeTextFile: (p: string, c: string) => Promise<void> }, path: string, content: string) => {
+    await fs.writeTextFile(path, content);
+  }),
+}));
+
 vi.mock("./useWindowSync", () => ({
   emitDocUpdated: vi.fn(),
 }));

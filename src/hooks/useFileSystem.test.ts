@@ -58,6 +58,17 @@ vi.mock("../utils/fs", () => ({
   tauriFileSystem: { writeTextFile: vi.fn(async () => {}) },
 }));
 
+// Body writes (provisionNoteFile / rewriteNoteFile / saveFile) route through
+// atomicWriteText (temp+rename). Delegate to the plugin-fs writeTextFile mock
+// so the existing writeMock assertions and per-path fault injection still
+// observe body writes on their final paths.
+vi.mock("../utils/atomicWrite", () => ({
+  atomicWriteText: vi.fn(async (_fs: unknown, path: string, content: string) => {
+    const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+    await writeTextFile(path, content);
+  }),
+}));
+
 vi.mock("../utils/documentTitle", () => ({
   getDefaultDocumentTitle: vi.fn(() => "Untitled"),
 }));

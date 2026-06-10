@@ -85,6 +85,27 @@ export async function backupIfRemoteWroteFirst(
   try {
     diskContent = await fs.readTextFile(filePath);
   } catch (err) {
+    // A read failure has two very different meanings:
+    //
+    // 1. The file is simply gone (deleted on another device and synced here,
+    //    or trashed externally). There is nothing on disk to back up, so the
+    //    save is safe — the body write below recreates the file. Treating
+    //    this as fatal used to leave a dirty note permanently unsaveable:
+    //    every autosave threw, and the whole editing session was silently
+    //    lost on close.
+    // 2. The file exists but can't be read (cloud-sync placeholder
+    //    hydration, AV lock). We genuinely cannot verify whether a remote
+    //    body would be overwritten, so defer the save.
+    let fileExists = true;
+    try {
+      fileExists = await fs.exists(filePath);
+    } catch { /* can't even stat — keep fatal path below */ }
+    if (!fileExists) {
+      // The save will recreate the file; drop the stale baseline so the
+      // recreated content seeds a fresh one.
+      forgetKnownDiskContent(filePath);
+      return false;
+    }
     // Previously this swallowed to diskContent=null and returned false ("no
     // backup needed"), which lied: we couldn't check, so we don't know.
     // Throw so the caller defers the save rather than overwriting blind.

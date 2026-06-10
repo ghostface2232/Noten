@@ -224,10 +224,16 @@ export function useSidebarGroupDrag(opts: UseSidebarGroupDragOptions) {
     const ghost = document.createElement("div");
     ghost.className = "sidebar-drag-ghost";
     const iconSvg = '<svg fill="currentColor" width="16" height="16" viewBox="0 0 20 20"><path d="M3.75 4a1.75 1.75 0 0 0-1.75 1.75v8.5c0 .97.78 1.75 1.75 1.75h12.5a1.75 1.75 0 0 0 1.75-1.75V7.25A1.75 1.75 0 0 0 16.25 5.5H10.5l-1.5-1.28A1.75 1.75 0 0 0 7.86 4H3.75Z"/></svg>';
-    const nameEscaped = group.name.replace(/[&<>"']/g, (c) => (
-      { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c] ?? c
-    ));
-    ghost.innerHTML = iconSvg + `<span>${nameEscaped}</span>` + `<span class="sidebar-drag-count">${noteCount}</span>`;
+    // innerHTML only for the static icon markup; the group name is user data
+    // and goes in via textContent (same pattern as useSidebarDrag).
+    ghost.innerHTML = iconSvg;
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = group.name;
+    ghost.appendChild(nameSpan);
+    const countSpan = document.createElement("span");
+    countSpan.className = "sidebar-drag-count";
+    countSpan.textContent = String(noteCount);
+    ghost.appendChild(countSpan);
     ghost.style.transform = `translate3d(${startX + 8}px, ${startY - 14}px, 0)`;
     document.body.appendChild(ghost);
 

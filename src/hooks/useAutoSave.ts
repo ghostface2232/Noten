@@ -10,6 +10,7 @@ import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { emitDocUpdated } from "./useWindowSync";
 import { markOwnWrite } from "./ownWriteTracker";
 import { backupIfRemoteWroteFirst, setKnownDiskContent } from "../utils/conflictBackup";
+import { atomicWriteText } from "../utils/atomicWrite";
 import { NotenError } from "../utils/notenError";
 import { logNotenError } from "../utils/crashLog";
 
@@ -212,7 +213,11 @@ export function useAutoSave(
       }
 
       markOwnWrite(snapshot.filePath, snapshot.content);
-      await tauriFileSystem.writeTextFile(snapshot.filePath, snapshot.content);
+      // The body .md is the single source of truth: a crash or cloud-sync/AV
+      // interruption mid-write must never leave it truncated, so route through
+      // temp+rename. The root watcher ignores `.md.tmp` (endsWith(".md")
+      // filter) and the rename lands on the marked own-write path.
+      await atomicWriteText(tauriFileSystem, snapshot.filePath, snapshot.content);
       setKnownDiskContent(snapshot.filePath, snapshot.content);
 
       if (!snapshotIsCurrent(snapshot)) {

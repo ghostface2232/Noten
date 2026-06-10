@@ -2,6 +2,7 @@ import { useCallback, useRef } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { mkdir, readTextFile, writeTextFile, remove, copyFile } from "@tauri-apps/plugin-fs";
 import { tauriFileSystem } from "../utils/fs";
+import { atomicWriteText } from "../utils/atomicWrite";
 import {
   getNotesDir,
   saveManifest,
@@ -86,7 +87,7 @@ async function provisionNoteFile(
     await mkdir(notesDir, { recursive: true }).catch(() => {});
     filePath = `${notesDir}/${id}.md`;
     markOwnWrite(filePath, content);
-    await writeTextFile(filePath, content);
+    await atomicWriteText(tauriFileSystem, filePath, content);
     return { filePath, ok: true };
   } catch (error) {
     void logNotenError(new NotenError(
@@ -113,7 +114,7 @@ async function rewriteNoteFile(
 ): Promise<boolean> {
   try {
     markOwnWrite(filePath, content);
-    await writeTextFile(filePath, content);
+    await atomicWriteText(tauriFileSystem, filePath, content);
     return true;
   } catch (error) {
     void logNotenError(new NotenError(
@@ -311,7 +312,7 @@ export function useFileSystem(
     }
 
     markOwnWrite(targetPath, markdown);
-    await writeTextFile(targetPath, markdown);
+    await atomicWriteText(tauriFileSystem, targetPath, markdown);
 
     const nextDocs = docs.map((entry, index) => {
       if (index !== activeIndex) return entry;
