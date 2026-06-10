@@ -201,5 +201,15 @@ export function useSettings() {
     }
   }, []);
 
-  return useMemo(() => ({ settings, update, isLoaded }), [settings, update, isLoaded]);
+  // Adopt a value another window already persisted (e.g. notesDirectory after
+  // a migration broadcast) without a redundant disk write. Marks the user-
+  // update flag so a still-running startup load cannot clobber it.
+  const applyExternal = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]): void => {
+    didUserUpdateRef.current = true;
+    const next = { ...settingsRef.current, [key]: value };
+    settingsRef.current = next;
+    setSettingsRaw(next);
+  }, []);
+
+  return useMemo(() => ({ settings, update, applyExternal, isLoaded }), [settings, update, applyExternal, isLoaded]);
 }

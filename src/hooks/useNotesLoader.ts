@@ -145,11 +145,16 @@ export function sortNotes(docs: NoteDoc[], order: NotesSortOrder, locale: Locale
   return sorted;
 }
 
-export async function getNotesDir(): Promise<string> {
-  if (notesDirCache) return notesDirCache;
+/** The app-data fallback directory, without touching the active-dir cache. */
+export async function getDefaultNotesDir(): Promise<string> {
   const base = await appDataDir();
   const sep = base.endsWith("/") || base.endsWith("\\") ? "" : "/";
-  notesDirCache = `${base}${sep}notes`;
+  return `${base}${sep}notes`;
+}
+
+export async function getNotesDir(): Promise<string> {
+  if (notesDirCache) return notesDirCache;
+  notesDirCache = await getDefaultNotesDir();
   return notesDirCache;
 }
 

@@ -95,17 +95,31 @@ function hydrateGroupMembershipFromMeta(
 }
 
 /**
- * Per-note observation counter for bodyless meta sidecars. Required because
- * orphan-meta deletion must wait one full reconcile pass (cloud sync sidecars
- * sometimes arrive before bodies). Lives on a state object instead of a
- * module singleton so each call site can hold its own and tests stay isolated.
+ * Per-note observation record for bodyless meta sidecars. Orphan-meta
+ * deletion must wait BOTH a full reconcile pass and a minimum wall-clock age
+ * (cloud sync sidecars sometimes arrive before bodies, and two watcher passes
+ * can land seconds apart). Lives on a state object instead of a module
+ * singleton so each call site can hold its own and tests stay isolated.
  */
-export interface ReconcileState {
-  bodyMissing: Map<string, number>;
+export interface BodyMissingObservation {
+  firstSeenAt: number;
+  passes: number;
 }
 
+export interface ReconcileState {
+  bodyMissing: Map<string, BodyMissingObservation>;
+}
+
+/**
+ * Minimum wall-clock age of a bodyless-meta observation before its sidecar
+ * may be deleted. Covers cloud clients that deliver `.meta` seconds-to-tens-
+ * of-seconds before the `.md`; the 60s periodic reconcile guarantees a
+ * qualifying pass shortly after the grace expires.
+ */
+export const ORPHAN_META_GRACE_MS = 90_000;
+
 export function createReconcileState(): ReconcileState {
-  return { bodyMissing: new Map<string, number>() };
+  return { bodyMissing: new Map<string, BodyMissingObservation>() };
 }
 
 export function clearReconcileState(state: ReconcileState): void {
@@ -296,7 +310,8 @@ export async function reconcileFolder(
   // its body. Deleting it via removeMetaFile propagates to every synced PC,
   // so two guards gate the delete: skip the whole pass when many metas are
   // bodyless at once (bulk = likely mid-sync), and require a meta to stay
-  // bodyless across two passes (per-id grace) before removing it.
+  // bodyless across two passes AND at least ORPHAN_META_GRACE_MS of wall
+  // clock (per-id grace) before removing it.
   const missingBodyIds: string[] = [];
   for (const meta of allMeta.values()) {
     const rootName = `${meta.id}.md`;
@@ -332,16 +347,24 @@ export async function reconcileFolder(
   }
 
   if (!looksMidSync) {
+    const now = Date.now();
     for (const id of missingBodyIds) {
-      const seen = state.bodyMissing.get(id) ?? 0;
-      if (seen >= 1) {
+      const obs = state.bodyMissing.get(id);
+      // Both gates must hold: a prior non-bulk pass (split-read tolerance)
+      // AND a minimum wall-clock age. Pass count alone is not enough — two
+      // watcher passes can fire seconds apart while a cloud client is still
+      // uploading the body behind its sidecar.
+      if (obs && obs.passes >= 1 && now - obs.firstSeenAt >= ORPHAN_META_GRACE_MS) {
         state.bodyMissing.delete(id);
         try {
           await removeMetaFile(fs, dir, id);
           allMeta.delete(id);
         } catch { /* ignore */ }
       } else {
-        state.bodyMissing.set(id, seen + 1);
+        state.bodyMissing.set(id, {
+          firstSeenAt: obs?.firstSeenAt ?? now,
+          passes: (obs?.passes ?? 0) + 1,
+        });
       }
     }
   }

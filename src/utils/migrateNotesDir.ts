@@ -431,16 +431,24 @@ async function backupOverwrittenBody(
   } catch { /* best-effort backup */ }
 }
 
-/** Move managed note data. Merge preserves both sides with newer-wins clocks. */
+/**
+ * Move managed note data. Merge preserves both sides with newer-wins clocks.
+ *
+ * `clearSource: false` runs only the copy phase so the caller can commit the
+ * `notesDirectory` setting between copy and source clear (crash mid-copy then
+ * leaves the old dir authoritative) and finish with `clearMigratedSource`.
+ */
 export async function migrateNotesDir(
   fromDir: string,
   toDir: string,
   mergeStrategy: "merge" | "overwrite",
+  options?: { clearSource?: boolean },
 ): Promise<MigrationResult> {
   const from = normalizeSep(fromDir).replace(/[\\/]+$/, "");
   const to = normalizeSep(toDir).replace(/[\\/]+$/, "");
   if (from === to) return { success: true };
 
+  const clearSource = options?.clearSource !== false;
   const destinationIsInsideSource = isSameOrChildPath(fromDir, toDir);
   const machineId = await getMachineId();
 
@@ -463,7 +471,7 @@ export async function migrateNotesDir(
       await clearDirContents(toDir, undefined, true);
       await copySharedTreeForOverwrite(fromDir, toDir);
 
-      if (!destinationIsInsideSource) {
+      if (clearSource && !destinationIsInsideSource) {
         await clearDirContents(fromDir);
       }
       return { success: true };
@@ -554,7 +562,7 @@ export async function migrateNotesDir(
       } catch { /* best-effort */ }
     }
 
-    if (!destinationIsInsideSource) {
+    if (clearSource && !destinationIsInsideSource) {
       await clearDirContents(fromDir);
     }
     return { success: true };
@@ -567,6 +575,15 @@ export async function migrateNotesDir(
     ));
     return { success: false, error: String(err) };
   }
+}
+
+/**
+ * Finalize a `clearSource: false` migration after the setting commit. Removal
+ * is best-effort: a failure leaves duplicate data in the old dir, never loss.
+ */
+export async function clearMigratedSource(fromDir: string, toDir: string): Promise<void> {
+  if (isSameOrChildPath(fromDir, toDir)) return;
+  await clearDirContents(fromDir);
 }
 
 export async function hasExistingNotenData(dir: string): Promise<boolean> {

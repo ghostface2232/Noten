@@ -21,7 +21,7 @@ import {
 import { getCurrentWindow, Effect, LogicalSize, LogicalPosition } from "@tauri-apps/api/window";
 import { useMarkdownState } from "./hooks/useMarkdownState";
 import { getCurrentMarkdown, useFileSystem } from "./hooks/useFileSystem";
-import { saveManifest, sortNotes, useNotesLoader, getNotesDir, setNotesDir, resetNotesDir, setMigrationInProgress } from "./hooks/useNotesLoader";
+import { saveManifest, sortNotes, useNotesLoader, getNotesDir, getDefaultNotesDir, setNotesDir, resetNotesDir, setMigrationInProgress } from "./hooks/useNotesLoader";
 import { useAutoSave } from "./hooks/useAutoSave";
 import { useNoteGroups } from "./hooks/useNoteGroups";
 import { useSettings, type ParagraphSpacing } from "./hooks/useSettings";
@@ -43,12 +43,13 @@ import { searchPluginKey, type SearchPluginState } from "./extensions/SearchHigh
 import { refreshWikiLinkDecorations } from "./extensions/WikiLink";
 import { t } from "./i18n";
 import { exportAsMarkdown, exportAsPdf } from "./utils/exportHandlers";
-import { clearManagedNotesData, hasExistingNotenData, migrateNotesDir } from "./utils/migrateNotesDir";
+import { clearManagedNotesData, clearMigratedSource, hasExistingNotenData, migrateNotesDir } from "./utils/migrateNotesDir";
 import { colorHex } from "./utils/noteColors";
 import { clampMenuToViewport } from "./utils/clampMenuPosition";
 import { useFileWatcher } from "./hooks/useFileWatcher";
 import { createReconcileState } from "./utils/reconcileFolder";
 import { useWindowSync } from "./hooks/useWindowSync";
+import { useMigrationSync, broadcastMigrationStarted, broadcastMigrationFinished } from "./hooks/useMigrationSync";
 import { useChromeVisibility } from "./hooks/useChromeVisibility";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useDragDrop } from "./hooks/useDragDrop";
@@ -202,7 +203,7 @@ function App() {
   const [sidebarSearchOpen, setSidebarSearchOpen] = useState(false);
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   const [notesDirConflict, setNotesDirConflict] = useState<NotesDirConflictDialogState | null>(null);
-  const { settings, update: updateSetting, isLoaded: settingsLoaded } = useSettings();
+  const { settings, update: updateSetting, applyExternal: applySettingExternal, isLoaded: settingsLoaded } = useSettings();
   const updater = useUpdater();
   const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDark);
   const isDarkMode = settings.themeMode === "system"
@@ -367,6 +368,18 @@ function App() {
   flushPendingSnapshotsRef.current = flushPendingSnapshots;
   notifyActiveDocRef.current = notifyActiveDoc;
   cancelDocSaveRef.current = cancelDocSave;
+
+  // Cross-window migration coordination: when another window migrates the
+  // notes directory, flush+block our saves, then follow it to the new dir.
+  useMigrationSync({
+    flushAutoSaveRef,
+    awaitInFlightSavesRef,
+    flushPendingSnapshotsRef,
+    reconcileState: reconcileStateRef.current,
+    setReloadKey,
+    setCurrentNotesDir,
+    applyExternalSettingsChange: applySettingExternal,
+  });
 
   const fileParamHandled = useRef(false);
   useEffect(() => {
@@ -617,9 +630,10 @@ function App() {
     return saved;
   }, [updateSetting]);
 
-  // Unwind a failed notes-dir migration: restore the loader's in-memory dir,
-  // roll the persisted setting back, and release the autosave guard. Each
-  // failure path (try/catch throw, !result.success) repeated this triple.
+  // Unwind the use-selected-only path when clearing the old dir fails after
+  // the setting was already persisted: restore the loader's in-memory dir,
+  // roll the persisted setting back, and release the autosave guard. The
+  // copy-based paths no longer need this — they persist only after success.
   const revertNotesDirChange = useCallback(async (oldDir: string, previousNotesDirectory: string) => {
     setNotesDir(oldDir, reconcileStateRef.current);
     await persistNotesDirectorySetting(previousNotesDirectory);
@@ -671,32 +685,58 @@ function App() {
     ).catch(() => {});
 
     setMigrationInProgress(true);
-    const previousNotesDirectory = settings.notesDirectory;
-    if (!(await persistNotesDirectorySetting(newDir))) {
+    // Other windows flush and block their saves before any destructive step.
+    const migrationId = await broadcastMigrationStarted();
+    const abortMigration = async (messageKey: Parameters<typeof t>[0] | null) => {
       setMigrationInProgress(false);
-      await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
-      return;
-    }
+      broadcastMigrationFinished(migrationId, false, "");
+      if (messageKey) await message(t(messageKey, locale), { kind: "error" });
+    };
 
-    let result;
-    try {
-      result = action === "use-selected-only"
-        ? await clearManagedNotesData(oldDir, newDir)
-        : await migrateNotesDir(oldDir, newDir, action === "merge" ? "merge" : "overwrite");
-    } catch (err) {
-      await revertNotesDirChange(oldDir, previousNotesDirectory);
-      throw err;
-    }
-
-    if (!result.success) {
-      await revertNotesDirChange(oldDir, previousNotesDirectory);
-      await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
-      return;
+    if (action !== "use-selected-only") {
+      // Copy first, commit the setting only after the copy landed, clear the
+      // source only after the commit. A crash at any point leaves either the
+      // old dir authoritative or duplicate data — never a partial-only state.
+      let result;
+      try {
+        result = await migrateNotesDir(oldDir, newDir, action === "merge" ? "merge" : "overwrite", { clearSource: false });
+      } catch (err) {
+        await abortMigration(null);
+        throw err;
+      }
+      if (!result.success) {
+        await abortMigration("settings.notesDirectory.migrationFailed");
+        return;
+      }
+      if (!(await persistNotesDirectorySetting(newDir))) {
+        // The copied data stays in newDir as a harmless duplicate; the old
+        // dir remains authoritative.
+        await abortMigration("settings.notesDirectory.settingsFailed");
+        return;
+      }
+      await clearMigratedSource(oldDir, newDir).catch(() => {});
+    } else {
+      // No copy phase: the destination is adopted as-is, so the setting
+      // commit comes first and the only destructive step (clearing the old
+      // dir) follows it.
+      const previousNotesDirectory = settings.notesDirectory;
+      if (!(await persistNotesDirectorySetting(newDir))) {
+        await abortMigration("settings.notesDirectory.settingsFailed");
+        return;
+      }
+      const result = await clearManagedNotesData(oldDir, newDir);
+      if (!result.success) {
+        await revertNotesDirChange(oldDir, previousNotesDirectory);
+        broadcastMigrationFinished(migrationId, false, "");
+        await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
+        return;
+      }
     }
 
     setNotesDir(newDir, reconcileStateRef.current);
     setCurrentNotesDir(newDir);
     setReloadKey((k) => k + 1);
+    broadcastMigrationFinished(migrationId, true, newDir);
     // Reload owns releasing migrationInProgress.
   }, [locale, persistNotesDirectorySetting, requestNotesDirConflictChoice, revertNotesDirChange, settings.notesDirectory]);
 
@@ -719,34 +759,47 @@ function App() {
     ).catch(() => {});
 
     setMigrationInProgress(true);
-    const previousNotesDirectory = settings.notesDirectory;
-    if (!(await persistNotesDirectorySetting(""))) {
+    // Other windows flush and block their saves before any destructive step.
+    const migrationId = await broadcastMigrationStarted();
+    const abortMigration = async (messageKey: Parameters<typeof t>[0]) => {
       setMigrationInProgress(false);
-      await message(t("settings.notesDirectory.settingsFailed", locale), { kind: "error" });
+      broadcastMigrationFinished(migrationId, false, "");
+      await message(t(messageKey, locale), { kind: "error" });
+    };
+
+    // Resolve the default dir without mutating the loader cache — the cache
+    // must keep pointing at the old dir until the copy lands and the setting
+    // commits.
+    const defaultDir = await getDefaultNotesDir();
+
+    // Same crash-safe ordering as handleChangeNotesDir: copy → persist →
+    // clear source.
+    let result;
+    try {
+      result = await migrateNotesDir(oldDir, defaultDir, "overwrite", { clearSource: false });
+    } catch (err) {
+      setMigrationInProgress(false);
+      broadcastMigrationFinished(migrationId, false, "");
+      throw err;
+    }
+    if (!result.success) {
+      await abortMigration("settings.notesDirectory.migrationFailed");
+      return;
+    }
+
+    if (!(await persistNotesDirectorySetting(""))) {
+      await abortMigration("settings.notesDirectory.settingsFailed");
       return;
     }
 
     resetNotesDir(reconcileStateRef.current);
-    const defaultDir = await getNotesDir();
-
-    let result;
-    try {
-      result = await migrateNotesDir(oldDir, defaultDir, "overwrite");
-    } catch (err) {
-      await revertNotesDirChange(oldDir, previousNotesDirectory);
-      throw err;
-    }
-
-    if (!result.success) {
-      await revertNotesDirChange(oldDir, previousNotesDirectory);
-      await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
-      return;
-    }
+    await clearMigratedSource(oldDir, defaultDir).catch(() => {});
 
     setCurrentNotesDir(defaultDir);
     setReloadKey((k) => k + 1);
+    broadcastMigrationFinished(migrationId, true, "");
     // Reload owns releasing migrationInProgress.
-  }, [locale, persistNotesDirectorySetting, revertNotesDirChange, settings.notesDirectory]);
+  }, [locale, persistNotesDirectorySetting, settings.notesDirectory]);
 
   const {
     chromeVisible,

@@ -212,7 +212,7 @@ describe("useNotesLoader — all body reads fail closed", () => {
 describe("useNotesLoader — reload clears reconcile state (bug 4 regression)", () => {
   it("invokes clearReconcileState on the injected state when reloadKey bumps", async () => {
     const externalState: ReconcileState = createReconcileState();
-    externalState.bodyMissing.set("ghost-a", 1);
+    externalState.bodyMissing.set("ghost-a", { firstSeenAt: Date.now(), passes: 1 });
 
     const { rerender, result } = renderHook(
       ({ reloadKey }) => useNotesLoader("en", "updated-desc", true, reloadKey, externalState),

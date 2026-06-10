@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createInMemoryFileSystem, type InMemoryFileSystem } from "./fs.test-utils";
 import { wrapWithFaults } from "./fs.fault.test-utils";
 import {
   reconcileFolder,
   createReconcileState,
+  ORPHAN_META_GRACE_MS,
   type ReconcileState,
 } from "./reconcileFolder";
 import {
@@ -65,10 +66,17 @@ let fs: InMemoryFileSystem;
 let state: ReconcileState;
 
 beforeEach(async () => {
+  // Orphan-meta deletion is gated on wall-clock age, so the suite pins time.
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
   fs = createInMemoryFileSystem();
   state = createReconcileState();
   fs.seedDir(DIR);
   (await getMockedLogger()).mockClear();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("reconcileFolder", () => {
@@ -87,17 +95,26 @@ describe("reconcileFolder", () => {
     expect(written!.fileName).toBe("Hello");
   });
 
-  it("graces a bodyless meta on the first pass and removes it on the second", async () => {
+  it("graces a bodyless meta until both a prior pass and the wall-clock grace have elapsed", async () => {
     const id = "11111111-1111-1111-1111-111111111111";
     await seedMeta(fs, makeMeta(id));
 
     const first = await reconcileFolder(fs, state, DIR, [], [], LOCALE);
     expect(first.changed).toBe(false);
-    expect(state.bodyMissing.get(id)).toBe(1);
+    expect(state.bodyMissing.get(id)?.passes).toBe(1);
     expect(await fs.exists(metaPathFor(DIR, id))).toBe(true);
 
+    // A second pass seconds later must NOT delete: OneDrive can deliver the
+    // sidecar before the body, and two watcher passes can land seconds apart.
+    vi.advanceTimersByTime(5_000);
     const second = await reconcileFolder(fs, state, DIR, [], [], LOCALE);
     expect(second.changed).toBe(false);
+    expect(await fs.exists(metaPathFor(DIR, id))).toBe(true);
+
+    // Once the grace age has passed, the next pass deletes.
+    vi.advanceTimersByTime(ORPHAN_META_GRACE_MS);
+    const third = await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+    expect(third.changed).toBe(false);
     expect(state.bodyMissing.has(id)).toBe(false);
     expect(await fs.exists(metaPathFor(DIR, id))).toBe(false);
   });
@@ -114,27 +131,35 @@ describe("reconcileFolder", () => {
 
     // Pass 1: bodyless → grace recorded.
     await reconcileFolder(fs, state, DIR, [], [], LOCALE);
-    expect(state.bodyMissing.get(id)).toBe(1);
+    expect(state.bodyMissing.get(id)?.passes).toBe(1);
 
     // Body arrives between passes (cloud-sync hydration completes).
     fs.seedTextFile(filePath, "hydrated body");
 
-    // Pass 2: body present → counter must reset, sidecar must stay.
+    // Pass 2: body present → observation must reset, sidecar must stay.
     await reconcileFolder(fs, state, DIR, [], [], LOCALE);
     expect(state.bodyMissing.has(id)).toBe(false);
     expect(await fs.exists(metaPathFor(DIR, id))).toBe(true);
 
-    // Body disappears again (placeholder re-virtualized).
+    // Body disappears again (placeholder re-virtualized) well after the
+    // original observation's grace would have expired — the reset must also
+    // refresh firstSeenAt, not just the pass count.
+    vi.advanceTimersByTime(ORPHAN_META_GRACE_MS + 1_000);
     await fs.remove(filePath);
 
-    // Pass 3: bodyless → should record fresh observation (seen=0 → 1), not
-    // delete on first sight. Without the reset, the lingering counter would
-    // have triggered deletion immediately here.
+    // Pass 3: bodyless → fresh observation, no delete on first sight.
     await reconcileFolder(fs, state, DIR, [], [], LOCALE);
-    expect(state.bodyMissing.get(id)).toBe(1);
+    expect(state.bodyMissing.get(id)?.passes).toBe(1);
     expect(await fs.exists(metaPathFor(DIR, id))).toBe(true);
 
-    // Pass 4: bodyless still → now eligible for deletion.
+    // Pass 4: a prior pass exists but the fresh observation is still inside
+    // its own grace window → must NOT delete. A sticky firstSeenAt would
+    // delete here.
+    await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+    expect(await fs.exists(metaPathFor(DIR, id))).toBe(true);
+
+    // After the fresh observation ages past the grace, deletion proceeds.
+    vi.advanceTimersByTime(ORPHAN_META_GRACE_MS);
     await reconcileFolder(fs, state, DIR, [], [], LOCALE);
     expect(state.bodyMissing.has(id)).toBe(false);
     expect(await fs.exists(metaPathFor(DIR, id))).toBe(false);
@@ -155,9 +180,10 @@ describe("reconcileFolder", () => {
 
     const first = await reconcileFolder(fs, state, DIR, [], [], LOCALE);
     expect(first.changed).toBe(false);
-    expect(state.bodyMissing.get(id)).toBe(1);
+    expect(state.bodyMissing.get(id)?.passes).toBe(1);
     expect(await fs.exists(metaPathFor(DIR, id))).toBe(true);
 
+    vi.advanceTimersByTime(ORPHAN_META_GRACE_MS);
     await reconcileFolder(fs, state, DIR, [], [], LOCALE);
     expect(state.bodyMissing.has(id)).toBe(false);
     expect(await fs.exists(metaPathFor(DIR, id))).toBe(false);
@@ -172,7 +198,10 @@ describe("reconcileFolder", () => {
       }
     }
 
+    // Advance past the wall-clock grace between passes so this pins that the
+    // BULK guard (not age) is what blocks deletion.
     await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+    vi.advanceTimersByTime(ORPHAN_META_GRACE_MS);
     await reconcileFolder(fs, state, DIR, [], [], LOCALE);
 
     for (let i = 0; i < 3; i += 1) {

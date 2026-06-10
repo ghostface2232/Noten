@@ -105,37 +105,58 @@ describe("contract: settings read failures are not default settings", () => {
   });
 });
 
-describe("contract: notes directory setting is durable before migration", () => {
-  // Regression class: moving note files and then failing to save notesDirectory
-  // splits this session from the next launch. The setting must be persisted
-  // before destructive directory migration begins.
+describe("contract: notes directory setting commits after copy, before source clear", () => {
+  // Regression class: persisting notesDirectory before the copy phase means a
+  // crash mid-copy boots the next launch into an empty/partial directory.
+  // Migration must run copy → persist setting → clear source, so a crash at
+  // any point leaves either the old dir authoritative or duplicate data.
   const APP = resolve(SRC_ROOT, "App.tsx");
 
-  it("change-notes-dir persists notesDirectory before moving managed data", () => {
+  it("change-notes-dir copies, then persists, then clears the source", () => {
     const text = read(APP);
     const fnMatch = text.match(/const handleChangeNotesDir[\s\S]*?\n  const handleResetNotesDir/);
     expect(fnMatch, "handleChangeNotesDir not found").not.toBeNull();
     const body = fnMatch![0];
-    const persistAt = body.indexOf("persistNotesDirectorySetting(newDir)");
     const migrateAt = body.indexOf("migrateNotesDir(oldDir, newDir");
+    const persistAt = body.indexOf("persistNotesDirectorySetting(newDir)");
+    const clearSourceAt = body.indexOf("clearMigratedSource(oldDir, newDir)");
+    expect(migrateAt).toBeGreaterThanOrEqual(0);
+    expect(persistAt).toBeGreaterThanOrEqual(0);
+    expect(clearSourceAt).toBeGreaterThanOrEqual(0);
+    expect(migrateAt).toBeLessThan(persistAt);
+    expect(persistAt).toBeLessThan(clearSourceAt);
+    // The copy phase must not clear the source itself.
+    expect(body.slice(migrateAt, persistAt)).toContain("clearSource: false");
+  });
+
+  it("change-notes-dir use-selected-only persists before clearing the old dir", () => {
+    const text = read(APP);
+    const fnMatch = text.match(/const handleChangeNotesDir[\s\S]*?\n  const handleResetNotesDir/);
+    expect(fnMatch, "handleChangeNotesDir not found").not.toBeNull();
+    const body = fnMatch![0];
+    // This branch has no copy phase; its only destructive step (clearing the
+    // old dir) must follow its own setting commit — the last persist call.
+    const persistAt = body.lastIndexOf("persistNotesDirectorySetting(newDir)");
     const clearAt = body.indexOf("clearManagedNotesData(oldDir, newDir)");
     expect(persistAt).toBeGreaterThanOrEqual(0);
-    expect(migrateAt).toBeGreaterThanOrEqual(0);
     expect(clearAt).toBeGreaterThanOrEqual(0);
-    expect(persistAt).toBeLessThan(migrateAt);
     expect(persistAt).toBeLessThan(clearAt);
   });
 
-  it("reset-notes-dir persists the default setting before overwriting data", () => {
+  it("reset-notes-dir copies, then persists, then clears the source", () => {
     const text = read(APP);
     const fnMatch = text.match(/const handleResetNotesDir[\s\S]*?\n  const \{/);
     expect(fnMatch, "handleResetNotesDir not found").not.toBeNull();
     const body = fnMatch![0];
-    const persistAt = body.indexOf("persistNotesDirectorySetting(\"\")");
     const migrateAt = body.indexOf("migrateNotesDir(oldDir, defaultDir");
-    expect(persistAt).toBeGreaterThanOrEqual(0);
+    const persistAt = body.indexOf("persistNotesDirectorySetting(\"\")");
+    const clearSourceAt = body.indexOf("clearMigratedSource(oldDir, defaultDir)");
     expect(migrateAt).toBeGreaterThanOrEqual(0);
-    expect(persistAt).toBeLessThan(migrateAt);
+    expect(persistAt).toBeGreaterThanOrEqual(0);
+    expect(clearSourceAt).toBeGreaterThanOrEqual(0);
+    expect(migrateAt).toBeLessThan(persistAt);
+    expect(persistAt).toBeLessThan(clearSourceAt);
+    expect(body.slice(migrateAt, persistAt)).toContain("clearSource: false");
   });
 });
 

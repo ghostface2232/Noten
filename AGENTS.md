@@ -35,6 +35,7 @@ Windows-native Markdown note app built with Tauri v2, React, and TypeScript.
 - Local cache includes `imageAssetMigrationV1CompletedAt` to track one-time image asset migration completion per notes directory.
 - Sidebar open/close state and width are stored in localStorage.
 - Notes created by the app are stored under the app data `notes` directory.
+- Notes-dir migration commits in the order copy → persist `notesDirectory` → clear source (`migrateNotesDir(..., { clearSource: false })` + `clearMigratedSource`), so a crash at any point leaves either the old dir authoritative or duplicate data — never a partial-only state. The lifecycle is broadcast cross-window via `useMigrationSync` (`notes-migration-started` / `-flush-ack` / `-finished`): non-migrating windows flush their saves, then block via `migrationInProgress`, and ack before the copy begins (5s timeout, proceed on timeout); on finish they repoint to the new dir and reload.
 - `appDataDir()` may not include a trailing separator; always check before joining paths.
 - The app is Tauri-only. Do not add browser fallbacks unless explicitly requested.
 
@@ -51,7 +52,7 @@ Noten's privacy posture is "your notes never leave the disk," and it should stay
 - Shared notes directories such as OneDrive/Dropbox are supported by file-based sync; metadata/group writes are merged so different PCs do not rely on one monolithic manifest.
 - Remote body conflicts are last-write-wins with previous remote body backups under `.conflicts/`. `.conflicts/` travels with the notes directory on a folder change/migration; a `merge` migration also backs up an about-to-be-overwritten destination body there before applying last-write-wins.
 - `reconcileFolder` does not delete a `.meta/<noteId>.json` the instant its body file is missing — on a mid-sync cloud folder the sidecar can arrive before its body:
-  - An orphan meta is deleted only after a per-id grace (observed bodyless on a prior non-bulk reconcile pass).
+  - An orphan meta is deleted only after a per-id grace: observed bodyless on a prior non-bulk reconcile pass AND first observed at least 90s ago (`ORPHAN_META_GRACE_MS`).
   - The whole sweep is skipped when many metas are bodyless at once (bulk guard — likely mid-sync).
 - Auto-save uses `activeDocRef` (sync ref) to track the active document, not React state's `activeIndex`, to prevent wrong-doc writes after rapid switching.
 - `notifyActiveDoc(id, filePath)` must be called in every code path that switches the active document (switchDocument, newNote, importFiles, duplicateNote, restoreNote). `deleteNote` does not call it directly because it relies on the subsequent active-index change to flow through normal state.
