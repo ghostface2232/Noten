@@ -658,15 +658,31 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
 
                   {!updateAvailable && (
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.5</div>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.6</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 체크박스 목록이 일반 목록으로 바뀌고 목록 안 텍스트가 편집되지 않던 문제 수정
+                          · 노트 본문을 원자적으로 저장해 정전·동기화 중단 중에도 파일이 손상되지 않도록 강화<br />
+                          · 노트 폴더 변경(이동·병합)을 여러 창에서 안전하게 조율하고, 복사가 끝난 뒤에만 설정을 반영<br />
+                          · 여러 PC 공유 시 그룹·핀·색상 메타데이터 보존과 충돌 백업 개선<br />
+                          · 노트를 삭제하면 실행취소 안내가 표시<br />
+                          · 같은 이미지를 여러 노트에서 사용할 때 이미지가 깨지던 문제 수정<br />
+                          · 위키링크가 있는 노트 이름을 바꿀 때 다른 노트의 링크가 되돌아가던 문제 수정<br />
+                          · 코드·Mermaid 블록 첫 줄에서 ← 키가 빈 문단을 만들던 문제와, 찾기·바꾸기가 일부 특수문자에서 잘못된 글자를 지우던 문제 수정<br />
+                          · 노트 안의 원격 이미지를 차단하고 보안(CSP)을 강화해 내용이 외부로 나가지 않도록 함<br />
+                          · 이미지 선택·위키링크 처리 성능 개선
                         </>
                       ) : (
                         <>
-                          · Fixed: checkbox lists no longer turn into plain lists, and text inside list items is editable again
+                          · Stronger data safety: note bodies are written atomically, so a crash or interrupted sync can't corrupt a file<br />
+                          · Changing the notes folder (move/merge) is now coordinated across windows, and the setting is applied only after the copy succeeds<br />
+                          · Better shared-folder sync: group/pin/color metadata is preserved and conflict backups improved<br />
+                          · Deleting a note now shows an undo prompt<br />
+                          · Fixed: images breaking when the same image was used in more than one note<br />
+                          · Fixed: renaming a note with wiki-links no longer reverts the links in other notes<br />
+                          · Fixed: Left Arrow on the first line of a code/Mermaid block no longer inserts a blank paragraph, and Find &amp; Replace no longer removes the wrong character with certain special characters<br />
+                          · Hardened privacy: remote images inside notes are blocked and CSP is enforced, so note content isn't requested from the internet<br />
+                          · Performance: faster image selection and wiki-link handling
                         </>
                       )}
                     </div>
