@@ -13,6 +13,7 @@ const refs = vi.hoisted(() => ({
   windowLabels: ["main", "second"],
   currentDir: "/old/notes",
   hasUnsaved: false,
+  enumerateThrows: false,
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -37,7 +38,10 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("@tauri-apps/api/webviewWindow", () => ({
-  getAllWebviewWindows: vi.fn(async () => refs.windowLabels.map((label) => ({ label }))),
+  getAllWebviewWindows: vi.fn(async () => {
+    if (refs.enumerateThrows) throw new Error("enumeration failed");
+    return refs.windowLabels.map((label) => ({ label }));
+  }),
 }));
 
 vi.mock("./useNotesLoader", () => ({
@@ -94,6 +98,7 @@ beforeEach(() => {
   refs.windowLabels = ["main", "second"];
   refs.currentDir = "/old/notes";
   refs.hasUnsaved = false;
+  refs.enumerateThrows = false;
 });
 
 afterEach(() => {
@@ -117,14 +122,25 @@ describe("broadcastMigrationStarted", () => {
     expect(refs.callLog).toContain("emit:notes-migration-started");
   });
 
-  it("treats an ack without an ok field as a successful drain (back-compat)", async () => {
+  it("aborts (allDrained:false) when an ack omits the ok field", async () => {
+    // An older window that can't report flush success acks without ok. Treating
+    // that as drained would reopen the loss path, so it must abort.
     await listen("notes-migration-started", (event) => {
       const { migrationId } = event.payload as { migrationId: string };
       void emit("notes-migration-flush-ack", { sourceWindow: "second", migrationId });
     });
 
     const { allDrained } = await broadcastMigrationStarted(60_000);
-    expect(allDrained).toBe(true);
+    expect(allDrained).toBe(false);
+  });
+
+  it("aborts (allDrained:false) when window enumeration fails", async () => {
+    refs.enumerateThrows = true;
+    const { migrationId, allDrained } = await broadcastMigrationStarted(60_000);
+    expect(typeof migrationId).toBe("string");
+    expect(allDrained).toBe(false);
+    // The started event is still emitted so any live window flushes and blocks.
+    expect(refs.callLog).toContain("emit:notes-migration-started");
   });
 
   it("reports allDrained:false when a window acks ok:false", async () => {

@@ -685,15 +685,18 @@ function App() {
     await flushAutoSaveRef.current?.().catch(() => {});
     await awaitInFlightSavesRef.current?.().catch(() => {});
     await flushPendingSnapshotsRef.current?.().catch(() => {});
-    await saveManifest(
+    const manifestSaved = await saveManifest(
       docsRef.current,
       docsRef.current[activeIndexRef.current]?.id ?? null,
       groupsRef.current,
-    ).catch(() => {});
+    ).then(() => true).catch(() => false);
 
-    // Abort before any destructive step if this window's own edits could not
-    // be persisted — the copy/clear below would otherwise drop them.
-    if (hasUnsavedChangesRef.current?.()) {
+    // Abort before any destructive step if anything could not be persisted —
+    // the copy/clear below would otherwise drop it. hasUnsavedChanges covers
+    // the autosave body queue; manifestSaved covers group/pin/color/order
+    // metadata, which lives only in the manifest and is not reflected by the
+    // body-queue flag.
+    if (hasUnsavedChangesRef.current?.() || !manifestSaved) {
       await message(t("settings.notesDirectory.drainFailed", locale), { kind: "error" });
       return;
     }
@@ -773,15 +776,18 @@ function App() {
     await flushAutoSaveRef.current?.().catch(() => {});
     await awaitInFlightSavesRef.current?.().catch(() => {});
     await flushPendingSnapshotsRef.current?.().catch(() => {});
-    await saveManifest(
+    const manifestSaved = await saveManifest(
       docsRef.current,
       docsRef.current[activeIndexRef.current]?.id ?? null,
       groupsRef.current,
-    ).catch(() => {});
+    ).then(() => true).catch(() => false);
 
-    // Abort before any destructive step if this window's own edits could not
-    // be persisted — the copy/clear below would otherwise drop them.
-    if (hasUnsavedChangesRef.current?.()) {
+    // Abort before any destructive step if anything could not be persisted —
+    // the copy/clear below would otherwise drop it. hasUnsavedChanges covers
+    // the autosave body queue; manifestSaved covers group/pin/color/order
+    // metadata, which lives only in the manifest and is not reflected by the
+    // body-queue flag.
+    if (hasUnsavedChangesRef.current?.() || !manifestSaved) {
       await message(t("settings.notesDirectory.drainFailed", locale), { kind: "error" });
       return;
     }

@@ -20,11 +20,11 @@ interface MigrationAckPayload {
   sourceWindow: string;
   migrationId: string;
   /**
-   * Whether this window fully drained its pending saves before blocking. When
-   * false, the migrating window must NOT proceed: this window may still hold
-   * unsaved edits bound to the old directory that the copy/clear would drop.
-   * Optional for back-compat with an older window that acks without it
-   * (treated as a successful drain).
+   * Whether this window fully drained its pending saves before blocking. The
+   * migrating window proceeds only on an explicit `ok: true`; anything else
+   * (false, or a missing field from an older window that can't report flush
+   * success) aborts the migration, since that window may still hold unsaved
+   * edits bound to the old directory that the copy/clear would drop.
    */
   ok?: boolean;
 }
@@ -62,14 +62,26 @@ const WINDOW_LABEL = getCurrentWindow().label;
  */
 export async function broadcastMigrationStarted(timeoutMs = 5000): Promise<MigrationStartResult> {
   const migrationId = crypto.randomUUID();
+  const payload = { sourceWindow: WINDOW_LABEL, migrationId } satisfies MigrationStartedPayload;
+
   let otherLabels: string[] = [];
+  let enumerated = false;
   try {
     otherLabels = (await getAllWebviewWindows())
       .map((w) => w.label)
       .filter((label) => label !== WINDOW_LABEL);
-  } catch { /* enumeration failed — cannot confirm other windows drained */ }
+    enumerated = true;
+  } catch { /* enumeration failed — cannot tell which windows are open */ }
 
-  const payload = { sourceWindow: WINDOW_LABEL, migrationId } satisfies MigrationStartedPayload;
+  // If we couldn't list the windows, another window may be open and still
+  // writing to the old dir. Announce the migration anyway (so any live
+  // listener flushes and blocks), but report not-drained so the caller aborts
+  // instead of clearing the source on an unverified assumption.
+  if (!enumerated) {
+    await emit("notes-migration-started", payload).catch(() => {});
+    return { migrationId, allDrained: false };
+  }
+
   if (otherLabels.length === 0) {
     await emit("notes-migration-started", payload).catch(() => {});
     return { migrationId, allDrained: true };
@@ -85,7 +97,10 @@ export async function broadcastMigrationStarted(timeoutMs = 5000): Promise<Migra
   try {
     unlistenAck = await listen<MigrationAckPayload>("notes-migration-flush-ack", (event) => {
       if (event.payload.migrationId !== migrationId) return;
-      if (event.payload.ok === false) drainFailed = true;
+      // Only an explicit ok:true counts as drained. A missing/invalid ok (an
+      // older window that never reported flush success) is treated as a
+      // failure — proceeding on it would reopen the very loss path this guards.
+      if (event.payload.ok !== true) drainFailed = true;
       pendingAcks.delete(event.payload.sourceWindow);
       if (pendingAcks.size === 0) settleAcked();
     });
