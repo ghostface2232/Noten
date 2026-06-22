@@ -658,31 +658,27 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
 
                   {!updateAvailable && (
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.6</div>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.7</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 노트 본문을 원자적으로 저장해 정전·동기화 중단 중에도 파일이 손상되지 않도록 강화<br />
-                          · 노트 폴더 변경(이동·병합)을 여러 창에서 안전하게 조율하고, 복사가 끝난 뒤에만 설정을 반영<br />
-                          · 여러 PC 공유 시 그룹·핀·색상 메타데이터 보존과 충돌 백업 개선<br />
-                          · 노트를 삭제하면 실행취소 안내가 표시<br />
-                          · 같은 이미지를 여러 노트에서 사용할 때 이미지가 깨지던 문제 수정<br />
-                          · 위키링크가 있는 노트 이름을 바꿀 때 다른 노트의 링크가 되돌아가던 문제 수정<br />
-                          · 코드·Mermaid 블록 첫 줄에서 ← 키가 빈 문단을 만들던 문제와, 찾기·바꾸기가 일부 특수문자에서 잘못된 글자를 지우던 문제 수정<br />
-                          · 노트 안의 원격 이미지를 차단하고 보안(CSP)을 강화해 내용이 외부로 나가지 않도록 함<br />
-                          · 이미지 선택·위키링크 처리 성능 개선
+                          · 창을 닫거나 노트 폴더를 바꿀 때 저장이 실패해도 수정 내용을 잃지 않도록 강화 — 저장될 때까지 유지·재시도<br />
+                          · 다른 창이 열려 있어도 노트 폴더 변경이 막히지 않도록 개선 — 이전 폴더는 안전이 확인된 뒤 정리<br />
+                          · 휴지통 정리·앱 제거 과정에서 엉뚱한 데이터가 지워지던 문제 수정<br />
+                          · 노트 본문 저장을 노트별로 직렬화하고, 실패 시 부분 기록 없이 재시도하도록 강화<br />
+                          · 핀·색상·그룹·이름 변경 같은 메타데이터를 창을 닫기 전에 끝까지 기록하도록 보장<br />
+                          · 안전하지 않은 노트 식별자(경로 조작·Windows 예약 이름)를 거부해 노트 폴더가 잘못 삭제될 위험 차단<br />
+                          · 사이드바 포커스 상태가 남아 Ctrl+R로 앱이 새로고침되며 작업 내용이 날아가던 문제 수정
                         </>
                       ) : (
                         <>
-                          · Stronger data safety: note bodies are written atomically, so a crash or interrupted sync can't corrupt a file<br />
-                          · Changing the notes folder (move/merge) is now coordinated across windows, and the setting is applied only after the copy succeeds<br />
-                          · Better shared-folder sync: group/pin/color metadata is preserved and conflict backups improved<br />
-                          · Deleting a note now shows an undo prompt<br />
-                          · Fixed: images breaking when the same image was used in more than one note<br />
-                          · Fixed: renaming a note with wiki-links no longer reverts the links in other notes<br />
-                          · Fixed: Left Arrow on the first line of a code/Mermaid block no longer inserts a blank paragraph, and Find &amp; Replace no longer removes the wrong character with certain special characters<br />
-                          · Hardened privacy: remote images inside notes are blocked and CSP is enforced, so note content isn't requested from the internet<br />
-                          · Performance: faster image selection and wiki-link handling
+                          · No lost edits when a save fails during window close or a notes-folder change — the note stays dirty and retries until it persists<br />
+                          · Changing the notes folder no longer dead-ends when other windows are open; the old folder is cleaned up later, only once it's confirmed safe<br />
+                          · Fixed: trash cleanup and uninstall could discard the wrong data<br />
+                          · Note-body saves are serialized per note and fail closed, so overlapping saves can't clobber each other or leave a partial file<br />
+                          · Metadata like pin, color, group, and rename is now fully flushed before a window closes<br />
+                          · Path-unsafe note ids (path traversal, Windows reserved names) are rejected, closing a recursive-delete risk on the notes folder<br />
+                          · Fixed: a stale sidebar-focus state let Ctrl+R reload the app and discard the document
                         </>
                       )}
                     </div>
