@@ -119,7 +119,7 @@ afterEach(() => {
 });
 
 describe("broadcastMigrationStarted", () => {
-  it("resolves with allDrained once every other window acks ok", async () => {
+  it("is all-drained once every other window acks ok", async () => {
     // Simulated second window: ack as soon as it sees the started event.
     await listen("notes-migration-started", (event) => {
       const { migrationId } = event.payload as { migrationId: string };
@@ -128,41 +128,42 @@ describe("broadcastMigrationStarted", () => {
 
     // A generous timeout: if the ack did not resolve the wait, the test
     // itself would time out long before this fires.
-    const { migrationId, allDrained } = await broadcastMigrationStarted(60_000);
+    const { migrationId, outcome } = await broadcastMigrationStarted(60_000);
     expect(typeof migrationId).toBe("string");
-    expect(allDrained).toBe(true);
+    expect(outcome).toBe("all-drained");
     expect(refs.callLog).toContain("emit:notes-migration-started");
   });
 
-  it("aborts (allDrained:false) when an ack omits the ok field", async () => {
-    // An older window that can't report flush success acks without ok. Treating
-    // that as drained would reopen the loss path, so it must abort.
+  it("is unconfirmed (not save-failed) when an ack omits the ok field", async () => {
+    // An older window that can't report flush success acks without ok. We can't
+    // confirm it drained, but it didn't report a failure either → unconfirmed,
+    // which the caller handles with deferred cleanup rather than a dead end.
     await listen("notes-migration-started", (event) => {
       const { migrationId } = event.payload as { migrationId: string };
       void emit("notes-migration-flush-ack", { sourceWindow: "second", migrationId });
     });
 
-    const { allDrained } = await broadcastMigrationStarted(60_000);
-    expect(allDrained).toBe(false);
+    const { outcome } = await broadcastMigrationStarted(60_000);
+    expect(outcome).toBe("unconfirmed");
   });
 
-  it("aborts (allDrained:false) when window enumeration fails", async () => {
+  it("is unconfirmed when window enumeration fails", async () => {
     refs.enumerateThrows = true;
-    const { migrationId, allDrained } = await broadcastMigrationStarted(60_000);
+    const { migrationId, outcome } = await broadcastMigrationStarted(60_000);
     expect(typeof migrationId).toBe("string");
-    expect(allDrained).toBe(false);
+    expect(outcome).toBe("unconfirmed");
     // The started event is still emitted so any live window flushes and blocks.
     expect(refs.callLog).toContain("emit:notes-migration-started");
   });
 
-  it("reports allDrained:false when a window acks ok:false", async () => {
+  it("is save-failed when a window acks ok:false", async () => {
     await listen("notes-migration-started", (event) => {
       const { migrationId } = event.payload as { migrationId: string };
       void emit("notes-migration-flush-ack", { sourceWindow: "second", migrationId, ok: false });
     });
 
-    const { allDrained } = await broadcastMigrationStarted(60_000);
-    expect(allDrained).toBe(false);
+    const { outcome } = await broadcastMigrationStarted(60_000);
+    expect(outcome).toBe("save-failed");
   });
 
   it("ignores acks for a different migrationId until the right one arrives", async () => {
@@ -172,12 +173,12 @@ describe("broadcastMigrationStarted", () => {
       void emit("notes-migration-flush-ack", { sourceWindow: "second", migrationId, ok: true });
     });
 
-    const { migrationId, allDrained } = await broadcastMigrationStarted(60_000);
+    const { migrationId, outcome } = await broadcastMigrationStarted(60_000);
     expect(typeof migrationId).toBe("string");
-    expect(allDrained).toBe(true);
+    expect(outcome).toBe("all-drained");
   });
 
-  it("aborts (allDrained:false) after the timeout when a window never acks", async () => {
+  it("is unconfirmed after the timeout when a window never acks", async () => {
     vi.useFakeTimers();
 
     let resolved = false;
@@ -187,16 +188,16 @@ describe("broadcastMigrationStarted", () => {
     expect(resolved).toBe(false);
 
     await vi.advanceTimersByTimeAsync(5_000);
-    const { migrationId, allDrained } = await pending;
+    const { migrationId, outcome } = await pending;
     expect(typeof migrationId).toBe("string");
-    expect(allDrained).toBe(false);
+    expect(outcome).toBe("unconfirmed");
   });
 
   it("does not wait at all when this is the only window", async () => {
     refs.windowLabels = ["main"];
-    const { migrationId, allDrained } = await broadcastMigrationStarted(60_000);
+    const { migrationId, outcome } = await broadcastMigrationStarted(60_000);
     expect(typeof migrationId).toBe("string");
-    expect(allDrained).toBe(true);
+    expect(outcome).toBe("all-drained");
     expect(refs.listeners.get("notes-migration-flush-ack") ?? []).toHaveLength(0);
   });
 });
@@ -361,6 +362,39 @@ describe("useMigrationSync — finished listener", () => {
 
     expect(setReloadKey).not.toHaveBeenCalled();
     expect(setNotesDirMock).not.toHaveBeenCalled();
+  });
+
+  it("sourceRetained: lowers the guard, flushes to the old dir, then follows", async () => {
+    refs.hasUnsaved = false;
+    const { reconcileState, setReloadKey } = renderMigrationSync();
+    await waitForListeners();
+
+    await emit("notes-migration-finished", {
+      sourceWindow: "second", migrationId: "m1", success: true, newDir: "/new/notes", sourceRetained: true,
+    });
+
+    // The old dir survives, so it drops its guard and flushes any stranded edit
+    // there before following to the new dir.
+    await vi.waitFor(() => expect(setNotesDirMock).toHaveBeenCalledWith("/new/notes", reconcileState));
+    expect(refs.callLog).toContain("flag:false");
+    expect(refs.callLog).toContain("flushAutoSave");
+    expect(setReloadKey).toHaveBeenCalledTimes(1);
+  });
+
+  it("sourceRetained: holds on the old dir when it still cannot drain", async () => {
+    refs.hasUnsaved = true;
+    const { setReloadKey } = renderMigrationSync();
+    await waitForListeners();
+
+    await emit("notes-migration-finished", {
+      sourceWindow: "second", migrationId: "m1", success: true, newDir: "/new/notes", sourceRetained: true,
+    });
+
+    // Wait until the flush attempt has run, then confirm it did NOT follow:
+    // reloading would overwrite the edits it could not save.
+    await vi.waitFor(() => expect(refs.callLog).toContain("flushPendingSnapshots"));
+    expect(setNotesDirMock).not.toHaveBeenCalled();
+    expect(setReloadKey).not.toHaveBeenCalled();
   });
 });
 

@@ -29,15 +29,24 @@ interface MigrationAckPayload {
   ok?: boolean;
 }
 
+/**
+ * How thoroughly the other windows confirmed they stopped writing to the old
+ * directory before the destructive step:
+ * - `all-drained`: every other window acked ok in time → safe to clear the old
+ *   dir immediately.
+ * - `unconfirmed`: a timeout, missing/invalid ack, or failed enumeration — no
+ *   window reported an explicit failure, but we could not confirm all of them.
+ *   Safe to migrate with DEFERRED cleanup (keep the old dir; clean it later).
+ * - `save-failed`: a window explicitly reported it could not persist its edits
+ *   (ok:false). Migrate with deferred cleanup too; that window keeps its
+ *   in-memory edits and self-heals on the finished event.
+ */
+export type DrainOutcome = "all-drained" | "unconfirmed" | "save-failed";
+
 /** Outcome of announcing a migration to the other windows. */
 export interface MigrationStartResult {
   migrationId: string;
-  /**
-   * True only when every other window acked in time AND each reported a
-   * successful drain. A timeout, a missing ack, or any `ok: false` leaves
-   * this false so the caller aborts before the destructive copy/clear.
-   */
-  allDrained: boolean;
+  outcome: DrainOutcome;
 }
 
 interface MigrationFinishedPayload {
@@ -46,6 +55,13 @@ interface MigrationFinishedPayload {
   success: boolean;
   /** New notes directory; "" means the app-data default. */
   newDir: string;
+  /**
+   * True when the old dir was NOT cleared (deferred cleanup). A receiving
+   * window may then safely flush any edits it still holds to the old dir
+   * before following to the new one; when false the old dir is already gone,
+   * so it must not write there.
+   */
+  sourceRetained: boolean;
 }
 
 const WINDOW_LABEL = getCurrentWindow().label;
@@ -54,11 +70,10 @@ const WINDOW_LABEL = getCurrentWindow().label;
  * Announce a migration and wait until every other window has flushed its
  * autosave state and blocked further saves (each acks after doing so).
  *
- * Returns `allDrained` so the caller can refuse to start the destructive
- * copy/clear unless every other window confirmed it persisted its pending
- * edits. The `timeoutMs` bound still prevents waiting forever, but a timeout
- * now resolves to `allDrained: false` (abort) rather than proceeding blindly:
- * a window that never acked may still be writing into the old directory.
+ * Returns a {@link DrainOutcome} so the caller can decide between clearing the
+ * old directory immediately (`all-drained`) and migrating with deferred
+ * cleanup (`unconfirmed` / `save-failed`). The `timeoutMs` bound prevents
+ * waiting forever; a timeout resolves to `unconfirmed`, never a blind clear.
  */
 export async function broadcastMigrationStarted(timeoutMs = 5000): Promise<MigrationStartResult> {
   const migrationId = crypto.randomUUID();
@@ -73,22 +88,22 @@ export async function broadcastMigrationStarted(timeoutMs = 5000): Promise<Migra
     enumerated = true;
   } catch { /* enumeration failed — cannot tell which windows are open */ }
 
-  // If we couldn't list the windows, another window may be open and still
-  // writing to the old dir. Announce the migration anyway (so any live
-  // listener flushes and blocks), but report not-drained so the caller aborts
-  // instead of clearing the source on an unverified assumption.
+  // Couldn't list windows: another may be open and still writing to the old
+  // dir. Announce anyway (so any live listener flushes and blocks), but report
+  // unconfirmed so the caller keeps the old dir and cleans up later.
   if (!enumerated) {
     await emit("notes-migration-started", payload).catch(() => {});
-    return { migrationId, allDrained: false };
+    return { migrationId, outcome: "unconfirmed" };
   }
 
   if (otherLabels.length === 0) {
     await emit("notes-migration-started", payload).catch(() => {});
-    return { migrationId, allDrained: true };
+    return { migrationId, outcome: "all-drained" };
   }
 
   const pendingAcks = new Set(otherLabels);
-  let drainFailed = false;
+  let saveFailed = false;
+  let unconfirmedAck = false;
   let settleAcked: () => void = () => {};
   const allAcked = new Promise<void>((resolve) => { settleAcked = resolve; });
   // Register the ack listener BEFORE emitting so a fast responder can't ack
@@ -97,10 +112,11 @@ export async function broadcastMigrationStarted(timeoutMs = 5000): Promise<Migra
   try {
     unlistenAck = await listen<MigrationAckPayload>("notes-migration-flush-ack", (event) => {
       if (event.payload.migrationId !== migrationId) return;
-      // Only an explicit ok:true counts as drained. A missing/invalid ok (an
-      // older window that never reported flush success) is treated as a
-      // failure — proceeding on it would reopen the very loss path this guards.
-      if (event.payload.ok !== true) drainFailed = true;
+      const ok = event.payload.ok;
+      // ok:true → drained. ok:false → a known save failure. Anything else (an
+      // older window that can't report status) is unconfirmable, not "drained".
+      if (ok === false) saveFailed = true;
+      else if (ok !== true) unconfirmedAck = true;
       pendingAcks.delete(event.payload.sourceWindow);
       if (pendingAcks.size === 0) settleAcked();
     });
@@ -108,8 +124,8 @@ export async function broadcastMigrationStarted(timeoutMs = 5000): Promise<Migra
 
   await emit("notes-migration-started", payload).catch(() => {});
 
-  // Without the ack listener we can't confirm anything drained, so abort.
-  if (!unlistenAck) return { migrationId, allDrained: false };
+  // Without the ack listener we can't confirm anything drained.
+  if (!unlistenAck) return { migrationId, outcome: "unconfirmed" };
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   await Promise.race([
@@ -119,13 +135,21 @@ export async function broadcastMigrationStarted(timeoutMs = 5000): Promise<Migra
   clearTimeout(timer);
   unlistenAck();
 
-  const allDrained = pendingAcks.size === 0 && !drainFailed;
-  return { migrationId, allDrained };
+  const timedOut = pendingAcks.size > 0;
+  const outcome: DrainOutcome = saveFailed
+    ? "save-failed"
+    : (timedOut || unconfirmedAck) ? "unconfirmed" : "all-drained";
+  return { migrationId, outcome };
 }
 
-export function broadcastMigrationFinished(migrationId: string, success: boolean, newDir: string): void {
+export function broadcastMigrationFinished(
+  migrationId: string,
+  success: boolean,
+  newDir: string,
+  sourceRetained = false,
+): void {
   emit("notes-migration-finished", {
-    sourceWindow: WINDOW_LABEL, migrationId, success, newDir,
+    sourceWindow: WINDOW_LABEL, migrationId, success, newDir, sourceRetained,
   } satisfies MigrationFinishedPayload).catch(() => {});
 }
 
@@ -189,7 +213,7 @@ export function useMigrationSync(params: MigrationSyncParams) {
       }),
 
       listen<MigrationFinishedPayload>("notes-migration-finished", (event) => {
-        const { sourceWindow, migrationId, success, newDir } = event.payload;
+        const { sourceWindow, migrationId, success, newDir, sourceRetained } = event.payload;
         if (sourceWindow === WINDOW_LABEL) return;
         finishedMigrationIds.add(migrationId);
         const p = paramsRef.current;
@@ -197,19 +221,46 @@ export function useMigrationSync(params: MigrationSyncParams) {
           setMigrationInProgress(false);
           return;
         }
-        // Repoint the loader cache synchronously; the settings update below
-        // re-runs App's notes-dir effect idempotently, but that async effect
-        // is not guaranteed to run before the reload starts loading.
-        if (newDir) {
-          setNotesDir(newDir, p.reconcileState);
-        } else {
-          resetNotesDir(p.reconcileState);
+        const followToNewDir = () => {
+          // Repoint the loader cache synchronously; the settings update below
+          // re-runs App's notes-dir effect idempotently, but that async effect
+          // is not guaranteed to run before the reload starts loading.
+          if (newDir) {
+            setNotesDir(newDir, p.reconcileState);
+          } else {
+            resetNotesDir(p.reconcileState);
+          }
+          p.applyExternalSettingsChange("notesDirectory", newDir);
+          void getNotesDir().then((dir) => p.setCurrentNotesDir(dir)).catch(() => {});
+          // The reload owns releasing migrationInProgress, mirroring the
+          // migrating window (useNotesLoader sets and clears it around a load).
+          p.setReloadKey((k) => k + 1);
+        };
+
+        if (!sourceRetained) {
+          // Old dir already cleared (all-drained): every window drained before
+          // the clear, so there is nothing left to flush — just follow.
+          followToNewDir();
+          return;
         }
-        p.applyExternalSettingsChange("notesDirectory", newDir);
-        void getNotesDir().then((dir) => p.setCurrentNotesDir(dir)).catch(() => {});
-        // The reload owns releasing migrationInProgress, mirroring the
-        // migrating window (useNotesLoader sets and clears it around a load).
-        p.setReloadKey((k) => k + 1);
+
+        // Deferred cleanup: the old dir survives. Drop the guard this window
+        // raised on `started` so any edit it could not save earlier can finally
+        // land in the (retained) old dir, then drain. The cleanup pass merges
+        // those late writes into the new dir.
+        void (async () => {
+          setMigrationInProgress(false);
+          await p.flushAutoSaveRef.current?.().catch(() => {});
+          await p.awaitInFlightSavesRef.current?.().catch(() => {});
+          await p.flushPendingSnapshotsRef.current?.().catch(() => {});
+          if (p.hasUnsavedChangesRef.current?.()) {
+            // Still can't persist. Stay on the old dir — it is retained, so this
+            // window keeps working losslessly there and follows on next launch;
+            // the deferred cleanup defers again while a window still uses it.
+            return;
+          }
+          followToNewDir();
+        })();
       }),
     ]).then((fns) => {
       if (!mounted) { fns.forEach((fn) => fn()); return; }

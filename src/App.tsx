@@ -44,6 +44,8 @@ import { refreshWikiLinkDecorations } from "./extensions/WikiLink";
 import { t } from "./i18n";
 import { exportAsMarkdown, exportAsPdf } from "./utils/exportHandlers";
 import { clearManagedNotesData, clearMigratedSource, hasExistingNotenData, migrateNotesDir } from "./utils/migrateNotesDir";
+import { writeMigrationJournal, type MigrationCleanupMode } from "./utils/migrationJournal";
+import { recoverPendingMigration } from "./utils/migrationCleanup";
 import { colorHex } from "./utils/noteColors";
 import { clampMenuToViewport } from "./utils/clampMenuPosition";
 import { useFileWatcher } from "./hooks/useFileWatcher";
@@ -395,6 +397,16 @@ function App() {
     applyExternalSettingsChange: applySettingExternal,
   });
 
+  // Finish any migration whose old dir was retained for deferred cleanup (a
+  // previous session quit before every window left the old dir). Runs once the
+  // initial load settled, and only acts when this is the sole window.
+  const migrationRecoveryDone = useRef(false);
+  useEffect(() => {
+    if (migrationRecoveryDone.current || isLoading) return;
+    migrationRecoveryDone.current = true;
+    void recoverPendingMigration();
+  }, [isLoading]);
+
   const fileParamHandled = useRef(false);
   useEffect(() => {
     if (fileParamHandled.current || isLoading || docs.length === 0) return;
@@ -710,19 +722,18 @@ function App() {
 
     setMigrationInProgress(true);
     // Other windows flush and block their saves before any destructive step.
-    const { migrationId, allDrained } = await broadcastMigrationStarted();
+    const { migrationId, outcome } = await broadcastMigrationStarted();
+    // Clear the old dir now only when every window confirmed it drained.
+    // Otherwise migrate anyway but KEEP the old dir (deferred cleanup): a slow
+    // or save-failed window's edits stay safe there and are merged in later,
+    // so the user never sees a "close other windows and retry" dead end.
+    const sourceRetained = outcome !== "all-drained";
+    const cleanupMode: MigrationCleanupMode = action === "use-selected-only" ? "backup-only" : "merge";
     const abortMigration = async (messageKey: Parameters<typeof t>[0] | null) => {
       setMigrationInProgress(false);
       broadcastMigrationFinished(migrationId, false, "");
       if (messageKey) await message(t(messageKey, locale), { kind: "error" });
     };
-
-    // Only move once every window confirmed it drained; otherwise a window
-    // still bound to the old dir could lose edits when we clear it.
-    if (!allDrained) {
-      await abortMigration("settings.notesDirectory.drainFailed");
-      return;
-    }
 
     if (action !== "use-selected-only") {
       // Copy first, commit the setting only after the copy landed, clear the
@@ -745,7 +756,11 @@ function App() {
         await abortMigration("settings.notesDirectory.settingsFailed");
         return;
       }
-      await clearMigratedSource(oldDir, newDir).catch(() => {});
+      if (sourceRetained) {
+        await writeMigrationJournal({ migrationId, oldDir, newDir, cleanupMode, startedAt: Date.now() }).catch(() => {});
+      } else {
+        await clearMigratedSource(oldDir, newDir).catch(() => {});
+      }
     } else {
       // No copy phase: the destination is adopted as-is, so the setting
       // commit comes first and the only destructive step (clearing the old
@@ -755,19 +770,28 @@ function App() {
         await abortMigration("settings.notesDirectory.settingsFailed");
         return;
       }
-      const result = await clearManagedNotesData(oldDir, newDir);
-      if (!result.success) {
-        await revertNotesDirChange(oldDir, previousNotesDirectory);
-        broadcastMigrationFinished(migrationId, false, "");
-        await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
-        return;
+      if (sourceRetained) {
+        // Keep the old dir as a backup; it is deleted (no merge) once every
+        // window has left it. The user chose to discard the old notes.
+        await writeMigrationJournal({ migrationId, oldDir, newDir, cleanupMode: "backup-only", startedAt: Date.now() }).catch(() => {});
+      } else {
+        const result = await clearManagedNotesData(oldDir, newDir);
+        if (!result.success) {
+          await revertNotesDirChange(oldDir, previousNotesDirectory);
+          broadcastMigrationFinished(migrationId, false, "");
+          await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
+          return;
+        }
       }
     }
 
     setNotesDir(newDir, reconcileStateRef.current);
     setCurrentNotesDir(newDir);
     setReloadKey((k) => k + 1);
-    broadcastMigrationFinished(migrationId, true, newDir);
+    broadcastMigrationFinished(migrationId, true, newDir, sourceRetained);
+    // If we turned out to be the only window after all, finish the deferred
+    // cleanup now instead of waiting for the next launch.
+    if (sourceRetained) void recoverPendingMigration();
     // Reload owns releasing migrationInProgress.
   }, [locale, persistNotesDirectorySetting, requestNotesDirConflictChoice, revertNotesDirChange, settings.notesDirectory]);
 
@@ -801,18 +825,13 @@ function App() {
 
     setMigrationInProgress(true);
     // Other windows flush and block their saves before any destructive step.
-    const { migrationId, allDrained } = await broadcastMigrationStarted();
+    const { migrationId, outcome } = await broadcastMigrationStarted();
+    const sourceRetained = outcome !== "all-drained";
     const abortMigration = async (messageKey: Parameters<typeof t>[0]) => {
       setMigrationInProgress(false);
       broadcastMigrationFinished(migrationId, false, "");
       await message(t(messageKey, locale), { kind: "error" });
     };
-
-    // Only move once every window confirmed it drained.
-    if (!allDrained) {
-      await abortMigration("settings.notesDirectory.drainFailed");
-      return;
-    }
 
     // Resolve the default dir without mutating the loader cache — the cache
     // must keep pointing at the old dir until the copy lands and the setting
@@ -820,7 +839,7 @@ function App() {
     const defaultDir = await getDefaultNotesDir();
 
     // Same crash-safe ordering as handleChangeNotesDir: copy → persist →
-    // clear source.
+    // clear source (or defer the clear when not all windows drained).
     let result;
     try {
       result = await migrateNotesDir(oldDir, defaultDir, "overwrite", { clearSource: false });
@@ -840,11 +859,18 @@ function App() {
     }
 
     resetNotesDir(reconcileStateRef.current);
-    await clearMigratedSource(oldDir, defaultDir).catch(() => {});
+    if (sourceRetained) {
+      // Journal the resolved default dir so a later cleanup knows where to
+      // merge the retained old-dir writes into.
+      await writeMigrationJournal({ migrationId, oldDir, newDir: defaultDir, cleanupMode: "merge", startedAt: Date.now() }).catch(() => {});
+    } else {
+      await clearMigratedSource(oldDir, defaultDir).catch(() => {});
+    }
 
     setCurrentNotesDir(defaultDir);
     setReloadKey((k) => k + 1);
-    broadcastMigrationFinished(migrationId, true, "");
+    broadcastMigrationFinished(migrationId, true, "", sourceRetained);
+    if (sourceRetained) void recoverPendingMigration();
     // Reload owns releasing migrationInProgress.
   }, [locale, persistNotesDirectorySetting, settings.notesDirectory]);
 
