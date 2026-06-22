@@ -534,6 +534,9 @@ export function useAutoSave(
     timersRef.current.delete(docId);
     pendingTargetsRef.current.delete(docId);
     pendingSnapshotsRef.current.delete(docId);
+    // saveTailByDocRef is intentionally left alone: a write already in flight
+    // for this doc must finish, and its cleanupTail self-removes the entry on
+    // settle. Clearing it here could let a concurrent write skip the chain.
     refreshHasPendingChanges();
   }, [refreshHasPendingChanges]);
 

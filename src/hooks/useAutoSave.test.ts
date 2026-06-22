@@ -860,6 +860,15 @@ describe("useAutoSave — per-doc save serialization", () => {
     return { promise, resolve };
   }
 
+  // These tests install a custom writeMock implementation. The global afterEach
+  // only vi.clearAllMocks() (clears calls, NOT implementations), so restore the
+  // factory default here or the blocking impl would leak into later tests.
+  afterEach(() => {
+    writeMock.mockImplementation(async () => {
+      if (refs.writeShouldThrow) throw refs.writeShouldThrow;
+    });
+  });
+
   it("never runs two body writes for the same doc concurrently", async () => {
     // A slow cloud-sync write for the leaving doc can still be in flight when a
     // doc-switch queues the next save. Without per-doc serialization both would
