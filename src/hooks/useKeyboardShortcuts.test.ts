@@ -25,20 +25,18 @@ function makeParams(): UseKeyboardShortcutsParams {
   };
 }
 
-/** Dispatch Ctrl+R from `target` and report whether the default was blocked. */
-function pressCtrlR(target: Element): boolean {
-  const event = new KeyboardEvent("keydown", {
-    key: "r",
-    ctrlKey: true,
-    bubbles: true,
-    cancelable: true,
-  });
+/** Dispatch a keydown from `target` and report whether the default was blocked. */
+function press(target: Element, init: KeyboardEventInit): boolean {
+  const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
   target.dispatchEvent(event);
   return event.defaultPrevented;
 }
 
+const pressCtrlR = (target: Element) => press(target, { key: "r", ctrlKey: true });
+
 let editorEl: HTMLElement;
 let inputEl: HTMLInputElement;
+let editableEl: HTMLElement;
 let plainEl: HTMLElement;
 
 beforeEach(() => {
@@ -51,14 +49,19 @@ beforeEach(() => {
   editorEl.appendChild(editorChild);
 
   inputEl = document.createElement("input");
+
+  editableEl = document.createElement("div");
+  editableEl.setAttribute("contenteditable", "true");
+
   plainEl = document.createElement("div");
 
-  document.body.append(editorEl, inputEl, plainEl);
+  document.body.append(editorEl, inputEl, editableEl, plainEl);
 });
 
 afterEach(() => {
   editorEl.remove();
   inputEl.remove();
+  editableEl.remove();
   plainEl.remove();
   document.documentElement.dataset.sidebarActive = "";
 });
@@ -88,5 +91,19 @@ describe("useKeyboardShortcuts — Ctrl+R / WebView reload guard", () => {
     document.documentElement.dataset.sidebarActive = "1";
     renderHook(() => useKeyboardShortcuts(makeParams()));
     expect(pressCtrlR(inputEl)).toBe(true);
+  });
+
+  it("blocks Ctrl+R when the sidebar flag is set but focus is in any contentEditable host", () => {
+    document.documentElement.dataset.sidebarActive = "1";
+    renderHook(() => useKeyboardShortcuts(makeParams()));
+    // A contentEditable that is NOT the .ProseMirror editor: the sidebar
+    // handler would bail on it, so this layer must block the reload.
+    expect(pressCtrlR(editableEl)).toBe(true);
+  });
+
+  it("always blocks Ctrl+Shift+R (hard reload) even when the sidebar is active", () => {
+    document.documentElement.dataset.sidebarActive = "1";
+    renderHook(() => useKeyboardShortcuts(makeParams()));
+    expect(press(plainEl, { key: "r", ctrlKey: true, shiftKey: true })).toBe(true);
   });
 });

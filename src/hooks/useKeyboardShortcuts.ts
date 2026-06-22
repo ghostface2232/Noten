@@ -19,9 +19,16 @@ function isDialogTarget(target: EventTarget | null) {
   return !!element?.closest('[role="dialog"]');
 }
 
-function isTextInputTarget(target: EventTarget | null) {
-  const tag = shortcutTargetElement(target)?.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA";
+function isTextEntryTarget(target: EventTarget | null) {
+  const element = shortcutTargetElement(target);
+  if (!element) return false;
+  const tag = element.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return true;
+  // Any contentEditable host (the editor is also one, but a stray editable
+  // surface elsewhere must count too — otherwise Ctrl+R would fall through to
+  // the sidebar handler, which bails on contentEditable, and nothing blocks
+  // the WebView reload).
+  return !!element.closest('[contenteditable="true"], [contenteditable=""]');
 }
 
 export interface UseKeyboardShortcutsParams {
@@ -56,7 +63,7 @@ export function useKeyboardShortcuts({
       const sidebarFocused =
         document.documentElement.dataset.sidebarActive === "1" &&
         !isEditorShortcutTarget(e.target) &&
-        !isTextInputTarget(e.target);
+        !isTextEntryTarget(e.target);
       const ctrl = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
 
