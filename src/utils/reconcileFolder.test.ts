@@ -294,6 +294,33 @@ describe("reconcileFolder", () => {
     expect(await fs.exists(`${DIR}/${id}.md`)).toBe(false);
   });
 
+  it("backs up the stale root and keeps the trash body when trash wins with a body conflict", async () => {
+    const id = "33333333-3333-3333-3333-3333333344aa";
+    const rootPath = `${DIR}/${id}.md`;
+    const trashPath = `${DIR}/.trash/${id}.md`;
+    fs.seedTextFile(rootPath, "stale root");
+    fs.seedTextFile(trashPath, "fresh trash");
+
+    // Root was NOT modified after trashing → trash wins, and the trash body is
+    // authoritative. The stale root must be preserved (backed up) and removed,
+    // never copied over the winning trash body.
+    const rootMtime = (await fs.stat(rootPath)).mtime!.getTime();
+    await seedMeta(fs, makeMeta(id, { trashedAt: rootMtime + 60_000, trashedFromPath: rootPath }));
+
+    const result = await reconcileFolder(fs, state, DIR, [makeDoc(id)], [], LOCALE);
+
+    expect(result.changed).toBe(true);
+    expect(result.docs.find((d) => d.id === id)).toBeUndefined();
+    // Trash body survives untouched; stale root is gone.
+    expect(await fs.readTextFile(trashPath)).toBe("fresh trash");
+    expect(await fs.exists(rootPath)).toBe(false);
+    // The losing root body is preserved in .conflicts/, not dropped.
+    const conflicts = await fs.readDir(`${DIR}/.conflicts`);
+    const backups = conflicts.filter((e) => e.name?.startsWith(`${id}-`) && e.name?.endsWith(".md"));
+    expect(backups).toHaveLength(1);
+    expect(await fs.readTextFile(`${DIR}/.conflicts/${backups[0].name}`)).toBe("stale root");
+  });
+
   it("keeps dirty docs even when the disk file vanishes", async () => {
     const dirty = makeDoc("dirty-id", { isDirty: true, content: "unsaved" });
 

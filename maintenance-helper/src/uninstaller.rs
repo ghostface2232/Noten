@@ -159,8 +159,91 @@ fn remove_notes_dir_if_safe(path: &Path, additional_blocked: &[&Path]) -> Result
         ));
     }
 
-    fs::remove_dir_all(&resolved)
-        .map_err(|error| format!("failed to remove {}: {error}", resolved.display()))
+    if is_default_notes {
+        // Noten's own dedicated folder — nothing else lives here, so removing it
+        // wholesale is safe.
+        return fs::remove_dir_all(&resolved)
+            .map_err(|error| format!("failed to remove {}: {error}", resolved.display()));
+    }
+
+    // A custom folder may be one the user already kept other files in (they can
+    // point Noten at any directory). Deleting it wholesale would take unrelated
+    // files with it, so remove only Noten-owned artifacts and leave the rest —
+    // including the directory itself when anything foreign remains.
+    remove_noten_artifacts(&resolved);
+    Ok(())
+}
+
+/// Remove only the files and folders Noten creates inside a notes directory,
+/// leaving unrelated user files untouched. Best-effort: a failure on one item
+/// is logged and the rest proceed. The directory itself is removed only if it
+/// ends up empty (so a dedicated folder is cleaned up, but a shared one stays).
+fn remove_noten_artifacts(dir: &Path) {
+    // Note bodies are `{noteId}.md` with a primary sidecar at
+    // `.meta/{noteId}.json`. Treat a root `*.md` as Noten's only when that
+    // sidecar exists, so a foreign markdown file the user kept here survives.
+    let meta_dir = dir.join(".meta");
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
+            }
+            let is_md = path
+                .extension()
+                .map(|ext| ext.eq_ignore_ascii_case("md"))
+                .unwrap_or(false);
+            if !is_md {
+                continue;
+            }
+            let Some(stem) = path.file_stem() else { continue };
+            let sidecar = meta_dir.join(format!("{}.json", stem.to_string_lossy()));
+            if sidecar.is_file() {
+                remove_file_logged(&path);
+            }
+        }
+    }
+
+    // Structural artifacts that are unambiguously Noten's.
+    for rel in [".meta", ".trash", ".conflicts", ".assets"] {
+        let path = dir.join(rel);
+        if path.is_dir() {
+            if let Err(error) = fs::remove_dir_all(&path) {
+                eprintln!(
+                    "[maintenance-helper] warning: failed to remove {}: {error}",
+                    path.display()
+                );
+            }
+        }
+    }
+    for rel in [".groups.json", "manifest.json"] {
+        let path = dir.join(rel);
+        if path.is_file() {
+            remove_file_logged(&path);
+        }
+    }
+
+    // Remove the directory only when nothing unrelated is left. A non-empty
+    // error is the expected outcome for a shared folder — not a failure.
+    match fs::remove_dir(dir) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => {
+            eprintln!(
+                "[maintenance-helper] note: kept {} (still contains non-Noten files)",
+                dir.display()
+            );
+        }
+    }
+}
+
+fn remove_file_logged(path: &Path) {
+    if let Err(error) = fs::remove_file(path) {
+        eprintln!(
+            "[maintenance-helper] warning: failed to remove {}: {error}",
+            path.display()
+        );
+    }
 }
 
 fn validate_delete_path(path: &Path, additional_blocked: &[&Path]) -> Result<(), String> {
@@ -271,4 +354,97 @@ fn extract_json_string(raw: &str, key: &str) -> Option<String> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    fn temp_dir() -> PathBuf {
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "noten-uninstall-test-{}-{nanos}-{n}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write(path: &Path, body: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, body).unwrap();
+    }
+
+    #[test]
+    fn removes_noten_artifacts_but_keeps_foreign_files() {
+        let dir = temp_dir();
+        let id = "11111111-1111-1111-1111-111111111111";
+        write(&dir.join(format!("{id}.md")), "note body");
+        write(&dir.join(".meta").join(format!("{id}.json")), "{}");
+        write(
+            &dir.join(".trash")
+                .join("22222222-2222-2222-2222-222222222222.md"),
+            "trashed",
+        );
+        write(&dir.join(".conflicts").join("c.md"), "conflict");
+        write(&dir.join(".assets").join(id).join("img.png"), "png");
+        write(&dir.join(".groups.json"), "[]");
+        // Unrelated user data that must survive an uninstall.
+        write(&dir.join("budget.xlsx"), "spreadsheet");
+        write(&dir.join("notes-i-wrote.md"), "foreign markdown, no sidecar");
+        write(&dir.join("photos").join("vacation.jpg"), "jpg");
+
+        remove_noten_artifacts(&dir);
+
+        // Noten artifacts are gone.
+        assert!(!dir.join(format!("{id}.md")).exists());
+        assert!(!dir.join(".meta").exists());
+        assert!(!dir.join(".trash").exists());
+        assert!(!dir.join(".conflicts").exists());
+        assert!(!dir.join(".assets").exists());
+        assert!(!dir.join(".groups.json").exists());
+        // Foreign files — and the directory itself — are preserved.
+        assert!(dir.join("budget.xlsx").is_file());
+        assert!(dir.join("notes-i-wrote.md").is_file());
+        assert!(dir.join("photos").join("vacation.jpg").is_file());
+        assert!(dir.exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn removes_the_directory_when_only_noten_data_remains() {
+        let dir = temp_dir();
+        let id = "33333333-3333-3333-3333-333333333333";
+        write(&dir.join(format!("{id}.md")), "body");
+        write(&dir.join(".meta").join(format!("{id}.json")), "{}");
+        write(&dir.join(".groups.json"), "[]");
+
+        remove_noten_artifacts(&dir);
+
+        // A dedicated folder ends up empty and is removed.
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn keeps_markdown_without_a_meta_sidecar() {
+        let dir = temp_dir();
+        write(&dir.join("README.md"), "user readme, not a Noten note");
+
+        remove_noten_artifacts(&dir);
+
+        assert!(dir.join("README.md").is_file());
+        assert!(dir.exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
 }

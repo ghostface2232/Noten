@@ -277,15 +277,26 @@ export async function reconcileFolder(
       } catch { /* ignore */ }
       changed = true;
     } else {
-      if (trashBody !== null && trashBody !== rootBody && trashBody.length > 0) {
-        try { await backupRemoteVersion(fs, dir, meta.id, trashBody); } catch { /* best-effort */ }
+      // Trash wins: the note stays deleted and the trash body is authoritative
+      // (root was not modified after trashing). The root file is a stale
+      // leftover, so fold it into trash WITHOUT clobbering the trash body.
+      if (trashBody !== null) {
+        // Back up the *root* copy (the loser) when it diverges, then drop the
+        // stale root file — never overwrite the winning trash body with it.
+        if (trashBody !== rootBody && rootBody.length > 0) {
+          try { await backupRemoteVersion(fs, dir, meta.id, rootBody); } catch { /* best-effort */ }
+        }
+        try { markOwnWrite(rootPath); await fs.remove(rootPath); } catch { /* ignore */ }
+      } else {
+        // No trash body yet: the root file is the note's only copy, so move it
+        // into trash to preserve the content the user deleted.
+        try {
+          await fs.mkdir(`${base}.trash`, { recursive: true });
+          markOwnWrite(rootPath);
+          await fs.copyFile(rootPath, trashPath);
+          await fs.remove(rootPath);
+        } catch { /* ignore */ }
       }
-      try {
-        await fs.mkdir(`${base}.trash`, { recursive: true });
-        markOwnWrite(rootPath);
-        await fs.copyFile(rootPath, trashPath);
-        await fs.remove(rootPath);
-      } catch { /* ignore */ }
       const beforeLen = nextDocs.length;
       nextDocs = nextDocs.filter((d) => d.id !== meta.id);
       if (nextDocs.length !== beforeLen) changed = true;
