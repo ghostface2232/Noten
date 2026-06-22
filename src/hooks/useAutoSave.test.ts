@@ -852,3 +852,90 @@ describe("useAutoSave — notifyActiveDoc", () => {
     expect(writeMock).toHaveBeenCalledWith("/notes/b.md", "switched-doc content");
   });
 });
+
+describe("useAutoSave — per-doc save serialization", () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => { resolve = r; });
+    return { promise, resolve };
+  }
+
+  it("never runs two body writes for the same doc concurrently", async () => {
+    // A slow cloud-sync write for the leaving doc can still be in flight when a
+    // doc-switch queues the next save. Without per-doc serialization both would
+    // write `${path}.tmp` at once and clobber each other. Block the first body
+    // write and confirm the second does not enter the writer until it settles.
+    const firstWrite = deferred<void>();
+    let active = 0;
+    let maxActive = 0;
+    const writtenContent: string[] = [];
+    writeMock.mockImplementation(async (_path: string, content: string) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      writtenContent.push(content);
+      if (writtenContent.length === 1) await firstWrite.promise;
+      active -= 1;
+    });
+
+    refs.editorContent = "v1";
+    const { result } = renderAutoSave({ state: makeState({ isDirty: true }) });
+
+    await act(async () => {
+      const p1 = result.current.flushAutoSave();
+      // Wait until save #1 is actually inside the (blocked) body write.
+      await vi.waitFor(() => expect(writeMock).toHaveBeenCalledTimes(1));
+
+      // Queue save #2 for the SAME doc while #1 is mid-write.
+      refs.editorContent = "v2";
+      const p2 = result.current.flushAutoSave();
+
+      // #2 must be chained behind #1, not writing concurrently.
+      await Promise.resolve();
+      expect(writeMock).toHaveBeenCalledTimes(1);
+
+      firstWrite.resolve();
+      await Promise.all([p1, p2]);
+    });
+
+    expect(maxActive).toBe(1);
+    // Writes land in order, newest content last.
+    expect(writtenContent).toEqual(["v1", "v2"]);
+  });
+
+  it("keeps saves for different docs parallel", async () => {
+    // Different docs have independent tails, so a blocked write on one must not
+    // hold up a write on another.
+    const blockA = deferred<void>();
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    writeMock.mockImplementation(async (path: string) => {
+      concurrent += 1;
+      maxConcurrent = Math.max(maxConcurrent, concurrent);
+      if (path === "/notes/a.md") await blockA.promise;
+      concurrent -= 1;
+    });
+
+    refs.editorContent = "content";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a"), makeDoc("b")],
+      state: makeState({ isDirty: true }),
+    });
+
+    await act(async () => {
+      // Save doc A (blocks), then switch the active ref to B and save it.
+      result.current.notifyActiveDoc("a", "/notes/a.md");
+      const pa = result.current.flushAutoSave();
+      await vi.waitFor(() => expect(writeMock).toHaveBeenCalledTimes(1));
+
+      result.current.notifyActiveDoc("b", "/notes/b.md");
+      const pb = result.current.flushAutoSave();
+      // B's write proceeds even though A is still blocked.
+      await vi.waitFor(() => expect(writeMock).toHaveBeenCalledTimes(2));
+
+      blockA.resolve();
+      await Promise.all([pa, pb]);
+    });
+
+    expect(maxConcurrent).toBe(2);
+  });
+});

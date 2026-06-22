@@ -54,6 +54,13 @@ export function useAutoSave(
   // could drop a save if the user closed mid-write.
   const inFlightSavesRef = useRef(new Set<Promise<boolean>>());
   const inFlightSavesByDocRef = useRef(new Map<string, Set<Promise<boolean>>>());
+  // Per-doc serialization tail for the body-write critical section inside
+  // doSave. Each save's write is chained after the previous write of the SAME
+  // doc, so two never touch `${path}.tmp` concurrently and clobber each other
+  // (the 1s autosave can still be mid-write on a slow cloud folder when a
+  // doc-switch queues the next save). Only the write is serialized — backup and
+  // manifest stay parallel. Keyed by docId, so different docs stay parallel.
+  const saveTailByDocRef = useRef(new Map<string, Promise<unknown>>());
   const stateRef = useRef({
     state,
     tiptapRef,
@@ -212,15 +219,47 @@ export function useAutoSave(
         return false;
       }
 
-      markOwnWrite(snapshot.filePath, snapshot.content);
-      // The body .md is the single source of truth: a crash or cloud-sync/AV
-      // interruption mid-write must never leave it truncated, so route through
-      // temp+rename. The root watcher ignores `.md.tmp` (endsWith(".md")
-      // filter) and the rename lands on the marked own-write path. failClosed
-      // so a locked rename throws (→ caught below, doc stays dirty, retried)
-      // instead of degrading to a truncation-prone direct overwrite.
-      await atomicWriteText(tauriFileSystem, snapshot.filePath, snapshot.content, { failClosed: true });
-      setKnownDiskContent(snapshot.filePath, snapshot.content);
+      // Serialize the body write per-doc. Two overlapping saves for the same
+      // doc (e.g. a slow cloud-sync write still in flight when a doc-switch
+      // queues the next save) would otherwise both write `${path}.tmp` at once
+      // and clobber each other — the snapshot revision guards above bracket the
+      // write but don't make it mutually exclusive. Only the write itself is
+      // serialized; backup (above) and the manifest commit (below) stay outside
+      // the lock so a slow remote-backup on an older save can't hold up a newer
+      // one. Re-check the revision INSIDE the lock so a save superseded while it
+      // waited bails without writing, leaving only the newest content on disk.
+      const performBodyWrite = async (): Promise<boolean> => {
+        if (!snapshotIsCurrent(snapshot)) return false;
+        markOwnWrite(snapshot.filePath, snapshot.content);
+        // The body .md is the single source of truth: a crash or cloud-sync/AV
+        // interruption mid-write must never leave it truncated, so route through
+        // temp+rename. The root watcher ignores `.md.tmp` (endsWith(".md")
+        // filter) and the rename lands on the marked own-write path. failClosed
+        // so a locked rename throws (→ caught below, doc stays dirty, retried)
+        // instead of degrading to a truncation-prone direct overwrite.
+        await atomicWriteText(tauriFileSystem, snapshot.filePath, snapshot.content, { failClosed: true });
+        setKnownDiskContent(snapshot.filePath, snapshot.content);
+        return true;
+      };
+      const priorWrite = saveTailByDocRef.current.get(snapshot.docId) ?? Promise.resolve();
+      // Chain whether the prior write resolved or rejected, so one doc's failed
+      // write can't poison the queue for its later saves.
+      const thisWrite = priorWrite.then(performBodyWrite, performBodyWrite);
+      saveTailByDocRef.current.set(snapshot.docId, thisWrite);
+      // Settle-cleanup via then(cb, cb) — NOT .finally — so a rejected write
+      // (failClosed throw) doesn't surface as an unhandled rejection on this
+      // side branch. The rejection is still handled by the `await thisWrite`
+      // below (and the next save's then-onRejected).
+      const cleanupTail = () => {
+        if (saveTailByDocRef.current.get(snapshot.docId) === thisWrite) {
+          saveTailByDocRef.current.delete(snapshot.docId);
+        }
+      };
+      void thisWrite.then(cleanupTail, cleanupTail);
+      const wroteBody = await thisWrite;
+      if (!wroteBody) {
+        return false;
+      }
 
       if (!snapshotIsCurrent(snapshot)) {
         return false;
