@@ -321,6 +321,55 @@ describe("reconcileFolder", () => {
     expect(await fs.readTextFile(`${DIR}/.conflicts/${backups[0].name}`)).toBe("stale root");
   });
 
+  it("leaves both bodies untouched when an existing trash body is temporarily unreadable", async () => {
+    const id = "33333333-3333-3333-3333-3333333344bb";
+    const rootPath = `${DIR}/${id}.md`;
+    const trashPath = `${DIR}/.trash/${id}.md`;
+    fs.seedTextFile(rootPath, "stale root");
+    fs.seedTextFile(trashPath, "authoritative trash");
+    const rootMtime = (await fs.stat(rootPath)).mtime!.getTime();
+    await seedMeta(fs, makeMeta(id, { trashedAt: rootMtime + 60_000, trashedFromPath: rootPath }));
+
+    const faultFs = wrapWithFaults(fs);
+    faultFs.injectFault({
+      op: "readTextFile",
+      path: trashPath,
+      throwError: new Error("EBUSY: trash placeholder is hydrating"),
+    });
+
+    const result = await reconcileFolder(faultFs, state, DIR, [makeDoc(id)], [], LOCALE);
+
+    expect(result.docs.find((d) => d.id === id)).toBeUndefined();
+    expect(await fs.readTextFile(rootPath)).toBe("stale root");
+    expect(await fs.readTextFile(trashPath)).toBe("authoritative trash");
+    expect(faultFs.callCount("copyFile", rootPath)).toBe(0);
+    expect(faultFs.callCount("remove", rootPath)).toBe(0);
+  });
+
+  it("keeps the divergent root when its conflict backup cannot be written", async () => {
+    const id = "33333333-3333-3333-3333-3333333344cc";
+    const rootPath = `${DIR}/${id}.md`;
+    const trashPath = `${DIR}/.trash/${id}.md`;
+    fs.seedTextFile(rootPath, "unique stale root");
+    fs.seedTextFile(trashPath, "authoritative trash");
+    const rootMtime = (await fs.stat(rootPath)).mtime!.getTime();
+    await seedMeta(fs, makeMeta(id, { trashedAt: rootMtime + 60_000, trashedFromPath: rootPath }));
+
+    const faultFs = wrapWithFaults(fs);
+    faultFs.injectFault({
+      op: "writeTextFile",
+      path: new RegExp(`/\\.conflicts/${id}-\\d+\\.md$`),
+      throwError: new Error("ENOSPC: cannot preserve conflict body"),
+    });
+
+    const result = await reconcileFolder(faultFs, state, DIR, [makeDoc(id)], [], LOCALE);
+
+    expect(result.docs.find((d) => d.id === id)).toBeUndefined();
+    expect(await fs.readTextFile(rootPath)).toBe("unique stale root");
+    expect(await fs.readTextFile(trashPath)).toBe("authoritative trash");
+    expect(faultFs.callCount("remove", rootPath)).toBe(0);
+  });
+
   it("keeps dirty docs even when the disk file vanishes", async () => {
     const dirty = makeDoc("dirty-id", { isDirty: true, content: "unsaved" });
 

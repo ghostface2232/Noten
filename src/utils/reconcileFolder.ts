@@ -254,20 +254,46 @@ export async function reconcileFolder(
     } catch { /* unknown mtime — keep in trash */ }
 
     let trashBody: string | null = null;
+    let trashState: "absent" | "readable" | "unknown" = "unknown";
     try {
       if (await fs.exists(trashPath)) {
         trashBody = await fs.readTextFile(trashPath);
+        trashState = "readable";
+      } else {
+        trashState = "absent";
       }
-    } catch { /* trash unreadable; treat as absent */ }
+    } catch { /* unknown/unreadable trash must never be overwritten */ }
 
-    let rootBody = "";
+    let rootBody: string | null = null;
     try { rootBody = await fs.readTextFile(rootPath); } catch { /* unreadable root */ }
 
+    const removeTrashedDoc = () => {
+      const beforeLen = nextDocs.length;
+      nextDocs = nextDocs.filter((d) => d.id !== meta.id);
+      if (nextDocs.length !== beforeLen) changed = true;
+    };
+
+    // The root is listed and the meta says this note is trashed, but one of
+    // the bodies could not be inspected. Keep both paths untouched and retry
+    // on the next reconcile; treating an unreadable trash body as absent can
+    // overwrite the authoritative copy with the stale root.
+    if (trashState === "unknown" || rootBody === null) {
+      removeTrashedDoc();
+      continue;
+    }
+
     if (rootMtime != null && rootMtime > meta.trashedAt) {
-      if (trashBody !== null && trashBody !== rootBody && trashBody.length > 0) {
-        try { await backupRemoteVersion(fs, dir, meta.id, trashBody); } catch { /* best-effort */ }
+      if (trashState === "readable" && trashBody !== null && trashBody !== rootBody && trashBody.length > 0) {
+        try {
+          await backupRemoteVersion(fs, dir, meta.id, trashBody);
+        } catch {
+          // Restoring would discard the trash version. Leave both bodies and
+          // the trashed meta intact until its recovery backup succeeds.
+          removeTrashedDoc();
+          continue;
+        }
       }
-      if (trashBody !== null) {
+      if (trashState === "readable") {
         try { markOwnWrite(trashPath); await fs.remove(trashPath); } catch { /* ignore */ }
       }
       try {
@@ -280,11 +306,18 @@ export async function reconcileFolder(
       // Trash wins: the note stays deleted and the trash body is authoritative
       // (root was not modified after trashing). The root file is a stale
       // leftover, so fold it into trash WITHOUT clobbering the trash body.
-      if (trashBody !== null) {
+      if (trashState === "readable") {
         // Back up the *root* copy (the loser) when it diverges, then drop the
         // stale root file — never overwrite the winning trash body with it.
         if (trashBody !== rootBody && rootBody.length > 0) {
-          try { await backupRemoteVersion(fs, dir, meta.id, rootBody); } catch { /* best-effort */ }
+          try {
+            await backupRemoteVersion(fs, dir, meta.id, rootBody);
+          } catch {
+            // The conflict copy is still unique data even when trash wins.
+            // Keep it at root and retry rather than deleting it unbacked.
+            removeTrashedDoc();
+            continue;
+          }
         }
         try { markOwnWrite(rootPath); await fs.remove(rootPath); } catch { /* ignore */ }
       } else {
@@ -297,9 +330,7 @@ export async function reconcileFolder(
           await fs.remove(rootPath);
         } catch { /* ignore */ }
       }
-      const beforeLen = nextDocs.length;
-      nextDocs = nextDocs.filter((d) => d.id !== meta.id);
-      if (nextDocs.length !== beforeLen) changed = true;
+      removeTrashedDoc();
     }
   }
 

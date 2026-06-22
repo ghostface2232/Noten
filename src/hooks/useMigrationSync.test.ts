@@ -14,6 +14,8 @@ const refs = vi.hoisted(() => ({
   currentDir: "/old/notes",
   hasUnsaved: false,
   enumerateThrows: false,
+  manifestSaved: true,
+  drainGate: null as Promise<void> | null,
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -72,8 +74,16 @@ function renderMigrationSync() {
   const setCurrentNotesDir = vi.fn((dir: string) => { refs.callLog.push(`currentDir:${dir}`); });
   const applyExternalSettingsChange = vi.fn();
   const params = {
-    flushAutoSaveRef: { current: vi.fn(async () => { refs.callLog.push("flushAutoSave"); return true; }) },
+    flushAutoSaveRef: { current: vi.fn(async () => {
+      refs.callLog.push("flushAutoSave");
+      await refs.drainGate;
+      return true;
+    }) },
     hasUnsavedChangesRef: { current: vi.fn(() => refs.hasUnsaved) },
+    flushManifestRef: { current: vi.fn(async () => {
+      refs.callLog.push("flushManifest");
+      return refs.manifestSaved;
+    }) },
     awaitInFlightSavesRef: { current: vi.fn(async () => { refs.callLog.push("awaitInFlightSaves"); }) },
     flushPendingSnapshotsRef: { current: vi.fn(async () => { refs.callLog.push("flushPendingSnapshots"); }) },
     reconcileState,
@@ -99,6 +109,8 @@ beforeEach(() => {
   refs.currentDir = "/old/notes";
   refs.hasUnsaved = false;
   refs.enumerateThrows = false;
+  refs.manifestSaved = true;
+  refs.drainGate = null;
 });
 
 afterEach(() => {
@@ -204,6 +216,7 @@ describe("useMigrationSync — started listener", () => {
       refs.callLog.indexOf("flushAutoSave"),
       refs.callLog.indexOf("awaitInFlightSaves"),
       refs.callLog.indexOf("flushPendingSnapshots"),
+      refs.callLog.indexOf("flushManifest"),
       refs.callLog.indexOf("flag:true"),
       refs.callLog.indexOf("emit:notes-migration-flush-ack"),
     ];
@@ -248,6 +261,45 @@ describe("useMigrationSync — started listener", () => {
     await emit("notes-migration-started", { sourceWindow: "second", migrationId: "stranded" });
     await vi.waitFor(() => expect(acks).toHaveLength(1));
     expect(acks[0].ok).toBe(false);
+  });
+
+  it("acks ok:false when this window's manifest state could not be persisted", async () => {
+    const acks: { ok?: boolean }[] = [];
+    await listen("notes-migration-flush-ack", (event) => {
+      acks.push(event.payload as { ok?: boolean });
+    });
+
+    refs.manifestSaved = false;
+    renderMigrationSync();
+    await waitForListeners();
+    await emit("notes-migration-started", { sourceWindow: "second", migrationId: "manifest-failed" });
+    await vi.waitFor(() => expect(acks).toHaveLength(1));
+
+    expect(acks[0].ok).toBe(false);
+    expect(refs.callLog.indexOf("flushManifest")).toBeLessThan(
+      refs.callLog.indexOf("emit:notes-migration-flush-ack"),
+    );
+  });
+
+  it("does not re-enable the migration flag when an abort arrives during a slow drain", async () => {
+    let releaseDrain: () => void = () => {};
+    refs.drainGate = new Promise<void>((resolve) => { releaseDrain = resolve; });
+
+    renderMigrationSync();
+    await waitForListeners();
+    await emit("notes-migration-started", { sourceWindow: "second", migrationId: "slow-drain" });
+    await vi.waitFor(() => expect(refs.callLog).toContain("flushAutoSave"));
+
+    await emit("notes-migration-finished", {
+      sourceWindow: "second", migrationId: "slow-drain", success: false, newDir: "",
+    });
+    releaseDrain();
+    await Promise.resolve();
+
+    expect(refs.callLog).toContain("flag:false");
+    expect(refs.callLog).not.toContain("flag:true");
+    expect(refs.callLog).not.toContain("flushManifest");
+    expect(refs.callLog).not.toContain("emit:notes-migration-flush-ack");
   });
 });
 

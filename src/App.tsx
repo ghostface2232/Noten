@@ -327,6 +327,7 @@ function App() {
 
   const flushAutoSaveRef = useRef<(() => Promise<boolean>) | null>(null);
   const hasUnsavedChangesRef = useRef<(() => boolean) | null>(null);
+  const flushManifestRef = useRef<(() => Promise<boolean>) | null>(null);
   const captureAndQueueSaveRef = useRef<(() => void) | null>(null);
   const awaitInFlightSavesRef = useRef<(() => Promise<void>) | null>(null);
   const flushDocSaveRef = useRef<((docId: string) => Promise<boolean>) | null>(null);
@@ -368,6 +369,11 @@ function App() {
   );
   flushAutoSaveRef.current = flushAutoSave;
   hasUnsavedChangesRef.current = hasUnsavedChanges;
+  flushManifestRef.current = () => saveManifest(
+    docsRef.current,
+    docsRef.current[activeIndexRef.current]?.id ?? null,
+    groupsRef.current,
+  ).then(() => true).catch(() => false);
   captureAndQueueSaveRef.current = captureAndQueueSave;
   awaitInFlightSavesRef.current = awaitInFlightSaves;
   flushDocSaveRef.current = flushDocSave;
@@ -380,6 +386,7 @@ function App() {
   useMigrationSync({
     flushAutoSaveRef,
     hasUnsavedChangesRef,
+    flushManifestRef,
     awaitInFlightSavesRef,
     flushPendingSnapshotsRef,
     reconcileState: reconcileStateRef.current,

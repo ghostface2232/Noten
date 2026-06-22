@@ -216,7 +216,7 @@ fn remove_noten_artifacts(dir: &Path) {
             }
         }
     }
-    for rel in [".groups.json", "manifest.json"] {
+    for rel in [".groups.json", "manifest.json", "manifest.legacy.json"] {
         let path = dir.join(rel);
         if path.is_file() {
             remove_file_logged(&path);
@@ -398,6 +398,7 @@ mod tests {
         write(&dir.join(".conflicts").join("c.md"), "conflict");
         write(&dir.join(".assets").join(id).join("img.png"), "png");
         write(&dir.join(".groups.json"), "[]");
+        write(&dir.join("manifest.legacy.json"), "{\"notes\":[]}");
         // Unrelated user data that must survive an uninstall.
         write(&dir.join("budget.xlsx"), "spreadsheet");
         write(&dir.join("notes-i-wrote.md"), "foreign markdown, no sidecar");
@@ -412,6 +413,7 @@ mod tests {
         assert!(!dir.join(".conflicts").exists());
         assert!(!dir.join(".assets").exists());
         assert!(!dir.join(".groups.json").exists());
+        assert!(!dir.join("manifest.legacy.json").exists());
         // Foreign files — and the directory itself — are preserved.
         assert!(dir.join("budget.xlsx").is_file());
         assert!(dir.join("notes-i-wrote.md").is_file());

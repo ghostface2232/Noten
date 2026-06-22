@@ -132,6 +132,7 @@ export function broadcastMigrationFinished(migrationId: string, success: boolean
 export interface MigrationSyncParams {
   flushAutoSaveRef: React.RefObject<(() => Promise<boolean>) | null>;
   hasUnsavedChangesRef: React.RefObject<(() => boolean) | null>;
+  flushManifestRef: React.RefObject<(() => Promise<boolean>) | null>;
   awaitInFlightSavesRef: React.RefObject<(() => Promise<void>) | null>;
   flushPendingSnapshotsRef: React.RefObject<(() => Promise<void>) | null>;
   reconcileState: ReconcileState;
@@ -147,6 +148,11 @@ export function useMigrationSync(params: MigrationSyncParams) {
   useEffect(() => {
     let mounted = true;
     let unlisteners: (() => void)[] = [];
+    // A failed/aborted migration can finish while this window is still
+    // draining slow cloud-backed saves. Remember that terminal event so the
+    // late drain cannot re-enable the global migration guard after it was
+    // already released.
+    const finishedMigrationIds = new Set<string>();
 
     Promise.all([
       listen<MigrationStartedPayload>("notes-migration-started", (event) => {
@@ -162,11 +168,20 @@ export function useMigrationSync(params: MigrationSyncParams) {
           await p.flushAutoSaveRef.current?.().catch(() => {});
           await p.awaitInFlightSavesRef.current?.().catch(() => {});
           await p.flushPendingSnapshotsRef.current?.().catch(() => {});
+          if (finishedMigrationIds.has(migrationId)) return;
+          // Body autosave tracking does not include group/pin/color/order
+          // writes. Queue a current full-state manifest write, then raise the
+          // guard synchronously before awaiting it: the queued write still
+          // runs, while later UI actions cannot enqueue another old-dir write
+          // behind the drain barrier.
+          const manifestSave = p.flushManifestRef.current?.().catch(() => false);
           setMigrationInProgress(true);
+          const manifestSaved = (await manifestSave) === true;
+          if (finishedMigrationIds.has(migrationId)) return;
           // Report whether the drain actually persisted everything. If a
           // backup/write error stranded edits, ok:false tells the migrating
           // window to abort rather than clear the old dir out from under us.
-          const ok = !(p.hasUnsavedChangesRef.current?.() ?? false);
+          const ok = manifestSaved && !(p.hasUnsavedChangesRef.current?.() ?? false);
           await emit("notes-migration-flush-ack", {
             sourceWindow: WINDOW_LABEL, migrationId, ok,
           } satisfies MigrationAckPayload).catch(() => {});
@@ -174,8 +189,9 @@ export function useMigrationSync(params: MigrationSyncParams) {
       }),
 
       listen<MigrationFinishedPayload>("notes-migration-finished", (event) => {
-        const { sourceWindow, success, newDir } = event.payload;
+        const { sourceWindow, migrationId, success, newDir } = event.payload;
         if (sourceWindow === WINDOW_LABEL) return;
+        finishedMigrationIds.add(migrationId);
         const p = paramsRef.current;
         if (!success) {
           setMigrationInProgress(false);
