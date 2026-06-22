@@ -1,5 +1,6 @@
 import { mkdir, readDir, copyFile, readTextFile, readFile, exists, remove } from "@tauri-apps/plugin-fs";
 import { tauriFileSystem } from "./fs";
+import { isValidNoteId } from "./noteId";
 import { normalizeSep } from "./pathUtils";
 import {
   ensureMetaDir,
@@ -226,7 +227,7 @@ async function decomposeLegacyIntoDir(
   }
 
   for (const n of manifest.notes ?? []) {
-    if (!n.id) continue;
+    if (!isValidNoteId(n.id)) continue;
     const meta: NoteMeta = {
       version: 2,
       id: n.id,
@@ -247,7 +248,7 @@ async function decomposeLegacyIntoDir(
   }
 
   for (const t of manifest.trashedNotes ?? []) {
-    if (!t.id) continue;
+    if (!isValidNoteId(t.id)) continue;
     const meta: NoteMeta = {
       version: 2,
       id: t.id,

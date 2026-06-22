@@ -2,7 +2,10 @@ import type { FileSystem } from "./fs";
 import { atomicWriteText } from "./atomicWrite";
 import { markOwnWrite } from "../hooks/ownWriteTracker";
 import { isNoteColorId, type NoteColorId } from "./noteColors";
+import { isValidNoteId } from "./noteId";
 import { normalizeSep } from "./pathUtils";
+import { NotenError } from "./notenError";
+import { logNotenError } from "./crashLog";
 
 export interface NoteMeta {
   version: 2;
@@ -103,7 +106,9 @@ export function invalidateReadAllMetaCache(fs: FileSystem, notesDir?: string): v
 function isValidMeta(obj: unknown): obj is NoteMeta {
   if (!obj || typeof obj !== "object") return false;
   const m = obj as Record<string, unknown>;
-  return typeof m.id === "string"
+  // id must be a path-safe single segment: it is concatenated into
+  // `.meta/<id>.json`, `<id>.md`, and `.assets/<id>/` everywhere downstream.
+  return isValidNoteId(m.id)
     && typeof m.fileName === "string"
     && typeof m.createdAt === "number"
     && typeof m.updatedAt === "number"
@@ -156,6 +161,17 @@ export async function writeMeta(fs: FileSystem, notesDir: string, meta: NoteMeta
 }
 
 export async function removeMeta(fs: FileSystem, notesDir: string, noteId: string): Promise<void> {
+  // Defense-in-depth: never let an unsafe id reach a filesystem remove.
+  // Validation upstream should already exclude these, so reaching here is a bug.
+  if (!isValidNoteId(noteId)) {
+    void logNotenError(new NotenError(
+      "INVALID_NOTE_ID",
+      "recoverable",
+      "removeMeta: refusing to remove sidecar for unsafe id",
+      { context: { notesDir, noteId } },
+    ));
+    return;
+  }
   const path = metaPathFor(notesDir, noteId);
   // Mark intent so the watcher's "deleted" event for our own removal is
   // ignored by the time-based filter at least; reconcile cleans up regardless.
@@ -202,6 +218,19 @@ export async function readAllMeta(fs: FileSystem, notesDir: string): Promise<Map
   // fails closed for that case.
   await Promise.all(names.map(async (name) => {
     const id = name.replace(/\.json$/, "");
+    // A sidecar whose filename stem is not a path-safe id (e.g. `...json` →
+    // `..`) is corrupt or hostile. Never surface it as a note: its id is later
+    // concatenated into `.assets/<id>/` and recursively deleted on trash purge,
+    // and `..` there escapes to the notes root.
+    if (!isValidNoteId(id)) {
+      void logNotenError(new NotenError(
+        "INVALID_NOTE_ID",
+        "recoverable",
+        "readAllMeta: skipping meta sidecar with unsafe filename id",
+        { context: { notesDir, name } },
+      ));
+      return;
+    }
     try {
       const meta = await readMeta(fs, notesDir, id);
       if (meta && meta.id === id) out.set(id, meta);

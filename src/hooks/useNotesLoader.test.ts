@@ -110,7 +110,7 @@ vi.mock("../utils/reconcileFolder", async (importOriginal) => {
 });
 
 // Loader is imported AFTER all mocks. Tests then drive it with renderHook.
-import { useNotesLoader, resetNotesDir, saveManifest } from "./useNotesLoader";
+import { useNotesLoader, resetNotesDir, saveManifest, purgeExpiredTrash } from "./useNotesLoader";
 import * as reconcileFolderModule from "../utils/reconcileFolder";
 import * as decomposedStateModule from "../utils/decomposedState";
 import * as crashLogModule from "../utils/crashLog";
@@ -339,5 +339,43 @@ describe("useNotesLoader — saveManifest persistChain", () => {
       (c) => (c[0] as { code: string }).code === "PERSIST_FAILED",
     );
     expect(logged).toBeDefined();
+  });
+});
+
+describe("purgeExpiredTrash — unsafe id defense-in-depth", () => {
+  it("retains (never purges) a trashed note whose id is a traversal segment", async () => {
+    const unsafe: TrashedNote = {
+      id: "..",
+      fileName: "x",
+      originalFilePath: "/test-appdata/notes/x.md",
+      trashFilePath: "/test-appdata/notes/.trash/...md",
+      trashedAt: 1, // long expired
+      groupId: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const kept = await purgeExpiredTrash([unsafe]);
+    expect(kept.map((n) => n.id)).toContain("..");
+    const logged = logNotenErrorMock.mock.calls.find(
+      (c) => (c[0] as { code: string }).code === "INVALID_NOTE_ID",
+    );
+    expect(logged).toBeDefined();
+  });
+
+  it("still purges a normal expired note", async () => {
+    refs.fs!.seedTextFile("/test-appdata/notes/.trash/safe.md", "body");
+    const safe: TrashedNote = {
+      id: "safe",
+      fileName: "safe",
+      originalFilePath: "/test-appdata/notes/safe.md",
+      trashFilePath: "/test-appdata/notes/.trash/safe.md",
+      trashedAt: 1,
+      groupId: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const kept = await purgeExpiredTrash([safe]);
+    expect(kept).toHaveLength(0);
+    expect(await refs.fs!.exists("/test-appdata/notes/.trash/safe.md")).toBe(false);
   });
 });

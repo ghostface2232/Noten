@@ -1,5 +1,9 @@
 import { mkdir, readFile, remove, writeFile } from "@tauri-apps/plugin-fs";
 import { bytesToDataUrl, dataUrlToUint8Array, mimeFromDataUrl, mimeFromExt, mimeToExt } from "./imageUtils";
+import { isValidNoteId } from "./noteId";
+import { isStrictSubpath, normalizeSep } from "./pathUtils";
+import { NotenError } from "./notenError";
+import { logNotenError } from "./crashLog";
 
 export interface DocumentImageContext {
   noteId: string | null;
@@ -74,8 +78,29 @@ export function buildAssetRelativePath(noteId: string, filename: string): string
 
 export async function removeNoteAssetDir(notesDir: string, noteId: string): Promise<void> {
   if (!notesDir || !noteId) return;
-  const sep = notesDir.endsWith("/") || notesDir.endsWith("\\") ? "" : "/";
-  const dir = `${notesDir}${sep}.assets/${noteId}`;
+  // This is a recursive delete: an unsafe id is catastrophic here. `..` makes
+  // `.assets/..` resolve to the notes root and wipe every note. Reject the id,
+  // then re-verify the built path is strictly inside `.assets/` before removing.
+  if (!isValidNoteId(noteId)) {
+    void logNotenError(new NotenError(
+      "INVALID_NOTE_ID",
+      "recoverable",
+      "removeNoteAssetDir: refusing recursive delete for unsafe id",
+      { context: { notesDir, noteId } },
+    ));
+    return;
+  }
+  const assetsRoot = `${normalizeSep(notesDir)}.assets`;
+  const dir = `${assetsRoot}/${noteId}`;
+  if (!isStrictSubpath(assetsRoot, dir)) {
+    void logNotenError(new NotenError(
+      "INVALID_NOTE_ID",
+      "recoverable",
+      "removeNoteAssetDir: refusing recursive delete outside .assets",
+      { context: { notesDir, noteId, dir } },
+    ));
+    return;
+  }
   try {
     await remove(dir, { recursive: true });
   } catch {

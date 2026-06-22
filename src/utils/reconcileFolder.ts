@@ -14,6 +14,7 @@ import { getMachineIdCached } from "./machineId";
 import { getFileTimestamps } from "./fileTimestamps";
 import { backupRemoteVersion } from "./conflictBackup";
 import { markOwnWrite } from "../hooks/ownWriteTracker";
+import { isValidNoteId } from "./noteId";
 import { normalizeSep } from "./pathUtils";
 import { NotenError } from "./notenError";
 import { logNotenError } from "./crashLog";
@@ -159,6 +160,17 @@ export async function reconcileFolder(
   for (const entry of mdEntries) {
     const name = entry.name!;
     const id = fileNameToId(name);
+    // A body file whose stem is not a path-safe id (e.g. `..md` → `.`) must not
+    // be ingested as a note: its id flows into `.assets/<id>/` deletes later.
+    if (!isValidNoteId(id)) {
+      void logNotenError(new NotenError(
+        "INVALID_NOTE_ID",
+        "recoverable",
+        "reconcileFolder: skipping body file with unsafe filename id",
+        { context: { dir, name } },
+      ));
+      continue;
+    }
     if (docById.has(id)) continue;
     if (trashedIds.has(id)) continue; // handled in mismatch branch below
 

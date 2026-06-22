@@ -22,6 +22,7 @@ import {
   type DecomposedState,
 } from "../utils/decomposedState";
 import { markOwnWrite } from "./ownWriteTracker";
+import { isValidNoteId } from "../utils/noteId";
 import { NotenError } from "../utils/notenError";
 import { logNotenError } from "../utils/crashLog";
 import type { Locale, NotesSortOrder } from "./useSettings";
@@ -221,6 +222,20 @@ export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<Tr
   }
 
   for (const note of trashedNotes) {
+    // Defense-in-depth: an unsafe id here drives recursive deletes
+    // (removeNoteAssetDir). Upstream validation should prevent it, but never
+    // purge such an entry — keep it visible/inert so the bad sidecar can be
+    // diagnosed rather than acted on.
+    if (!isValidNoteId(note.id)) {
+      void logNotenError(new NotenError(
+        "INVALID_NOTE_ID",
+        "recoverable",
+        "purgeExpiredTrash: skipping trashed note with unsafe id",
+        { context: { noteId: note.id } },
+      ));
+      kept.push(note);
+      continue;
+    }
     if (now - note.trashedAt > TRASH_RETENTION_MS) {
       try { await tauriFileSystem.remove(note.trashFilePath); } catch { /* file may already be gone */ }
       if (notesDir) {
@@ -394,7 +409,7 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
   }
 
   for (const n of manifest.notes ?? []) {
-    if (!n.id) continue;
+    if (!isValidNoteId(n.id)) continue;
     await writeMetaFile(tauriFileSystem, dir, {
       version: 2,
       id: n.id,
@@ -411,7 +426,7 @@ async function decomposeLegacyManifest(dir: string, manifest: LegacyManifest): P
   }
 
   for (const t of manifest.trashedNotes ?? []) {
-    if (!t.id) continue;
+    if (!isValidNoteId(t.id)) continue;
     await writeMetaFile(tauriFileSystem, dir, {
       version: 2,
       id: t.id,
