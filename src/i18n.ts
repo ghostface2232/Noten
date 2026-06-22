@@ -249,6 +249,14 @@ const dict = {
     en: "Could not save the folder setting. The storage location was not changed.",
     ko: "폴더 설정을 저장하지 못했습니다. 저장 위치가 변경되지 않았습니다.",
   },
+  "settings.notesDirectory.drainFailed": {
+    en: "Some notes could not be saved before moving. Close other Noten windows and try again. The storage location was not changed.",
+    ko: "이동 전에 일부 노트를 저장하지 못했습니다. 다른 Noten 창을 닫고 다시 시도해 주세요. 저장 위치가 변경되지 않았습니다.",
+  },
+  "close.unsavedBlocked": {
+    en: "Some changes could not be saved, so the window stayed open. Check your storage location and permissions, then try again.",
+    ko: "일부 변경 사항을 저장하지 못해 창을 닫지 않았습니다. 저장 위치와 권한을 확인한 뒤 다시 시도해 주세요.",
+  },
 
   "settings.tab.trash": { en: "Recently Deleted", ko: "최근 삭제한 노트" },
   "trash.count": { en: "{n} deleted notes", ko: "삭제된 노트 {n}개" },

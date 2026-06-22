@@ -19,6 +19,25 @@ interface MigrationStartedPayload {
 interface MigrationAckPayload {
   sourceWindow: string;
   migrationId: string;
+  /**
+   * Whether this window fully drained its pending saves before blocking. When
+   * false, the migrating window must NOT proceed: this window may still hold
+   * unsaved edits bound to the old directory that the copy/clear would drop.
+   * Optional for back-compat with an older window that acks without it
+   * (treated as a successful drain).
+   */
+  ok?: boolean;
+}
+
+/** Outcome of announcing a migration to the other windows. */
+export interface MigrationStartResult {
+  migrationId: string;
+  /**
+   * True only when every other window acked in time AND each reported a
+   * successful drain. A timeout, a missing ack, or any `ok: false` leaves
+   * this false so the caller aborts before the destructive copy/clear.
+   */
+  allDrained: boolean;
 }
 
 interface MigrationFinishedPayload {
@@ -34,25 +53,30 @@ const WINDOW_LABEL = getCurrentWindow().label;
 /**
  * Announce a migration and wait until every other window has flushed its
  * autosave state and blocked further saves (each acks after doing so).
- * Proceeds after `timeoutMs`: a hung window's saves are still blocked the
- * moment its own listener runs, so waiting forever buys nothing.
+ *
+ * Returns `allDrained` so the caller can refuse to start the destructive
+ * copy/clear unless every other window confirmed it persisted its pending
+ * edits. The `timeoutMs` bound still prevents waiting forever, but a timeout
+ * now resolves to `allDrained: false` (abort) rather than proceeding blindly:
+ * a window that never acked may still be writing into the old directory.
  */
-export async function broadcastMigrationStarted(timeoutMs = 5000): Promise<string> {
+export async function broadcastMigrationStarted(timeoutMs = 5000): Promise<MigrationStartResult> {
   const migrationId = crypto.randomUUID();
   let otherLabels: string[] = [];
   try {
     otherLabels = (await getAllWebviewWindows())
       .map((w) => w.label)
       .filter((label) => label !== WINDOW_LABEL);
-  } catch { /* enumeration failed — emit and proceed without waiting */ }
+  } catch { /* enumeration failed — cannot confirm other windows drained */ }
 
   const payload = { sourceWindow: WINDOW_LABEL, migrationId } satisfies MigrationStartedPayload;
   if (otherLabels.length === 0) {
     await emit("notes-migration-started", payload).catch(() => {});
-    return migrationId;
+    return { migrationId, allDrained: true };
   }
 
   const pendingAcks = new Set(otherLabels);
+  let drainFailed = false;
   let settleAcked: () => void = () => {};
   const allAcked = new Promise<void>((resolve) => { settleAcked = resolve; });
   // Register the ack listener BEFORE emitting so a fast responder can't ack
@@ -61,23 +85,27 @@ export async function broadcastMigrationStarted(timeoutMs = 5000): Promise<strin
   try {
     unlistenAck = await listen<MigrationAckPayload>("notes-migration-flush-ack", (event) => {
       if (event.payload.migrationId !== migrationId) return;
+      if (event.payload.ok === false) drainFailed = true;
       pendingAcks.delete(event.payload.sourceWindow);
       if (pendingAcks.size === 0) settleAcked();
     });
-  } catch { /* listener failed — emit and proceed without waiting */ }
+  } catch { /* listener failed — cannot confirm other windows drained */ }
 
   await emit("notes-migration-started", payload).catch(() => {});
 
-  if (unlistenAck) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([
-      allAcked,
-      new Promise<void>((resolve) => { timer = setTimeout(resolve, timeoutMs); }),
-    ]);
-    clearTimeout(timer);
-    unlistenAck();
-  }
-  return migrationId;
+  // Without the ack listener we can't confirm anything drained, so abort.
+  if (!unlistenAck) return { migrationId, allDrained: false };
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    allAcked,
+    new Promise<void>((resolve) => { timer = setTimeout(resolve, timeoutMs); }),
+  ]);
+  clearTimeout(timer);
+  unlistenAck();
+
+  const allDrained = pendingAcks.size === 0 && !drainFailed;
+  return { migrationId, allDrained };
 }
 
 export function broadcastMigrationFinished(migrationId: string, success: boolean, newDir: string): void {
@@ -88,6 +116,7 @@ export function broadcastMigrationFinished(migrationId: string, success: boolean
 
 export interface MigrationSyncParams {
   flushAutoSaveRef: React.RefObject<(() => Promise<boolean>) | null>;
+  hasUnsavedChangesRef: React.RefObject<(() => boolean) | null>;
   awaitInFlightSavesRef: React.RefObject<(() => Promise<void>) | null>;
   flushPendingSnapshotsRef: React.RefObject<(() => Promise<void>) | null>;
   reconcileState: ReconcileState;
@@ -119,8 +148,12 @@ export function useMigrationSync(params: MigrationSyncParams) {
           await p.awaitInFlightSavesRef.current?.().catch(() => {});
           await p.flushPendingSnapshotsRef.current?.().catch(() => {});
           setMigrationInProgress(true);
+          // Report whether the drain actually persisted everything. If a
+          // backup/write error stranded edits, ok:false tells the migrating
+          // window to abort rather than clear the old dir out from under us.
+          const ok = !(p.hasUnsavedChangesRef.current?.() ?? false);
           await emit("notes-migration-flush-ack", {
-            sourceWindow: WINDOW_LABEL, migrationId,
+            sourceWindow: WINDOW_LABEL, migrationId, ok,
           } satisfies MigrationAckPayload).catch(() => {});
         })();
       }),

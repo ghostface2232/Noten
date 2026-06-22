@@ -280,6 +280,10 @@ function App() {
   docsRef.current = docs;
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
+  // Fresh-locale ref for effects/handlers registered once (empty deps) that
+  // still need to localize a late message — e.g. the close-blocked dialog.
+  const localeRef = useRef(locale);
+  localeRef.current = locale;
   const wikiDocIndexSignature = useMemo(
     () => docs.map((doc) => `${doc.id}\u0000${doc.fileName}`).join("\u0001"),
     [docs],
@@ -322,6 +326,7 @@ function App() {
   }, [isLoading, docs, activeIndex]);
 
   const flushAutoSaveRef = useRef<(() => Promise<boolean>) | null>(null);
+  const hasUnsavedChangesRef = useRef<(() => boolean) | null>(null);
   const captureAndQueueSaveRef = useRef<(() => void) | null>(null);
   const awaitInFlightSavesRef = useRef<(() => Promise<void>) | null>(null);
   const flushDocSaveRef = useRef<((docId: string) => Promise<boolean>) | null>(null);
@@ -350,7 +355,7 @@ function App() {
     flushDocSaveRef,
   );
 
-  const { scheduleAutoSave, flushAutoSave, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, notifyActiveDoc, cancelDocSave } = useAutoSave(
+  const { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, notifyActiveDoc, cancelDocSave } = useAutoSave(
     state,
     tiptapRef,
     docs,
@@ -362,6 +367,7 @@ function App() {
     groups,
   );
   flushAutoSaveRef.current = flushAutoSave;
+  hasUnsavedChangesRef.current = hasUnsavedChanges;
   captureAndQueueSaveRef.current = captureAndQueueSave;
   awaitInFlightSavesRef.current = awaitInFlightSaves;
   flushDocSaveRef.current = flushDocSave;
@@ -373,6 +379,7 @@ function App() {
   // notes directory, flush+block our saves, then follow it to the new dir.
   useMigrationSync({
     flushAutoSaveRef,
+    hasUnsavedChangesRef,
     awaitInFlightSavesRef,
     flushPendingSnapshotsRef,
     reconcileState: reconcileStateRef.current,
@@ -684,14 +691,28 @@ function App() {
       groupsRef.current,
     ).catch(() => {});
 
+    // Abort before any destructive step if this window's own edits could not
+    // be persisted — the copy/clear below would otherwise drop them.
+    if (hasUnsavedChangesRef.current?.()) {
+      await message(t("settings.notesDirectory.drainFailed", locale), { kind: "error" });
+      return;
+    }
+
     setMigrationInProgress(true);
     // Other windows flush and block their saves before any destructive step.
-    const migrationId = await broadcastMigrationStarted();
+    const { migrationId, allDrained } = await broadcastMigrationStarted();
     const abortMigration = async (messageKey: Parameters<typeof t>[0] | null) => {
       setMigrationInProgress(false);
       broadcastMigrationFinished(migrationId, false, "");
       if (messageKey) await message(t(messageKey, locale), { kind: "error" });
     };
+
+    // Only move once every window confirmed it drained; otherwise a window
+    // still bound to the old dir could lose edits when we clear it.
+    if (!allDrained) {
+      await abortMigration("settings.notesDirectory.drainFailed");
+      return;
+    }
 
     if (action !== "use-selected-only") {
       // Copy first, commit the setting only after the copy landed, clear the
@@ -758,14 +779,27 @@ function App() {
       groupsRef.current,
     ).catch(() => {});
 
+    // Abort before any destructive step if this window's own edits could not
+    // be persisted — the copy/clear below would otherwise drop them.
+    if (hasUnsavedChangesRef.current?.()) {
+      await message(t("settings.notesDirectory.drainFailed", locale), { kind: "error" });
+      return;
+    }
+
     setMigrationInProgress(true);
     // Other windows flush and block their saves before any destructive step.
-    const migrationId = await broadcastMigrationStarted();
+    const { migrationId, allDrained } = await broadcastMigrationStarted();
     const abortMigration = async (messageKey: Parameters<typeof t>[0]) => {
       setMigrationInProgress(false);
       broadcastMigrationFinished(migrationId, false, "");
       await message(t(messageKey, locale), { kind: "error" });
     };
+
+    // Only move once every window confirmed it drained.
+    if (!allDrained) {
+      await abortMigration("settings.notesDirectory.drainFailed");
+      return;
+    }
 
     // Resolve the default dir without mutating the loader cache — the cache
     // must keep pointing at the old dir until the copy lands and the setting
@@ -886,7 +920,7 @@ function App() {
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    getCurrentWindow().onCloseRequested(async () => {
+    getCurrentWindow().onCloseRequested(async (event) => {
       // Three-step drain: (1) flushAutoSave commits the current doc's pending
       // edits, (2) awaitInFlightSaves waits for any background save queued by
       // switchDocument's fast path, (3) flushPendingSnapshots retries any
@@ -896,6 +930,14 @@ function App() {
       await flushAutoSaveRef.current?.();
       await awaitInFlightSavesRef.current?.();
       await flushPendingSnapshotsRef.current?.();
+      // If the drain could not persist everything (e.g. a backup/write error
+      // that the retry above also hit), keep the window open instead of
+      // silently dropping the edits. onCloseRequested awaits this handler, so
+      // preventDefault here still cancels the close.
+      if (hasUnsavedChangesRef.current?.()) {
+        event.preventDefault();
+        await message(t("close.unsavedBlocked", localeRef.current), { kind: "error" });
+      }
     }).then((fn) => { unlisten = fn; });
     return () => unlisten?.();
   }, []);

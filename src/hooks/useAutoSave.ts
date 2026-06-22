@@ -347,6 +347,13 @@ export function useAutoSave(
     return startBackgroundSave(freshSnapshot);
   }, [createSnapshot, startBackgroundSave]);
 
+  // Synchronous "is anything still unsaved" probe for close/migration drain
+  // gates. Reads only the synchronously-maintained pending refs (via
+  // hasPendingChangesRef) — NOT React's isDirty state, which can lag a
+  // successful save until the next render and would falsely report unsaved
+  // work inside an awaited close handler that never re-renders.
+  const hasUnsavedChanges = useCallback((): boolean => hasPendingChangesRef.current, []);
+
   // Awaits every save currently in flight (whether queued by scheduleAutoSave,
   // flushAutoSave, or captureAndQueueSave). Used by close handlers and
   // notes-dir migrations that must not quit while a background save is still
@@ -489,5 +496,5 @@ export function useAutoSave(
     refreshHasPendingChanges();
   }, [refreshHasPendingChanges]);
 
-  return { scheduleAutoSave, flushAutoSave, captureAndQueueSave, awaitInFlightSaves, awaitDocSave, flushDocSave, flushPendingSnapshots, notifyActiveDoc, cancelDocSave };
+  return { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, captureAndQueueSave, awaitInFlightSaves, awaitDocSave, flushDocSave, flushPendingSnapshots, notifyActiveDoc, cancelDocSave };
 }

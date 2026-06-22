@@ -12,6 +12,7 @@ const refs = vi.hoisted(() => ({
   callLog: [] as string[],
   windowLabels: ["main", "second"],
   currentDir: "/old/notes",
+  hasUnsaved: false,
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -68,6 +69,7 @@ function renderMigrationSync() {
   const applyExternalSettingsChange = vi.fn();
   const params = {
     flushAutoSaveRef: { current: vi.fn(async () => { refs.callLog.push("flushAutoSave"); return true; }) },
+    hasUnsavedChangesRef: { current: vi.fn(() => refs.hasUnsaved) },
     awaitInFlightSavesRef: { current: vi.fn(async () => { refs.callLog.push("awaitInFlightSaves"); }) },
     flushPendingSnapshotsRef: { current: vi.fn(async () => { refs.callLog.push("flushPendingSnapshots"); }) },
     reconcileState,
@@ -91,6 +93,7 @@ beforeEach(() => {
   refs.callLog = [];
   refs.windowLabels = ["main", "second"];
   refs.currentDir = "/old/notes";
+  refs.hasUnsaved = false;
 });
 
 afterEach(() => {
@@ -99,49 +102,73 @@ afterEach(() => {
 });
 
 describe("broadcastMigrationStarted", () => {
-  it("resolves once every other window has acked", async () => {
+  it("resolves with allDrained once every other window acks ok", async () => {
     // Simulated second window: ack as soon as it sees the started event.
+    await listen("notes-migration-started", (event) => {
+      const { migrationId } = event.payload as { migrationId: string };
+      void emit("notes-migration-flush-ack", { sourceWindow: "second", migrationId, ok: true });
+    });
+
+    // A generous timeout: if the ack did not resolve the wait, the test
+    // itself would time out long before this fires.
+    const { migrationId, allDrained } = await broadcastMigrationStarted(60_000);
+    expect(typeof migrationId).toBe("string");
+    expect(allDrained).toBe(true);
+    expect(refs.callLog).toContain("emit:notes-migration-started");
+  });
+
+  it("treats an ack without an ok field as a successful drain (back-compat)", async () => {
     await listen("notes-migration-started", (event) => {
       const { migrationId } = event.payload as { migrationId: string };
       void emit("notes-migration-flush-ack", { sourceWindow: "second", migrationId });
     });
 
-    // A generous timeout: if the ack did not resolve the wait, the test
-    // itself would time out long before this fires.
-    const migrationId = await broadcastMigrationStarted(60_000);
-    expect(typeof migrationId).toBe("string");
-    expect(refs.callLog).toContain("emit:notes-migration-started");
+    const { allDrained } = await broadcastMigrationStarted(60_000);
+    expect(allDrained).toBe(true);
+  });
+
+  it("reports allDrained:false when a window acks ok:false", async () => {
+    await listen("notes-migration-started", (event) => {
+      const { migrationId } = event.payload as { migrationId: string };
+      void emit("notes-migration-flush-ack", { sourceWindow: "second", migrationId, ok: false });
+    });
+
+    const { allDrained } = await broadcastMigrationStarted(60_000);
+    expect(allDrained).toBe(false);
   });
 
   it("ignores acks for a different migrationId until the right one arrives", async () => {
     await listen("notes-migration-started", (event) => {
       const { migrationId } = event.payload as { migrationId: string };
-      void emit("notes-migration-flush-ack", { sourceWindow: "second", migrationId: "stale-id" });
-      void emit("notes-migration-flush-ack", { sourceWindow: "second", migrationId });
+      void emit("notes-migration-flush-ack", { sourceWindow: "second", migrationId: "stale-id", ok: true });
+      void emit("notes-migration-flush-ack", { sourceWindow: "second", migrationId, ok: true });
     });
 
-    const migrationId = await broadcastMigrationStarted(60_000);
+    const { migrationId, allDrained } = await broadcastMigrationStarted(60_000);
     expect(typeof migrationId).toBe("string");
+    expect(allDrained).toBe(true);
   });
 
-  it("proceeds after the timeout when a window never acks", async () => {
+  it("aborts (allDrained:false) after the timeout when a window never acks", async () => {
     vi.useFakeTimers();
 
     let resolved = false;
-    const pending = broadcastMigrationStarted(5_000).then((id) => { resolved = true; return id; });
+    const pending = broadcastMigrationStarted(5_000).then((r) => { resolved = true; return r; });
     // Let the enumeration + emit settle, then confirm it is still waiting.
     await vi.advanceTimersByTimeAsync(0);
     expect(resolved).toBe(false);
 
     await vi.advanceTimersByTimeAsync(5_000);
-    const migrationId = await pending;
+    const { migrationId, allDrained } = await pending;
     expect(typeof migrationId).toBe("string");
+    expect(allDrained).toBe(false);
   });
 
   it("does not wait at all when this is the only window", async () => {
     refs.windowLabels = ["main"];
-    const migrationId = await broadcastMigrationStarted(60_000);
+    const { migrationId, allDrained } = await broadcastMigrationStarted(60_000);
     expect(typeof migrationId).toBe("string");
+    expect(allDrained).toBe(true);
     expect(refs.listeners.get("notes-migration-flush-ack") ?? []).toHaveLength(0);
   });
 });
@@ -177,6 +204,34 @@ describe("useMigrationSync — started listener", () => {
     await Promise.resolve();
     expect(refs.callLog).not.toContain("flushAutoSave");
     expect(refs.callLog).not.toContain("flag:true");
+  });
+
+  it("acks ok:true when its drain leaves nothing unsaved", async () => {
+    const acks: { ok?: boolean }[] = [];
+    await listen("notes-migration-flush-ack", (event) => {
+      acks.push(event.payload as { ok?: boolean });
+    });
+
+    refs.hasUnsaved = false;
+    renderMigrationSync();
+    await waitForListeners();
+    await emit("notes-migration-started", { sourceWindow: "second", migrationId: "drained" });
+    await vi.waitFor(() => expect(acks).toHaveLength(1));
+    expect(acks[0].ok).toBe(true);
+  });
+
+  it("acks ok:false when edits could not be drained", async () => {
+    const acks: { ok?: boolean }[] = [];
+    await listen("notes-migration-flush-ack", (event) => {
+      acks.push(event.payload as { ok?: boolean });
+    });
+
+    refs.hasUnsaved = true;
+    renderMigrationSync();
+    await waitForListeners();
+    await emit("notes-migration-started", { sourceWindow: "second", migrationId: "stranded" });
+    await vi.waitFor(() => expect(acks).toHaveLength(1));
+    expect(acks[0].ok).toBe(false);
   });
 });
 
