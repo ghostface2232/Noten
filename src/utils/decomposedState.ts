@@ -489,6 +489,13 @@ export async function persistDecomposedState(
     groupsChanged = true;
   }
 
+  // Captured so a groups-write failure surfaces to the caller AFTER the other
+  // writes settle, without aborting them. Swallowing the rejection here made
+  // saveManifest / flushManifest / migration-ack / close-drain believe the
+  // groups landed when they didn't (silent group/order loss). The in-memory
+  // snapshot + tombstone intent stay untouched on failure so the next persist
+  // retries.
+  let groupsError: unknown;
   const groupsPromise = groupsChanged
     ? writeGroupsWithMerge(fs, dir, localGroupsMap).then(
         () => {
@@ -496,7 +503,7 @@ export async function persistDecomposedState(
           for (const id of pendingGroupDeletes) state.writtenGroups.delete(id);
           for (const id of tombstoneApplied) state.pendingTombstones.delete(id);
         },
-        () => { /* keep pending for retry */ },
+        (err: unknown) => { groupsError = err; /* keep pending for retry */ },
       )
     : Promise.resolve();
 
@@ -538,4 +545,11 @@ export async function persistDecomposedState(
     activePromise,
     cachePromise,
   ]);
+
+  // Surface a groups-write failure now that meta/cache have committed, so the
+  // overall persist rejects and durable-intent gates (flushManifest, migration
+  // ack, close drain) do not falsely report success.
+  if (groupsError !== undefined) {
+    throw groupsError instanceof Error ? groupsError : new Error(String(groupsError));
+  }
 }

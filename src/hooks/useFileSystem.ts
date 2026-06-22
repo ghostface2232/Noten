@@ -89,7 +89,7 @@ async function provisionNoteFile(
     await mkdir(notesDir, { recursive: true }).catch(() => {});
     filePath = `${notesDir}/${id}.md`;
     markOwnWrite(filePath, content);
-    await atomicWriteText(tauriFileSystem, filePath, content);
+    await atomicWriteText(tauriFileSystem, filePath, content, { failClosed: true });
     return { filePath, ok: true };
   } catch (error) {
     void logNotenError(new NotenError(
@@ -116,7 +116,7 @@ async function rewriteNoteFile(
 ): Promise<boolean> {
   try {
     markOwnWrite(filePath, content);
-    await atomicWriteText(tauriFileSystem, filePath, content);
+    await atomicWriteText(tauriFileSystem, filePath, content, { failClosed: true });
     // Keep the conflict-backup baseline in sync, or the next autosave of this
     // doc would treat our own rewrite as an unseen remote write and back it
     // up to .conflicts.
@@ -327,7 +327,19 @@ export function useFileSystem(
     }
 
     markOwnWrite(targetPath, markdown);
-    await atomicWriteText(tauriFileSystem, targetPath, markdown);
+    try {
+      await atomicWriteText(tauriFileSystem, targetPath, markdown, { failClosed: true });
+    } catch (error) {
+      // Fail-closed: the body could not be written atomically. Leave the doc
+      // dirty (do NOT mark clean below) so the change is not silently lost.
+      void logNotenError(new NotenError(
+        "SAVE_FAILED",
+        "fatal",
+        error instanceof Error ? error.message : String(error),
+        { context: { stage: "saveFile", noteId: doc.id, filePath: targetPath }, cause: error },
+      ));
+      return;
+    }
 
     const nextDocs = docs.map((entry, index) => {
       if (index !== activeIndex) return entry;

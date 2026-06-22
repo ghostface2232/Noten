@@ -960,20 +960,29 @@ function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     getCurrentWindow().onCloseRequested(async (event) => {
-      // Three-step drain: (1) flushAutoSave commits the current doc's pending
+      // Four-step drain: (1) flushAutoSave commits the current doc's pending
       // edits, (2) awaitInFlightSaves waits for any background save queued by
       // switchDocument's fast path, (3) flushPendingSnapshots retries any
       // snapshot whose background save failed and is otherwise orphaned in
       // pendingSnapshotsRef — without step (3), a transient backup/write
-      // failure for a previously-active doc would silently lose data.
+      // failure for a previously-active doc would silently lose data — and
+      // (4) flushManifest drains the per-window persist queue. Body autosave
+      // tracking does NOT cover metadata-only writes (pin/color/group/rename
+      // enqueue saveManifest fire-and-forget); when the body is clean, nothing
+      // else awaits them, so a close right after a metadata change could quit
+      // before they land. flushManifest enqueues a current full-state write at
+      // the tail of the serialized chain, so awaiting it also drains every
+      // earlier queued write.
       await flushAutoSaveRef.current?.();
       await awaitInFlightSavesRef.current?.();
       await flushPendingSnapshotsRef.current?.();
-      // If the drain could not persist everything (e.g. a backup/write error
-      // that the retry above also hit), keep the window open instead of
-      // silently dropping the edits. onCloseRequested awaits this handler, so
-      // preventDefault here still cancels the close.
-      if (hasUnsavedChangesRef.current?.()) {
+      const manifestOk = (await flushManifestRef.current?.()) ?? true;
+      // If the drain could not persist everything (a backup/write error the
+      // retry above also hit, or a manifest/groups write that kept failing),
+      // keep the window open instead of silently dropping the edits.
+      // onCloseRequested awaits this handler, so preventDefault still cancels
+      // the close.
+      if (hasUnsavedChangesRef.current?.() || !manifestOk) {
         event.preventDefault();
         await message(t("close.unsavedBlocked", localeRef.current), { kind: "error" });
       }

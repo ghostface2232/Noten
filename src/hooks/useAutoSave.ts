@@ -216,8 +216,10 @@ export function useAutoSave(
       // The body .md is the single source of truth: a crash or cloud-sync/AV
       // interruption mid-write must never leave it truncated, so route through
       // temp+rename. The root watcher ignores `.md.tmp` (endsWith(".md")
-      // filter) and the rename lands on the marked own-write path.
-      await atomicWriteText(tauriFileSystem, snapshot.filePath, snapshot.content);
+      // filter) and the rename lands on the marked own-write path. failClosed
+      // so a locked rename throws (→ caught below, doc stays dirty, retried)
+      // instead of degrading to a truncation-prone direct overwrite.
+      await atomicWriteText(tauriFileSystem, snapshot.filePath, snapshot.content, { failClosed: true });
       setKnownDiskContent(snapshot.filePath, snapshot.content);
 
       if (!snapshotIsCurrent(snapshot)) {

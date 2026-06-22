@@ -256,7 +256,11 @@ describe("writtenGroups commit semantics — only update on disk-write success",
     });
 
     const group = makeGroup("g-doomed-write", { name: "First" });
-    await persistDecomposedState(faultFs, DIR, state, [], null, [group], persistOpts());
+    // The groups failure now propagates (no longer swallowed) so durable-intent
+    // gates can see it; the snapshot must still stay pending for retry.
+    await expect(
+      persistDecomposedState(faultFs, DIR, state, [], null, [group], persistOpts()),
+    ).rejects.toThrow();
 
     // The in-memory snapshot must remain empty so the next persist call
     // recognises the group as unwritten and retries. Without the fix, the
@@ -278,8 +282,10 @@ describe("writtenGroups commit semantics — only update on disk-write success",
 
     const group = makeGroup("g-flaky", { name: "Flaky" });
 
-    // First call: write fails, groupsPromise.catch swallows the error.
-    await persistDecomposedState(faultFs, DIR, state, [], null, [group], persistOpts());
+    // First call: write fails, persist rejects, snapshot stays pending.
+    await expect(
+      persistDecomposedState(faultFs, DIR, state, [], null, [group], persistOpts()),
+    ).rejects.toThrow();
     expect(state.writtenGroups.has("g-flaky")).toBe(false);
     let file = await readGroupsFile(faultFs, DIR);
     expect(file.groups["g-flaky"]).toBeUndefined();
@@ -307,7 +313,9 @@ describe("writtenGroups commit semantics — only update on disk-write success",
       throwError: new Error("EBUSY"),
     });
 
-    await persistDecomposedState(faultFs, DIR, state, [], null, [], persistOpts());
+    await expect(
+      persistDecomposedState(faultFs, DIR, state, [], null, [], persistOpts()),
+    ).rejects.toThrow();
 
     // Both the snapshot entry and the pending tombstone intent must survive so
     // the next attempt can re-apply the delete. Without the fix, writtenGroups
@@ -330,7 +338,11 @@ describe("writtenGroups commit semantics — only update on disk-write success",
     });
 
     const incoming = makeGroup("g-incoming", { name: "Incoming" });
-    await persistDecomposedState(faultFs, DIR, state, [], null, [incoming], persistOpts());
+    // The unreadable-existing guard makes writeGroupsWithMerge reject rather
+    // than clobber; that rejection now propagates out of persist.
+    await expect(
+      persistDecomposedState(faultFs, DIR, state, [], null, [incoming], persistOpts()),
+    ).rejects.toThrow();
 
     const file = await readGroupsFile(fs, DIR);
     expect(file.groups["g-existing"]).toBeDefined();
