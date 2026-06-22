@@ -19,6 +19,11 @@ function isDialogTarget(target: EventTarget | null) {
   return !!element?.closest('[role="dialog"]');
 }
 
+function isTextInputTarget(target: EventTarget | null) {
+  const tag = shortcutTargetElement(target)?.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA";
+}
+
 export interface UseKeyboardShortcutsParams {
   tiptapRef: RefObject<TiptapEditorHandle | null>;
   docSearchOpen: boolean;
@@ -42,7 +47,16 @@ export function useKeyboardShortcuts({
 }: UseKeyboardShortcutsParams) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const sidebarFocused = document.documentElement.dataset.sidebarActive === "1";
+      // The sidebar-active flag is set on mousedown and goes stale once focus
+      // moves into a text-entry region by other means (e.g. Tab into the
+      // editor, or a rename field). Confirm the live keydown target really is
+      // outside the editor / inputs, so Ctrl+R is only let through to the
+      // sidebar's rename handler when that handler would actually act on it —
+      // otherwise a stale flag lets Ctrl+R fall through and reload the WebView.
+      const sidebarFocused =
+        document.documentElement.dataset.sidebarActive === "1" &&
+        !isEditorShortcutTarget(e.target) &&
+        !isTextInputTarget(e.target);
       const ctrl = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
 
