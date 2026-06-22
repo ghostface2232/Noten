@@ -45,6 +45,21 @@ describe("removeNoteAssetDir", () => {
     expect(removeMock).not.toHaveBeenCalled();
   });
 
+  it("refuses ids Win32 would alias by trimming trailing dots/spaces", async () => {
+    // `.assets/...` and `.assets/ ` -> `.assets` (mass image delete);
+    // `.assets/.. ` -> `.assets/..` = notes root (total wipe).
+    for (const id of ["...", "....", " ", ".. ", ". ", "note.", "note "]) {
+      await removeNoteAssetDir("/notes", id);
+    }
+    expect(removeMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses Windows reserved device names", async () => {
+    await removeNoteAssetDir("/notes", "NUL");
+    await removeNoteAssetDir("/notes", "con");
+    expect(removeMock).not.toHaveBeenCalled();
+  });
+
   it("is a no-op when notesDir or noteId is empty", async () => {
     await removeNoteAssetDir("", "abc");
     await removeNoteAssetDir("/notes", "");

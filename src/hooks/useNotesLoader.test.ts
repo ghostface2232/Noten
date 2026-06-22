@@ -362,6 +362,27 @@ describe("purgeExpiredTrash — unsafe id defense-in-depth", () => {
     expect(logged).toBeDefined();
   });
 
+  it("retains Win32-aliasing and reserved-name ids instead of purging them", async () => {
+    // Each of these would, if purged, drive `.assets/<id>` to alias `.assets`
+    // itself (or its parent) on Windows and mass-delete note images/notes.
+    const unsafeIds = ["...", " ", ".. ", "note.", "NUL"];
+    const trashed: TrashedNote[] = unsafeIds.map((id) => ({
+      id,
+      fileName: "x",
+      originalFilePath: `/test-appdata/notes/${id}.md`,
+      trashFilePath: `/test-appdata/notes/.trash/${id}.md`,
+      trashedAt: 1, // long expired
+      groupId: null,
+      createdAt: 1,
+      updatedAt: 1,
+    }));
+    const kept = await purgeExpiredTrash(trashed);
+    expect(kept.map((n) => n.id).sort()).toEqual([...unsafeIds].sort());
+    expect(logNotenErrorMock.mock.calls.filter(
+      (c) => (c[0] as { code: string }).code === "INVALID_NOTE_ID",
+    ).length).toBe(unsafeIds.length);
+  });
+
   it("still purges a normal expired note", async () => {
     refs.fs!.seedTextFile("/test-appdata/notes/.trash/safe.md", "body");
     const safe: TrashedNote = {

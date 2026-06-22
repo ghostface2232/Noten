@@ -19,7 +19,15 @@ export function normalizeSep(dir: string): string {
 export function isStrictSubpath(base: string, candidate: string): boolean {
   const resolve = (p: string): string[] => {
     const out: string[] = [];
-    for (const seg of p.replace(/\\/g, "/").split("/")) {
+    for (const raw of p.replace(/\\/g, "/").split("/")) {
+      // Mirror Win32 component normalization so the guard isn't fooled by the
+      // same aliasing the id validator rejects: trailing spaces then trailing
+      // dots are stripped, while `.`/`..` keep their special meaning. So
+      // `...` collapses to "" (skipped) and `.. ` collapses to `..` (climb).
+      const spaceStripped = raw.replace(/ +$/, "");
+      const seg = spaceStripped === "." || spaceStripped === ".."
+        ? spaceStripped
+        : spaceStripped.replace(/\.+$/, "");
       if (seg === "" || seg === ".") continue;
       if (seg === "..") {
         if (out.length === 0) return ["\0escaped"]; // climbed above root

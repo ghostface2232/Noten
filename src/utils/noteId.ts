@@ -20,10 +20,23 @@ const MAX_NOTE_ID_LENGTH = 255;
 // pass; `..`, `a/b`, `a\b`, `C:` do not.
 const FORBIDDEN_CHARS = /[\x00-\x1f<>:"/\\|?*]/;
 
+// DOS device names are reserved by Win32 even with an extension (`NUL.txt`), so
+// `.assets/NUL` would not be a real directory. Matched against the part before
+// the first dot, case-insensitively.
+const WIN_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
 export function isValidNoteId(id: unknown): id is string {
   if (typeof id !== "string") return false;
   if (id.length === 0 || id.length > MAX_NOTE_ID_LENGTH) return false;
-  if (id === "." || id === "..") return false;
   if (FORBIDDEN_CHARS.test(id)) return false;
+  // Win32 silently trims leading/trailing spaces and trailing dots from each
+  // path component, so an id like `...`, ` `, or `.. ` resolves to a *different*
+  // directory than written: `.assets/...` -> `.assets` (wipes every note's
+  // images) and `.assets/.. ` -> `.assets/..` = the notes root (total wipe).
+  // Rejecting all trailing dots/spaces (and leading whitespace) also covers
+  // `.`, `..`, and any id composed solely of dots and/or spaces.
+  if (id !== id.trim()) return false;
+  if (id.endsWith(".")) return false;
+  if (WIN_RESERVED_NAME.test(id.split(".")[0])) return false;
   return true;
 }

@@ -17,6 +17,32 @@ describe("isValidNoteId", () => {
     expect(isValidNoteId("..\\x")).toBe(false);
   });
 
+  it("rejects ids Win32 would alias by trimming trailing dots/spaces", () => {
+    // `.assets/...` -> `.assets`, `.assets/ ` -> `.assets`: mass image delete.
+    expect(isValidNoteId("...")).toBe(false);
+    expect(isValidNoteId("....")).toBe(false);
+    expect(isValidNoteId(" ")).toBe(false);
+    expect(isValidNoteId("   ")).toBe(false);
+    // `.assets/.. ` -> `.assets/..` = notes root: total wipe.
+    expect(isValidNoteId(".. ")).toBe(false);
+    expect(isValidNoteId(". ")).toBe(false);
+    // Any trailing dot or space, and leading whitespace.
+    expect(isValidNoteId("note.")).toBe(false);
+    expect(isValidNoteId("note ")).toBe(false);
+    expect(isValidNoteId(" note")).toBe(false);
+  });
+
+  it("rejects Windows reserved device names (with or without extension)", () => {
+    for (const name of ["CON", "con", "PRN", "AUX", "NUL", "nul.txt", "COM1", "com9", "LPT1", "LPT9"]) {
+      expect(isValidNoteId(name)).toBe(false);
+    }
+    // Lookalikes that are NOT reserved must still pass.
+    expect(isValidNoteId("CON2")).toBe(true);
+    expect(isValidNoteId("COM10")).toBe(true);
+    expect(isValidNoteId("CONSOLE")).toBe(true);
+    expect(isValidNoteId("NULL")).toBe(true);
+  });
+
   it("rejects any path separator", () => {
     expect(isValidNoteId("a/b")).toBe(false);
     expect(isValidNoteId("a\\b")).toBe(false);
