@@ -56,6 +56,13 @@ import { useChromeVisibility } from "./hooks/useChromeVisibility";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useDragDrop } from "./hooks/useDragDrop";
 import { useUpdater } from "./hooks/useUpdater";
+import {
+  getSystemPrefersDarkFromMatchMedia,
+  queryWindowsSystemPrefersDark,
+  SYSTEM_DARK_QUERY,
+  SYSTEM_THEME_POLL_MS,
+  themeToPrefersDark,
+} from "./utils/systemTheme";
 import { open as openDialog, confirm, message } from "@tauri-apps/plugin-dialog";
 import { useStyles } from "./App.styles";
 import "./App.css";
@@ -66,19 +73,12 @@ const SIDEBAR_DEFAULT = 260;
 // Enough logical width for the wrapped toolbar and sidebar toggle.
 const EDITOR_MIN_WIDTH = 600;
 const WINDOW_MIN_HEIGHT = 620;
-const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
 
 type NotesDirConflictChoice = "replace-with-current" | "use-selected-only" | "merge" | null;
 
 interface NotesDirConflictDialogState {
   path: string;
   resolve: (choice: NotesDirConflictChoice) => void;
-}
-
-function getSystemPrefersDark() {
-  return typeof window !== "undefined"
-    && typeof window.matchMedia === "function"
-    && window.matchMedia(SYSTEM_DARK_QUERY).matches;
 }
 
 function App() {
@@ -207,7 +207,7 @@ function App() {
   const [notesDirConflict, setNotesDirConflict] = useState<NotesDirConflictDialogState | null>(null);
   const { settings, update: updateSetting, applyExternal: applySettingExternal, isLoaded: settingsLoaded } = useSettings();
   const updater = useUpdater();
-  const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDark);
+  const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDarkFromMatchMedia);
   const isDarkMode = settings.themeMode === "system"
     ? systemPrefersDark
     : settings.themeMode === "dark";
@@ -234,13 +234,75 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const media = window.matchMedia(SYSTEM_DARK_QUERY);
-    const sync = () => setSystemPrefersDark(media.matches);
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
-  }, []);
+    if (settings.themeMode !== "system") return;
+
+    const win = getCurrentWindow();
+    let disposed = false;
+    let themeUnlisten: (() => void) | undefined;
+    let refreshInFlight = false;
+    let refreshAgain = false;
+
+    const applyPrefersDark = (prefersDark: boolean | null) => {
+      if (disposed || prefersDark == null) return;
+      setSystemPrefersDark((current) => (current === prefersDark ? current : prefersDark));
+    };
+
+    const refreshSystemTheme = () => {
+      if (refreshInFlight) {
+        refreshAgain = true;
+        return;
+      }
+      refreshInFlight = true;
+      void (async () => {
+        try {
+          const windowsPrefersDark = await queryWindowsSystemPrefersDark();
+          applyPrefersDark(windowsPrefersDark ?? getSystemPrefersDarkFromMatchMedia());
+        } finally {
+          refreshInFlight = false;
+          if (!disposed && refreshAgain) {
+            refreshAgain = false;
+            refreshSystemTheme();
+          }
+        }
+      })();
+    };
+
+    refreshSystemTheme();
+    win
+      .onThemeChanged(({ payload }) => {
+        applyPrefersDark(themeToPrefersDark(payload));
+        refreshSystemTheme();
+      })
+      .then((fn) => {
+        if (disposed) fn();
+        else themeUnlisten = fn;
+      })
+      .catch(() => {});
+
+    const onFocus = () => refreshSystemTheme();
+    const onVisibilityChange = () => {
+      if (!document.hidden) refreshSystemTheme();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    const poll = window.setInterval(refreshSystemTheme, SYSTEM_THEME_POLL_MS);
+    let media: MediaQueryList | null = null;
+    const syncMedia = () => applyPrefersDark(getSystemPrefersDarkFromMatchMedia());
+    if (typeof window.matchMedia === "function") {
+      media = window.matchMedia(SYSTEM_DARK_QUERY);
+      media.addEventListener("change", syncMedia);
+    }
+
+    return () => {
+      disposed = true;
+      themeUnlisten?.();
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.clearInterval(poll);
+      media?.removeEventListener("change", syncMedia);
+    };
+  }, [settings.themeMode]);
 
   useEffect(() => {
     if (startupUpdateCheckStartedRef.current) return;
