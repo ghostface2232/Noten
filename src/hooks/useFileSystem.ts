@@ -437,14 +437,46 @@ export function useFileSystem(
     if (importedDocs.length === 0) return;
 
     const lastImported = importedDocs[importedDocs.length - 1];
+    const importedIds = importedDocs.map((d) => d.id);
+
+    // Inherit the active document's group so an import lands in the group the
+    // user is currently viewing, mirroring newNote's group-inheritance.
+    const inheritedGroupId = activeDocId
+      ? (groupsRef.current?.find((g) => g.noteIds.includes(activeDocId))?.id ?? null)
+      : null;
+
     const prunedDocs = await pruneEmptyCurrentDoc(baseDocs, activeDocId);
     const nextDocs = [...prunedDocs, ...importedDocs];
-    sortAndPersistDocs(nextDocs, lastImported.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
+
+    let nextGroups = groupsRef.current;
+    if (inheritedGroupId) {
+      // pruneEmptyCurrentDoc may have removed the (empty) active doc from its
+      // group and dropped the group once it emptied. Recompute from that
+      // post-prune state so the value we persist matches React state, then add
+      // the imports to the inherited group if it still exists.
+      const activeDocPruned = activeDocId != null && !prunedDocs.some((d) => d.id === activeDocId);
+      const base = activeDocPruned
+        ? (groupsRef.current ?? [])
+            .map((g) => ({ ...g, noteIds: g.noteIds.filter((nid) => nid !== activeDocId) }))
+            .filter((g) => g.noteIds.length > 0)
+        : (groupsRef.current ?? []);
+      if (base.some((g) => g.id === inheritedGroupId)) {
+        nextGroups = base.map((g) =>
+          g.id === inheritedGroupId
+            ? { ...g, noteIds: [...g.noteIds, ...importedIds.filter((nid) => !g.noteIds.includes(nid))] }
+            : g,
+        );
+        setGroups?.(nextGroups);
+        emitGroupsUpdated(nextGroups);
+      }
+    }
+
+    sortAndPersistDocs(nextDocs, lastImported.id, notesSortOrder, locale, setDocs, setActiveIndex, nextGroups);
     importedDocs.forEach((doc) => emitDocCreated(doc));
 
     resetDocState(state, tiptapRef, lastImported.id, lastImported.filePath, lastImported.content);
     notifyActiveDocRef?.current?.(lastImported.id, lastImported.filePath);
-  }, [getLiveDocsSnapshot, leaveCurrentDoc, markDocClean, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef, pruneEmptyCurrentDoc]);
+  }, [getLiveDocsSnapshot, leaveCurrentDoc, markDocClean, notesSortOrder, setActiveIndex, setDocs, setGroups, state, tiptapRef, pruneEmptyCurrentDoc]);
 
   const importFile = useCallback(async () => {
     const selected = await open({ filters: MD_FILTERS, multiple: true });

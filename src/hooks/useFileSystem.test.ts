@@ -317,6 +317,40 @@ describe("useFileSystem — importFiles batch resilience", () => {
 
     expect(setDocs).not.toHaveBeenCalled();
   });
+
+  it("adds imported docs to the group the active doc belongs to", async () => {
+    readMock.mockImplementation(async (path: string) => `body of ${path}`);
+    const active = makeDoc("a", { content: "real note" });
+    const groups: NoteGroup[] = [
+      { id: "g1", name: "G1", noteIds: ["a"], collapsed: false, createdAt: 1000 },
+    ];
+    const { result, setGroups } = renderFs({ docs: [active], activeIndex: 0, groups });
+
+    await act(async () => {
+      await result.current.importFiles(["/src/b.md", "/src/c.md"]);
+    });
+
+    expect(setGroups).toHaveBeenCalled();
+    const nextGroups = setGroups.mock.calls[setGroups.mock.calls.length - 1][0] as NoteGroup[];
+    const g1 = nextGroups.find((g) => g.id === "g1")!;
+    // The active doc keeps its place; both imports join its group.
+    expect(g1.noteIds).toEqual(["a", "uuid-1", "uuid-2"]);
+  });
+
+  it("leaves imports ungrouped when the active doc is in no group", async () => {
+    readMock.mockImplementation(async (path: string) => `body of ${path}`);
+    const active = makeDoc("a", { content: "real note" });
+    const groups: NoteGroup[] = [
+      { id: "g1", name: "G1", noteIds: ["other"], collapsed: false, createdAt: 1000 },
+    ];
+    const { result, setGroups } = renderFs({ docs: [active], activeIndex: 0, groups });
+
+    await act(async () => {
+      await result.current.importFiles(["/src/b.md"]);
+    });
+
+    expect(setGroups).not.toHaveBeenCalled();
+  });
 });
 
 // newNote — disk-first invariant: if the body write fails, the previous doc
