@@ -266,7 +266,7 @@ export function useFileSystem(
     ));
   }, []);
 
-  const pruneEmptyCurrentDoc = useCallback(async (baseDocs: NoteDoc[], leavingDocId: string | null): Promise<NoteDoc[]> => {
+  const pruneEmptyCurrentDoc = useCallback(async (baseDocs: NoteDoc[], leavingDocId: string | null, preserveGroupId: string | null = null): Promise<NoteDoc[]> => {
     if (!leavingDocId) return baseDocs;
     const leaving = baseDocs.find((d) => d.id === leavingDocId);
     if (!leaving) return baseDocs;
@@ -298,7 +298,10 @@ export function useFileSystem(
     } catch { /* ignore — already gone or unreachable */ }
     setGroups?.((prev) => {
       const next = prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }));
-      const kept = next.filter((g) => g.noteIds.length > 0);
+      // Keep preserveGroupId alive even when it empties: a caller that is about
+      // to add notes to the inherited group (importFiles) must not have it
+      // filtered out or tombstoned mid-flow — mirrors newNote.willReplace.
+      const kept = next.filter((g) => g.noteIds.length > 0 || g.id === preserveGroupId);
       if (kept.length !== next.length) {
         const keptIds = new Set(kept.map((g) => g.id));
         for (const g of next) if (!keptIds.has(g.id)) markGroupAsDeleted(g.id);
@@ -437,14 +440,49 @@ export function useFileSystem(
     if (importedDocs.length === 0) return;
 
     const lastImported = importedDocs[importedDocs.length - 1];
-    const prunedDocs = await pruneEmptyCurrentDoc(baseDocs, activeDocId);
+    const importedIds = importedDocs.map((d) => d.id);
+
+    // Inherit the active document's group so an import lands in the group the
+    // user is currently viewing, mirroring newNote's group-inheritance.
+    const inheritedGroupId = activeDocId
+      ? (groupsRef.current?.find((g) => g.noteIds.includes(activeDocId))?.id ?? null)
+      : null;
+
+    // Pass inheritedGroupId so the prune keeps that group alive even if the
+    // active doc was its only (empty placeholder) member — the imports below
+    // are about to join it.
+    const prunedDocs = await pruneEmptyCurrentDoc(baseDocs, activeDocId, inheritedGroupId);
     const nextDocs = [...prunedDocs, ...importedDocs];
-    sortAndPersistDocs(nextDocs, lastImported.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
+
+    let nextGroups = groupsRef.current;
+    if (inheritedGroupId) {
+      // pruneEmptyCurrentDoc may have removed the (empty) active doc from its
+      // group. Recompute from that post-prune state so the value we persist
+      // matches React state, keeping the inherited group (preserved above) so
+      // the imports can join it.
+      const activeDocPruned = activeDocId != null && !prunedDocs.some((d) => d.id === activeDocId);
+      const base = activeDocPruned
+        ? (groupsRef.current ?? [])
+            .map((g) => ({ ...g, noteIds: g.noteIds.filter((nid) => nid !== activeDocId) }))
+            .filter((g) => g.noteIds.length > 0 || g.id === inheritedGroupId)
+        : (groupsRef.current ?? []);
+      if (base.some((g) => g.id === inheritedGroupId)) {
+        nextGroups = base.map((g) =>
+          g.id === inheritedGroupId
+            ? { ...g, noteIds: [...g.noteIds, ...importedIds.filter((nid) => !g.noteIds.includes(nid))] }
+            : g,
+        );
+        setGroups?.(nextGroups);
+        emitGroupsUpdated(nextGroups);
+      }
+    }
+
+    sortAndPersistDocs(nextDocs, lastImported.id, notesSortOrder, locale, setDocs, setActiveIndex, nextGroups);
     importedDocs.forEach((doc) => emitDocCreated(doc));
 
     resetDocState(state, tiptapRef, lastImported.id, lastImported.filePath, lastImported.content);
     notifyActiveDocRef?.current?.(lastImported.id, lastImported.filePath);
-  }, [getLiveDocsSnapshot, leaveCurrentDoc, markDocClean, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef, pruneEmptyCurrentDoc]);
+  }, [getLiveDocsSnapshot, leaveCurrentDoc, markDocClean, notesSortOrder, setActiveIndex, setDocs, setGroups, state, tiptapRef, pruneEmptyCurrentDoc]);
 
   const importFile = useCallback(async () => {
     const selected = await open({ filters: MD_FILTERS, multiple: true });
