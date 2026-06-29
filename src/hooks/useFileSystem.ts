@@ -266,7 +266,7 @@ export function useFileSystem(
     ));
   }, []);
 
-  const pruneEmptyCurrentDoc = useCallback(async (baseDocs: NoteDoc[], leavingDocId: string | null): Promise<NoteDoc[]> => {
+  const pruneEmptyCurrentDoc = useCallback(async (baseDocs: NoteDoc[], leavingDocId: string | null, preserveGroupId: string | null = null): Promise<NoteDoc[]> => {
     if (!leavingDocId) return baseDocs;
     const leaving = baseDocs.find((d) => d.id === leavingDocId);
     if (!leaving) return baseDocs;
@@ -298,7 +298,10 @@ export function useFileSystem(
     } catch { /* ignore — already gone or unreachable */ }
     setGroups?.((prev) => {
       const next = prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }));
-      const kept = next.filter((g) => g.noteIds.length > 0);
+      // Keep preserveGroupId alive even when it empties: a caller that is about
+      // to add notes to the inherited group (importFiles) must not have it
+      // filtered out or tombstoned mid-flow — mirrors newNote.willReplace.
+      const kept = next.filter((g) => g.noteIds.length > 0 || g.id === preserveGroupId);
       if (kept.length !== next.length) {
         const keptIds = new Set(kept.map((g) => g.id));
         for (const g of next) if (!keptIds.has(g.id)) markGroupAsDeleted(g.id);
@@ -445,20 +448,23 @@ export function useFileSystem(
       ? (groupsRef.current?.find((g) => g.noteIds.includes(activeDocId))?.id ?? null)
       : null;
 
-    const prunedDocs = await pruneEmptyCurrentDoc(baseDocs, activeDocId);
+    // Pass inheritedGroupId so the prune keeps that group alive even if the
+    // active doc was its only (empty placeholder) member — the imports below
+    // are about to join it.
+    const prunedDocs = await pruneEmptyCurrentDoc(baseDocs, activeDocId, inheritedGroupId);
     const nextDocs = [...prunedDocs, ...importedDocs];
 
     let nextGroups = groupsRef.current;
     if (inheritedGroupId) {
       // pruneEmptyCurrentDoc may have removed the (empty) active doc from its
-      // group and dropped the group once it emptied. Recompute from that
-      // post-prune state so the value we persist matches React state, then add
-      // the imports to the inherited group if it still exists.
+      // group. Recompute from that post-prune state so the value we persist
+      // matches React state, keeping the inherited group (preserved above) so
+      // the imports can join it.
       const activeDocPruned = activeDocId != null && !prunedDocs.some((d) => d.id === activeDocId);
       const base = activeDocPruned
         ? (groupsRef.current ?? [])
             .map((g) => ({ ...g, noteIds: g.noteIds.filter((nid) => nid !== activeDocId) }))
-            .filter((g) => g.noteIds.length > 0)
+            .filter((g) => g.noteIds.length > 0 || g.id === inheritedGroupId)
         : (groupsRef.current ?? []);
       if (base.some((g) => g.id === inheritedGroupId)) {
         nextGroups = base.map((g) =>
