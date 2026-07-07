@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # Keep SHA-pinned GitHub Actions current: Dependabot bumps each pin to the
+  # new commit and updates the `# vX` comment, so pinning stays maintainable.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -20,16 +20,20 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Setup Node.js 24
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 24
           cache: npm
 
       - name: Setup Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        # Pinned to a commit on the action's `stable` branch; toolchain input
+        # keeps selecting the current stable Rust channel at build time.
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: stable
 
       - name: Install dependencies
         run: npm ci
@@ -46,7 +50,7 @@ jobs:
           Copy-Item -LiteralPath $source -Destination $dest -Force
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -109,7 +113,7 @@ jobs:
           }
 
       - name: Upload bootstrapper to GitHub release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
           draft: true
           tag_name: ${{ github.ref_name }}
