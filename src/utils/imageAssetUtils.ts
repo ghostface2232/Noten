@@ -150,14 +150,20 @@ export async function duplicateNoteAssets(
   }
 
   await mkdir(targetDir, { recursive: true }).catch(() => {});
+  const copied = new Set<string>();
   for (const entry of entries) {
     if (!entry.isFile) continue;
     try {
       const bytes = await readFile(`${sourceDir}/${entry.name}`);
       await writeFile(`${targetDir}/${entry.name}`, bytes);
+      copied.add(entry.name);
     } catch (err) {
-      // One unreadable asset degrades only that image in the copy; the rest of
-      // the duplicate still succeeds.
+      // Copy failed (locked OneDrive placeholder, read-only dir, disk full).
+      // Leave this asset's references pointing at the SOURCE dir below — the
+      // source file still exists, so the image renders now, instead of
+      // rewriting to a `.assets/<newId>/` file that was never created (which
+      // would break the image immediately). The reference reverts to the
+      // pre-fix shared-asset state only for this one file.
       void logNotenError(new NotenError(
         "SAVE_FAILED",
         "recoverable",
@@ -167,10 +173,18 @@ export async function duplicateNoteAssets(
     }
   }
 
-  // Point every `.assets/<sourceId>/` reference at the new note's asset dir.
-  // The prefix is shared by both the markdown `](...)` and serialized
-  // `<img src="...">` forms, and survives a leading `./`.
-  return content.split(`.assets/${sourceId}/`).join(`.assets/${newId}/`);
+  // Rewrite only the references whose asset was actually copied; a failed copy
+  // keeps its `.assets/<sourceId>/<file>` reference so it still resolves. The
+  // per-file key is shared by the markdown `](...)` and serialized
+  // `<img src="...">` forms and survives a leading `./`. Content-hash
+  // filenames are fixed-shape, so no key is a substring of another.
+  let rewritten = content;
+  for (const filename of copied) {
+    rewritten = rewritten
+      .split(`.assets/${sourceId}/${filename}`)
+      .join(`.assets/${newId}/${filename}`);
+  }
+  return rewritten;
 }
 
 export function resolveAssetAbsolutePath(src: string, noteFilePath: string | null): string | null {

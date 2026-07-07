@@ -33,6 +33,7 @@ beforeEach(async () => {
   readFileMock.mockClear();
   readFileMock.mockResolvedValue(new Uint8Array());
   writeFileMock.mockClear();
+  writeFileMock.mockResolvedValue(undefined);
   (await getMockedLogger()).mockClear();
 });
 
@@ -113,7 +114,7 @@ describe("duplicateNoteAssets", () => {
     expect(writeFileMock).not.toHaveBeenCalled();
   });
 
-  it("skips a single unreadable asset but still rewrites references", async () => {
+  it("rewrites only the copied asset and keeps a failed copy pointing at the source", async () => {
     readDirMock.mockResolvedValue([
       { name: "good.png", isFile: true },
       { name: "bad.png", isFile: true },
@@ -127,8 +128,26 @@ describe("duplicateNoteAssets", () => {
     const out = await duplicateNoteAssets("/notes", SRC, DST, content);
 
     expect(writeFileMock).toHaveBeenCalledWith(`/notes/.assets/${DST}/good.png`, expect.any(Uint8Array));
-    expect(out).toBe(`![a](.assets/${DST}/good.png) ![b](.assets/${DST}/bad.png)`);
+    // good.png copied -> rewritten to the new id; bad.png failed -> reference
+    // stays at the source dir (which still exists) so it renders now instead
+    // of pointing at a file that was never created.
+    expect(out).toBe(`![a](.assets/${DST}/good.png) ![b](.assets/${SRC}/bad.png)`);
     expect((await getMockedLogger()).mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it("leaves ALL references at the source when every copy fails", async () => {
+    readDirMock.mockResolvedValue([
+      { name: "a.png", isFile: true },
+      { name: "b.png", isFile: true },
+    ]);
+    writeFileMock.mockRejectedValue(new Error("disk full"));
+    const content = `![a](.assets/${SRC}/a.png) ![b](.assets/${SRC}/b.png)`;
+
+    const out = await duplicateNoteAssets("/notes", SRC, DST, content);
+
+    // No copy landed, so no reference is rewritten — the duplicate resolves
+    // against the still-present source assets rather than breaking immediately.
+    expect(out).toBe(content);
   });
 
   it("ignores non-file directory entries", async () => {
