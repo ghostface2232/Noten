@@ -20,7 +20,7 @@ import type { MarkdownState } from "./useMarkdownState";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
-import { removeNoteAssetDir } from "../utils/imageAssetUtils";
+import { duplicateNoteAssets, removeNoteAssetDir } from "../utils/imageAssetUtils";
 import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsUpdated, emitNoteColorUpdated, emitNotePinnedUpdated, emitTrashUpdated } from "./useWindowSync";
 import type { NoteColorId } from "../utils/noteColors";
 import { markOwnWrite } from "./ownWriteTracker";
@@ -903,7 +903,11 @@ export function useFileSystem(
 
     const id = crypto.randomUUID();
     const timestamp = Date.now();
-    const content = sourceDoc.content;
+    // Copy the source's image assets into the duplicate's own asset dir and
+    // rewrite `.assets/<sourceId>/` references to the new id, so deleting the
+    // source later does not break the duplicate's images.
+    const notesDir = await getNotesDir();
+    const content = await duplicateNoteAssets(notesDir, sourceDoc.id, id, sourceDoc.content);
     // Abort rather than committing a clean duplicate that lies about being
     // persisted. The source doc is unaffected, so the user can retry.
     const { filePath, ok } = await provisionNoteFile(id, content, "duplicateNote", { sourceId: sourceDoc.id });

@@ -1,11 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const removeMock = vi.fn(async (_path: string, _opts?: { recursive?: boolean }) => {});
+const mkdirMock = vi.fn(async (_path: string, _opts?: { recursive?: boolean }) => {});
+const readDirMock = vi.fn(async (_path: string): Promise<Array<{ name: string; isFile: boolean }>> => []);
+const readFileMock = vi.fn(async (_path: string): Promise<Uint8Array> => new Uint8Array());
+const writeFileMock = vi.fn(async (_path: string, _bytes: Uint8Array) => {});
 
 vi.mock("@tauri-apps/plugin-fs", () => ({
-  mkdir: vi.fn(async () => {}),
-  readFile: vi.fn(async () => new Uint8Array()),
-  writeFile: vi.fn(async () => {}),
+  mkdir: (path: string, opts?: { recursive?: boolean }) => mkdirMock(path, opts),
+  readDir: (path: string) => readDirMock(path),
+  readFile: (path: string) => readFileMock(path),
+  writeFile: (path: string, bytes: Uint8Array) => writeFileMock(path, bytes),
   remove: (path: string, opts?: { recursive?: boolean }) => removeMock(path, opts),
 }));
 
@@ -13,7 +18,7 @@ vi.mock("./crashLog", () => ({
   logNotenError: vi.fn(() => Promise.resolve()),
 }));
 
-import { removeNoteAssetDir } from "./imageAssetUtils";
+import { duplicateNoteAssets, removeNoteAssetDir } from "./imageAssetUtils";
 
 async function getMockedLogger() {
   const { logNotenError } = await import("./crashLog");
@@ -22,6 +27,12 @@ async function getMockedLogger() {
 
 beforeEach(async () => {
   removeMock.mockClear();
+  mkdirMock.mockClear();
+  readDirMock.mockClear();
+  readDirMock.mockResolvedValue([]);
+  readFileMock.mockClear();
+  readFileMock.mockResolvedValue(new Uint8Array());
+  writeFileMock.mockClear();
   (await getMockedLogger()).mockClear();
 });
 
@@ -64,5 +75,85 @@ describe("removeNoteAssetDir", () => {
     await removeNoteAssetDir("", "abc");
     await removeNoteAssetDir("/notes", "");
     expect(removeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("duplicateNoteAssets", () => {
+  const SRC = "11111111-1111-1111-1111-111111111111";
+  const DST = "22222222-2222-2222-2222-222222222222";
+
+  it("copies each source asset file and rewrites references to the new id", async () => {
+    readDirMock.mockResolvedValue([
+      { name: "aaa.png", isFile: true },
+      { name: "bbb.jpg", isFile: true },
+    ]);
+    const content = `![x](.assets/${SRC}/aaa.png)\n<img src=".assets/${SRC}/bbb.jpg" width="100">`;
+
+    const out = await duplicateNoteAssets("/notes", SRC, DST, content);
+
+    expect(readDirMock).toHaveBeenCalledWith(`/notes/.assets/${SRC}`);
+    expect(writeFileMock).toHaveBeenCalledWith(`/notes/.assets/${DST}/aaa.png`, expect.any(Uint8Array));
+    expect(writeFileMock).toHaveBeenCalledWith(`/notes/.assets/${DST}/bbb.jpg`, expect.any(Uint8Array));
+    expect(out).toBe(`![x](.assets/${DST}/aaa.png)\n<img src=".assets/${DST}/bbb.jpg" width="100">`);
+    // No lingering references to the source id.
+    expect(out).not.toContain(SRC);
+  });
+
+  it("rewrites a `./`-prefixed reference too", async () => {
+    readDirMock.mockResolvedValue([{ name: "aaa.png", isFile: true }]);
+    const out = await duplicateNoteAssets("/notes", SRC, DST, `![x](./.assets/${SRC}/aaa.png)`);
+    expect(out).toBe(`![x](./.assets/${DST}/aaa.png)`);
+  });
+
+  it("returns content unchanged when the source has no asset dir", async () => {
+    readDirMock.mockRejectedValue(new Error("ENOENT"));
+    const content = `plain note, no images`;
+    const out = await duplicateNoteAssets("/notes", SRC, DST, content);
+    expect(out).toBe(content);
+    expect(writeFileMock).not.toHaveBeenCalled();
+  });
+
+  it("skips a single unreadable asset but still rewrites references", async () => {
+    readDirMock.mockResolvedValue([
+      { name: "good.png", isFile: true },
+      { name: "bad.png", isFile: true },
+    ]);
+    readFileMock.mockImplementation(async (path: string) => {
+      if (path.endsWith("bad.png")) throw new Error("locked");
+      return new Uint8Array([1, 2, 3]);
+    });
+    const content = `![a](.assets/${SRC}/good.png) ![b](.assets/${SRC}/bad.png)`;
+
+    const out = await duplicateNoteAssets("/notes", SRC, DST, content);
+
+    expect(writeFileMock).toHaveBeenCalledWith(`/notes/.assets/${DST}/good.png`, expect.any(Uint8Array));
+    expect(out).toBe(`![a](.assets/${DST}/good.png) ![b](.assets/${DST}/bad.png)`);
+    expect((await getMockedLogger()).mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it("ignores non-file directory entries", async () => {
+    readDirMock.mockResolvedValue([
+      { name: "nested", isFile: false },
+      { name: "aaa.png", isFile: true },
+    ]);
+    await duplicateNoteAssets("/notes", SRC, DST, `![x](.assets/${SRC}/aaa.png)`);
+    expect(writeFileMock).toHaveBeenCalledTimes(1);
+    expect(writeFileMock).toHaveBeenCalledWith(`/notes/.assets/${DST}/aaa.png`, expect.any(Uint8Array));
+  });
+
+  it("REFUSES to copy for an unsafe source id and leaves content unchanged", async () => {
+    const content = `![x](.assets/../aaa.png)`;
+    const out = await duplicateNoteAssets("/notes", "..", DST, content);
+    expect(out).toBe(content);
+    expect(readDirMock).not.toHaveBeenCalled();
+    expect(writeFileMock).not.toHaveBeenCalled();
+    expect((await getMockedLogger()).mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it("is a no-op when source and target ids are equal", async () => {
+    const content = `![x](.assets/${SRC}/aaa.png)`;
+    const out = await duplicateNoteAssets("/notes", SRC, SRC, content);
+    expect(out).toBe(content);
+    expect(readDirMock).not.toHaveBeenCalled();
   });
 });

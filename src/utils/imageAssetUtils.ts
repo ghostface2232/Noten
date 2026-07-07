@@ -1,4 +1,4 @@
-import { mkdir, readFile, remove, writeFile } from "@tauri-apps/plugin-fs";
+import { mkdir, readDir, readFile, remove, writeFile } from "@tauri-apps/plugin-fs";
 import { bytesToDataUrl, dataUrlToUint8Array, mimeFromDataUrl, mimeFromExt, mimeToExt } from "./imageUtils";
 import { isValidNoteId } from "./noteId";
 import { isStrictSubpath, normalizeSep } from "./pathUtils";
@@ -106,6 +106,71 @@ export async function removeNoteAssetDir(notesDir: string, noteId: string): Prom
   } catch {
     // Directory may not exist (note had no images) — ignore
   }
+}
+
+// Copy a source note's asset files into the duplicate's own asset dir and
+// rewrite the markdown so its `.assets/<sourceId>/` references point at the
+// new note. Without this a duplicated note keeps pointing at the source's
+// asset dir, so permanently deleting the source (or the 14-day trash purge)
+// runs `removeNoteAssetDir(sourceId)` and silently breaks the duplicate's
+// images. Returns the rewritten content; on any guard failure it returns the
+// content unchanged so the caller still gets a usable (if image-broken) copy.
+export async function duplicateNoteAssets(
+  notesDir: string,
+  sourceId: string,
+  newId: string,
+  content: string,
+): Promise<string> {
+  if (!notesDir || !sourceId || !newId || sourceId === newId) return content;
+  // These paths are id-derived and drive recursive-ish file ops; reject unsafe
+  // ids and re-verify both dirs resolve strictly inside `.assets/` first.
+  if (!isValidNoteId(sourceId) || !isValidNoteId(newId)) {
+    void logNotenError(new NotenError(
+      "INVALID_NOTE_ID",
+      "recoverable",
+      "duplicateNoteAssets: refusing asset copy for unsafe id",
+      { context: { notesDir, sourceId, newId } },
+    ));
+    return content;
+  }
+  const assetsRoot = `${normalizeSep(notesDir)}.assets`;
+  const sourceDir = `${assetsRoot}/${sourceId}`;
+  const targetDir = `${assetsRoot}/${newId}`;
+  if (!isStrictSubpath(assetsRoot, sourceDir) || !isStrictSubpath(assetsRoot, targetDir)) {
+    return content;
+  }
+
+  let entries: Awaited<ReturnType<typeof readDir>>;
+  try {
+    entries = await readDir(sourceDir);
+  } catch {
+    // Source note has no asset dir — nothing to copy, and no matching
+    // references to rewrite.
+    return content;
+  }
+
+  await mkdir(targetDir, { recursive: true }).catch(() => {});
+  for (const entry of entries) {
+    if (!entry.isFile) continue;
+    try {
+      const bytes = await readFile(`${sourceDir}/${entry.name}`);
+      await writeFile(`${targetDir}/${entry.name}`, bytes);
+    } catch (err) {
+      // One unreadable asset degrades only that image in the copy; the rest of
+      // the duplicate still succeeds.
+      void logNotenError(new NotenError(
+        "SAVE_FAILED",
+        "recoverable",
+        err instanceof Error ? err.message : String(err),
+        { context: { stage: "duplicateNoteAssets", sourceId, newId, file: entry.name } },
+      ));
+    }
+  }
+
+  // Point every `.assets/<sourceId>/` reference at the new note's asset dir.
+  // The prefix is shared by both the markdown `](...)` and serialized
+  // `<img src="...">` forms, and survives a leading `./`.
+  return content.split(`.assets/${sourceId}/`).join(`.assets/${newId}/`);
 }
 
 export function resolveAssetAbsolutePath(src: string, noteFilePath: string | null): string | null {
