@@ -297,6 +297,14 @@ export function useFileWatcher(
         setDocs((prev) => {
           const idx = prev.findIndex((d) => d.id === doc.id);
           if (idx < 0) return prev;
+          // The dirty check at the top of the loop ran on a pre-await snapshot.
+          // The user may have started typing during readTextFile /
+          // getFileTimestamps (a slow OneDrive placeholder hydration can take
+          // seconds), so re-check here and refuse to overwrite live keystrokes.
+          // setKnownDiskContent already recorded the disk baseline, so
+          // autosave's last-write-wins plus the remote backup resolves the
+          // conflict. Mirrors useWindowSync's doc-updated guard.
+          if (prev[idx].isDirty) return prev;
           const updated = [...prev];
           const autoTitle = prev[idx].customName
             ? prev[idx].fileName

@@ -236,6 +236,45 @@ describe("useFileWatcher — isDirty protection", () => {
   });
 });
 
+describe("useFileWatcher — isDirty race protection (dirty during await)", () => {
+  // Regression for the TOCTOU gap: the top-of-loop isDirty check runs on a
+  // pre-await snapshot. If the user starts typing while readTextFile /
+  // getFileTimestamps are in flight (a slow OneDrive placeholder hydration can
+  // take seconds), the setDocs updater must STILL refuse to overwrite the
+  // now-dirty body. Without the in-updater re-check the keystrokes are lost.
+  it("does not overwrite content when the doc becomes dirty during the async read", async () => {
+    // Doc starts clean, so it passes the top-of-loop guard and reaches setDocs.
+    const cleanDoc = makeDoc("a", { isDirty: false, content: "old-body" });
+    refs.bodyByPath.set(cleanDoc.filePath, "genuine-remote-body");
+    const { setDocs } = renderWatcher({ docs: [cleanDoc] });
+    await waitForRootHandler();
+
+    await act(async () => {
+      await refs.rootHandler!({
+        type: { modify: { kind: "data", mode: "any" } },
+        paths: [cleanDoc.filePath],
+        attrs: {},
+      } as unknown as WatchEvent);
+    });
+
+    // The body updater was queued. Simulate the user having typed during the
+    // await by applying it against a now-dirty prev — it must return prev
+    // unchanged rather than clobbering the in-progress edits.
+    const bodyUpdaters = setDocs.mock.calls
+      .map((c) => c[0])
+      .filter((u): u is (prev: NoteDoc[]) => NoteDoc[] => typeof u === "function");
+    expect(bodyUpdaters.length).toBeGreaterThan(0);
+
+    const dirtyPrev = [makeDoc("a", { isDirty: true, content: "user-edits" })];
+    for (const updater of bodyUpdaters) {
+      const result = updater(dirtyPrev);
+      const a = result.find((d) => d.id === "a");
+      expect(a?.content).toBe("user-edits");
+      expect(a?.isDirty).toBe(true);
+    }
+  });
+});
+
 describe("useFileWatcher — own-write echo skip", () => {
   // markOwnWrite + isOwnWriteContentMatch is the mechanism that prevents
   // every autosave write from triggering a watcher loop. If broken, each

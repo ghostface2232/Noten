@@ -75,6 +75,10 @@ vi.mock("../utils/documentTitle", () => ({
 
 vi.mock("../utils/imageAssetUtils", () => ({
   removeNoteAssetDir: vi.fn(async () => {}),
+  // Passthrough: return the source content unchanged so duplicateNote tests
+  // exercise the note-creation path, not the asset-copy path (covered in
+  // imageAssetUtils.test.ts).
+  duplicateNoteAssets: vi.fn(async (_dir: string, _src: string, _dst: string, content: string) => content),
 }));
 
 vi.mock("./useWindowSync", () => ({
