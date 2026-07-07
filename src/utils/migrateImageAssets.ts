@@ -1,6 +1,8 @@
-import { mkdir, readTextFile, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { mkdir, readTextFile, writeFile } from "@tauri-apps/plugin-fs";
 import { dataUrlToUint8Array, mimeToExt } from "./imageUtils";
 import { buildAssetRelativePath, getNoteIdFromFilePath, resolveAssetAbsolutePath } from "./imageAssetUtils";
+import { atomicWriteText } from "./atomicWrite";
+import { tauriFileSystem } from "./fs";
 
 const HTML_IMG_DATA_URL_RE = /<img\b[^>]*\bsrc=(["'])(data:image\/[a-zA-Z0-9.+-]+;base64,[^"']+)\1[^>]*>/gi;
 const MARKDOWN_IMG_DATA_URL_RE = /!\[([^\]]*)\]\((data:image\/[a-zA-Z0-9.+-]+;base64,[^)\s]+)(?:\s+"([^"]*)")?\)/g;
@@ -156,7 +158,18 @@ export async function migrateDataUrlImagesToAssets(noteFilePaths: string[]): Pro
     const converted = htmlPass.converted + markdownPass.converted;
     if (converted === 0 || next === raw) continue;
 
-    await writeTextFile(path, next);
+    try {
+      // Fail-closed like every other body write: never degrade to a
+      // non-atomic overwrite. A crash/AV-lock mid-write must not truncate the
+      // note (whose base64 image bytes live in this very body until they land
+      // as asset files). On failure the original body survives untouched.
+      await atomicWriteText(tauriFileSystem, path, next, { failClosed: true });
+    } catch {
+      // atomicWriteText already logged the failure. Skip this note — it keeps
+      // its base64 images (still renderable via allowBase64) and can be
+      // migrated on a later launch. Do not count it as changed.
+      continue;
+    }
     changedFiles += 1;
     convertedImages += converted;
   }

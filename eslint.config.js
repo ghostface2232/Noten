@@ -7,6 +7,12 @@ import tseslint from "typescript-eslint";
 const RAW_WRITE_SELECTOR =
   "CallExpression[callee.type='MemberExpression'][callee.property.name='writeTextFile']";
 
+// Also catch a bare `writeTextFile(...)` imported straight from the fs plugin.
+// The member-expression selector above misses this form, which is exactly how
+// migrateImageAssets.ts once bypassed the gate.
+const RAW_WRITE_BARE_SELECTOR =
+  "CallExpression[callee.type='Identifier'][callee.name='writeTextFile']";
+
 const MTIME_BYPASS_SELECTORS = [
   // `something.mtime!` — non-null assertion
   {
@@ -65,6 +71,7 @@ export default tseslint.config(
       "src/utils/metadataIO.ts",
       "src/utils/groupsIO.ts",
       "src/utils/conflictFileDetector.ts",
+      "src/utils/migrateImageAssets.ts",
     ],
     rules: {
       "no-restricted-syntax": [
@@ -74,6 +81,11 @@ export default tseslint.config(
           selector: RAW_WRITE_SELECTOR,
           message:
             "Durable writers must call atomicWriteText(fs, path, content), not fs.writeTextFile directly. Raw writes leave readers exposed to half-written files when AV/OneDrive interrupts the operation.",
+        },
+        {
+          selector: RAW_WRITE_BARE_SELECTOR,
+          message:
+            "Durable writers must call atomicWriteText(fs, path, content), not writeTextFile directly. Raw writes leave readers exposed to half-written files when AV/OneDrive interrupts the operation.",
         },
       ],
     },
