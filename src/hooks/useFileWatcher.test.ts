@@ -98,6 +98,9 @@ vi.mock("../utils/crashLog", () => ({
 }));
 
 import { useFileWatcher } from "./useFileWatcher";
+import { reconcileFolder } from "../utils/reconcileFolder";
+
+const reconcileFolderMock = vi.mocked(reconcileFolder);
 
 function makeDoc(id: string, overrides: Partial<NoteDoc> = {}): NoteDoc {
   return {
@@ -372,5 +375,111 @@ describe("useFileWatcher — meta trashed propagates to group removal", () => {
     const g1 = after.find((g) => g.id === "g1");
     expect(g1).toBeDefined();
     expect(g1!.noteIds).toEqual(["b"]);
+  });
+});
+
+describe("useFileWatcher — reconcile drift barrier (P0-5)", () => {
+  // A cloud reconcile awaits multi-second disk reads on a stale docs snapshot.
+  // If the user creates/deletes a note during that window, the full-folder
+  // result no longer matches current state. Force-replacing via setDocs would
+  // drop the freshly created note (and, symmetrically, resurrect a deleted one
+  // while racing its meta write). The watcher must detect the drift and abandon
+  // the stale commit instead.
+  function renderWatcherWithRerender(initialDocs: NoteDoc[]) {
+    const setDocs = vi.fn();
+    const setGroups = vi.fn();
+    const setActiveIndex = vi.fn();
+    const tiptapRef = makeTiptapRef();
+    const reconcileState: ReconcileState = { bodyMissing: new Map() };
+    const { rerender, unmount } = renderHook(
+      (p: { docs: NoteDoc[]; groups: NoteGroup[]; activeIndex: number; activeDocId: string | null }) =>
+        useFileWatcher(
+          p.docs, setDocs, p.groups, setGroups,
+          p.activeIndex, p.activeDocId, setActiveIndex,
+          tiptapRef, "en", true, reconcileState,
+        ),
+      { initialProps: { docs: initialDocs, groups: [], activeIndex: 0, activeDocId: initialDocs[0]?.id ?? null } },
+    );
+    return { setDocs, setGroups, setActiveIndex, rerender, unmount };
+  }
+
+  // A non-.md path drives handleRootEvent straight to runReconcile with no
+  // body-loop side effects, isolating the reconcile commit path.
+  const IDLE_EVENT = {
+    type: { modify: { kind: "data", mode: "any" } },
+    paths: ["/notes/unrelated.txt"],
+    attrs: {},
+  } as unknown as WatchEvent;
+
+  it("abandons the stale result when docs changed during the reconcile await", async () => {
+    let releaseReconcile: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => { releaseReconcile = resolve; });
+    const docsA = [makeDoc("a")];
+    // Result derived from the pre-mutation snapshot: it drops the not-yet-known
+    // "b-new" and (as a stale full-folder view would) reintroduces a ghost.
+    reconcileFolderMock.mockImplementationOnce(async () => {
+      await gate;
+      return { docs: [makeDoc("a"), makeDoc("ghost")], groups: [], changed: true };
+    });
+
+    const { setDocs, setGroups, rerender, unmount } = renderWatcherWithRerender(docsA);
+    await waitForRootHandler();
+
+    // Start the reconcile and let handleRootEvent progress through its awaits
+    // (getNotesDir, scanAndAbsorbConflicts) until reconcileFolder is actually
+    // invoked — at which point runReconcile has already captured its baseline
+    // and is now parked on the gate. This ordering is what the test hinges on.
+    let handlerDone: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      handlerDone = Promise.resolve(refs.rootHandler!(IDLE_EVENT));
+      for (let i = 0; i < 20 && reconcileFolderMock.mock.calls.length === 0; i++) {
+        await Promise.resolve();
+      }
+    });
+    expect(reconcileFolderMock).toHaveBeenCalledTimes(1);
+
+    // Concurrent local mutation mid-await: the user creates "b-new" (Ctrl+N),
+    // which replaces the docs array reference the watcher captured.
+    await act(async () => {
+      rerender({ docs: [makeDoc("a"), makeDoc("b-new")], groups: [], activeIndex: 1, activeDocId: "b-new" });
+    });
+
+    // Release the gate; the reconcile now tries to commit its stale result.
+    await act(async () => {
+      releaseReconcile!();
+      await handlerDone;
+    });
+
+    // The barrier must have fired: no full-array replace (that is the only path
+    // that would drop "b-new" / resurrect "ghost"). Body-loop updaters are
+    // functions; a stale commit is a plain array argument.
+    const arrayReplace = setDocs.mock.calls.find((c) => Array.isArray(c[0]));
+    expect(arrayReplace).toBeUndefined();
+    const groupsReplace = setGroups.mock.calls.find((c) => Array.isArray(c[0]));
+    expect(groupsReplace).toBeUndefined();
+
+    unmount();
+  });
+
+  it("commits the reconcile result when no local mutation races the await", async () => {
+    const docsA = [makeDoc("a")];
+    const reconciled = [makeDoc("a"), makeDoc("remote-new")];
+    reconcileFolderMock.mockImplementationOnce(async () => ({
+      docs: reconciled, groups: [], changed: true,
+    }));
+
+    const { setDocs, unmount } = renderWatcherWithRerender(docsA);
+    await waitForRootHandler();
+
+    await act(async () => {
+      await refs.rootHandler!(IDLE_EVENT);
+    });
+
+    // No drift: the reconciled full-folder array is committed as-is.
+    const arrayReplace = setDocs.mock.calls.find((c) => Array.isArray(c[0]));
+    expect(arrayReplace).toBeDefined();
+    expect((arrayReplace![0] as NoteDoc[]).map((d) => d.id)).toEqual(["a", "remote-new"]);
+
+    unmount();
   });
 });
