@@ -137,6 +137,7 @@ const copyFileMock = fsPlugin.copyFile as ReturnType<typeof vi.fn>;
 const logMock = crashLogModule.logNotenError as ReturnType<typeof vi.fn>;
 const markOwnWriteMock = ownWriteModule.markOwnWrite as ReturnType<typeof vi.fn>;
 const markGroupAsDeletedMock = notesLoaderModule.markGroupAsDeleted as ReturnType<typeof vi.fn>;
+const saveManifestMock = notesLoaderModule.saveManifest as ReturnType<typeof vi.fn>;
 
 function makeDoc(id: string, overrides: Partial<NoteDoc> = {}): NoteDoc {
   return {
@@ -741,11 +742,41 @@ describe("useFileSystem — switchDocument prunes an empty leaving doc", () => {
     });
 
     expect(setGroups).toHaveBeenCalled();
-    const updater = setGroups.mock.calls[0][0] as (prev: NoteGroup[]) => NoteGroup[];
-    const next = updater(groups);
+    // The pruner now commits the post-delete array synchronously (a plain value,
+    // not a prev => ... updater) so callers can persist it consistently.
+    const next = setGroups.mock.calls[setGroups.mock.calls.length - 1][0] as NoteGroup[];
     // g1 lost its only note and is dropped entirely; g2 is untouched.
     expect(next.map((g) => g.id)).toEqual(["g2"]);
     expect(next[0].noteIds).toEqual(["b"]);
+    expect(markGroupAsDeletedMock).toHaveBeenCalledWith("g1");
+  });
+
+  it("persists groups WITHOUT the tombstoned group so the delete is not cancelled", async () => {
+    // Regression for the P0-4 follow-up: markGroupAsDeleted runs while pruning,
+    // but switchDocument used to hand saveManifest groupsRef.current — a
+    // pre-delete array still containing g1. persistDecomposedState then read
+    // g1's presence as a resurrection and cancelled the fresh tombstone, so
+    // deletedAt was never written and g1 reappeared on reload. The pruner now
+    // returns the post-delete array and switchDocument persists THAT.
+    const empty = makeDoc("a", { content: "" });
+    const other = makeDoc("b", { content: "real note" });
+    const groups: NoteGroup[] = [
+      { id: "g1", name: "G1", noteIds: ["a"], collapsed: false, createdAt: 1000 },
+      { id: "g2", name: "G2", noteIds: ["b"], collapsed: false, createdAt: 1000 },
+    ];
+    const { result } = renderFs({ docs: [empty, other], activeIndex: 0, groups });
+
+    await act(async () => {
+      await result.current.switchDocument(1);
+    });
+
+    expect(markGroupAsDeletedMock).toHaveBeenCalledWith("g1");
+    // The last saveManifest call must carry the pruned groups (g1 gone), not the
+    // stale array — otherwise the tombstone gets cancelled downstream.
+    const lastPersist = saveManifestMock.mock.calls[saveManifestMock.mock.calls.length - 1];
+    const persistedGroups = lastPersist?.[2] as NoteGroup[] | undefined;
+    expect(persistedGroups).toBeDefined();
+    expect(persistedGroups!.map((g) => g.id)).toEqual(["g2"]);
   });
 
   it("does not prune a non-empty leaving doc", async () => {
