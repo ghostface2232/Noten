@@ -80,6 +80,14 @@ export function setMigrationInProgress(v: boolean) { migrationInProgress = v; }
 // useNoteGroups, and useWindowSync don't need to thread it explicitly.
 const persistState = createPersistState();
 
+// Monotonic logical clock for group deletions. `markGroupAsDeleted` stamps each
+// tombstone with the next value; `saveManifest` captures the current value when
+// a save is ENQUEUED. Comparing the two at drain time lets persist tell a
+// genuine resurrection (save enqueued after the delete) from a slow in-flight
+// save whose groups snapshot predates the delete, so the latter can no longer
+// cancel the tombstone and revive the group (P0-4).
+let groupMutationSeq = 0;
+
 export function markGroupMembershipChanged(noteId: string, groupId: string | null, updatedAt = Date.now()): void {
   persistState.pendingGroupMembership.set(noteId, { groupId, updatedAt });
 }
@@ -95,7 +103,7 @@ export function markGroupMembershipChanges(
 }
 
 export function markGroupAsDeleted(id: string): void {
-  persistState.pendingTombstones.add(id);
+  persistState.pendingTombstones.set(id, ++groupMutationSeq);
 }
 
 export function unmarkGroupAsDeleted(id: string): void {
@@ -463,6 +471,7 @@ async function persistDecomposedState(
   activeId: string | null,
   groups?: NoteGroup[],
   source?: string,
+  snapshotSeq?: number,
 ): Promise<void> {
   const dir = await getNotesDir();
   const cachePath = await getLocalCachePath();
@@ -473,6 +482,10 @@ async function persistDecomposedState(
       cachePath,
       imageAssetMigrationCompletedAt: imageAssetMigrationV1CompletedAtCache,
       setActiveNoteId: setActiveNoteIdPersisted,
+      // Fall back to the live counter for direct loader calls (which run while
+      // pendingTombstones is empty, so the value is moot). Chained saves pass
+      // the value captured at enqueue time.
+      groupsSnapshotSeq: snapshotSeq ?? groupMutationSeq,
     });
   } catch (err) {
     if (import.meta.env.DEV) console.warn("[PERSIST_FAILED]", err);
@@ -502,9 +515,13 @@ export async function saveManifest(
   source?: string,
 ): Promise<void> {
   if (migrationInProgress) return;
+  // Capture the deletion clock at ENQUEUE time. A tombstone recorded after this
+  // point carries a higher sequence, so when this (now-stale) save finally
+  // drains it can no longer cancel that tombstone. See P0-4.
+  const snapshotSeq = groupMutationSeq;
   const job = persistChain
     .catch(() => undefined)
-    .then(() => persistDecomposedState(docs, activeId, groups, source));
+    .then(() => persistDecomposedState(docs, activeId, groups, source, snapshotSeq));
   persistChain = job;
   return job;
 }
