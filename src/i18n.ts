@@ -175,7 +175,6 @@ const dict = {
   "settings.shortcut.import": { en: "Open file", ko: "파일 열기" },
   "settings.shortcut.newFile": { en: "New note", ko: "새 노트" },
   "settings.shortcut.newWindow": { en: "New window", ko: "새 창" },
-  "settings.shortcut.focusEditor": { en: "Focus editor", ko: "편집기로 포커스 이동" },
   "settings.shortcut.find": { en: "Find in document", ko: "문서에서 찾기" },
   "settings.shortcut.replace": { en: "Find and replace", ko: "찾기 및 바꾸기" },
   "settings.shortcut.gotoLine": { en: "Go to line", ko: "줄 이동" },

@@ -125,6 +125,8 @@ export function SidebarContextMenus({
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const submenuParentRef = useRef<HTMLDivElement>(null);
   const submenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Element focused before the menu opened, restored when it is dismissed by keyboard. */
+  const openerRef = useRef<HTMLElement | null>(null);
 
   // Cleanup submenu timer on unmount
   useEffect(() => {
@@ -161,6 +163,67 @@ export function SidebarContextMenus({
     }
   }, [contextMenu]);
 
+  // The roving-focus set: every enabled button in the root menu, excluding the
+  // hover-only submenu items (P1-5). Color swatches live in a role="group" and
+  // stay in the set so they remain keyboard-reachable, but they keep their own
+  // button role (aria-pressed is invalid on role="menuitem").
+  const rovingItems = useCallback((): HTMLButtonElement[] => {
+    const menuEl = contextMenuRef.current;
+    if (!menuEl) return [];
+    return Array.from(menuEl.querySelectorAll<HTMLButtonElement>("button")).filter(
+      (b) => !b.disabled && !b.closest("[data-submenu]"),
+    );
+  }, []);
+
+  // When the menu opens, tag its action items with menu roles and move focus to
+  // the first real action so it is immediately operable by keyboard / screen
+  // reader. The opener is remembered so keyboard dismissal can restore focus.
+  useEffect(() => {
+    if (!contextMenu || !contextMenuRef.current) return;
+    const menuEl = contextMenuRef.current;
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    menuEl.querySelectorAll<HTMLButtonElement>("button").forEach((b) => {
+      // Swatches (inside role="group") keep their toggle-button semantics.
+      if (!b.closest('[role="group"]') && !b.getAttribute("role")) b.setAttribute("role", "menuitem");
+      b.tabIndex = -1;
+    });
+    const items = rovingItems();
+    // Prefer a labelled action over a color swatch as the initial focus.
+    const first = items.find((b) => !b.closest('[role="group"]')) ?? items[0];
+    first?.focus();
+  }, [contextMenu, rovingItems]);
+
+  const dismissWithFocusRestore = useCallback(() => {
+    const opener = openerRef.current;
+    closeContextMenu();
+    if (opener?.isConnected) opener.focus();
+  }, [closeContextMenu]);
+
+  // Roving-focus keyboard navigation for the root menu + Escape/Tab to dismiss.
+  const handleMenuKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Escape" || e.key === "Tab") {
+        e.preventDefault();
+        dismissWithFocusRestore();
+        return;
+      }
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+      const items = rovingItems();
+      if (items.length === 0) return;
+      e.preventDefault();
+      const current = items.indexOf(document.activeElement as HTMLButtonElement);
+      let next = current;
+      switch (e.key) {
+        case "ArrowDown": next = current < 0 ? 0 : (current + 1) % items.length; break;
+        case "ArrowUp": next = current < 0 ? items.length - 1 : (current - 1 + items.length) % items.length; break;
+        case "Home": next = 0; break;
+        case "End": next = items.length - 1; break;
+      }
+      items[next]?.focus();
+    },
+    [dismissWithFocusRestore, rovingItems],
+  );
+
   const handleCopyContent = useCallback((index: number) => {
     const content = getDocumentContent(index);
     navigator.clipboard.writeText(content).catch(() => {});
@@ -195,6 +258,10 @@ export function SidebarContextMenus({
           ref={contextMenuRef}
           className={styles.contextMenu}
           style={{ left: contextMenu.x, top: contextMenu.y }}
+          role="menu"
+          aria-orientation="vertical"
+          tabIndex={-1}
+          onKeyDown={handleMenuKeyDown}
         >
           {contextMenu.type === "empty" && contextMenu.index === -1 && (
             <>
@@ -314,6 +381,7 @@ export function SidebarContextMenus({
                       ref={(el) => { if (el) clampMenuToViewport(el); }}
                       onMouseEnter={keepSubmenu}
                       onMouseLeave={hideSubmenu}
+                      data-submenu
                     >
                       {groups.map((g) => (
                         <Button
@@ -464,6 +532,7 @@ export function SidebarContextMenus({
                       ref={(el) => { if (el) clampMenuToViewport(el); }}
                       onMouseEnter={keepSubmenu}
                       onMouseLeave={hideSubmenu}
+                      data-submenu
                     >
                       {groups.map((g) => (
                         <Button

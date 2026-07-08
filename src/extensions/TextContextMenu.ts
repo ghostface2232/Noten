@@ -1,5 +1,6 @@
 import { Extension, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { DOMSerializer } from "@tiptap/pm/model";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
 import { closeContextMenu, createMenuShell, createMenuItem, createMenuSeparator } from "../utils/contextMenuRegistry";
@@ -76,14 +77,55 @@ export function showGenericContextMenu(pos: { x: number; y: number }, ctx: TextC
   });
 }
 
+/**
+ * Copy the current selection to the clipboard straight from ProseMirror state.
+ *
+ * The context menu takes DOM focus while open, so the old `document.execCommand`
+ * path (which depends on the editor being focused with a live DOM selection) is
+ * unreliable here — it could copy nothing. Reading the slice from editor state
+ * is focus-independent. Falls back to plain text if the rich write is rejected
+ * (e.g. WebView2 clipboard quirks).
+ */
+async function copyEditorSelection(editor: Editor): Promise<boolean> {
+  const { from, to, empty } = editor.state.selection;
+  if (empty) return false;
+
+  const slice = editor.state.selection.content();
+  const serializer = DOMSerializer.fromSchema(editor.schema);
+  const wrapper = document.createElement("div");
+  wrapper.appendChild(serializer.serializeFragment(slice.content));
+  const html = wrapper.innerHTML;
+  const text = editor.state.doc.textBetween(from, to, "\n", "\n");
+
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        "text/html": new Blob([html], { type: "text/html" }),
+        "text/plain": new Blob([text], { type: "text/plain" }),
+      }),
+    ]);
+    return true;
+  } catch {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 function tiptapContext(editor: Editor): TextContextMenuContext {
   const { from, to } = editor.state.selection;
   return {
     hasSelection: from !== to,
     isEditable: !editor.storage.readonlyGuard?.readonly,
     locale: (editor.storage.slashCommands?.locale ?? "en") as Locale,
-    cut: () => document.execCommand("cut"),
-    copy: () => document.execCommand("copy"),
+    cut: async () => {
+      const copied = await copyEditorSelection(editor);
+      if (copied) editor.chain().focus().deleteSelection().run();
+    },
+    copy: () => { void copyEditorSelection(editor); },
     paste: async (plain) => {
       try {
         if (plain) {

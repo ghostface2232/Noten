@@ -36,7 +36,6 @@ import {
   ArrowUndo20Regular,
   ArrowRedo20Regular,
   Pin20Regular,
-  KeyboardTab20Regular,
 } from "@fluentui/react-icons";
 import { getVersion } from "@tauri-apps/api/app";
 import { t } from "../i18n";
@@ -539,7 +538,6 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   ["settings.shortcut.newWindow", "Ctrl+Shift+N", WindowNew20Regular],
                   ["settings.shortcut.import", "Ctrl+O", ArrowDownload20Regular],
                   ["settings.shortcut.showChrome", "Click / Scroll", Code20Regular],
-                  ["settings.shortcut.focusEditor", "Tab", KeyboardTab20Regular],
                   ["settings.shortcut.find", "Ctrl+F", Search20Regular],
                   ["settings.shortcut.replace", "Ctrl+H", ArrowSwap20Regular],
                   ["settings.shortcut.gotoLine", "Ctrl+G", TextNumberListLtr20Regular],

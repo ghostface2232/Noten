@@ -14,11 +14,6 @@ function isEditorShortcutTarget(target: EventTarget | null) {
   return !!element?.closest(".ProseMirror");
 }
 
-function isDialogTarget(target: EventTarget | null) {
-  const element = shortcutTargetElement(target);
-  return !!element?.closest('[role="dialog"]');
-}
-
 function isTextEntryTarget(target: EventTarget | null) {
   const element = shortcutTargetElement(target);
   if (!element) return false;
@@ -67,11 +62,13 @@ export function useKeyboardShortcuts({
       const ctrl = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
 
-      if (e.key === "Tab" && !isDialogTarget(e.target)) {
-        e.preventDefault();
-        tiptapRef.current?.getEditor()?.commands.focus();
-        return;
-      }
+      // Tab is intentionally NOT hijacked. This handler used to preventDefault
+      // every Tab outside a dialog and yank focus back into the editor, which
+      // made the sidebar, toolbar, title bar, status bar and the find bar's
+      // Find→Replace field unreachable by keyboard (WCAG 2.1.1) and trapped
+      // focus in the editor (WCAG 2.1.2). Native Tab traversal is now left
+      // intact everywhere; list/indent Tab is still handled inside the editor
+      // by ProseMirror's own keymap, so removing the hijack does not regress it.
 
       // Dev-only shortcuts must run before the browser-shortcut blocker.
       if (ctrl && e.altKey && e.shiftKey && key === "i") {
