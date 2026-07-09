@@ -1,8 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import { Markdown } from "@tiptap/markdown";
 import type { Node as PMNode, Mark as PMMark } from "@tiptap/pm/model";
 import type { NoteDoc } from "../hooks/useNotesLoader";
+import { createFastMarked } from "./fastMarkdownLexer";
 import WikiLink, { findDocByTitle, refreshWikiLinkDecorations } from "./WikiLink";
 
 function doc(fileName: string): NoteDoc {
@@ -126,6 +128,26 @@ describe("missing-link decorations", () => {
     const missing = editor.view.dom.querySelectorAll(".wiki-link-missing");
     expect(missing.length).toBe(1);
     expect(missing[0].textContent).toBe("Ghost");
+  });
+});
+
+describe("markdown serialization", () => {
+  it("round-trips wiki-link marks as bracketed markdown", () => {
+    const editor = new Editor({
+      extensions: [
+        StarterKit,
+        Markdown.configure({ marked: createFastMarked() }),
+        WikiLink,
+      ],
+      content: "See [[Alpha]] and [[한글 노트]].",
+      contentType: "markdown",
+    } as ConstructorParameters<typeof Editor>[0]);
+    active = editor;
+
+    expect(wikiMarkedText(editor.state.doc, "Alpha")).toBe("Alpha");
+    expect(wikiMarkedText(editor.state.doc, "한글 노트")).toBe("한글 노트");
+    expect(editor.getMarkdown()).toContain("[[Alpha]]");
+    expect(editor.getMarkdown()).toContain("[[한글 노트]]");
   });
 });
 

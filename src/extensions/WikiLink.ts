@@ -181,8 +181,8 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
     helpers: MarkdownRendererHelpers,
   ) {
     const renderedText = helpers.renderChildren(node);
-    const target = String(
-      (node.attrs as WikiLinkAttributes | undefined)?.target ?? renderedText,
+    const target = renderedText || String(
+      (node.attrs as WikiLinkAttributes | undefined)?.target ?? "",
     );
     return target ? `[[${target}]]` : "";
   },
