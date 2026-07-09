@@ -107,3 +107,30 @@ describe("useKeyboardShortcuts — Ctrl+R / WebView reload guard", () => {
     expect(press(plainEl, { key: "r", ctrlKey: true, shiftKey: true })).toBe(true);
   });
 });
+
+describe("useKeyboardShortcuts — Tab is not hijacked (keyboard navigation)", () => {
+  it("lets Tab through from app chrome so focus can leave the editor (WCAG 2.1.1/2.1.2)", () => {
+    renderHook(() => useKeyboardShortcuts(makeParams()));
+    expect(press(plainEl, { key: "Tab" })).toBe(false);
+    expect(focusSpy).not.toHaveBeenCalled();
+  });
+
+  it("lets Tab through from a text input (e.g. find bar Find→Replace)", () => {
+    renderHook(() => useKeyboardShortcuts(makeParams()));
+    expect(press(inputEl, { key: "Tab" })).toBe(false);
+    expect(focusSpy).not.toHaveBeenCalled();
+  });
+
+  it("lets Shift+Tab through from app chrome", () => {
+    renderHook(() => useKeyboardShortcuts(makeParams()));
+    expect(press(plainEl, { key: "Tab", shiftKey: true })).toBe(false);
+  });
+
+  it("does not force focus into the editor on a Tab from inside the editor", () => {
+    renderHook(() => useKeyboardShortcuts(makeParams()));
+    const editorChild = editorEl.querySelector("p")!;
+    // ProseMirror handles list/indent Tab itself; this hook must not intervene.
+    expect(press(editorChild, { key: "Tab" })).toBe(false);
+    expect(focusSpy).not.toHaveBeenCalled();
+  });
+});

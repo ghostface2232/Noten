@@ -690,6 +690,13 @@ export const useStyles = makeStyles({
     ":hover": {
       transform: "scale(1.18)",
     },
+    // Keyboard focus indicator (2.4.7): swatches are part of the context menu's
+    // roving focus, so an arrowed-to swatch must be visibly distinguishable.
+    ":focus-visible": {
+      outline: `2px solid ${tokens.colorStrokeFocus2}`,
+      outlineOffset: "1px",
+      transform: "scale(1.18)",
+    },
   },
   colorSwatchSelected: {
     outline: `2px solid ${tokens.colorNeutralForeground1}`,
