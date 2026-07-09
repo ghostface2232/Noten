@@ -1,9 +1,12 @@
 import { Extension, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { Slice } from "@tiptap/pm/model";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
 import { closeContextMenu, createMenuShell, createMenuItem, createMenuSeparator } from "../utils/contextMenuRegistry";
+import { createPlainTextSlice } from "../utils/clipboardText";
+import { isProbablyMarkdown } from "./isProbablyMarkdown";
 
 export interface TextContextMenuContext {
   hasSelection: boolean;
@@ -115,6 +118,48 @@ async function copyEditorSelection(editor: Editor): Promise<boolean> {
   }
 }
 
+type MarkdownAwareEditor = Editor & {
+  markdown?: { parse: (markdown: string) => unknown };
+};
+
+function keepFormatOnPaste(editor: Editor): boolean {
+  return editor.storage.markdownPaste?.keepFormatOnPaste !== false;
+}
+
+function dispatchPaste(editor: Editor, tr = editor.state.tr): void {
+  editor.view.dispatch(tr.scrollIntoView().setMeta("paste", true).setMeta("uiEvent", "paste"));
+}
+
+function pastePlainText(editor: Editor, text: string): void {
+  const tr = editor.state.tr.replaceSelection(createPlainTextSlice(editor.schema, text));
+  dispatchPaste(editor, tr);
+}
+
+function pasteMarkdownText(editor: Editor, text: string): boolean {
+  const markdown = (editor as MarkdownAwareEditor).markdown;
+  if (!markdown || !isProbablyMarkdown(text)) return false;
+
+  const parsed = markdown.parse(text);
+  if (!parsed) return false;
+
+  const doc = editor.schema.nodeFromJSON(parsed);
+  const tr = editor.state.tr.replaceSelection(new Slice(doc.content, 0, 0));
+  dispatchPaste(editor, tr);
+  return true;
+}
+
+async function readClipboardHtml(): Promise<string | null> {
+  const read = navigator.clipboard?.read;
+  if (!read) return null;
+
+  const items = await read.call(navigator.clipboard);
+  const htmlItem = items.find((item) => item.types.includes("text/html"));
+  if (!htmlItem) return null;
+
+  const blob = await htmlItem.getType("text/html");
+  return blob.text();
+}
+
 function tiptapContext(editor: Editor): TextContextMenuContext {
   const { from, to } = editor.state.selection;
   return {
@@ -128,21 +173,21 @@ function tiptapContext(editor: Editor): TextContextMenuContext {
     copy: () => { void copyEditorSelection(editor); },
     paste: async (plain) => {
       try {
-        if (plain) {
-          const text = await navigator.clipboard.readText();
-          editor.chain().focus().insertContent(text).run();
-        } else {
-          const items = await navigator.clipboard.read();
-          const htmlItem = items[0]?.types.includes("text/html") ? items[0] : null;
-          if (htmlItem) {
-            const blob = await htmlItem.getType("text/html");
-            const html = await blob.text();
-            editor.chain().focus().insertContent(html).run();
-          } else {
-            const text = await navigator.clipboard.readText();
-            editor.chain().focus().insertContent(text).run();
+        editor.commands.focus();
+
+        if (!plain && keepFormatOnPaste(editor)) {
+          const html = await readClipboardHtml().catch(() => null);
+          if (html) {
+            editor.view.pasteHTML(html);
+            return;
           }
         }
+
+        const text = await navigator.clipboard.readText();
+        if (!text) return;
+
+        if (!plain && keepFormatOnPaste(editor) && pasteMarkdownText(editor, text)) return;
+        pastePlainText(editor, text);
       } catch { document.execCommand("paste"); }
     },
     selectAll: () => editor.chain().focus().selectAll().run(),

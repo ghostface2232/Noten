@@ -12,7 +12,7 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import { Extension, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey, NodeSelection, TextSelection, EditorState, Selection } from "@tiptap/pm/state";
 import { GapCursor } from "@tiptap/pm/gapcursor";
-import { Fragment, Slice } from "@tiptap/pm/model";
+import { Slice } from "@tiptap/pm/model";
 import { closeHistory } from "@tiptap/pm/history";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
@@ -30,7 +30,7 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { usePopoverAnchor, type PopoverReference } from "../hooks/usePopoverAnchor";
 import { useHoverDismissTimer } from "../hooks/useHoverDismissTimer";
 import { HOVER_SAFE_ZONE_PX, isPointInExpandedRect } from "../utils/popoverGeometry";
-import { sliceToPlainText } from "../utils/clipboardText";
+import { createPlainTextSlice, sliceToPlainText } from "../utils/clipboardText";
 import { CopySelectRegular, RenameRegular } from "@fluentui/react-icons";
 import { common, createLowlight } from "lowlight";
 import { createFastMarked } from "../extensions/fastMarkdownLexer";
@@ -84,31 +84,6 @@ function buildDocumentSessionKey(noteId: string | null, filePath: string | null)
   if (noteId) return `id:${noteId}`;
   if (!filePath) return null;
   return `path:${filePath.replace(/\\/g, "/").toLowerCase()}`;
-}
-
-function createPlainTextSlice(editor: Editor, text: string) {
-  const normalized = text.replace(/\r\n?/g, "\n");
-  const blocks = normalized.split(/\n{2,}/);
-  const paragraph = editor.schema.nodes.paragraph;
-  const hardBreak = editor.schema.nodes.hardBreak;
-
-  const nodes = blocks.map((block) => {
-    const lines = block.split("\n");
-    const content = lines.flatMap((line, index) => {
-      const parts = [];
-      if (line.length > 0) {
-        parts.push(editor.schema.text(line));
-      }
-      if (index < lines.length - 1 && hardBreak) {
-        parts.push(hardBreak.create());
-      }
-      return parts;
-    });
-
-    return paragraph.create(null, content);
-  });
-
-  return new Slice(Fragment.fromArray(nodes), 0, 0);
 }
 
 function getScrollParent(element: HTMLElement | null): HTMLElement | null {
@@ -342,7 +317,7 @@ const MarkdownPaste = Extension.create({
             if (!storage.keepFormatOnPaste) {
               event.preventDefault();
               const { tr } = view.state;
-              tr.replaceSelection(createPlainTextSlice(editor, text));
+              tr.replaceSelection(createPlainTextSlice(editor.schema, text));
               view.dispatch(tr.scrollIntoView());
               requestAnimationFrame(() => {
                 refreshSpellcheckMarkers(editor, true);
@@ -351,7 +326,16 @@ const MarkdownPaste = Extension.create({
             }
 
             if (clipboard?.getData("text/html")) return false;
-            if (!isProbablyMarkdown(text) || !editor.markdown) return false;
+            if (!isProbablyMarkdown(text) || !editor.markdown) {
+              event.preventDefault();
+              const { tr } = view.state;
+              tr.replaceSelection(createPlainTextSlice(editor.schema, text));
+              view.dispatch(tr.scrollIntoView());
+              requestAnimationFrame(() => {
+                refreshSpellcheckMarkers(editor, true);
+              });
+              return true;
+            }
 
             const parsed = editor.markdown.parse(text);
             if (!parsed) return false;

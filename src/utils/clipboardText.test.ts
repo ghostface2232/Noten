@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Schema, Slice, Fragment, type Node as PMNode } from "@tiptap/pm/model";
-import { sliceToPlainText } from "./clipboardText";
+import { createPlainTextSlice, sliceToPlainText } from "./clipboardText";
 
 // Minimal schema mirroring the relevant parts of the app's editor: paragraph,
 // heading, hard break (no spec.leafText — like Tiptap), inline image, and the
@@ -83,5 +83,18 @@ describe("sliceToPlainText", () => {
 
   it("does not append a trailing newline for a single paragraph", () => {
     expect(sliceToPlainText(sliceOf(para(text("solo"))))).toBe("solo");
+  });
+});
+
+describe("createPlainTextSlice", () => {
+  it("normalizes CRLF and keeps single line breaks as hard breaks", () => {
+    const slice = createPlainTextSlice(schema, "a\r\nb");
+    expect(sliceToPlainText(slice)).toBe("a\nb");
+    expect(slice.content.firstChild?.child(1).type.name).toBe("hardBreak");
+  });
+
+  it("keeps pasted markup literal in plain text", () => {
+    const slice = createPlainTextSlice(schema, "<strong>b</strong>");
+    expect(slice.content.firstChild?.textContent).toBe("<strong>b</strong>");
   });
 });

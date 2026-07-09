@@ -1,4 +1,4 @@
-import type { Node as PMNode, Slice } from "@tiptap/pm/model";
+import { Fragment, Slice, type Node as PMNode, type Schema } from "@tiptap/pm/model";
 
 /**
  * Text representation of inline leaf nodes for clipboard serialization.
@@ -21,4 +21,29 @@ function leafText(node: PMNode): string {
  */
 export function sliceToPlainText(slice: Slice): string {
   return slice.content.textBetween(0, slice.content.size, "\n", leafText);
+}
+
+export function createPlainTextSlice(schema: Schema, text: string): Slice {
+  const normalized = text.replace(/\r\n?/g, "\n");
+  const blocks = normalized.split(/\n{2,}/);
+  const paragraph = schema.nodes.paragraph;
+  const hardBreak = schema.nodes.hardBreak;
+
+  const nodes = blocks.map((block) => {
+    const lines = block.split("\n");
+    const content = lines.flatMap((line, index) => {
+      const parts = [];
+      if (line.length > 0) {
+        parts.push(schema.text(line));
+      }
+      if (index < lines.length - 1 && hardBreak) {
+        parts.push(hardBreak.create());
+      }
+      return parts;
+    });
+
+    return paragraph.create(null, content);
+  });
+
+  return new Slice(Fragment.fromArray(nodes), 0, 0);
 }
