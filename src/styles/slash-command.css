@@ -55,7 +55,7 @@
   text-align: left;
   color: var(--editor-color-text);
   font-family: inherit;
-  transition: background-color 0.1s ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .slash-command-item:hover,

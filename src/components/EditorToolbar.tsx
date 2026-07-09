@@ -40,6 +40,11 @@ import { insertMermaidCodeBlock } from "../extensions/mermaidCommands";
 import { t } from "../i18n";
 import type { Editor } from "@tiptap/react";
 import type { Locale } from "../hooks/useSettings";
+import {
+  MOTION_DURATION_BASE,
+  MOTION_DURATION_SLOW,
+  pressableButton,
+} from "../styles/interactions";
 
 const useStyles = makeStyles({
   bar: {
@@ -50,7 +55,7 @@ const useStyles = makeStyles({
     zIndex: 5,
     pointerEvents: "auto",
     transitionProperty: "height, opacity, border-bottom-color",
-    transitionDuration: "0.25s",
+    transitionDuration: MOTION_DURATION_SLOW,
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
   },
   barHidden: {
@@ -64,7 +69,7 @@ const useStyles = makeStyles({
     rowGap: "4px",
     padding: "10px 10px",
     transitionProperty: "transform, opacity",
-    transitionDuration: "0.25s",
+    transitionDuration: MOTION_DURATION_SLOW,
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
   },
   gridHidden: {
@@ -113,6 +118,7 @@ const useStyles = makeStyles({
     padding: "0",
     borderRadius: "6px",
     border: "none",
+    ...pressableButton,
   },
   toolBtnActive: {
     minWidth: "28px",
@@ -122,6 +128,7 @@ const useStyles = makeStyles({
     border: "none",
     backgroundColor: "var(--ui-active-bg)",
     fontWeight: 500,
+    ...pressableButton,
   },
   headingBtn: {
     width: "64px",
@@ -134,6 +141,7 @@ const useStyles = makeStyles({
     fontSize: "12px",
     fontWeight: 400,
     gap: "2px",
+    ...pressableButton,
   },
   headingBtnActive: {
     width: "64px",
@@ -146,6 +154,16 @@ const useStyles = makeStyles({
     fontSize: "12px",
     gap: "2px",
     fontWeight: 400,
+    ...pressableButton,
+  },
+  popoverSurface: {
+    animationName: {
+      from: { opacity: 0, filter: "blur(4px)" },
+      to: { opacity: 1, filter: "blur(0px)" },
+    },
+    animationDuration: MOTION_DURATION_BASE,
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+    animationFillMode: "backwards",
   },
 });
 
@@ -210,9 +228,10 @@ interface TableInsertButtonProps {
   locale: Locale;
   tooltip: string;
   buttonClassName: string;
+  popoverClassName: string;
 }
 
-function TableInsertButton({ editor, locale, tooltip, buttonClassName }: TableInsertButtonProps) {
+function TableInsertButton({ editor, locale, tooltip, buttonClassName, popoverClassName }: TableInsertButtonProps) {
   const [open, setOpen] = useState(false);
   return (
     <Popover
@@ -232,7 +251,7 @@ function TableInsertButton({ editor, locale, tooltip, buttonClassName }: TableIn
           />
         </Tooltip>
       </PopoverTrigger>
-      <PopoverSurface tabIndex={-1} style={{ padding: 8 }}>
+      <PopoverSurface tabIndex={-1} className={popoverClassName} style={{ padding: 8 }}>
         <TableGridPicker
           editor={editor}
           locale={locale}
@@ -423,7 +442,7 @@ function EditorToolbarImpl({
                     {headingLabel}
                   </Button>
                 </MenuTrigger>
-                <MenuPopover>
+                <MenuPopover className={styles.popoverSurface}>
                   <MenuList>
                     <MenuItem onClick={() => editor?.chain().focus().setParagraph().run()}>
                       <span style={{ fontSize: "0.95em", fontWeight: 400 }}>{i("heading.body")}</span>
@@ -493,6 +512,7 @@ function EditorToolbarImpl({
                 locale={locale}
                 tooltip={i("tool.table")}
                 buttonClassName={styles.toolBtn}
+                popoverClassName={styles.popoverSurface}
               />
             </div>
 

@@ -1,4 +1,12 @@
 import { makeStyles, tokens } from "@fluentui/react-components";
+import {
+  MOTION_DURATION_BASE,
+  MOTION_DURATION_FAST,
+  MOTION_DURATION_MEDIUM,
+  MOTION_DURATION_SLOW,
+  MOTION_DURATION_SLOWER,
+  pressableButton,
+} from "../styles/interactions";
 
 export const SIDE_PADDING = "6px";
 // Scroll containers reserve a both-edges scrollbar gutter (6px — the
@@ -55,7 +63,7 @@ export const useStyles = makeStyles({
     "--sidebar-mask-bottom": "0px",
     maskImage: "linear-gradient(to bottom, transparent, black var(--sidebar-mask-top), black calc(100% - var(--sidebar-mask-bottom)), transparent)",
     transitionProperty: "--sidebar-mask-top, --sidebar-mask-bottom",
-    transitionDuration: "0.3s",
+    transitionDuration: MOTION_DURATION_SLOWER,
     transitionTimingFunction: "ease",
     "&[data-scroll-top='false']": {
       "--sidebar-mask-top": "24px",
@@ -75,7 +83,7 @@ export const useStyles = makeStyles({
     height: "100%",
     transform: "translateX(0)",
     transitionProperty: "transform",
-    transitionDuration: "0.24s",
+    transitionDuration: MOTION_DURATION_SLOW,
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
   },
   viewTrackShifted: {
@@ -110,6 +118,7 @@ export const useStyles = makeStyles({
     maxWidth: "none",
     paddingLeft: "8px",
     paddingRight: "8px",
+    ...pressableButton,
   },
   allNotesHeaderLabel: {
     flex: 1,
@@ -138,7 +147,7 @@ export const useStyles = makeStyles({
     "--sidebar-mask-bottom": "0px",
     maskImage: "linear-gradient(to bottom, transparent, black var(--sidebar-mask-top), black calc(100% - var(--sidebar-mask-bottom)), transparent)",
     transitionProperty: "--sidebar-mask-top, --sidebar-mask-bottom",
-    transitionDuration: "0.3s",
+    transitionDuration: MOTION_DURATION_SLOWER,
     transitionTimingFunction: "ease",
     "&[data-scroll-top='false']": {
       "--sidebar-mask-top": "24px",
@@ -163,6 +172,7 @@ export const useStyles = makeStyles({
     fontWeight: 500,
     marginBottom: "12px",
     flexShrink: 0,
+    ...pressableButton,
   },
   allNotesEntryName: {
     flex: 1,
@@ -205,18 +215,18 @@ export const useStyles = makeStyles({
   },
   docItemNew: {
     animationName: "docSlideIn",
-    animationDuration: "0.3s",
+    animationDuration: MOTION_DURATION_SLOWER,
     animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
     animationFillMode: "backwards",
   },
   docItemSlideUp: {
     animationName: "docSlideUp",
-    animationDuration: "0.2s",
+    animationDuration: MOTION_DURATION_MEDIUM,
     animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
   },
   docItemExit: {
     animationName: "docSlideOut",
-    animationDuration: "0.25s",
+    animationDuration: MOTION_DURATION_SLOW,
     animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
     animationFillMode: "forwards",
     pointerEvents: "none" as const,
@@ -232,7 +242,7 @@ export const useStyles = makeStyles({
     gridTemplateRows: "1fr",
     marginTop: "0px",
     transitionProperty: "grid-template-rows, opacity, margin-top",
-    transitionDuration: "0.28s",
+    transitionDuration: MOTION_DURATION_SLOWER,
     transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
   },
   groupNotesSlideCollapsed: {
@@ -251,7 +261,7 @@ export const useStyles = makeStyles({
   },
   groupCollapseOut: {
     animationName: "groupCollapseOut",
-    animationDuration: "0.28s",
+    animationDuration: MOTION_DURATION_SLOWER,
     animationTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
     animationFillMode: "forwards",
     overflow: "hidden",
@@ -259,7 +269,7 @@ export const useStyles = makeStyles({
   },
   searchResultFadeIn: {
     animationName: "searchResultFadeIn",
-    animationDuration: "0.25s",
+    animationDuration: MOTION_DURATION_SLOW,
     animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
     animationFillMode: "backwards",
   },
@@ -298,6 +308,7 @@ export const useStyles = makeStyles({
     minHeight: "32px",
     paddingLeft: "8px",
     paddingRight: "8px",
+    ...pressableButton,
   },
   docItemActive: {
     display: "flex",
@@ -314,6 +325,7 @@ export const useStyles = makeStyles({
     paddingRight: "8px",
     backgroundColor: "var(--ui-active-bg)",
     fontWeight: 500,
+    ...pressableButton,
   },
   docItemIndented: {
     paddingLeft: "20px",
@@ -377,6 +389,7 @@ export const useStyles = makeStyles({
     paddingRight: "8px",
     fontWeight: 500,
     marginBottom: "4px",
+    ...pressableButton,
     "& .new-doc-shortcut": {
       marginLeft: "auto",
       fontSize: "11px",
@@ -386,7 +399,7 @@ export const useStyles = makeStyles({
       whiteSpace: "nowrap",
       fontWeight: 400,
       transitionProperty: "opacity",
-      transitionDuration: "0.15s",
+      transitionDuration: MOTION_DURATION_BASE,
     },
     ":hover .new-doc-shortcut": {
       opacity: 0.7,
@@ -419,6 +432,7 @@ export const useStyles = makeStyles({
     padding: 0,
     borderRadius: "4px",
     flexShrink: 0,
+    ...pressableButton,
   },
   sectionLabel: {
     fontSize: "11px",
@@ -434,7 +448,7 @@ export const useStyles = makeStyles({
     display: "grid",
     gridTemplateRows: "1fr",
     transitionProperty: "grid-template-rows, opacity, margin-bottom",
-    transitionDuration: "0.25s",
+    transitionDuration: MOTION_DURATION_SLOW,
     transitionTimingFunction: "ease",
     marginBottom: "12px",
   },
@@ -490,8 +504,9 @@ export const useStyles = makeStyles({
     padding: "0",
     opacity: 0,
     pointerEvents: "none",
-    transitionProperty: "opacity",
-    transitionDuration: "0.1s",
+    ...pressableButton,
+    transitionProperty: "opacity, background-color, color, scale",
+    transitionDuration: MOTION_DURATION_FAST,
   },
   moreBtnVisible: {
     opacity: 1,
@@ -508,7 +523,7 @@ export const useStyles = makeStyles({
     gap: "4px",
     flexShrink: 0,
     transitionProperty: "opacity",
-    transitionDuration: "0.1s",
+    transitionDuration: MOTION_DURATION_FAST,
   },
   docTrailingHidden: {
     opacity: 0,
@@ -554,6 +569,7 @@ export const useStyles = makeStyles({
     minHeight: "36px",
     paddingLeft: "8px",
     paddingRight: "8px",
+    ...pressableButton,
   },
   // Delete-undo toast, parked just above the settings button.
   undoToast: {
@@ -577,7 +593,7 @@ export const useStyles = makeStyles({
       from: { opacity: 0, transform: "translateY(6px)" },
       to: { opacity: 1, transform: "translateY(0)" },
     },
-    animationDuration: "0.15s",
+    animationDuration: MOTION_DURATION_BASE,
     animationTimingFunction: "ease-out",
   },
   undoToastText: {
@@ -595,6 +611,7 @@ export const useStyles = makeStyles({
     paddingLeft: "8px",
     paddingRight: "8px",
     color: tokens.colorBrandForeground1,
+    ...pressableButton,
   },
   undoToastDismiss: {
     flexShrink: 0,
@@ -602,6 +619,7 @@ export const useStyles = makeStyles({
     minHeight: "24px",
     paddingLeft: "2px",
     paddingRight: "2px",
+    ...pressableButton,
   },
   updateDot: {
     width: "8px",
@@ -622,6 +640,13 @@ export const useStyles = makeStyles({
     boxShadow: tokens.shadow16,
     padding: "4px",
     minWidth: "210px",
+    animationName: {
+      from: { opacity: 0, transform: "translateY(4px)", filter: "blur(4px)" },
+      to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
+    },
+    animationDuration: MOTION_DURATION_FAST,
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+    animationFillMode: "backwards",
   },
   contextMenuItem: {
     display: "flex",
@@ -636,6 +661,7 @@ export const useStyles = makeStyles({
     minHeight: "32px",
     paddingLeft: "8px",
     paddingRight: "12px",
+    ...pressableButton,
   },
   contextMenuDanger: {
     color: tokens.colorPaletteRedForeground1,
@@ -664,6 +690,13 @@ export const useStyles = makeStyles({
     boxShadow: tokens.shadow16,
     padding: "4px",
     minWidth: "140px",
+    animationName: {
+      from: { opacity: 0, transform: "translateY(3px)", filter: "blur(4px)" },
+      to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
+    },
+    animationDuration: MOTION_DURATION_FAST,
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+    animationFillMode: "backwards",
   },
   colorRow: {
     display: "flex",
@@ -686,9 +719,12 @@ export const useStyles = makeStyles({
     justifyContent: "center",
     outline: "none",
     transitionProperty: "transform",
-    transitionDuration: "0.1s",
+    transitionDuration: MOTION_DURATION_FAST,
     ":hover": {
       transform: "scale(1.18)",
+    },
+    ":active": {
+      transform: "scale(0.96)",
     },
     // Keyboard focus indicator (2.4.7): swatches are part of the context menu's
     // roving focus, so an arrowed-to swatch must be visibly distinguishable.
@@ -712,6 +748,13 @@ export const useStyles = makeStyles({
     padding: "4px",
     display: "flex",
     flexDirection: "column",
+    animationName: {
+      from: { opacity: 0, transform: "translateY(4px)", filter: "blur(4px)" },
+      to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
+    },
+    animationDuration: MOTION_DURATION_FAST,
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+    animationFillMode: "backwards",
   },
   confirmOverlay: {
     position: "fixed",
@@ -751,7 +794,7 @@ export const useStyles = makeStyles({
     maxHeight: "0px",
     opacity: 0,
     transitionProperty: "max-height, opacity, margin-bottom",
-    transitionDuration: "0.2s",
+    transitionDuration: MOTION_DURATION_MEDIUM,
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
     marginBottom: "0px",
   },
@@ -791,6 +834,7 @@ export const useStyles = makeStyles({
     height: "24px",
     padding: "0",
     flexShrink: 0,
+    ...pressableButton,
   },
   groupHeader: {
     position: "relative",
@@ -807,6 +851,7 @@ export const useStyles = makeStyles({
     paddingLeft: "8px",
     paddingRight: "8px",
     cursor: "pointer",
+    ...pressableButton,
   },
   // Stand-in selection cue for the active note when its group is
   // collapsed: the note row itself isn't rendered, so the header adopts
@@ -826,7 +871,7 @@ export const useStyles = makeStyles({
     flexShrink: 0,
     color: tokens.colorNeutralForeground3,
     transitionProperty: "transform",
-    transitionDuration: "0.15s",
+    transitionDuration: MOTION_DURATION_BASE,
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
   },
   groupChevronExpanded: {
@@ -846,7 +891,7 @@ export const useStyles = makeStyles({
     opacity: 0.8,
     flexShrink: 0,
     transitionProperty: "opacity",
-    transitionDuration: "0.1s",
+    transitionDuration: MOTION_DURATION_FAST,
   },
   groupNameInput: {
     border: "none",
@@ -874,7 +919,7 @@ export const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralForeground1,
     opacity: 0,
     transitionProperty: "width, opacity, background-color, margin",
-    transitionDuration: "0.15s",
+    transitionDuration: MOTION_DURATION_BASE,
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
     padding: 0,
     marginLeft: 0,
@@ -883,6 +928,14 @@ export const useStyles = makeStyles({
     fontSize: "14px",
     lineHeight: 1,
     pointerEvents: "none",
+    "& svg": {
+      opacity: 0,
+      scale: 0.25,
+      filter: "blur(4px)",
+      transitionProperty: "opacity, scale, filter",
+      transitionDuration: MOTION_DURATION_MEDIUM,
+      transitionTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+    },
   },
   selectCheckboxVisible: {
     width: "16px",
@@ -894,6 +947,11 @@ export const useStyles = makeStyles({
     opacity: 1,
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralBackground1,
+    "& svg": {
+      opacity: 1,
+      scale: 1,
+      filter: "blur(0px)",
+    },
   },
   selectToolbar: {
     display: "flex",
@@ -921,5 +979,6 @@ export const useStyles = makeStyles({
     width: "28px",
     padding: "0",
     flexShrink: 0,
+    ...pressableButton,
   },
 });

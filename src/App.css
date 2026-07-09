@@ -29,7 +29,7 @@ body,
 
 body {
   background: transparent;
-  transition: background 0.2s ease;
+  transition: background var(--motion-medium) ease;
   font-family: var(--editor-font-family);
   font-size: var(--editor-font-size);
   line-height: var(--editor-line-height);
@@ -58,7 +58,7 @@ body {
 ::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 3px;
-  transition: background 0.2s ease;
+  transition: background var(--motion-medium) ease;
 }
 
 *:hover > ::-webkit-scrollbar-thumb,
@@ -192,7 +192,7 @@ body {
 
 .fui-FluentProvider,
 .ProseMirror {
-  transition: color 0.3s ease, background-color 0.3s ease;
+  transition: color var(--motion-slower) ease, background-color var(--motion-slower) ease;
 }
 
 .fui-Button:hover {
@@ -211,7 +211,7 @@ body {
 }
 
 .fui-DialogSurface__backdrop {
-  transition: background-color 0.2s ease;
+  transition: background-color var(--motion-medium) ease;
 }
 
 @media print {

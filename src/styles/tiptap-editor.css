@@ -194,6 +194,11 @@
   background: transparent;
   color: var(--editor-color-text-secondary);
   cursor: pointer;
+  transition: color var(--motion-fast) ease-out, scale var(--motion-fast) ease-out;
+}
+
+.ProseMirror pre .noten-code-copy:active {
+  scale: 0.96;
 }
 
 .ProseMirror pre .noten-code-copy:hover {
@@ -203,17 +208,40 @@
 .ProseMirror pre .noten-code-copy svg {
   width: 14px;
   height: 14px;
-  transition: opacity 0.15s ease;
 }
 
-@keyframes noten-copy-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+.ProseMirror pre .noten-icon-swap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
 }
 
-.ProseMirror pre .noten-code-copy.is-copied svg,
-.ProseMirror pre .noten-code-copy.is-restoring svg {
-  animation: noten-copy-fade-in 0.15s ease;
+.ProseMirror pre .noten-icon-swap-layer {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  scale: 0.25;
+  filter: blur(4px);
+  transition: opacity var(--motion-medium) cubic-bezier(0.2, 0, 0, 1), scale var(--motion-medium) cubic-bezier(0.2, 0, 0, 1), filter var(--motion-medium) cubic-bezier(0.2, 0, 0, 1);
+}
+
+.ProseMirror pre .noten-icon-swap-resting,
+.ProseMirror pre .noten-code-copy.is-copied .noten-icon-swap-success {
+  opacity: 1;
+  scale: 1;
+  filter: blur(0px);
+}
+
+.ProseMirror pre .noten-code-copy.is-copied .noten-icon-swap-resting {
+  opacity: 0;
+  scale: 0.25;
+  filter: blur(4px);
 }
 
 .ProseMirror pre .noten-code-copy.is-copied {
@@ -364,7 +392,7 @@
   background-color: var(--editor-color-accent, #0078d4);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.1s ease;
+  transition: opacity var(--motion-fast) ease;
 }
 
 /* Hide the handle on the rightmost cell of every row — there's no neighbour
@@ -651,7 +679,7 @@
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
-  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  transition: background-color var(--motion-fast) ease, border-color var(--motion-fast) ease, color var(--motion-fast) ease;
   outline: none;
 }
 
@@ -707,7 +735,7 @@
   background: var(--editor-color-bg);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
   transform-origin: bottom center;
-  animation: tiptap-table-bubble-in 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: tiptap-table-bubble-in var(--motion-fast) cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 @keyframes tiptap-table-bubble-in {
@@ -735,7 +763,7 @@
   cursor: pointer;
   line-height: 1;
   outline: none;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: background-color var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-fast) ease;
 }
 
 .tiptap-table-bubble-button:hover:not(:disabled) {

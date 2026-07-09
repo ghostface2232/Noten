@@ -42,6 +42,13 @@
   font-family: var(--editor-font-family-sans);
   line-height: 0;
   cursor: pointer;
+  transition: background-color var(--motion-fast) ease-out, color var(--motion-fast) ease-out, scale var(--motion-fast) ease-out;
+}
+
+.ProseMirror .noten-code-block.is-mermaid pre .noten-code-copy:active,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle:active,
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export:active {
+  scale: 0.96;
 }
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-toggle {
@@ -61,7 +68,7 @@
   width: 16px;
   height: 16px;
   display: block;
-  transition: transform 0.2s ease;
+  transition: transform var(--motion-medium) ease;
 }
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export svg {
@@ -87,11 +94,16 @@
   transform: rotate(180deg);
 }
 
-/* Reuse the copy button's success-feedback fade for the export button so the
-   check-icon swap on a completed Save As animates the same way. */
-.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export.is-copied svg,
-.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export.is-restoring svg {
-  animation: noten-copy-fade-in 0.15s ease;
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export.is-copied .noten-icon-swap-success {
+  opacity: 1;
+  scale: 1;
+  filter: blur(0px);
+}
+
+.ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export.is-copied .noten-icon-swap-resting {
+  opacity: 0;
+  scale: 0.25;
+  filter: blur(4px);
 }
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-export.is-copied {
@@ -101,7 +113,7 @@
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-body {
   display: grid;
   grid-template-rows: 1fr;
-  transition: grid-template-rows 0.2s ease;
+  transition: grid-template-rows var(--motion-medium) ease;
 }
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-body.is-collapsed {
@@ -110,7 +122,7 @@
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-body > code {
   overflow-y: hidden;
-  transition: padding 0.2s ease;
+  transition: padding var(--motion-medium) ease;
 }
 
 .ProseMirror .noten-code-block.is-mermaid .noten-mermaid-code-body.is-collapsed > code {

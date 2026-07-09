@@ -57,6 +57,7 @@ import { useChromeVisibility } from "./hooks/useChromeVisibility";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useDragDrop } from "./hooks/useDragDrop";
 import { useUpdater } from "./hooks/useUpdater";
+import { MOTION_FAST_MS } from "./styles/interactions";
 import {
   getSystemPrefersDarkFromMatchMedia,
   queryWindowsSystemPrefersDark,
@@ -74,6 +75,7 @@ const SIDEBAR_DEFAULT = 260;
 // Enough logical width for the wrapped toolbar and sidebar toggle.
 const EDITOR_MIN_WIDTH = 600;
 const WINDOW_MIN_HEIGHT = 620;
+type FloatingEditorControl = "search" | "goto" | null;
 
 type NotesDirConflictChoice = "replace-with-current" | "use-selected-only" | "merge" | null;
 
@@ -86,6 +88,7 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     try { return localStorage.getItem("sidebar-open") === "true"; } catch { return false; }
   });
+  const [sidebarTopActionsVisible, setSidebarTopActionsVisible] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     try { const v = localStorage.getItem("sidebar-width"); return v ? Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Number(v))) : SIDEBAR_DEFAULT; } catch { return SIDEBAR_DEFAULT; }
   });
@@ -105,6 +108,15 @@ function App() {
   }, [sidebarWidth]);
   useEffect(() => { try { localStorage.setItem("sidebar-open", String(sidebarOpen)); } catch {} }, [sidebarOpen]);
   useEffect(() => { try { localStorage.setItem("sidebar-width", String(sidebarWidth)); } catch {} }, [sidebarWidth]);
+  useEffect(() => {
+    if (!sidebarOpen) {
+      setSidebarTopActionsVisible(false);
+      return;
+    }
+    setSidebarTopActionsVisible(false);
+    const frame = requestAnimationFrame(() => setSidebarTopActionsVisible(true));
+    return () => cancelAnimationFrame(frame);
+  }, [sidebarOpen]);
   // Latest desired min window width (editor + open sidebar), read by the
   // resize listener after the window is restored from a maximized state.
   const minWidthRef = useRef(EDITOR_MIN_WIDTH);
@@ -203,6 +215,9 @@ function App() {
   const [docSearchOpen, setDocSearchOpen] = useState(false);
   const [docSearchReplace, setDocSearchReplace] = useState(false);
   const [docGoToLineOpen, setDocGoToLineOpen] = useState(false);
+  const activeFloatingEditorControl: FloatingEditorControl = docSearchOpen ? "search" : docGoToLineOpen ? "goto" : null;
+  const [renderedFloatingEditorControl, setRenderedFloatingEditorControl] = useState<FloatingEditorControl>(null);
+  const [floatingEditorControlExiting, setFloatingEditorControlExiting] = useState(false);
   const [sidebarSearchOpen, setSidebarSearchOpen] = useState(false);
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   const [notesDirConflict, setNotesDirConflict] = useState<NotesDirConflictDialogState | null>(null);
@@ -304,6 +319,25 @@ function App() {
       media?.removeEventListener("change", syncMedia);
     };
   }, [settings.themeMode]);
+
+  useEffect(() => {
+    if (activeFloatingEditorControl) {
+      setRenderedFloatingEditorControl(activeFloatingEditorControl);
+      setFloatingEditorControlExiting(false);
+      return;
+    }
+
+    if (!renderedFloatingEditorControl) {
+      return;
+    }
+
+    setFloatingEditorControlExiting(true);
+    const timeout = window.setTimeout(() => {
+      setRenderedFloatingEditorControl(null);
+      setFloatingEditorControlExiting(false);
+    }, MOTION_FAST_MS);
+    return () => window.clearTimeout(timeout);
+  }, [activeFloatingEditorControl, renderedFloatingEditorControl]);
 
   useEffect(() => {
     if (startupUpdateCheckStartedRef.current) return;
@@ -1163,7 +1197,16 @@ function App() {
           <div className={styles.sidebarToggle}>
             <Button
               appearance="subtle"
-              icon={sidebarOpen ? <PanelLeftFilled /> : <PanelLeftRegular />}
+              icon={
+                <span className={styles.iconCrossfade} aria-hidden="true">
+                  <span className={mergeClasses(styles.iconCrossfadeLayer, !sidebarOpen && styles.iconCrossfadeLayerVisible)}>
+                    <PanelLeftRegular />
+                  </span>
+                  <span className={mergeClasses(styles.iconCrossfadeLayer, sidebarOpen && styles.iconCrossfadeLayerVisible)}>
+                    <PanelLeftFilled />
+                  </span>
+                </span>
+              }
               className={styles.sidebarToggleBtn}
               onClick={() => {
                 setSidebarOpen((o) => {
@@ -1188,7 +1231,11 @@ function App() {
                   <Button
                     appearance="subtle"
                     icon={<CheckboxCheckedRegular />}
-                    className={styles.sidebarSelectBtn}
+                    className={mergeClasses(
+                      styles.sidebarSelectBtn,
+                      styles.sidebarTopActionBtn,
+                      sidebarTopActionsVisible && styles.sidebarTopActionBtnVisible,
+                    )}
                     onClick={() => setSelectMode((o) => !o)}
                     style={selectMode ? { backgroundColor: "var(--ui-active-bg)" } : undefined}
                   />
@@ -1197,7 +1244,11 @@ function App() {
                   <Button
                     appearance="subtle"
                     icon={<span style={{ display: "flex", color: colorHex(settings.colorFilter) }}><FilterRegular /></span>}
-                    className={styles.sidebarFilterBtn}
+                    className={mergeClasses(
+                      styles.sidebarFilterBtn,
+                      styles.sidebarTopActionBtn,
+                      sidebarTopActionsVisible && styles.sidebarTopActionBtnVisible,
+                    )}
                     onClick={(e) => {
                       if (filterPopoverPos) { setFilterPopoverPos(null); return; }
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -1210,7 +1261,11 @@ function App() {
                   <Button
                     appearance="subtle"
                     icon={<span style={{ display: "flex", marginTop: "-1px" }}><FolderAddRegular /></span>}
-                    className={styles.sidebarNewGroupBtn}
+                    className={mergeClasses(
+                      styles.sidebarNewGroupBtn,
+                      styles.sidebarTopActionBtn,
+                      sidebarTopActionsVisible && styles.sidebarTopActionBtnVisible,
+                    )}
                     onClick={() => {
                       const defaultName = t("sidebar.newGroup", locale);
                       const newId = noteGroups.createGroup(defaultName);
@@ -1222,7 +1277,11 @@ function App() {
                   <Button
                     appearance="subtle"
                     icon={<SearchRegular />}
-                    className={styles.sidebarSearchBtn}
+                    className={mergeClasses(
+                      styles.sidebarSearchBtn,
+                      styles.sidebarTopActionBtn,
+                      sidebarTopActionsVisible && styles.sidebarTopActionBtnVisible,
+                    )}
                     onClick={() => setSidebarSearchOpen((o) => !o)}
                   />
                 </Tooltip>
@@ -1353,12 +1412,15 @@ function App() {
                   onOpenGoToLine={handleOpenGoToLine}
                 />
               </div>
-              {(docSearchOpen || docGoToLineOpen) && (
+              {renderedFloatingEditorControl && (
                 <div
-                  className={styles.searchBarAnchor}
+                  className={mergeClasses(
+                    styles.searchBarAnchor,
+                    floatingEditorControlExiting && styles.searchBarAnchorExiting,
+                  )}
                   style={!hideToolbar && toolbarHeight > 0 ? { top: `${toolbarHeight}px` } : undefined}
                 >
-                  {docSearchOpen ? (
+                  {renderedFloatingEditorControl === "search" ? (
                     <SearchBar
                       editor={noteEditor}
                       onClose={() => { setDocSearchOpen(false); setDocSearchReplace(false); }}

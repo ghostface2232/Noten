@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { Button, makeStyles, tokens } from "@fluentui/react-components";
+import { Button, makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import { clampMenuToViewport } from "../utils/clampMenuPosition";
 import {
   NavigationRegular,
@@ -22,6 +22,12 @@ import { t, type I18nKey } from "../i18n";
 import type { Locale, ParagraphSpacing } from "../hooks/useSettings";
 import type { Editor } from "@tiptap/react";
 import { openNewWindow } from "../utils/newWindow";
+import {
+  MOTION_DURATION_BASE,
+  MOTION_DURATION_FAST,
+  MOTION_DURATION_MEDIUM,
+  pressableButton,
+} from "../styles/interactions";
 
 
 const useStyles = makeStyles({
@@ -32,6 +38,7 @@ const useStyles = makeStyles({
     padding: "0",
     borderRadius: "6px",
     border: "none",
+    ...pressableButton,
   },
   overlay: {
     position: "fixed",
@@ -47,6 +54,13 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow16,
     padding: "4px",
     minWidth: "200px",
+    animationName: {
+      from: { opacity: 0, transform: "translateY(4px)", filter: "blur(4px)" },
+      to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
+    },
+    animationDuration: MOTION_DURATION_BASE,
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+    animationFillMode: "backwards",
   },
   menuItem: {
     display: "flex",
@@ -61,6 +75,7 @@ const useStyles = makeStyles({
     minHeight: "32px",
     paddingLeft: "8px",
     paddingRight: "12px",
+    ...pressableButton,
   },
   menuItemWithSub: {
     display: "flex",
@@ -75,6 +90,7 @@ const useStyles = makeStyles({
     minHeight: "32px",
     paddingLeft: "8px",
     paddingRight: "8px",
+    ...pressableButton,
   },
   chevron: {
     marginLeft: "auto",
@@ -116,9 +132,43 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow16,
     padding: "4px",
     minWidth: "180px",
+    animationName: {
+      from: { opacity: 0, transform: "translateY(3px)", filter: "blur(4px)" },
+      to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
+    },
+    animationDuration: MOTION_DURATION_FAST,
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+    animationFillMode: "backwards",
   },
   subMenuParent: {
     position: "relative",
+  },
+  iconCrossfade: {
+    position: "relative",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "20px",
+    height: "20px",
+    flexShrink: 0,
+  },
+  iconCrossfadeLayer: {
+    position: "absolute",
+    inset: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    opacity: 0,
+    scale: 0.25,
+    filter: "blur(4px)",
+    transitionProperty: "opacity, scale, filter",
+    transitionDuration: MOTION_DURATION_MEDIUM,
+    transitionTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+  },
+  iconCrossfadeLayerVisible: {
+    opacity: 1,
+    scale: 1,
+    filter: "blur(0px)",
   },
 });
 
@@ -246,7 +296,22 @@ export function AppMenu({
               <span>{i("menu.redo")}</span><span className={styles.shortcut}>Ctrl+Y</span>
             </Button>
             <div className={styles.groupLabelSpaced}>{i("menu.view")}</div>
-            <Button appearance="subtle" icon={isDark ? <WeatherSunnyRegular /> : <WeatherMoonRegular />} className={styles.menuItem} onClick={() => act(onToggleTheme)} size="small">
+            <Button
+              appearance="subtle"
+              icon={
+                <span className={styles.iconCrossfade} aria-hidden="true">
+                  <span className={mergeClasses(styles.iconCrossfadeLayer, !isDark && styles.iconCrossfadeLayerVisible)}>
+                    <WeatherMoonRegular />
+                  </span>
+                  <span className={mergeClasses(styles.iconCrossfadeLayer, isDark && styles.iconCrossfadeLayerVisible)}>
+                    <WeatherSunnyRegular />
+                  </span>
+                </span>
+              }
+              className={styles.menuItem}
+              onClick={() => act(onToggleTheme)}
+              size="small"
+            >
               {isDark ? i("menu.lightMode") : i("menu.darkMode")}
             </Button>
 

@@ -1,4 +1,5 @@
 import { clampMenuToViewport } from "./clampMenuPosition";
+import { MOTION_DURATION_FAST } from "../styles/interactions";
 
 /** Shared singleton for all context menus — ensures only one is open at a time. */
 let activeMenu: HTMLElement | null = null;
@@ -109,6 +110,15 @@ export function createMenuShell(pos: { x: number; y: number }, minWidth = 160): 
   });
 
   document.body.appendChild(menu);
+  if (typeof menu.animate === "function") {
+    menu.animate(
+      [
+        { opacity: 0, transform: "translateY(4px)", filter: "blur(4px)" },
+        { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
+      ],
+      { duration: 140, easing: "cubic-bezier(0.2, 0, 0, 1)" },
+    );
+  }
   // registerContextMenu tears down any previously-open menu (and its Escape
   // listener), so wire up this menu's Escape handler *after* it, not before.
   registerContextMenu(menu, overlay);
@@ -183,6 +193,7 @@ export function createMenuItem(
     border-radius:4px;font-size:13px;font-weight:500;min-height:32px;padding:0 12px 0 8px;gap:8px;
     background:transparent;cursor:${opts.disabled ? "default" : "pointer"};
     font-family:inherit;color:${textColor};outline:none;
+    transition:background-color ${MOTION_DURATION_FAST} ease-out,color ${MOTION_DURATION_FAST} ease-out,scale ${MOTION_DURATION_FAST} ease-out;
   `;
 
   if (!opts.disabled) {
@@ -193,6 +204,10 @@ export function createMenuItem(
     btn.addEventListener("mouseleave", () => { btn.style.backgroundColor = "transparent"; });
     btn.addEventListener("focus", () => { btn.style.backgroundColor = highlight; });
     btn.addEventListener("blur", () => { btn.style.backgroundColor = "transparent"; });
+    btn.addEventListener("mousedown", () => { btn.style.setProperty("scale", "0.96"); });
+    btn.addEventListener("mouseup", () => { btn.style.setProperty("scale", "1"); });
+    btn.addEventListener("mouseleave", () => { btn.style.setProperty("scale", "1"); });
+    btn.addEventListener("blur", () => { btn.style.setProperty("scale", "1"); });
   }
 
   return btn;
