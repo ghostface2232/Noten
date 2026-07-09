@@ -16,6 +16,14 @@ const NONSCROLL_SIDE_PADDING = `calc(${LIST_SIDE_PADDING} + ${SCROLLBAR_GUTTER})
 // intact. The absolutely-positioned top buttons in App.styles.ts are nudged
 // by the same amount to stay level with the pills.
 const LIST_RIGHT_GAP = "4px";
+const pressableButton = {
+  transitionProperty: "background-color, color, scale",
+  transitionDuration: "0.12s",
+  transitionTimingFunction: "ease-out",
+  ":active": {
+    scale: 0.96,
+  },
+} as const;
 
 export const useStyles = makeStyles({
   sidebar: {
@@ -110,6 +118,7 @@ export const useStyles = makeStyles({
     maxWidth: "none",
     paddingLeft: "8px",
     paddingRight: "8px",
+    ...pressableButton,
   },
   allNotesHeaderLabel: {
     flex: 1,
@@ -163,6 +172,7 @@ export const useStyles = makeStyles({
     fontWeight: 500,
     marginBottom: "12px",
     flexShrink: 0,
+    ...pressableButton,
   },
   allNotesEntryName: {
     flex: 1,
@@ -298,6 +308,7 @@ export const useStyles = makeStyles({
     minHeight: "32px",
     paddingLeft: "8px",
     paddingRight: "8px",
+    ...pressableButton,
   },
   docItemActive: {
     display: "flex",
@@ -314,6 +325,7 @@ export const useStyles = makeStyles({
     paddingRight: "8px",
     backgroundColor: "var(--ui-active-bg)",
     fontWeight: 500,
+    ...pressableButton,
   },
   docItemIndented: {
     paddingLeft: "20px",
@@ -377,6 +389,7 @@ export const useStyles = makeStyles({
     paddingRight: "8px",
     fontWeight: 500,
     marginBottom: "4px",
+    ...pressableButton,
     "& .new-doc-shortcut": {
       marginLeft: "auto",
       fontSize: "11px",
@@ -564,6 +577,7 @@ export const useStyles = makeStyles({
     minHeight: "36px",
     paddingLeft: "8px",
     paddingRight: "8px",
+    ...pressableButton,
   },
   // Delete-undo toast, parked just above the settings button.
   undoToast: {
@@ -605,6 +619,7 @@ export const useStyles = makeStyles({
     paddingLeft: "8px",
     paddingRight: "8px",
     color: tokens.colorBrandForeground1,
+    ...pressableButton,
   },
   undoToastDismiss: {
     flexShrink: 0,
@@ -612,6 +627,7 @@ export const useStyles = makeStyles({
     minHeight: "24px",
     paddingLeft: "2px",
     paddingRight: "2px",
+    ...pressableButton,
   },
   updateDot: {
     width: "8px",
@@ -853,6 +869,7 @@ export const useStyles = makeStyles({
     paddingLeft: "8px",
     paddingRight: "8px",
     cursor: "pointer",
+    ...pressableButton,
   },
   // Stand-in selection cue for the active note when its group is
   // collapsed: the note row itself isn't rendered, so the header adopts
