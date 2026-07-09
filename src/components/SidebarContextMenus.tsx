@@ -234,6 +234,16 @@ export function SidebarContextMenus({
     }
   }, []);
 
+  const toggleSubmenu = useCallback(() => {
+    if (submenuOpen) {
+      if (submenuTimerRef.current) clearTimeout(submenuTimerRef.current);
+      setSubmenuOpen(false);
+      setSubmenuPos(null);
+      return;
+    }
+    showSubmenu();
+  }, [showSubmenu, submenuOpen]);
+
   const hideSubmenu = useCallback(() => {
     submenuTimerRef.current = setTimeout(() => {
       setSubmenuOpen(false);
@@ -455,6 +465,7 @@ export function SidebarContextMenus({
                     size="small"
                     aria-haspopup="menu"
                     aria-expanded={submenuOpen}
+                    onClick={toggleSubmenu}
                   >
                     {i("sidebar.moveToGroup")}
                     <span className={styles.submenuArrow}>▶</span>
@@ -611,6 +622,7 @@ export function SidebarContextMenus({
                     size="small"
                     aria-haspopup="menu"
                     aria-expanded={submenuOpen}
+                    onClick={toggleSubmenu}
                   >
                     {i("sidebar.addToGroup")}
                     <span className={styles.submenuArrow}>▶</span>

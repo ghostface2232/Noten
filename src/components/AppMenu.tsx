@@ -208,6 +208,8 @@ export function AppMenu({
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const subMenuRef = useRef<HTMLDivElement>(null);
+  const subMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const focusSubMenuOnOpenRef = useRef(false);
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
 
   const i = (key: I18nKey) => t(key, locale);
@@ -240,11 +242,71 @@ export function AppMenu({
     return () => window.removeEventListener("keydown", handler);
   }, [open, close]);
 
-  const showSubMenu = useCallback((type: "export" | "spacing", e: React.MouseEvent) => {
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  useEffect(() => {
+    if (!open) return;
+    requestAnimationFrame(() => {
+      if (menuRef.current) clampMenuToViewport(menuRef.current);
+      const firstItem = menuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)");
+      firstItem?.focus();
+    });
+  }, [open]);
+
+  useEffect(() => {
+    if (!subMenu) return;
+    requestAnimationFrame(() => {
+      if (subMenuRef.current) clampMenuToViewport(subMenuRef.current);
+      if (focusSubMenuOnOpenRef.current) {
+        focusSubMenuOnOpenRef.current = false;
+        const firstItem = subMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)");
+        firstItem?.focus();
+      }
+    });
+  }, [subMenu, subPos]);
+
+  const showSubMenu = useCallback((type: "export" | "spacing", target: HTMLElement, focusFirst = false) => {
+    const trigger = target instanceof HTMLButtonElement ? target : target.querySelector<HTMLButtonElement>("button");
+    subMenuTriggerRef.current = trigger;
+    focusSubMenuOnOpenRef.current = focusFirst;
+    const rect = target.getBoundingClientRect();
     setSubPos({ x: rect.right + 4, y: rect.top });
     setSubMenu(type);
   }, []);
+
+  const toggleSubMenu = useCallback((type: "export" | "spacing", target: HTMLElement, focusFirst = false) => {
+    if (subMenu === type) {
+      setSubMenu(null);
+      return;
+    }
+    showSubMenu(type, target, focusFirst);
+  }, [showSubMenu, subMenu]);
+
+  const handleMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+      btnRef.current?.focus();
+      return;
+    }
+    if (e.key !== "ArrowRight") return;
+    const trigger = (e.target as HTMLElement).closest<HTMLElement>("[data-submenu-trigger]");
+    const type = trigger?.dataset.submenuTrigger as "export" | "spacing" | undefined;
+    if (!trigger || !type) return;
+    e.preventDefault();
+    showSubMenu(type, trigger, true);
+  }, [close, showSubMenu]);
+
+  const handleSubMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+      btnRef.current?.focus();
+      return;
+    }
+    if (e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    setSubMenu(null);
+    subMenuTriggerRef.current?.focus();
+  }, [close]);
 
   return (
     <>
@@ -259,7 +321,14 @@ export function AppMenu({
       {open && createPortal(
         <>
           <div className={styles.overlay} onClick={close} />
-          <div ref={(el) => { (menuRef as React.MutableRefObject<HTMLDivElement | null>).current = el; if (el) clampMenuToViewport(el); }} className={styles.menu} style={{ left: menuPos.x, top: menuPos.y }}>
+          <div
+            ref={menuRef}
+            className={styles.menu}
+            style={{ left: menuPos.x, top: menuPos.y }}
+            role="menu"
+            aria-orientation="vertical"
+            onKeyDown={handleMenuKeyDown}
+          >
             <div className={styles.groupLabel}>{i("menu.file")}</div>
             <Button appearance="subtle" icon={<DocumentAddRegular />} className={styles.menuItem} onClick={() => act(onNewNote)} size="small">
               <span>{i("menu.newDoc")}</span><span className={styles.shortcut}>Ctrl+N</span>
@@ -271,13 +340,34 @@ export function AppMenu({
               <span>{i("menu.newWindow")}</span><span className={styles.shortcut}>Ctrl+Shift+N</span>
             </Button>
 
-            <div className={styles.subMenuParent} onMouseEnter={(e) => showSubMenu("export", e)} onMouseLeave={() => { if (subMenu === "export") setSubMenu(null); }}>
-              <Button appearance="subtle" icon={<ArrowExportUpRegular />} className={styles.menuItemWithSub} size="small">
+            <div
+              className={styles.subMenuParent}
+              onMouseEnter={(e) => showSubMenu("export", e.currentTarget)}
+              onMouseLeave={() => { if (subMenu === "export") setSubMenu(null); }}
+              data-submenu-trigger="export"
+            >
+              <Button
+                appearance="subtle"
+                icon={<ArrowExportUpRegular />}
+                className={styles.menuItemWithSub}
+                size="small"
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={subMenu === "export"}
+                onClick={(e) => toggleSubMenu("export", e.currentTarget, e.detail === 0)}
+              >
                 {i("menu.export")}
                 <ChevronRightRegular className={styles.chevron} />
               </Button>
               {subMenu === "export" && (
-                <div ref={subMenuRef} className={styles.subMenu} style={{ left: subPos.x - menuPos.x, top: subPos.y - menuPos.y }}>
+                <div
+                  ref={subMenuRef}
+                  className={styles.subMenu}
+                  style={{ left: subPos.x, top: subPos.y }}
+                  role="menu"
+                  aria-orientation="vertical"
+                  onKeyDown={handleSubMenuKeyDown}
+                >
                   <Button appearance="subtle" icon={<DocumentRegular />} className={styles.menuItem} onClick={() => act(onExportMd)} size="small">
                     {i("menu.exportMd")}
                   </Button>
@@ -315,13 +405,34 @@ export function AppMenu({
               {isDark ? i("menu.lightMode") : i("menu.darkMode")}
             </Button>
 
-            <div className={styles.subMenuParent} onMouseEnter={(e) => showSubMenu("spacing", e)} onMouseLeave={() => { if (subMenu === "spacing") setSubMenu(null); }}>
-              <Button appearance="subtle" icon={<TextParagraphRegular />} className={styles.menuItemWithSub} size="small">
+            <div
+              className={styles.subMenuParent}
+              onMouseEnter={(e) => showSubMenu("spacing", e.currentTarget)}
+              onMouseLeave={() => { if (subMenu === "spacing") setSubMenu(null); }}
+              data-submenu-trigger="spacing"
+            >
+              <Button
+                appearance="subtle"
+                icon={<TextParagraphRegular />}
+                className={styles.menuItemWithSub}
+                size="small"
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={subMenu === "spacing"}
+                onClick={(e) => toggleSubMenu("spacing", e.currentTarget, e.detail === 0)}
+              >
                 {i("menu.paragraphSpacing")}
                 <ChevronRightRegular className={styles.chevron} />
               </Button>
               {subMenu === "spacing" && (
-                <div ref={subMenuRef} className={styles.subMenu} style={{ left: subPos.x - menuPos.x, top: subPos.y - menuPos.y }}>
+                <div
+                  ref={subMenuRef}
+                  className={styles.subMenu}
+                  style={{ left: subPos.x, top: subPos.y }}
+                  role="menu"
+                  aria-orientation="vertical"
+                  onKeyDown={handleSubMenuKeyDown}
+                >
                   {SPACING_OPTIONS.map((v) => (
                     <Button
                       key={v}
