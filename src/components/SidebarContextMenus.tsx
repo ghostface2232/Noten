@@ -127,6 +127,8 @@ export function SidebarContextMenus({
   const submenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Element focused before the menu opened, restored when it is dismissed by keyboard. */
   const openerRef = useRef<HTMLElement | null>(null);
+  /** Set when the submenu is opened by keyboard so its first item takes focus. */
+  const focusSubmenuOnOpenRef = useRef(false);
 
   // Cleanup submenu timer on unmount
   useEffect(() => {
@@ -199,36 +201,29 @@ export function SidebarContextMenus({
     if (opener?.isConnected) opener.focus();
   }, [closeContextMenu]);
 
-  // Roving-focus keyboard navigation for the root menu + Escape/Tab to dismiss.
-  const handleMenuKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Escape" || e.key === "Tab") {
-        e.preventDefault();
-        dismissWithFocusRestore();
-        return;
-      }
-      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
-      const items = rovingItems();
-      if (items.length === 0) return;
-      e.preventDefault();
-      const current = items.indexOf(document.activeElement as HTMLButtonElement);
-      let next = current;
-      switch (e.key) {
-        case "ArrowDown": next = current < 0 ? 0 : (current + 1) % items.length; break;
-        case "ArrowUp": next = current < 0 ? items.length - 1 : (current - 1 + items.length) % items.length; break;
-        case "Home": next = 0; break;
-        case "End": next = items.length - 1; break;
-      }
-      items[next]?.focus();
-    },
-    [dismissWithFocusRestore, rovingItems],
-  );
+  // Enabled buttons inside the currently-open submenu (P1-5 keyboard path).
+  const submenuItems = useCallback((): HTMLButtonElement[] => {
+    const menuEl = contextMenuRef.current;
+    if (!menuEl) return [];
+    return Array.from(
+      menuEl.querySelectorAll<HTMLButtonElement>("[data-submenu] button"),
+    ).filter((b) => !b.disabled);
+  }, []);
 
-  const handleCopyContent = useCallback((index: number) => {
-    const content = getDocumentContent(index);
-    navigator.clipboard.writeText(content).catch(() => {});
-    closeContextMenu();
-  }, [closeContextMenu, getDocumentContent]);
+  // When the submenu is revealed by keyboard, tag its items with menu roles and
+  // move focus onto the first one so it is operable without a pointer.
+  useEffect(() => {
+    if (!submenuOpen) return;
+    const items = submenuItems();
+    items.forEach((b) => {
+      if (!b.getAttribute("role")) b.setAttribute("role", "menuitem");
+      b.tabIndex = -1;
+    });
+    if (focusSubmenuOnOpenRef.current) {
+      focusSubmenuOnOpenRef.current = false;
+      items[0]?.focus();
+    }
+  }, [submenuOpen, submenuItems]);
 
   const showSubmenu = useCallback(() => {
     if (submenuTimerRef.current) clearTimeout(submenuTimerRef.current);
@@ -249,6 +244,93 @@ export function SidebarContextMenus({
   const keepSubmenu = useCallback(() => {
     if (submenuTimerRef.current) clearTimeout(submenuTimerRef.current);
   }, []);
+
+  const showSubmenuFromKeyboard = useCallback(() => {
+    focusSubmenuOnOpenRef.current = true;
+    showSubmenu();
+  }, [showSubmenu]);
+
+  // Close the submenu and return focus to its parent row (keyboard collapse).
+  const closeSubmenuToTrigger = useCallback(() => {
+    if (submenuTimerRef.current) clearTimeout(submenuTimerRef.current);
+    setSubmenuOpen(false);
+    setSubmenuPos(null);
+    submenuParentRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, []);
+
+  // Roving-focus keyboard navigation for the root menu + Escape/Tab to dismiss.
+  const handleMenuKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Escape" || e.key === "Tab") {
+        e.preventDefault();
+        dismissWithFocusRestore();
+        return;
+      }
+      // Open the "Add/Move to group" submenu when its parent row has focus.
+      const active = document.activeElement as HTMLElement | null;
+      const onSubmenuTrigger =
+        !!active?.closest("[data-submenu-parent]") && !active.closest("[data-submenu]");
+      if (onSubmenuTrigger && (e.key === "Enter" || e.key === " " || e.key === "ArrowRight")) {
+        e.preventDefault();
+        showSubmenuFromKeyboard();
+        return;
+      }
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+      const items = rovingItems();
+      if (items.length === 0) return;
+      e.preventDefault();
+      const current = items.indexOf(document.activeElement as HTMLButtonElement);
+      let next = current;
+      switch (e.key) {
+        case "ArrowDown": next = current < 0 ? 0 : (current + 1) % items.length; break;
+        case "ArrowUp": next = current < 0 ? items.length - 1 : (current - 1 + items.length) % items.length; break;
+        case "Home": next = 0; break;
+        case "End": next = items.length - 1; break;
+      }
+      items[next]?.focus();
+    },
+    [dismissWithFocusRestore, rovingItems, showSubmenuFromKeyboard],
+  );
+
+  // Roving-focus navigation inside the open submenu. Bubbles from the root menu,
+  // so it stops propagation to keep the root handler from also acting.
+  const handleSubmenuKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Escape" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeSubmenuToTrigger();
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        e.stopPropagation();
+        dismissWithFocusRestore();
+        return;
+      }
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+      const items = submenuItems();
+      if (items.length === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const current = items.indexOf(document.activeElement as HTMLButtonElement);
+      let next = current;
+      switch (e.key) {
+        case "ArrowDown": next = current < 0 ? 0 : (current + 1) % items.length; break;
+        case "ArrowUp": next = current < 0 ? items.length - 1 : (current - 1 + items.length) % items.length; break;
+        case "Home": next = 0; break;
+        case "End": next = items.length - 1; break;
+      }
+      items[next]?.focus();
+    },
+    [closeSubmenuToTrigger, dismissWithFocusRestore, submenuItems],
+  );
+
+  const handleCopyContent = useCallback((index: number) => {
+    const content = getDocumentContent(index);
+    navigator.clipboard.writeText(content).catch(() => {});
+    closeContextMenu();
+  }, [closeContextMenu, getDocumentContent]);
 
   return (
     <>
@@ -364,12 +446,15 @@ export function SidebarContextMenus({
                   className={styles.submenuParent}
                   onMouseEnter={showSubmenu}
                   onMouseLeave={hideSubmenu}
+                  data-submenu-parent
                 >
                   <Button
                     appearance="subtle"
                     icon={<FolderArrowRightRegular />}
                     className={styles.contextMenuItem}
                     size="small"
+                    aria-haspopup="menu"
+                    aria-expanded={submenuOpen}
                   >
                     {i("sidebar.moveToGroup")}
                     <span className={styles.submenuArrow}>▶</span>
@@ -381,6 +466,8 @@ export function SidebarContextMenus({
                       ref={(el) => { if (el) clampMenuToViewport(el); }}
                       onMouseEnter={keepSubmenu}
                       onMouseLeave={hideSubmenu}
+                      onKeyDown={handleSubmenuKeyDown}
+                      role="menu"
                       data-submenu
                     >
                       {groups.map((g) => (
@@ -515,12 +602,15 @@ export function SidebarContextMenus({
                   className={styles.submenuParent}
                   onMouseEnter={showSubmenu}
                   onMouseLeave={hideSubmenu}
+                  data-submenu-parent
                 >
                   <Button
                     appearance="subtle"
                     icon={<FolderArrowRightRegular />}
                     className={styles.contextMenuItem}
                     size="small"
+                    aria-haspopup="menu"
+                    aria-expanded={submenuOpen}
                   >
                     {i("sidebar.addToGroup")}
                     <span className={styles.submenuArrow}>▶</span>
@@ -532,6 +622,8 @@ export function SidebarContextMenus({
                       ref={(el) => { if (el) clampMenuToViewport(el); }}
                       onMouseEnter={keepSubmenu}
                       onMouseLeave={hideSubmenu}
+                      onKeyDown={handleSubmenuKeyDown}
+                      role="menu"
                       data-submenu
                     >
                       {groups.map((g) => (

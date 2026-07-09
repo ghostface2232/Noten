@@ -1,6 +1,5 @@
 import { Extension, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
-import { DOMSerializer } from "@tiptap/pm/model";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
 import { closeContextMenu, createMenuShell, createMenuItem, createMenuSeparator } from "../utils/contextMenuRegistry";
@@ -85,17 +84,20 @@ export function showGenericContextMenu(pos: { x: number; y: number }, ctx: TextC
  * unreliable here — it could copy nothing. Reading the slice from editor state
  * is focus-independent. Falls back to plain text if the rich write is rejected
  * (e.g. WebView2 clipboard quirks).
+ *
+ * Serialization goes through `view.serializeForClipboard`, the same path a
+ * native copy uses: the HTML carries ProseMirror's `data-pm-slice` open/close
+ * context so a partial selection inside a list/table pastes back as the same
+ * slice, and the text channel runs the editor's registered
+ * `clipboardTextSerializer` (single-newline joins, image alt text).
  */
 async function copyEditorSelection(editor: Editor): Promise<boolean> {
-  const { from, to, empty } = editor.state.selection;
+  const { empty } = editor.state.selection;
   if (empty) return false;
 
   const slice = editor.state.selection.content();
-  const serializer = DOMSerializer.fromSchema(editor.schema);
-  const wrapper = document.createElement("div");
-  wrapper.appendChild(serializer.serializeFragment(slice.content));
-  const html = wrapper.innerHTML;
-  const text = editor.state.doc.textBetween(from, to, "\n", "\n");
+  const { dom, text } = editor.view.serializeForClipboard(slice);
+  const html = dom.innerHTML;
 
   try {
     await navigator.clipboard.write([
