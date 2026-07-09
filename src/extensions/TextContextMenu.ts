@@ -1,5 +1,6 @@
 import { Extension, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
 import { closeContextMenu, createMenuShell, createMenuItem, createMenuSeparator } from "../utils/contextMenuRegistry";
@@ -58,12 +59,9 @@ export function showGenericContextMenu(pos: { x: number; y: number }, ctx: TextC
       action: () => {
         closeContextMenu();
         ctx.focus();
-        try {
-          document.dispatchEvent(new KeyboardEvent("keydown", {
-            key: ".", code: "Period", keyCode: 190,
-            bubbles: true, cancelable: true, metaKey: true,
-          }));
-        } catch { /* ignore */ }
+        requestAnimationFrame(() => {
+          void invoke("open_windows_emoji_picker").catch(() => {});
+        });
       },
     },
   ];
