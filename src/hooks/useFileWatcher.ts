@@ -37,6 +37,11 @@ const normalizePath = pathKey;
 const RECONCILE_INTERVAL_MS = 60_000;
 const FOCUS_DEBOUNCE_MS = 500;
 const WATCH_DELAY_MS = 1500;
+// After a reconcile is abandoned because local state moved under it mid-await,
+// re-run once the mutation burst has had a moment to settle. Long enough to let
+// a rapid create/type/delete sequence quiesce, short enough that remote changes
+// still surface well inside the 60s periodic cadence.
+const RECONCILE_DRIFT_RETRY_MS = 750;
 
 export function useFileWatcher(
   docs: NoteDoc[],
@@ -64,6 +69,10 @@ export function useFileWatcher(
   onActiveDocChangedRef.current = onActiveDocChanged;
   const localeRef = useRef(locale);
   localeRef.current = locale;
+  // Pending drift-retry timer + a stable self-reference so the retry can call
+  // the latest runReconcile without threading it through the timer closure.
+  const reconcileRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const runReconcileRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   const getRoutedActiveDocId = useCallback(() => {
     const editorDocId = tiptapRef.current?.getEditor?.()?.storage.documentContext.noteId ?? null;
@@ -168,6 +177,21 @@ export function useFileWatcher(
     const dir = await getNotesDir();
     try { await scanAndAbsorbConflicts(tauriFileSystem, dir); } catch { /* best-effort */ }
 
+    // Snapshot the exact state reconcile computes against. reconcileFolder awaits
+    // full-folder disk reads that take seconds on a cloud placeholder; if a local
+    // mutation (Ctrl+N create, delete/restore, a dirty flip, or a group edit)
+    // lands in that window, the reconciled arrays — derived from this now-stale
+    // baseline — no longer describe current state. Committing them via setDocs/
+    // setGroups would DROP the new note, RESURRECT the deleted one (and make the
+    // follow-up saveManifest write its meta as both live and trashed, racing
+    // `${path}.tmp`), or clobber the freshly dirtied doc. Every such mutation
+    // replaces the docs or groups array reference, so an identity check at commit
+    // time is a sound, cheap drift signal. On drift we re-run against the fresh
+    // baseline rather than force-replacing — reconcile is idempotent, so the
+    // retry yields a correctly merged result. (P0-5)
+    const docsBaseline = docsRef.current;
+    const groupsBaseline = groupsRef.current;
+
     let reconciledDocs: NoteDoc[];
     let reconciledGroups: NoteGroup[];
     let changed: boolean;
@@ -176,8 +200,8 @@ export function useFileWatcher(
         tauriFileSystem,
         reconcileState,
         dir,
-        docsRef.current,
-        groupsRef.current,
+        docsBaseline,
+        groupsBaseline,
         localeRef.current,
       );
       reconciledDocs = result.docs;
@@ -197,6 +221,21 @@ export function useFileWatcher(
     }
 
     if (!changed) return;
+
+    // Local state moved under us during the reconcile await (see the baseline
+    // comment above). Abandon this stale result — committing it would clobber
+    // the concurrent mutation — and retry against the fresh baseline. The check
+    // sits immediately before the synchronous commit below, so nothing can
+    // interleave between here and setDocs.
+    if (docsRef.current !== docsBaseline || groupsRef.current !== groupsBaseline) {
+      if (reconcileRetryRef.current == null) {
+        reconcileRetryRef.current = setTimeout(() => {
+          reconcileRetryRef.current = null;
+          void runReconcileRef.current();
+        }, RECONCILE_DRIFT_RETRY_MS);
+      }
+      return;
+    }
 
     const prevActiveId = getRoutedActiveDocId();
     const activeStillExists = prevActiveId !== null
@@ -241,6 +280,18 @@ export function useFileWatcher(
 
     await saveManifest(reconciledDocs, nextActiveId, reconciledGroups).catch(() => {});
   }, [getRoutedActiveDocId, setActiveIndex, setDocs, setGroups, tiptapRef, reconcileState]);
+  // Keep the self-reference current so a pending drift retry invokes the latest
+  // runReconcile closure (fresh setDocs/deps), not the one captured when armed.
+  runReconcileRef.current = runReconcile;
+
+  // Clear any pending drift retry on unmount so it can't fire into a torn-down
+  // window (or leak across tests).
+  useEffect(() => () => {
+    if (reconcileRetryRef.current != null) {
+      clearTimeout(reconcileRetryRef.current);
+      reconcileRetryRef.current = null;
+    }
+  }, []);
 
   const handleRootEvent = useCallback(async (event: WatchEvent) => {
     if (migrationInProgress) return;

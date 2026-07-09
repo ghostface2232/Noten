@@ -43,7 +43,15 @@ export interface SharedGroupSnapshot {
 export interface PersistState {
   writtenMeta: Map<string, MetaSnapshot>;
   writtenGroups: Map<string, SharedGroupSnapshot>;
-  pendingTombstones: Set<string>;
+  /**
+   * Group id → deletion sequence (a monotonic logical clock stamped by
+   * `markGroupAsDeleted`). A pending tombstone may only be cancelled by a save
+   * whose groups snapshot is at least as new as this sequence — i.e. a genuine
+   * resurrection. A stale in-flight save that captured the group while it was
+   * still alive (snapshotSeq < deletion sequence) must NOT cancel it, otherwise
+   * a slow cloud write silently revives a just-deleted group (P0-4).
+   */
+  pendingTombstones: Map<string, number>;
   pendingGroupMembership: Map<string, { groupId: string | null; updatedAt: number }>;
   /** Last successfully-written local cache JSON. Skip the write when the
    *  serialized payload matches — autosaves driven by body-only edits
@@ -55,7 +63,7 @@ export function createPersistState(): PersistState {
   return {
     writtenMeta: new Map(),
     writtenGroups: new Map(),
-    pendingTombstones: new Set(),
+    pendingTombstones: new Map(),
     pendingGroupMembership: new Map(),
     lastWrittenLocalCache: undefined,
   };
@@ -297,6 +305,15 @@ export interface PersistOptions {
   imageAssetMigrationCompletedAt: number | null;
   /** Optional; tests pass a no-op. Production wires `setActiveNoteIdPersisted`. */
   setActiveNoteId?: (id: string | null) => Promise<void> | void;
+  /**
+   * Logical sequence of the `groups` snapshot being persisted, captured when
+   * this save was ENQUEUED (see `saveManifest`). Compared against each pending
+   * tombstone's deletion sequence so a stale in-flight save cannot cancel a
+   * tombstone recorded after the snapshot was taken. Omitted by callers that
+   * never race tombstones (load/reload paths, tests) — treated as +Infinity,
+   * preserving the legacy "cancel whenever the group is present" behaviour.
+   */
+  groupsSnapshotSeq?: number;
 }
 
 export async function persistDecomposedState(
@@ -309,6 +326,7 @@ export async function persistDecomposedState(
   options: PersistOptions,
 ): Promise<void> {
   const { trashedNotes, machineId, cachePath, imageAssetMigrationCompletedAt, setActiveNoteId } = options;
+  const snapshotSeq = options.groupsSnapshotSeq ?? Number.POSITIVE_INFINITY;
 
   const noteIdToGroupId = new Map<string, string>();
   for (const g of groups ?? []) {
@@ -468,11 +486,21 @@ export async function persistDecomposedState(
   // If a pending id is alive again locally (e.g., reloadGroupsFromDisk or
   // remote sync resurrected it), drop the intent so it cannot fire later when
   // the group disappears for an unrelated reason.
+  //
+  // The cancel is gated on the deletion's logical clock: a group present in
+  // this save's snapshot only counts as a resurrection when the snapshot is at
+  // least as new as the deletion (snapshotSeq >= deleteSeq). A slow in-flight
+  // save whose groups array was captured BEFORE the delete (snapshotSeq <
+  // deleteSeq) still shows the group alive, but must not cancel the tombstone —
+  // otherwise it revives a just-deleted group and no deletedAt is ever written,
+  // so the group resurrects on restart and the delete never propagates (P0-4).
   const currentIds = new Set(orderedGroups.map((g) => g.id));
   const tombstoneApplied: string[] = [];
-  for (const id of Array.from(state.pendingTombstones)) {
+  for (const [id, deleteSeq] of Array.from(state.pendingTombstones)) {
     if (currentIds.has(id)) {
-      state.pendingTombstones.delete(id);
+      if (snapshotSeq >= deleteSeq) state.pendingTombstones.delete(id);
+      // else: stale pre-delete snapshot — leave the intent pending so a later,
+      // post-delete save (which excludes the group) can apply the tombstone.
       continue;
     }
     localGroupsMap[id] = {

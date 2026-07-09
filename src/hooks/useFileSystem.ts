@@ -266,10 +266,11 @@ export function useFileSystem(
     ));
   }, []);
 
-  const pruneEmptyCurrentDoc = useCallback(async (baseDocs: NoteDoc[], leavingDocId: string | null, preserveGroupId: string | null = null): Promise<NoteDoc[]> => {
-    if (!leavingDocId) return baseDocs;
+  const pruneEmptyCurrentDoc = useCallback(async (baseDocs: NoteDoc[], leavingDocId: string | null, preserveGroupId: string | null = null): Promise<{ docs: NoteDoc[]; groups: NoteGroup[] }> => {
+    const currentGroups = groupsRef.current ?? [];
+    if (!leavingDocId) return { docs: baseDocs, groups: currentGroups };
     const leaving = baseDocs.find((d) => d.id === leavingDocId);
-    if (!leaving) return baseDocs;
+    if (!leaving) return { docs: baseDocs, groups: currentGroups };
     const currentContent = leaving.content.trim();
     // The docs list can lag the live editor: autosave just committed (isDirty
     // false) but the user typed once more before triggering the switch. Every
@@ -278,7 +279,9 @@ export function useFileSystem(
     // remove the file while a queued background save for it exists, and the
     // cancelDocSave below would then drop that save, losing the input.
     const liveContent = getCurrentMarkdown(tiptapRef).trim();
-    if (currentContent || liveContent || leaving.customName || baseDocs.length <= 1) return baseDocs;
+    if (currentContent || liveContent || leaving.customName || baseDocs.length <= 1) {
+      return { docs: baseDocs, groups: currentGroups };
+    }
 
     // Order matters: remove the .md BEFORE the .meta. The reverse order
     // (meta gone, body still present) is the dangerous one — the watcher's
@@ -296,24 +299,40 @@ export function useFileSystem(
       const dir = await getNotesDir();
       await removeMetaFile(tauriFileSystem, dir, leavingId);
     } catch { /* ignore — already gone or unreachable */ }
-    setGroups?.((prev) => {
-      const next = prev.map((g) => ({ ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }));
-      // Keep preserveGroupId alive even when it empties: a caller that is about
-      // to add notes to the inherited group (importFiles) must not have it
-      // filtered out or tombstoned mid-flow — mirrors newNote.willReplace.
-      const kept = next.filter((g) => g.noteIds.length > 0 || g.id === preserveGroupId);
-      if (kept.length !== next.length) {
-        const keptIds = new Set(kept.map((g) => g.id));
-        for (const g of next) if (!keptIds.has(g.id)) markGroupAsDeleted(g.id);
-      }
-      return kept;
-    });
+
+    // Compute the pruned groups SYNCHRONOUSLY from the current ref and hand them
+    // back to the caller, rather than mutating via a setGroups(prev => ...)
+    // updater. The updater form defers markGroupAsDeleted to the next render, so
+    // a caller that persists groupsRef.current before that render passes a
+    // pre-delete array in which the emptied group still looks alive; persist
+    // then reads that as a resurrection of the just-tombstoned group and cancels
+    // the tombstone, so deletedAt is never written and the group reappears on
+    // reload/sync. Returning the post-prune array keeps every caller's
+    // saveManifest consistent with the tombstone we record here. Mirrors
+    // newNote.willReplace, which already computes groups synchronously.
+    const stripped = currentGroups.map((g) =>
+      g.noteIds.includes(leavingId)
+        ? { ...g, noteIds: g.noteIds.filter((id) => id !== leavingId) }
+        : g,
+    );
+    // Keep preserveGroupId alive even when it empties: a caller that is about to
+    // add notes to the inherited group (importFiles) must not have it filtered
+    // out or tombstoned mid-flow — mirrors newNote.willReplace.
+    const keptGroups = stripped.filter((g) => g.noteIds.length > 0 || g.id === preserveGroupId);
+    const groupsChanged = keptGroups.length !== currentGroups.length
+      || stripped.some((g, i) => g !== currentGroups[i]);
+    if (groupsChanged) {
+      const keptIds = new Set(keptGroups.map((g) => g.id));
+      for (const g of stripped) if (!keptIds.has(g.id)) markGroupAsDeleted(g.id);
+      setGroups?.(keptGroups);
+    }
+
     cancelDocSaveRef?.current?.(leavingId);
     tiptapRef.current?.invalidateDocumentSession?.(leavingId, leaving.filePath);
 
     const pruned = baseDocs.filter((d) => d.id !== leavingDocId);
     setDocs(pruned);
-    return pruned;
+    return { docs: pruned, groups: groupsChanged ? keptGroups : currentGroups };
   }, [cancelDocSaveRef, setDocs, setGroups, tiptapRef]);
 
   const saveFile = useCallback(async () => {
@@ -451,30 +470,21 @@ export function useFileSystem(
     // Pass inheritedGroupId so the prune keeps that group alive even if the
     // active doc was its only (empty placeholder) member — the imports below
     // are about to join it.
-    const prunedDocs = await pruneEmptyCurrentDoc(baseDocs, activeDocId, inheritedGroupId);
+    const { docs: prunedDocs, groups: prunedGroups } = await pruneEmptyCurrentDoc(baseDocs, activeDocId, inheritedGroupId);
     const nextDocs = [...prunedDocs, ...importedDocs];
 
-    let nextGroups = groupsRef.current;
-    if (inheritedGroupId) {
-      // pruneEmptyCurrentDoc may have removed the (empty) active doc from its
-      // group. Recompute from that post-prune state so the value we persist
-      // matches React state, keeping the inherited group (preserved above) so
-      // the imports can join it.
-      const activeDocPruned = activeDocId != null && !prunedDocs.some((d) => d.id === activeDocId);
-      const base = activeDocPruned
-        ? (groupsRef.current ?? [])
-            .map((g) => ({ ...g, noteIds: g.noteIds.filter((nid) => nid !== activeDocId) }))
-            .filter((g) => g.noteIds.length > 0 || g.id === inheritedGroupId)
-        : (groupsRef.current ?? []);
-      if (base.some((g) => g.id === inheritedGroupId)) {
-        nextGroups = base.map((g) =>
-          g.id === inheritedGroupId
-            ? { ...g, noteIds: [...g.noteIds, ...importedIds.filter((nid) => !g.noteIds.includes(nid))] }
-            : g,
-        );
-        setGroups?.(nextGroups);
-        emitGroupsUpdated(nextGroups);
-      }
+    // Build the persisted groups on the post-prune array pruneEmptyCurrentDoc
+    // returned (activeDoc already stripped, inheritedGroupId preserved) so the
+    // imports' new membership and any prune tombstone stay consistent.
+    let nextGroups = prunedGroups;
+    if (inheritedGroupId && prunedGroups.some((g) => g.id === inheritedGroupId)) {
+      nextGroups = prunedGroups.map((g) =>
+        g.id === inheritedGroupId
+          ? { ...g, noteIds: [...g.noteIds, ...importedIds.filter((nid) => !g.noteIds.includes(nid))] }
+          : g,
+      );
+      setGroups?.(nextGroups);
+      emitGroupsUpdated(nextGroups);
     }
 
     sortAndPersistDocs(nextDocs, lastImported.id, notesSortOrder, locale, setDocs, setActiveIndex, nextGroups);
@@ -713,7 +723,7 @@ export function useFileSystem(
     }
 
     const targetDoc = baseDocs[index];
-    const nextDocs = await pruneEmptyCurrentDoc(baseDocs, activeDocId);
+    const { docs: nextDocs, groups: nextGroups } = await pruneEmptyCurrentDoc(baseDocs, activeDocId);
     let targetIndex = nextDocs.findIndex((d) => d.id === targetDoc.id);
     if (targetIndex < 0) targetIndex = 0;
 
@@ -722,7 +732,10 @@ export function useFileSystem(
     resetDocState(state, tiptapRef, target.id, target.filePath, target.content);
     notifyActiveDocRef?.current?.(target.id, target.filePath);
     setActiveIndex(targetIndex);
-    void saveManifest(nextDocs, target.id, groupsRef.current).catch(() => {});
+    // Persist the post-prune groups the pruner returned, not groupsRef.current:
+    // the ref still holds the pre-delete array until the next render, which
+    // would cancel the freshly recorded tombstone (P2 follow-up to P0-4).
+    void saveManifest(nextDocs, target.id, nextGroups).catch(() => {});
   }, [captureAndQueueSaveRef, getLiveDocsSnapshot, leaveCurrentDoc, markDocClean, setActiveIndex, setDocs, state, tiptapRef, pruneEmptyCurrentDoc]);
 
   // Batch delete core. The per-note trash I/O runs sequentially, but the doc
@@ -923,9 +936,11 @@ export function useFileSystem(
       updatedAt: timestamp,
     };
 
-    const prunedDocs = await pruneEmptyCurrentDoc(baseDocs, activeDocId);
+    const { docs: prunedDocs, groups: prunedGroups } = await pruneEmptyCurrentDoc(baseDocs, activeDocId);
     const nextDocs = [...prunedDocs, newDoc];
-    sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
+    // Persist the pruner's post-delete groups, not groupsRef.current (stale
+    // until the next render), so a prune tombstone is not cancelled.
+    sortAndPersistDocs(nextDocs, newDoc.id, notesSortOrder, locale, setDocs, setActiveIndex, prunedGroups);
     resetDocState(state, tiptapRef, newDoc.id, filePath, content);
     notifyActiveDocRef?.current?.(newDoc.id, filePath);
   }, [getLiveDocsSnapshot, leaveCurrentDoc, markDocClean, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef, pruneEmptyCurrentDoc]);
@@ -1227,22 +1242,23 @@ export function useFileSystem(
       emitTrashUpdated(getTrashedNotesCache());
     }
 
-    let restoredGroups = groupsRef.current ?? [];
-    if (trashed.groupId) {
-      const groupExists = restoredGroups.some((g) => g.id === trashed.groupId);
-      if (groupExists) {
-        restoredGroups = restoredGroups.map((g) => {
-          if (g.id === trashed.groupId && !g.noteIds.includes(trashed.id)) {
-            return { ...g, noteIds: [...g.noteIds, trashed.id] };
-          }
-          return g;
-        });
-        setGroups?.(restoredGroups);
-        emitGroupsUpdated(restoredGroups);
-      }
+    // Prune first (preserving the restored note's target group so it survives an
+    // empty-active-doc prune), then re-add the restored note on top of the array
+    // the pruner returned. Building on that post-prune array — instead of a
+    // pre-prune groupsRef snapshot — keeps the restore membership and any prune
+    // tombstone consistent in a single persist, so the tombstone is not cancelled.
+    const { docs: prunedDocs, groups: prunedGroups } = await pruneEmptyCurrentDoc(baseDocs, activeDocId, trashed.groupId ?? null);
+    let restoredGroups = prunedGroups;
+    if (trashed.groupId && prunedGroups.some((g) => g.id === trashed.groupId)) {
+      restoredGroups = prunedGroups.map((g) =>
+        g.id === trashed.groupId && !g.noteIds.includes(trashed.id)
+          ? { ...g, noteIds: [...g.noteIds, trashed.id] }
+          : g,
+      );
+      setGroups?.(restoredGroups);
+      emitGroupsUpdated(restoredGroups);
     }
 
-    const prunedDocs = await pruneEmptyCurrentDoc(baseDocs, activeDocId);
     const nextDocs = [...prunedDocs, restoredDoc];
     sortAndPersistDocs(nextDocs, restoredDoc.id, notesSortOrder, locale, setDocs, setActiveIndex, restoredGroups);
     emitDocCreated(restoredDoc);

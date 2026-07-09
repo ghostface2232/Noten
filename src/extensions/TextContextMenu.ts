@@ -76,14 +76,58 @@ export function showGenericContextMenu(pos: { x: number; y: number }, ctx: TextC
   });
 }
 
+/**
+ * Copy the current selection to the clipboard straight from ProseMirror state.
+ *
+ * The context menu takes DOM focus while open, so the old `document.execCommand`
+ * path (which depends on the editor being focused with a live DOM selection) is
+ * unreliable here — it could copy nothing. Reading the slice from editor state
+ * is focus-independent. Falls back to plain text if the rich write is rejected
+ * (e.g. WebView2 clipboard quirks).
+ *
+ * Serialization goes through `view.serializeForClipboard`, the same path a
+ * native copy uses: the HTML carries ProseMirror's `data-pm-slice` open/close
+ * context so a partial selection inside a list/table pastes back as the same
+ * slice, and the text channel runs the editor's registered
+ * `clipboardTextSerializer` (single-newline joins, image alt text).
+ */
+async function copyEditorSelection(editor: Editor): Promise<boolean> {
+  const { empty } = editor.state.selection;
+  if (empty) return false;
+
+  const slice = editor.state.selection.content();
+  const { dom, text } = editor.view.serializeForClipboard(slice);
+  const html = dom.innerHTML;
+
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        "text/html": new Blob([html], { type: "text/html" }),
+        "text/plain": new Blob([text], { type: "text/plain" }),
+      }),
+    ]);
+    return true;
+  } catch {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 function tiptapContext(editor: Editor): TextContextMenuContext {
   const { from, to } = editor.state.selection;
   return {
     hasSelection: from !== to,
     isEditable: !editor.storage.readonlyGuard?.readonly,
     locale: (editor.storage.slashCommands?.locale ?? "en") as Locale,
-    cut: () => document.execCommand("cut"),
-    copy: () => document.execCommand("copy"),
+    cut: async () => {
+      const copied = await copyEditorSelection(editor);
+      if (copied) editor.chain().focus().deleteSelection().run();
+    },
+    copy: () => { void copyEditorSelection(editor); },
     paste: async (plain) => {
       try {
         if (plain) {

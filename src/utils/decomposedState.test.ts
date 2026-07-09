@@ -151,7 +151,7 @@ describe("group tombstone propagation", () => {
     await persistDecomposedState(fs, DIR, state, [], null, [group], persistOpts());
 
     // User deletes the group; pendingTombstones records the intent.
-    state.pendingTombstones.add("g-doomed");
+    state.pendingTombstones.set("g-doomed", 1);
 
     // Subsequent persist no longer includes the group in `groups`.
     await persistDecomposedState(fs, DIR, state, [], null, [], persistOpts());
@@ -170,7 +170,7 @@ describe("group tombstone propagation", () => {
     const group = makeGroup("g-resurrected", { name: "Back" });
     await persistDecomposedState(fs, DIR, state, [], null, [group], persistOpts());
 
-    state.pendingTombstones.add("g-resurrected");
+    state.pendingTombstones.set("g-resurrected", 1);
 
     // Persist with the group still present must not write a tombstone, and
     // must clear the stale intent so it cannot fire later.
@@ -179,6 +179,37 @@ describe("group tombstone propagation", () => {
     const file = await readGroupsFile(fs, DIR);
     expect(file.groups["g-resurrected"].deletedAt).toBeNull();
     expect(state.pendingTombstones.has("g-resurrected")).toBe(false);
+  });
+
+  it("a stale in-flight save must not cancel a tombstone recorded after its snapshot (P0-4)", async () => {
+    // Seed the group on disk (as an earlier successful save would).
+    const group = makeGroup("g-raced", { name: "Raced" });
+    await persistDecomposedState(fs, DIR, state, [], null, [group], persistOpts());
+
+    // User deletes the group at logical time 10 (markGroupAsDeleted stamp).
+    state.pendingTombstones.set("g-raced", 10);
+
+    // Save B: enqueued BEFORE the delete, so its snapshot still shows the group
+    // alive and its captured sequence (5) predates the deletion (10). It must
+    // NOT cancel the tombstone. The group is (re)written alive here, mirroring
+    // the merge behaviour of a slow cloud write that lands late.
+    await persistDecomposedState(
+      fs, DIR, state, [], null, [group], persistOpts({ groupsSnapshotSeq: 5 }),
+    );
+    expect(state.pendingTombstones.has("g-raced")).toBe(true);
+    expect((await readGroupsFile(fs, DIR)).groups["g-raced"].deletedAt).toBeNull();
+
+    // Save C: the delete's own save — enqueued after the delete (seq 10),
+    // snapshot no longer contains the group. It applies the tombstone, and the
+    // merge lets deletedAt win over B's alive write.
+    await persistDecomposedState(
+      fs, DIR, state, [], null, [], persistOpts({ groupsSnapshotSeq: 10 }),
+    );
+
+    const file = await readGroupsFile(fs, DIR);
+    expect(file.groups["g-raced"]).toBeDefined();
+    expect(file.groups["g-raced"].deletedAt).not.toBeNull();
+    expect(state.pendingTombstones.has("g-raced")).toBe(false);
   });
 });
 
@@ -305,7 +336,7 @@ describe("writtenGroups commit semantics — only update on disk-write success",
     expect(state.writtenGroups.has("g-tomb-flaky")).toBe(true);
 
     // Stage the delete intent, then fault future writes.
-    state.pendingTombstones.add("g-tomb-flaky");
+    state.pendingTombstones.set("g-tomb-flaky", 1);
     const faultFs = wrapWithFaults(fs);
     faultFs.injectFault({
       op: "writeTextFile",
