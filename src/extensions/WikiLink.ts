@@ -7,7 +7,12 @@ import type {
 } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
-import type { Mark as ProseMirrorMark, Node as ProseMirrorNode } from "@tiptap/pm/model";
+import type {
+  MarkType,
+  Mark as ProseMirrorMark,
+  Node as ProseMirrorNode,
+  ResolvedPos,
+} from "@tiptap/pm/model";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { NoteDoc } from "../hooks/useNotesLoader";
 import type { Locale } from "../hooks/useSettings";
@@ -71,29 +76,95 @@ function isCompleteWikiLinkText(text: string, mark: ProseMirrorMark): boolean {
   return !!target && text === target;
 }
 
+function hasMark(node: ProseMirrorNode, mark: ProseMirrorMark): boolean {
+  return node.marks.some((m) => m.eq(mark));
+}
+
+function wikiLinkMarksNear($pos: ResolvedPos, markType: MarkType): ProseMirrorMark[] {
+  const marks: ProseMirrorMark[] = [];
+  const add = (mark: ProseMirrorMark) => {
+    if (mark.type !== markType) return;
+    if (!marks.some((known) => known.eq(mark))) marks.push(mark);
+  };
+
+  $pos.marks().forEach(add);
+  $pos.nodeBefore?.marks.forEach(add);
+  $pos.nodeAfter?.marks.forEach(add);
+  return marks;
+}
+
+function findMarkedChild(
+  $pos: ResolvedPos,
+  mark: ProseMirrorMark,
+): { index: number; offset: number; node: ProseMirrorNode } | null {
+  const after = $pos.parent.childAfter($pos.parentOffset);
+  if (after.node && hasMark(after.node, mark)) {
+    return { index: after.index, offset: after.offset, node: after.node };
+  }
+
+  const before = $pos.parent.childBefore($pos.parentOffset);
+  if (before.node && hasMark(before.node, mark)) {
+    return { index: before.index, offset: before.offset, node: before.node };
+  }
+
+  return null;
+}
+
+function findMarkedRunAroundResolvedPos(
+  $pos: ResolvedPos,
+  mark: ProseMirrorMark,
+): (CompleteWikiLinkRun & { text: string }) | null {
+  const child = findMarkedChild($pos, mark);
+  if (!child) return null;
+
+  const { parent } = $pos;
+  let startIndex = child.index;
+  let endIndex = child.index;
+  let startOffset = child.offset;
+  let endOffset = child.offset + child.node.nodeSize;
+  let text = child.node.isText ? child.node.text ?? "" : "";
+
+  while (startIndex > 0) {
+    const prev = parent.child(startIndex - 1);
+    if (!hasMark(prev, mark)) break;
+    startIndex -= 1;
+    startOffset -= prev.nodeSize;
+    text = (prev.isText ? prev.text ?? "" : "") + text;
+  }
+
+  while (endIndex + 1 < parent.childCount) {
+    const next = parent.child(endIndex + 1);
+    if (!hasMark(next, mark)) break;
+    endIndex += 1;
+    endOffset += next.nodeSize;
+    text += next.isText ? next.text ?? "" : "";
+  }
+
+  const start = $pos.start();
+  return {
+    from: start + startOffset,
+    to: start + endOffset,
+    text,
+  };
+}
+
 function findCompleteWikiLinkBeforeOrInside(
   state: EditorState,
   pos: number,
 ): CompleteWikiLinkRun | null {
-  let hit: CompleteWikiLinkRun | null = null;
+  const markType = state.schema.marks.wikiLink;
+  if (!markType) return null;
 
-  state.doc.descendants((node, nodePos) => {
-    if (hit) return false;
-    if (!node.isText) return true;
-
-    const mark = node.marks.find((m) => m.type.name === "wikiLink");
-    if (!mark || !isCompleteWikiLinkText(node.text ?? "", mark)) return false;
-
-    const from = nodePos;
-    const to = nodePos + node.nodeSize;
-    if (pos > from && pos <= to) {
-      hit = { from, to };
+  const $pos = state.doc.resolve(Math.max(0, Math.min(pos, state.doc.content.size)));
+  for (const mark of wikiLinkMarksNear($pos, markType)) {
+    const run = findMarkedRunAroundResolvedPos($pos, mark);
+    if (!run || pos <= run.from || pos > run.to) continue;
+    if (isCompleteWikiLinkText(run.text, mark)) {
+      return { from: run.from, to: run.to };
     }
+  }
 
-    return false;
-  });
-
-  return hit;
+  return null;
 }
 
 const WikiLink = Mark.create<unknown, WikiLinkStorage>({
@@ -350,34 +421,37 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
           }
 
           if (docChanged) {
-            newState.doc.descendants((node, pos) => {
-              if (!node.isText) return;
-              const mark = node.marks.find((m) => m.type.name === "wikiLink");
-              if (!mark) return;
+            const range = changedRangeForTransactions(transactions, newState.doc);
+            if (range) {
+              newState.doc.nodesBetween(range.from, range.to, (node, pos) => {
+                if (!node.isText) return;
+                const mark = node.marks.find((m) => m.type.name === "wikiLink");
+                if (!mark) return;
 
-              const text = node.text ?? "";
-              const target = (mark.attrs as WikiLinkAttributes).target ?? "";
-              if (!target) return;
+                const text = node.text ?? "";
+                const target = (mark.attrs as WikiLinkAttributes).target ?? "";
+                if (!target) return;
 
-              const expected = target;
-              if (text === expected) return;
+                const expected = target;
+                if (text === expected) return;
 
-              const expectedIdx = text.indexOf(expected);
-              if (expectedIdx < 0) return;
+                const expectedIdx = text.indexOf(expected);
+                if (expectedIdx < 0) return;
 
-              const from = pos;
-              const to = pos + node.nodeSize;
-              const keepFrom = from + expectedIdx;
-              const keepTo = keepFrom + expected.length;
-              if (keepFrom > from) {
-                tr.removeMark(from, keepFrom, markType);
-                mutated = true;
-              }
-              if (keepTo < to) {
-                tr.removeMark(keepTo, to, markType);
-                mutated = true;
-              }
-            });
+                const from = pos;
+                const to = pos + node.nodeSize;
+                const keepFrom = from + expectedIdx;
+                const keepTo = keepFrom + expected.length;
+                if (keepFrom > from) {
+                  tr.removeMark(from, keepFrom, markType);
+                  mutated = true;
+                }
+                if (keepTo < to) {
+                  tr.removeMark(keepTo, to, markType);
+                  mutated = true;
+                }
+              });
+            }
           }
 
           if (docChanged || selChanged) {
@@ -465,6 +539,25 @@ function changedRange(tr: Transaction, doc: ProseMirrorNode): { from: number; to
     from: Math.max(0, from - 1),
     to: Math.min(doc.content.size, to + 1),
   };
+}
+
+function changedRangeForTransactions(
+  transactions: readonly Transaction[],
+  doc: ProseMirrorNode,
+): { from: number; to: number } | null {
+  let from = Infinity;
+  let to = -Infinity;
+
+  for (const tr of transactions) {
+    if (!tr.docChanged) continue;
+    const range = changedRange(tr, doc);
+    if (!range) continue;
+    from = Math.min(from, range.from);
+    to = Math.max(to, range.to);
+  }
+
+  if (from > to) return null;
+  return { from, to };
 }
 
 export function refreshWikiLinkDecorations(editor: import("@tiptap/core").Editor): void {

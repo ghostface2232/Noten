@@ -1,7 +1,8 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
+import { Node as PMNodeClass } from "@tiptap/pm/model";
 import type { Node as PMNode, Mark as PMMark } from "@tiptap/pm/model";
 import type { NoteDoc } from "../hooks/useNotesLoader";
 import { createFastMarked } from "./fastMarkdownLexer";
@@ -177,5 +178,37 @@ describe("wiki-link atomicity backstop (appendTransaction)", () => {
     expect(editor.state.doc.textContent).toBe("AlphaX");
     // The backstop must strip the mark back to exactly the target text.
     expect(wikiMarkedText(editor.state.doc, "Alpha")).toBe("Alpha");
+  });
+
+  it("does not walk the whole document for plain typing outside wiki links", () => {
+    const editor = makeEditor(
+      '<p>start</p><p><span data-wiki-link="Alpha">Alpha</span></p>',
+      [doc("Alpha")],
+    );
+    active = editor;
+
+    const descendantsSpy = vi.spyOn(PMNodeClass.prototype, "descendants");
+    try {
+      editor.chain().focus().setTextSelection(1).insertContent("hello ").run();
+      expect(descendantsSpy).not.toHaveBeenCalled();
+    } finally {
+      descendantsSpy.mockRestore();
+    }
+  });
+
+  it("does not walk the whole document for cursor moves outside wiki links", () => {
+    const editor = makeEditor(
+      '<p>start</p><p><span data-wiki-link="Alpha">Alpha</span></p>',
+      [doc("Alpha")],
+    );
+    active = editor;
+
+    const descendantsSpy = vi.spyOn(PMNodeClass.prototype, "descendants");
+    try {
+      editor.commands.setTextSelection(2);
+      expect(descendantsSpy).not.toHaveBeenCalled();
+    } finally {
+      descendantsSpy.mockRestore();
+    }
   });
 });
