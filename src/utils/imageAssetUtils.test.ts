@@ -18,7 +18,12 @@ vi.mock("./crashLog", () => ({
   logNotenError: vi.fn(() => Promise.resolve()),
 }));
 
-import { duplicateNoteAssets, removeNoteAssetDir } from "./imageAssetUtils";
+import {
+  clearRenderableImageSourceCache,
+  duplicateNoteAssets,
+  removeNoteAssetDir,
+  resolveRenderableImageSource,
+} from "./imageAssetUtils";
 
 async function getMockedLogger() {
   const { logNotenError } = await import("./crashLog");
@@ -26,6 +31,7 @@ async function getMockedLogger() {
 }
 
 beforeEach(async () => {
+  clearRenderableImageSourceCache();
   removeMock.mockClear();
   mkdirMock.mockClear();
   readDirMock.mockClear();
@@ -35,6 +41,72 @@ beforeEach(async () => {
   writeFileMock.mockClear();
   writeFileMock.mockResolvedValue(undefined);
   (await getMockedLogger()).mockClear();
+});
+
+describe("resolveRenderableImageSource cache", () => {
+  const context = { noteId: "note-a", filePath: "/notes/note-a.md" };
+
+  it("reuses a cached asset render source while the entry is live", async () => {
+    readFileMock.mockResolvedValue(new Uint8Array([1, 2, 3]));
+
+    const first = await resolveRenderableImageSource(".assets/note-a/img.png", context);
+    const second = await resolveRenderableImageSource(".assets/note-a/img.png", context);
+
+    expect(first).toBe("data:image/png;base64,AQID");
+    expect(second).toBe(first);
+    expect(readFileMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("evicts least-recently-used entries instead of growing without bound", async () => {
+    readFileMock.mockResolvedValue(new Uint8Array([1]));
+
+    for (let i = 0; i < 129; i += 1) {
+      await resolveRenderableImageSource(`.assets/note-a/${i}.png`, context);
+    }
+    await resolveRenderableImageSource(".assets/note-a/0.png", context);
+    await resolveRenderableImageSource(".assets/note-a/128.png", context);
+
+    expect(readFileMock).toHaveBeenCalledTimes(130);
+  });
+
+  it("clears cached render sources when a note asset directory is removed", async () => {
+    readFileMock.mockResolvedValue(new Uint8Array([1, 2, 3]));
+
+    await resolveRenderableImageSource(".assets/note-a/img.png", context);
+    await removeNoteAssetDir("/notes", "note-a");
+    await resolveRenderableImageSource(".assets/note-a/img.png", context);
+
+    expect(removeMock).toHaveBeenCalledWith("/notes/.assets/note-a", { recursive: true });
+    expect(readFileMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("can be cleared when the notes directory changes", async () => {
+    readFileMock.mockResolvedValue(new Uint8Array([1, 2, 3]));
+
+    await resolveRenderableImageSource(".assets/note-a/img.png", context);
+    clearRenderableImageSourceCache();
+    await resolveRenderableImageSource(".assets/note-a/img.png", context);
+
+    expect(readFileMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not repopulate the cache from a stale read that finishes after clear", async () => {
+    let finishRead!: (bytes: Uint8Array) => void;
+    readFileMock
+      .mockImplementationOnce(() => new Promise<Uint8Array>((resolve) => {
+        finishRead = resolve;
+      }))
+      .mockResolvedValue(new Uint8Array([4, 5, 6]));
+
+    const pending = resolveRenderableImageSource(".assets/note-a/img.png", context);
+    clearRenderableImageSourceCache();
+    finishRead(new Uint8Array([1, 2, 3]));
+
+    expect(await pending).toBe("data:image/png;base64,AQID");
+    expect(await resolveRenderableImageSource(".assets/note-a/img.png", context))
+      .toBe("data:image/png;base64,BAUG");
+    expect(readFileMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("removeNoteAssetDir", () => {

@@ -48,6 +48,7 @@ import { writeMigrationJournal, type MigrationCleanupMode } from "./utils/migrat
 import { recoverPendingMigration } from "./utils/migrationCleanup";
 import { colorHex } from "./utils/noteColors";
 import { clampMenuToViewport } from "./utils/clampMenuPosition";
+import { clearRenderableImageSourceCache } from "./utils/imageAssetUtils";
 import { useFileWatcher } from "./hooks/useFileWatcher";
 import { createReconcileState } from "./utils/reconcileFolder";
 import { useWindowSync } from "./hooks/useWindowSync";
@@ -317,6 +318,7 @@ function App() {
   useEffect(() => {
     if (!settingsLoaded) return;
     (async () => {
+      clearRenderableImageSourceCache();
       if (settings.notesDirectory) {
         setNotesDir(settings.notesDirectory, reconcileStateRef.current);
       } else {
@@ -723,6 +725,7 @@ function App() {
   // roll the persisted setting back, and release the autosave guard. The
   // copy-based paths no longer need this — they persist only after success.
   const revertNotesDirChange = useCallback(async (oldDir: string, previousNotesDirectory: string) => {
+    clearRenderableImageSourceCache();
     setNotesDir(oldDir, reconcileStateRef.current);
     await persistNotesDirectorySetting(previousNotesDirectory);
     setMigrationInProgress(false);
@@ -847,6 +850,7 @@ function App() {
       }
     }
 
+    clearRenderableImageSourceCache();
     setNotesDir(newDir, reconcileStateRef.current);
     setCurrentNotesDir(newDir);
     setReloadKey((k) => k + 1);
@@ -920,6 +924,7 @@ function App() {
       return;
     }
 
+    clearRenderableImageSourceCache();
     resetNotesDir(reconcileStateRef.current);
     if (sourceRetained) {
       // Journal the resolved default dir so a later cleanup knows where to

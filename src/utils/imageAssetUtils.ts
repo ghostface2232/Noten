@@ -76,6 +76,80 @@ export function buildAssetRelativePath(noteId: string, filename: string): string
   return `.assets/${noteId}/${filename}`;
 }
 
+const MAX_RENDERABLE_SOURCE_CACHE_ENTRIES = 128;
+const MAX_RENDERABLE_SOURCE_CACHE_CHARS = 16 * 1024 * 1024;
+
+interface RenderableSourceCacheEntry {
+  dataUrl: string;
+  size: number;
+}
+
+const renderableSourceCache = new Map<string, RenderableSourceCacheEntry>();
+let renderableSourceCacheChars = 0;
+let renderableSourceCacheGeneration = 0;
+
+function normalizeCacheKey(path: string): string {
+  return toUnixPath(path);
+}
+
+function removeRenderableSourceCacheEntry(key: string): void {
+  const existing = renderableSourceCache.get(key);
+  if (!existing) return;
+  renderableSourceCache.delete(key);
+  renderableSourceCacheChars -= existing.size;
+}
+
+function invalidateRenderableSourceCache(): void {
+  renderableSourceCacheGeneration += 1;
+}
+
+function getCachedRenderableSource(absolutePath: string): string | null {
+  const key = normalizeCacheKey(absolutePath);
+  const cached = renderableSourceCache.get(key);
+  if (!cached) return null;
+  renderableSourceCache.delete(key);
+  renderableSourceCache.set(key, cached);
+  return cached.dataUrl;
+}
+
+function setCachedRenderableSource(absolutePath: string, dataUrl: string): void {
+  const key = normalizeCacheKey(absolutePath);
+  removeRenderableSourceCacheEntry(key);
+  const size = dataUrl.length;
+  renderableSourceCache.set(key, { dataUrl, size });
+  renderableSourceCacheChars += size;
+
+  while (
+    renderableSourceCache.size > MAX_RENDERABLE_SOURCE_CACHE_ENTRIES
+    || renderableSourceCacheChars > MAX_RENDERABLE_SOURCE_CACHE_CHARS
+  ) {
+    const oldest = renderableSourceCache.keys().next().value as string | undefined;
+    if (!oldest) break;
+    removeRenderableSourceCacheEntry(oldest);
+  }
+}
+
+export function clearRenderableImageSourceCache(): void {
+  renderableSourceCache.clear();
+  renderableSourceCacheChars = 0;
+  invalidateRenderableSourceCache();
+}
+
+export function evictRenderableImageSourceCachePath(absolutePath: string): void {
+  removeRenderableSourceCacheEntry(normalizeCacheKey(absolutePath));
+  invalidateRenderableSourceCache();
+}
+
+export function evictRenderableImageSourceCachePrefix(absolutePathPrefix: string): void {
+  const prefix = normalizeCacheKey(absolutePathPrefix).replace(/\/+$/, "");
+  for (const key of Array.from(renderableSourceCache.keys())) {
+    if (key === prefix || key.startsWith(`${prefix}/`)) {
+      removeRenderableSourceCacheEntry(key);
+    }
+  }
+  invalidateRenderableSourceCache();
+}
+
 export async function removeNoteAssetDir(notesDir: string, noteId: string): Promise<void> {
   if (!notesDir || !noteId) return;
   // This is a recursive delete: an unsafe id is catastrophic here. `..` makes
@@ -101,6 +175,7 @@ export async function removeNoteAssetDir(notesDir: string, noteId: string): Prom
     ));
     return;
   }
+  evictRenderableImageSourceCachePrefix(dir);
   try {
     await remove(dir, { recursive: true });
   } catch {
@@ -193,8 +268,6 @@ export function resolveAssetAbsolutePath(src: string, noteFilePath: string | nul
   return `${dirname(noteFilePath)}/${normalizedSrc}`;
 }
 
-const renderableSourceCache = new Map<string, string>();
-
 export async function persistDataUrlAsAsset(
   dataUrl: string,
   context: DocumentImageContext,
@@ -213,6 +286,7 @@ export async function persistDataUrlAsAsset(
 
   await mkdir(dirname(absolutePath), { recursive: true }).catch(() => {});
   await writeFile(absolutePath, bytes);
+  evictRenderableImageSourceCachePath(absolutePath);
   return relativePath;
 }
 
@@ -230,6 +304,7 @@ export async function persistBinaryAsAsset(
 
   await mkdir(dirname(absolutePath), { recursive: true }).catch(() => {});
   await writeFile(absolutePath, payload.bytes);
+  evictRenderableImageSourceCachePath(absolutePath);
   return relativePath;
 }
 
@@ -267,13 +342,16 @@ export async function resolveRenderableImageSource(
   const absolutePath = resolveAssetAbsolutePath(src, context.filePath);
   if (!absolutePath) return null;
 
-  const cached = renderableSourceCache.get(absolutePath);
+  const cached = getCachedRenderableSource(absolutePath);
   if (cached) return cached;
 
+  const cacheGeneration = renderableSourceCacheGeneration;
   const payload = await readImageBinary(src, context);
   if (!payload) return null;
 
   const dataUrl = bytesToDataUrl(payload.bytes, payload.mime);
-  renderableSourceCache.set(absolutePath, dataUrl);
+  if (cacheGeneration === renderableSourceCacheGeneration) {
+    setCachedRenderableSource(absolutePath, dataUrl);
+  }
   return dataUrl;
 }
