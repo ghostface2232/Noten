@@ -664,27 +664,27 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
 
                   {!updateAvailable && (
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.7</div>
+                    <div style={{ fontSize: "12px", fontWeight: 500, color: tokens.colorNeutralForeground2, marginBottom: "6px" }}>v0.2.8</div>
                     <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 창을 닫거나 노트 폴더를 바꿀 때 저장이 실패해도 수정 내용을 잃지 않도록 강화 — 저장될 때까지 유지·재시도<br />
-                          · 다른 창이 열려 있어도 노트 폴더 변경이 막히지 않도록 개선 — 이전 폴더는 안전이 확인된 뒤 정리<br />
-                          · 휴지통 정리·앱 제거 과정에서 엉뚱한 데이터가 지워지던 문제 수정<br />
-                          · 노트 본문 저장을 노트별로 직렬화하고, 실패 시 부분 기록 없이 재시도하도록 강화<br />
-                          · 핀·색상·그룹·이름 변경 같은 메타데이터를 창을 닫기 전에 끝까지 기록하도록 보장<br />
-                          · 안전하지 않은 노트 식별자(경로 조작·Windows 예약 이름)를 거부해 노트 폴더가 잘못 삭제될 위험 차단<br />
-                          · 사이드바 포커스 상태가 남아 Ctrl+R로 앱이 새로고침되며 작업 내용이 날아가던 문제 수정
+                          · Windows 시스템 테마 감지를 추가해 시스템 모드가 실제 Windows 설정을 따르도록 개선<br />
+                          · 마크다운 가져오기가 현재 그룹을 유지하고, 빈 자리표시자 노트를 대체할 때도 그룹이 보존되도록 수정<br />
+                          · 노트 복제 시 이미지 자산을 함께 복사하고, 복사 실패 시 기존 자산 참조를 안전하게 유지하도록 개선<br />
+                          · 이미지 자산 마이그레이션과 원격 변경 반영을 더 안전하게 처리해 실패·경합 상황에서 데이터 손상 위험을 줄임<br />
+                          · 컨텍스트 메뉴의 키보드 탐색, 하위 메뉴 열기, 접근성 속성, 단축키 표시를 개선<br />
+                          · 선택 텍스트 복사와 마크다운 왕복 변환 안정성을 높이고 관련 회귀 테스트를 추가<br />
+                          · 툴바 고정 설정, 사이드바 Shift+클릭 범위 선택, 앱 전반의 누름/호버/모션 피드백을 개선
                         </>
                       ) : (
                         <>
-                          · No lost edits when a save fails during window close or a notes-folder change — the note stays dirty and retries until it persists<br />
-                          · Changing the notes folder no longer dead-ends when other windows are open; the old folder is cleaned up later, only once it's confirmed safe<br />
-                          · Fixed: trash cleanup and uninstall could discard the wrong data<br />
-                          · Note-body saves are serialized per note and fail closed, so overlapping saves can't clobber each other or leave a partial file<br />
-                          · Metadata like pin, color, group, and rename is now fully flushed before a window closes<br />
-                          · Path-unsafe note ids (path traversal, Windows reserved names) are rejected, closing a recursive-delete risk on the notes folder<br />
-                          · Fixed: a stale sidebar-focus state let Ctrl+R reload the app and discard the document
+                          · Added Windows system theme detection so system mode follows the actual Windows setting<br />
+                          · Markdown imports now stay in the active group, including when replacing an empty placeholder note<br />
+                          · Duplicating a note now copies image assets, and safely preserves the original asset references if a copy fails<br />
+                          · Image-asset migration and remote change handling are more resilient in failure and race conditions<br />
+                          · Improved context-menu keyboard navigation, submenu opening, accessibility attributes, and shortcut hints<br />
+                          · Made selected-text copying and Markdown round-trips more reliable, with regression coverage added<br />
+                          · Added a toolbar pin setting, Shift-click range selection in the sidebar, and more consistent press/hover/motion feedback
                         </>
                       )}
                     </div>
