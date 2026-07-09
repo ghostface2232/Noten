@@ -1,8 +1,9 @@
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import { Button, makeStyles, tokens } from "@fluentui/react-components";
 import {
   Dismiss20Regular,
   Square20Regular,
+  SquareMultiple20Regular,
   Subtract20Regular,
 } from "@fluentui/react-icons";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -185,6 +186,29 @@ function TitleBarImpl({
   const styles = useStyles();
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
 
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let active = true;
+
+    appWindow.isMaximized().then((v) => { if (active) setIsMaximized(v); }).catch(() => {});
+    appWindow
+      .onResized(() => {
+        appWindow.isMaximized().then((v) => { if (active) setIsMaximized(v); }).catch(() => {});
+      })
+      .then((fn) => {
+        if (active) unlisten = fn;
+        else fn();
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
+
   return (
     <div className={styles.titleBar} data-tauri-drag-region>
       <div className={styles.left} data-tauri-drag-region>
@@ -222,7 +246,7 @@ function TitleBarImpl({
         />
         <Button
           appearance="subtle"
-          icon={<Square20Regular />}
+          icon={isMaximized ? <SquareMultiple20Regular /> : <Square20Regular />}
           className={styles.controlBtn}
           onClick={() => { appWindow.toggleMaximize().catch(() => {}); }}
         />
