@@ -11,6 +11,7 @@ import { searchPluginKey, findSearchMatches, type SearchPluginState } from "../e
 import { scrollToPos } from "../utils/scrollToPos";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
+import { MOTION_DURATION_BASE, pressableButton } from "../styles/interactions";
 
 const useStyles = makeStyles({
   wrapper: {
@@ -42,7 +43,7 @@ const useStyles = makeStyles({
       from: { opacity: 0, transform: "translateY(-4px)", filter: "blur(4px)" },
       to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
     },
-    animationDuration: "0.16s",
+    animationDuration: MOTION_DURATION_BASE,
     animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
     animationFillMode: "backwards",
   },
@@ -83,14 +84,9 @@ const useStyles = makeStyles({
     cursor: "pointer",
     flexShrink: 0,
     padding: 0,
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
+    ...pressableButton,
     ":hover": {
       backgroundColor: tokens.colorNeutralBackground1Hover,
-    },
-    ":active": {
-      scale: 0.96,
     },
   },
   btnActive: {
@@ -111,14 +107,9 @@ const useStyles = makeStyles({
     fontSize: "12px",
     fontFamily: "inherit",
     whiteSpace: "nowrap",
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
+    ...pressableButton,
     ":hover": {
       backgroundColor: tokens.colorNeutralBackground1Hover,
-    },
-    ":active": {
-      scale: 0.96,
     },
   },
 });

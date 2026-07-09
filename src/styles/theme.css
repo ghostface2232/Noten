@@ -82,6 +82,13 @@
   --ui-hover-bg: rgba(0, 0, 0, 0.04);
   --ui-pressed-bg: rgba(0, 0, 0, 0.08);
 
+  --motion-fast: 120ms;
+  --motion-base: 160ms;
+  --motion-medium: 200ms;
+  --motion-slow: 250ms;
+  --motion-slower: 300ms;
+  --motion-slowest: 400ms;
+
   --shell-sidebar-width: 260px;
   --shell-card-gap: 6px;
 

@@ -3,6 +3,7 @@ import { makeStyles, tokens } from "@fluentui/react-components";
 import { t } from "../i18n";
 import type { Editor } from "@tiptap/react";
 import type { Locale } from "../hooks/useSettings";
+import { MOTION_DURATION_SLOW } from "../styles/interactions";
 
 const useStyles = makeStyles({
   shell: {
@@ -12,7 +13,7 @@ const useStyles = makeStyles({
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground3,
     transitionProperty: "height, border-top-color, background-color",
-    transitionDuration: "0.25s",
+    transitionDuration: MOTION_DURATION_SLOW,
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
   },
   shellHidden: {
@@ -32,7 +33,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     userSelect: "none",
     transitionProperty: "transform, opacity",
-    transitionDuration: "0.25s",
+    transitionDuration: MOTION_DURATION_SLOW,
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
   },
   statusBarHidden: {

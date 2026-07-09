@@ -22,6 +22,12 @@ import { t, type I18nKey } from "../i18n";
 import type { Locale, ParagraphSpacing } from "../hooks/useSettings";
 import type { Editor } from "@tiptap/react";
 import { openNewWindow } from "../utils/newWindow";
+import {
+  MOTION_DURATION_BASE,
+  MOTION_DURATION_FAST,
+  MOTION_DURATION_MEDIUM,
+  pressableButton,
+} from "../styles/interactions";
 
 
 const useStyles = makeStyles({
@@ -32,12 +38,7 @@ const useStyles = makeStyles({
     padding: "0",
     borderRadius: "6px",
     border: "none",
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
-    ":active": {
-      scale: 0.96,
-    },
+    ...pressableButton,
   },
   overlay: {
     position: "fixed",
@@ -57,7 +58,7 @@ const useStyles = makeStyles({
       from: { opacity: 0, transform: "translateY(4px)", filter: "blur(4px)" },
       to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
     },
-    animationDuration: "0.16s",
+    animationDuration: MOTION_DURATION_BASE,
     animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
     animationFillMode: "backwards",
   },
@@ -74,12 +75,7 @@ const useStyles = makeStyles({
     minHeight: "32px",
     paddingLeft: "8px",
     paddingRight: "12px",
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
-    ":active": {
-      scale: 0.96,
-    },
+    ...pressableButton,
   },
   menuItemWithSub: {
     display: "flex",
@@ -94,12 +90,7 @@ const useStyles = makeStyles({
     minHeight: "32px",
     paddingLeft: "8px",
     paddingRight: "8px",
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
-    ":active": {
-      scale: 0.96,
-    },
+    ...pressableButton,
   },
   chevron: {
     marginLeft: "auto",
@@ -145,7 +136,7 @@ const useStyles = makeStyles({
       from: { opacity: 0, transform: "translateY(3px)", filter: "blur(4px)" },
       to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
     },
-    animationDuration: "0.14s",
+    animationDuration: MOTION_DURATION_FAST,
     animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
     animationFillMode: "backwards",
   },
@@ -171,7 +162,7 @@ const useStyles = makeStyles({
     scale: 0.25,
     filter: "blur(4px)",
     transitionProperty: "opacity, scale, filter",
-    transitionDuration: "0.3s",
+    transitionDuration: MOTION_DURATION_MEDIUM,
     transitionTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
   },
   iconCrossfadeLayerVisible: {

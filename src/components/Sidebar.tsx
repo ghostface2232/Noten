@@ -186,7 +186,7 @@ const NoteRow = memo(function NoteRow(props: NoteRowProps) {
         onClick={(e) => { e.stopPropagation(); onCheckboxClick(doc.id, e.shiftKey); }}
         style={selectMode && indented ? { marginLeft: "16px" } : undefined}
       >
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ opacity: isSelected ? 1 : 0, transition: "opacity 0.1s" }}>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ opacity: isSelected ? 1 : 0, transition: "opacity var(--motion-fast)" }}>
           <path d="M1.5 5.5L4 8L8.5 2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>

@@ -1,4 +1,12 @@
 import { makeStyles, tokens } from "@fluentui/react-components";
+import {
+  MOTION_DURATION_BASE,
+  MOTION_DURATION_FAST,
+  MOTION_DURATION_MEDIUM,
+  MOTION_DURATION_SLOWER,
+  MOTION_DURATION_SLOWEST,
+  pressableButton,
+} from "./styles/interactions";
 
 export const useStyles = makeStyles({
   root: {
@@ -15,7 +23,7 @@ export const useStyles = makeStyles({
     zIndex: 1,
     opacity: 0,
     transitionProperty: "opacity",
-    transitionDuration: "0.4s",
+    transitionDuration: MOTION_DURATION_SLOWEST,
     transitionTimingFunction: "ease",
   },
   micaOverlayActive: {
@@ -36,7 +44,7 @@ export const useStyles = makeStyles({
   },
   sidebarSlotAnimated: {
     transitionProperty: "width",
-    transitionDuration: "0.3s",
+    transitionDuration: MOTION_DURATION_SLOWER,
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
   },
   sidebarSlotOpen: {
@@ -62,11 +70,11 @@ export const useStyles = makeStyles({
       backgroundColor: tokens.colorBrandStroke1,
       opacity: 0,
       transitionProperty: "opacity",
-      transitionDuration: "0.15s",
+      transitionDuration: MOTION_DURATION_BASE,
     },
     ":hover::after": {
       opacity: 1,
-      transitionDelay: "0.3s",
+      transitionDelay: MOTION_DURATION_SLOWER,
     },
   },
   sidebarResizing: {
@@ -98,12 +106,7 @@ export const useStyles = makeStyles({
     width: "28px",
     padding: "0",
     pointerEvents: "auto",
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
-    ":active": {
-      scale: 0.96,
-    },
+    ...pressableButton,
   },
   sidebarSearchBtn: {
     position: "absolute",
@@ -119,12 +122,7 @@ export const useStyles = makeStyles({
     height: "28px",
     width: "28px",
     padding: "0",
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
-    ":active": {
-      scale: 0.96,
-    },
+    ...pressableButton,
   },
   sidebarNewGroupBtn: {
     position: "absolute",
@@ -137,12 +135,7 @@ export const useStyles = makeStyles({
     height: "28px",
     width: "28px",
     padding: "0",
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
-    ":active": {
-      scale: 0.96,
-    },
+    ...pressableButton,
   },
   sidebarFilterBtn: {
     position: "absolute",
@@ -155,12 +148,7 @@ export const useStyles = makeStyles({
     height: "28px",
     width: "28px",
     padding: "0",
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
-    ":active": {
-      scale: 0.96,
-    },
+    ...pressableButton,
   },
   sidebarSelectBtn: {
     position: "absolute",
@@ -173,24 +161,19 @@ export const useStyles = makeStyles({
     height: "28px",
     width: "28px",
     padding: "0",
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
-    ":active": {
-      scale: 0.96,
-    },
+    ...pressableButton,
   },
   sidebarTopActionBtn: {
     opacity: 0,
     pointerEvents: "none",
     transitionProperty: "opacity, background-color, color, scale",
-    transitionDuration: "0.14s, 0.12s, 0.12s, 0.12s",
+    transitionDuration: `${MOTION_DURATION_BASE}, ${MOTION_DURATION_FAST}, ${MOTION_DURATION_FAST}, ${MOTION_DURATION_FAST}`,
     transitionTimingFunction: "ease-out",
   },
   sidebarTopActionBtnVisible: {
     opacity: 1,
     pointerEvents: "auto",
-    transitionDelay: "0.16s, 0s, 0s, 0s",
+    transitionDelay: `${MOTION_DURATION_BASE}, 0s, 0s, 0s`,
   },
   iconCrossfade: {
     position: "relative",
@@ -210,7 +193,7 @@ export const useStyles = makeStyles({
     scale: 0.25,
     filter: "blur(4px)",
     transitionProperty: "opacity, scale, filter",
-    transitionDuration: "0.3s",
+    transitionDuration: MOTION_DURATION_MEDIUM,
     transitionTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
   },
   iconCrossfadeLayerVisible: {
@@ -256,13 +239,13 @@ export const useStyles = makeStyles({
     transform: "translateY(0)",
     filter: "blur(0px)",
     transitionProperty: "opacity, transform, filter",
-    transitionDuration: "0.14s",
+    transitionDuration: MOTION_DURATION_FAST,
     transitionTimingFunction: "ease-in",
     animationName: {
       from: { opacity: 0, transform: "translateY(4px)", filter: "blur(4px)" },
       to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
     },
-    animationDuration: "0.18s",
+    animationDuration: MOTION_DURATION_BASE,
     animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
     animationFillMode: "backwards",
   },
@@ -275,7 +258,7 @@ export const useStyles = makeStyles({
   editorPane: {
     opacity: 1,
     transitionProperty: "opacity",
-    transitionDuration: "0.15s",
+    transitionDuration: MOTION_DURATION_BASE,
     transitionTimingFunction: "ease",
     height: "100%",
   },

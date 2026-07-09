@@ -1,4 +1,12 @@
 import { makeStyles, tokens } from "@fluentui/react-components";
+import {
+  MOTION_DURATION_BASE,
+  MOTION_DURATION_FAST,
+  MOTION_DURATION_MEDIUM,
+  MOTION_DURATION_SLOW,
+  MOTION_DURATION_SLOWER,
+  pressableButton,
+} from "../styles/interactions";
 
 export const SIDE_PADDING = "6px";
 // Scroll containers reserve a both-edges scrollbar gutter (6px — the
@@ -16,14 +24,6 @@ const NONSCROLL_SIDE_PADDING = `calc(${LIST_SIDE_PADDING} + ${SCROLLBAR_GUTTER})
 // intact. The absolutely-positioned top buttons in App.styles.ts are nudged
 // by the same amount to stay level with the pills.
 const LIST_RIGHT_GAP = "4px";
-const pressableButton = {
-  transitionProperty: "background-color, color, scale",
-  transitionDuration: "0.12s",
-  transitionTimingFunction: "ease-out",
-  ":active": {
-    scale: 0.96,
-  },
-} as const;
 
 export const useStyles = makeStyles({
   sidebar: {
@@ -63,7 +63,7 @@ export const useStyles = makeStyles({
     "--sidebar-mask-bottom": "0px",
     maskImage: "linear-gradient(to bottom, transparent, black var(--sidebar-mask-top), black calc(100% - var(--sidebar-mask-bottom)), transparent)",
     transitionProperty: "--sidebar-mask-top, --sidebar-mask-bottom",
-    transitionDuration: "0.3s",
+    transitionDuration: MOTION_DURATION_SLOWER,
     transitionTimingFunction: "ease",
     "&[data-scroll-top='false']": {
       "--sidebar-mask-top": "24px",
@@ -83,7 +83,7 @@ export const useStyles = makeStyles({
     height: "100%",
     transform: "translateX(0)",
     transitionProperty: "transform",
-    transitionDuration: "0.24s",
+    transitionDuration: MOTION_DURATION_SLOW,
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
   },
   viewTrackShifted: {
@@ -147,7 +147,7 @@ export const useStyles = makeStyles({
     "--sidebar-mask-bottom": "0px",
     maskImage: "linear-gradient(to bottom, transparent, black var(--sidebar-mask-top), black calc(100% - var(--sidebar-mask-bottom)), transparent)",
     transitionProperty: "--sidebar-mask-top, --sidebar-mask-bottom",
-    transitionDuration: "0.3s",
+    transitionDuration: MOTION_DURATION_SLOWER,
     transitionTimingFunction: "ease",
     "&[data-scroll-top='false']": {
       "--sidebar-mask-top": "24px",
@@ -215,18 +215,18 @@ export const useStyles = makeStyles({
   },
   docItemNew: {
     animationName: "docSlideIn",
-    animationDuration: "0.3s",
+    animationDuration: MOTION_DURATION_SLOWER,
     animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
     animationFillMode: "backwards",
   },
   docItemSlideUp: {
     animationName: "docSlideUp",
-    animationDuration: "0.2s",
+    animationDuration: MOTION_DURATION_MEDIUM,
     animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
   },
   docItemExit: {
     animationName: "docSlideOut",
-    animationDuration: "0.25s",
+    animationDuration: MOTION_DURATION_SLOW,
     animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
     animationFillMode: "forwards",
     pointerEvents: "none" as const,
@@ -242,7 +242,7 @@ export const useStyles = makeStyles({
     gridTemplateRows: "1fr",
     marginTop: "0px",
     transitionProperty: "grid-template-rows, opacity, margin-top",
-    transitionDuration: "0.28s",
+    transitionDuration: MOTION_DURATION_SLOWER,
     transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
   },
   groupNotesSlideCollapsed: {
@@ -261,7 +261,7 @@ export const useStyles = makeStyles({
   },
   groupCollapseOut: {
     animationName: "groupCollapseOut",
-    animationDuration: "0.28s",
+    animationDuration: MOTION_DURATION_SLOWER,
     animationTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
     animationFillMode: "forwards",
     overflow: "hidden",
@@ -269,7 +269,7 @@ export const useStyles = makeStyles({
   },
   searchResultFadeIn: {
     animationName: "searchResultFadeIn",
-    animationDuration: "0.25s",
+    animationDuration: MOTION_DURATION_SLOW,
     animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
     animationFillMode: "backwards",
   },
@@ -399,7 +399,7 @@ export const useStyles = makeStyles({
       whiteSpace: "nowrap",
       fontWeight: 400,
       transitionProperty: "opacity",
-      transitionDuration: "0.15s",
+      transitionDuration: MOTION_DURATION_BASE,
     },
     ":hover .new-doc-shortcut": {
       opacity: 0.7,
@@ -432,12 +432,7 @@ export const useStyles = makeStyles({
     padding: 0,
     borderRadius: "4px",
     flexShrink: 0,
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
-    ":active": {
-      scale: 0.96,
-    },
+    ...pressableButton,
   },
   sectionLabel: {
     fontSize: "11px",
@@ -453,7 +448,7 @@ export const useStyles = makeStyles({
     display: "grid",
     gridTemplateRows: "1fr",
     transitionProperty: "grid-template-rows, opacity, margin-bottom",
-    transitionDuration: "0.25s",
+    transitionDuration: MOTION_DURATION_SLOW,
     transitionTimingFunction: "ease",
     marginBottom: "12px",
   },
@@ -509,12 +504,9 @@ export const useStyles = makeStyles({
     padding: "0",
     opacity: 0,
     pointerEvents: "none",
-    transitionProperty: "opacity, scale",
-    transitionDuration: "0.1s",
-    transitionTimingFunction: "ease-out",
-    ":active": {
-      scale: 0.96,
-    },
+    ...pressableButton,
+    transitionProperty: "opacity, background-color, color, scale",
+    transitionDuration: MOTION_DURATION_FAST,
   },
   moreBtnVisible: {
     opacity: 1,
@@ -531,7 +523,7 @@ export const useStyles = makeStyles({
     gap: "4px",
     flexShrink: 0,
     transitionProperty: "opacity",
-    transitionDuration: "0.1s",
+    transitionDuration: MOTION_DURATION_FAST,
   },
   docTrailingHidden: {
     opacity: 0,
@@ -601,7 +593,7 @@ export const useStyles = makeStyles({
       from: { opacity: 0, transform: "translateY(6px)" },
       to: { opacity: 1, transform: "translateY(0)" },
     },
-    animationDuration: "0.15s",
+    animationDuration: MOTION_DURATION_BASE,
     animationTimingFunction: "ease-out",
   },
   undoToastText: {
@@ -652,7 +644,7 @@ export const useStyles = makeStyles({
       from: { opacity: 0, transform: "translateY(4px)", filter: "blur(4px)" },
       to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
     },
-    animationDuration: "0.14s",
+    animationDuration: MOTION_DURATION_FAST,
     animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
     animationFillMode: "backwards",
   },
@@ -669,12 +661,7 @@ export const useStyles = makeStyles({
     minHeight: "32px",
     paddingLeft: "8px",
     paddingRight: "12px",
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
-    ":active": {
-      scale: 0.96,
-    },
+    ...pressableButton,
   },
   contextMenuDanger: {
     color: tokens.colorPaletteRedForeground1,
@@ -707,7 +694,7 @@ export const useStyles = makeStyles({
       from: { opacity: 0, transform: "translateY(3px)", filter: "blur(4px)" },
       to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
     },
-    animationDuration: "0.14s",
+    animationDuration: MOTION_DURATION_FAST,
     animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
     animationFillMode: "backwards",
   },
@@ -732,7 +719,7 @@ export const useStyles = makeStyles({
     justifyContent: "center",
     outline: "none",
     transitionProperty: "transform",
-    transitionDuration: "0.1s",
+    transitionDuration: MOTION_DURATION_FAST,
     ":hover": {
       transform: "scale(1.18)",
     },
@@ -765,7 +752,7 @@ export const useStyles = makeStyles({
       from: { opacity: 0, transform: "translateY(4px)", filter: "blur(4px)" },
       to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
     },
-    animationDuration: "0.14s",
+    animationDuration: MOTION_DURATION_FAST,
     animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
     animationFillMode: "backwards",
   },
@@ -807,7 +794,7 @@ export const useStyles = makeStyles({
     maxHeight: "0px",
     opacity: 0,
     transitionProperty: "max-height, opacity, margin-bottom",
-    transitionDuration: "0.2s",
+    transitionDuration: MOTION_DURATION_MEDIUM,
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
     marginBottom: "0px",
   },
@@ -847,12 +834,7 @@ export const useStyles = makeStyles({
     height: "24px",
     padding: "0",
     flexShrink: 0,
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
-    ":active": {
-      scale: 0.96,
-    },
+    ...pressableButton,
   },
   groupHeader: {
     position: "relative",
@@ -889,7 +871,7 @@ export const useStyles = makeStyles({
     flexShrink: 0,
     color: tokens.colorNeutralForeground3,
     transitionProperty: "transform",
-    transitionDuration: "0.15s",
+    transitionDuration: MOTION_DURATION_BASE,
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
   },
   groupChevronExpanded: {
@@ -909,7 +891,7 @@ export const useStyles = makeStyles({
     opacity: 0.8,
     flexShrink: 0,
     transitionProperty: "opacity",
-    transitionDuration: "0.1s",
+    transitionDuration: MOTION_DURATION_FAST,
   },
   groupNameInput: {
     border: "none",
@@ -937,7 +919,7 @@ export const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralForeground1,
     opacity: 0,
     transitionProperty: "width, opacity, background-color, margin",
-    transitionDuration: "0.15s",
+    transitionDuration: MOTION_DURATION_BASE,
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
     padding: 0,
     marginLeft: 0,
@@ -951,7 +933,7 @@ export const useStyles = makeStyles({
       scale: 0.25,
       filter: "blur(4px)",
       transitionProperty: "opacity, scale, filter",
-      transitionDuration: "0.3s",
+      transitionDuration: MOTION_DURATION_MEDIUM,
       transitionTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
     },
   },
@@ -997,11 +979,6 @@ export const useStyles = makeStyles({
     width: "28px",
     padding: "0",
     flexShrink: 0,
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
-    ":active": {
-      scale: 0.96,
-    },
+    ...pressableButton,
   },
 });

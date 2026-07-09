@@ -57,6 +57,7 @@ import { useChromeVisibility } from "./hooks/useChromeVisibility";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useDragDrop } from "./hooks/useDragDrop";
 import { useUpdater } from "./hooks/useUpdater";
+import { MOTION_FAST_MS } from "./styles/interactions";
 import {
   getSystemPrefersDarkFromMatchMedia,
   queryWindowsSystemPrefersDark,
@@ -334,7 +335,7 @@ function App() {
     const timeout = window.setTimeout(() => {
       setRenderedFloatingEditorControl(null);
       setFloatingEditorControlExiting(false);
-    }, 140);
+    }, MOTION_FAST_MS);
     return () => window.clearTimeout(timeout);
   }, [activeFloatingEditorControl, renderedFloatingEditorControl]);
 

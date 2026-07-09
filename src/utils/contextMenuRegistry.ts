@@ -1,4 +1,5 @@
 import { clampMenuToViewport } from "./clampMenuPosition";
+import { MOTION_DURATION_FAST } from "../styles/interactions";
 
 /** Shared singleton for all context menus — ensures only one is open at a time. */
 let activeMenu: HTMLElement | null = null;
@@ -192,7 +193,7 @@ export function createMenuItem(
     border-radius:4px;font-size:13px;font-weight:500;min-height:32px;padding:0 12px 0 8px;gap:8px;
     background:transparent;cursor:${opts.disabled ? "default" : "pointer"};
     font-family:inherit;color:${textColor};outline:none;
-    transition:background-color 120ms ease-out,color 120ms ease-out,scale 120ms ease-out;
+    transition:background-color ${MOTION_DURATION_FAST} ease-out,color ${MOTION_DURATION_FAST} ease-out,scale ${MOTION_DURATION_FAST} ease-out;
   `;
 
   if (!opts.disabled) {

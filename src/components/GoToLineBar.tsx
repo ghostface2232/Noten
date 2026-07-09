@@ -6,6 +6,7 @@ import { TextSelection } from "@tiptap/pm/state";
 import { scrollToPos } from "../utils/scrollToPos";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
+import { pressableButton } from "../styles/interactions";
 
 const useStyles = makeStyles({
   wrapper: {
@@ -60,14 +61,9 @@ const useStyles = makeStyles({
     cursor: "pointer",
     flexShrink: 0,
     padding: 0,
-    transitionProperty: "background-color, color, scale",
-    transitionDuration: "0.12s",
-    transitionTimingFunction: "ease-out",
+    ...pressableButton,
     ":hover": {
       backgroundColor: tokens.colorNeutralBackground1Hover,
-    },
-    ":active": {
-      scale: 0.96,
     },
   },
 });
@@ -122,7 +118,7 @@ export function GoToLineBar({ editor, onClose, locale }: GoToLineBarProps) {
       width: 3px; height: ${height}px; border-radius: 1.5px;
       background: var(--colorBrandForeground1, #0078d4);
       pointer-events: none; z-index: 5;
-      transition: top 0.15s ease, height 0.15s ease, opacity 0.15s ease;
+      transition: top var(--motion-base) ease, height var(--motion-base) ease, opacity var(--motion-base) ease;
       opacity: 1;
     `;
   }, []);
