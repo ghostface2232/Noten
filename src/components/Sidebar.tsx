@@ -137,11 +137,11 @@ interface NoteRowProps {
   onCancelRename: () => void;
   // Stable callbacks (parent pins via ref so selectMode/selectedNoteIds
   // changes don't churn their identity)
-  onActivate: (index: number, doc: NoteDoc) => void;
+  onActivate: (index: number, doc: NoteDoc, shiftKey: boolean) => void;
   onContextMenu: (index: number, doc: NoteDoc, e: React.MouseEvent) => void;
   onMoreClick: (index: number, doc: NoteDoc, e: React.PointerEvent) => void;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
-  onCheckboxClick: (id: string) => void;
+  onCheckboxClick: (id: string, shiftKey: boolean) => void;
 }
 
 const NoteRow = memo(function NoteRow(props: NoteRowProps) {
@@ -183,7 +183,7 @@ const NoteRow = memo(function NoteRow(props: NoteRowProps) {
           selectMode && styles.selectCheckboxVisible,
           selectMode && isSelected && styles.selectCheckboxChecked,
         )}
-        onClick={(e) => { e.stopPropagation(); onCheckboxClick(doc.id); }}
+        onClick={(e) => { e.stopPropagation(); onCheckboxClick(doc.id, e.shiftKey); }}
         style={selectMode && indented ? { marginLeft: "16px" } : undefined}
       >
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ opacity: isSelected ? 1 : 0, transition: "opacity 0.1s" }}>
@@ -227,7 +227,7 @@ const NoteRow = memo(function NoteRow(props: NoteRowProps) {
               selectMode && styles.docItemSelectGap,
               indented && !selectMode && styles.docItemIndented,
             )}
-            onClick={() => onActivate(originalIndex, doc)}
+            onClick={(e) => onActivate(originalIndex, doc, e.shiftKey)}
             size="small"
           >
             {isSearching && snippet ? (
@@ -394,6 +394,8 @@ export function Sidebar({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
   const [inAllNotes, setInAllNotes] = useState(false);
+  const selectionAnchorIdRef = useRef<string | null>(null);
+  const visibleNoteIdsRef = useRef<string[]>([]);
 
   const sidebarBodyRef = useRef<HTMLDivElement>(null);
   const allNotesScrollRef = useRef<HTMLDivElement>(null);
@@ -477,8 +479,26 @@ export function Sidebar({
   }, [pendingRenameGroupId, groups, onPendingRenameGroupIdClear]);
 
   useEffect(() => {
-    if (!selectMode) setSelectedNoteIds(new Set());
+    if (!selectMode) {
+      setSelectedNoteIds(new Set());
+      selectionAnchorIdRef.current = null;
+    }
   }, [selectMode]);
+
+  useEffect(() => {
+    setSelectedNoteIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (docIdSet.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+    if (selectionAnchorIdRef.current && !docIdSet.has(selectionAnchorIdRef.current)) {
+      selectionAnchorIdRef.current = null;
+    }
+  }, [docIdSet]);
 
 
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -713,11 +733,25 @@ export function Sidebar({
     return () => window.removeEventListener("keydown", handler);
   }, [activeIndex, contextMenu, docs, editingNoteId, editingGroupId, getDocumentContent, onDuplicateNote, onExportNote, onToggleNotePinned, onDeleteNote, handleDoubleClick, inAllNotes]);
 
-  const toggleNoteSelection = useCallback((noteId: string) => {
+  const toggleNoteSelection = useCallback((noteId: string, shiftKey = false) => {
     setSelectedNoteIds((prev) => {
+      if (shiftKey && selectionAnchorIdRef.current) {
+        const visibleNoteIds = visibleNoteIdsRef.current;
+        const anchorIndex = visibleNoteIds.indexOf(selectionAnchorIdRef.current);
+        const targetIndex = visibleNoteIds.indexOf(noteId);
+        if (anchorIndex >= 0 && targetIndex >= 0) {
+          const from = Math.min(anchorIndex, targetIndex);
+          const to = Math.max(anchorIndex, targetIndex);
+          const next = new Set(prev);
+          for (const id of visibleNoteIds.slice(from, to + 1)) next.add(id);
+          return next;
+        }
+      }
+
       const next = new Set(prev);
       if (next.has(noteId)) next.delete(noteId);
       else next.add(noteId);
+      selectionAnchorIdRef.current = noteId;
       return next;
     });
   }, []);
@@ -739,10 +773,10 @@ export function Sidebar({
   const handleDragPointerDownRef = useRef(handleDragPointerDown);
   handleDragPointerDownRef.current = handleDragPointerDown;
 
-  const handleRowActivate = useCallback((index: number, doc: NoteDoc) => {
+  const handleRowActivate = useCallback((index: number, doc: NoteDoc, shiftKey: boolean) => {
     if (isDragging.current) return;
     if (selectModeRef.current) {
-      toggleNoteSelection(doc.id);
+      toggleNoteSelection(doc.id, shiftKey);
     } else {
       onSwitchDocumentRef.current(index);
     }
@@ -850,6 +884,19 @@ export function Sidebar({
 
     return { groupRenderList: gList, noteItems: nItems };
   }, [flatListMode, filteredDocs, docs, groups, groupedNoteIds, notesSortOrder, locale, collapsingGroupIds]);
+
+  const visibleNoteIds = useMemo(() => {
+    if (inAllNotes) return filteredDocs.map(({ doc }) => doc.id);
+    if (flatListMode) return noteItems.map((item) => item.doc.id);
+
+    const ids: string[] = [];
+    for (const { notes } of groupRenderList) {
+      for (const { doc } of notes) ids.push(doc.id);
+    }
+    for (const item of noteItems) ids.push(item.doc.id);
+    return ids;
+  }, [filteredDocs, flatListMode, groupRenderList, inAllNotes, noteItems]);
+  visibleNoteIdsRef.current = visibleNoteIds;
 
   // Re-measure the fade masks when the rendered lists or container size change,
   // so an overflowing list always shows its bottom fade — even before any scroll.
