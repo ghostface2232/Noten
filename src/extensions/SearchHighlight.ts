@@ -80,6 +80,17 @@ export function findSearchMatches(doc: Node, query: string): SearchMatch[] {
   return results;
 }
 
+export function selectNonOverlappingMatches(matches: readonly SearchMatch[]): SearchMatch[] {
+  const selected: SearchMatch[] = [];
+  let nextAllowedFrom = -1;
+  for (const match of matches) {
+    if (match.from < nextAllowedFrom) continue;
+    selected.push(match);
+    nextAllowedFrom = match.to;
+  }
+  return selected;
+}
+
 // First index whose match ends at or after `pos` (lower bound). `matches` is
 // sorted ascending by position.
 function firstIndexFrom(matches: SearchMatch[], pos: number): number {

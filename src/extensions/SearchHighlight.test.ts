@@ -3,6 +3,7 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import {
   findSearchMatches,
+  selectNonOverlappingMatches,
   selectMatchesToDecorate,
   type SearchMatch,
 } from "./SearchHighlight";
@@ -82,6 +83,40 @@ describe("findSearchMatches", () => {
     const { editor, doc } = docFromText("aaa");
     active = editor;
     expect(findSearchMatches(doc, "aa").length).toBe(2);
+  });
+});
+
+describe("selectNonOverlappingMatches", () => {
+  it("keeps the leftmost matches for replace-all when search matches overlap", () => {
+    const { editor, doc } = docFromText("aaaa");
+    active = editor;
+    const matches = findSearchMatches(doc, "aaa");
+    expect(matches).toHaveLength(2);
+
+    const replaceable = selectNonOverlappingMatches(matches);
+    expect(replaceable).toEqual([matches[0]]);
+
+    const { tr } = editor.state;
+    for (const match of replaceable) {
+      tr.insertText("", tr.mapping.map(match.from), tr.mapping.map(match.to));
+    }
+
+    expect(() => editor.view.dispatch(tr)).not.toThrow();
+    expect(editor.state.doc.textContent).toBe("a");
+  });
+
+  it("maps later replacements after length-changing earlier replacements", () => {
+    const { editor, doc } = docFromText("aa aa");
+    active = editor;
+    const matches = selectNonOverlappingMatches(findSearchMatches(doc, "aa"));
+
+    const { tr } = editor.state;
+    for (const match of matches) {
+      tr.insertText("bbbb", tr.mapping.map(match.from), tr.mapping.map(match.to));
+    }
+    editor.view.dispatch(tr);
+
+    expect(editor.state.doc.textContent).toBe("bbbb bbbb");
   });
 });
 

@@ -61,7 +61,12 @@ vi.mock("./useNotesLoader", () => ({
   }),
 }));
 
-import { useMigrationSync, broadcastMigrationStarted, broadcastMigrationFinished } from "./useMigrationSync";
+import {
+  PEER_MIGRATION_STALE_MS,
+  useMigrationSync,
+  broadcastMigrationStarted,
+  broadcastMigrationFinished,
+} from "./useMigrationSync";
 import { emit, listen } from "@tauri-apps/api/event";
 import * as loaderModule from "./useNotesLoader";
 
@@ -98,8 +103,13 @@ function renderMigrationSync() {
 async function waitForListeners() {
   await vi.waitFor(() => {
     expect(refs.listeners.get("notes-migration-started")?.length ?? 0).toBeGreaterThan(0);
+    expect(refs.listeners.get("notes-migration-heartbeat")?.length ?? 0).toBeGreaterThan(0);
     expect(refs.listeners.get("notes-migration-finished")?.length ?? 0).toBeGreaterThan(0);
   });
+}
+
+async function flushMicrotasks(times = 8) {
+  for (let i = 0; i < times; i += 1) await Promise.resolve();
 }
 
 beforeEach(() => {
@@ -114,6 +124,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  broadcastMigrationFinished("__test_cleanup__", false, "");
   vi.clearAllMocks();
   vi.useRealTimers();
 });
@@ -301,6 +312,60 @@ describe("useMigrationSync — started listener", () => {
     expect(refs.callLog).not.toContain("flag:true");
     expect(refs.callLog).not.toContain("flushManifest");
     expect(refs.callLog).not.toContain("emit:notes-migration-flush-ack");
+  });
+
+  it("releases the save block when the migrating window stops heartbeating", async () => {
+    vi.useFakeTimers();
+
+    renderMigrationSync();
+    await waitForListeners();
+    await emit("notes-migration-started", { sourceWindow: "second", migrationId: "crashed-owner" });
+    await flushMicrotasks();
+
+    expect(refs.callLog).toContain("flag:true");
+    expect(refs.callLog).toContain("emit:notes-migration-flush-ack");
+    expect(refs.callLog).not.toContain("flag:false");
+
+    await vi.advanceTimersByTimeAsync(PEER_MIGRATION_STALE_MS - 1);
+    expect(refs.callLog).not.toContain("flag:false");
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refs.callLog).toContain("flag:false");
+  });
+
+  it("keeps the save block while heartbeat events keep arriving", async () => {
+    vi.useFakeTimers();
+
+    renderMigrationSync();
+    await waitForListeners();
+    await emit("notes-migration-started", { sourceWindow: "second", migrationId: "live-owner" });
+    await flushMicrotasks();
+
+    await vi.advanceTimersByTimeAsync(PEER_MIGRATION_STALE_MS - 1);
+    await emit("notes-migration-heartbeat", { sourceWindow: "second", migrationId: "live-owner" });
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(PEER_MIGRATION_STALE_MS - 1);
+    expect(refs.callLog).not.toContain("flag:false");
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refs.callLog).toContain("flag:false");
+  });
+
+  it("clears the heartbeat watchdog when a finished event arrives", async () => {
+    vi.useFakeTimers();
+
+    renderMigrationSync();
+    await waitForListeners();
+    await emit("notes-migration-started", { sourceWindow: "second", migrationId: "finished-owner" });
+    await flushMicrotasks();
+
+    await emit("notes-migration-finished", {
+      sourceWindow: "second", migrationId: "finished-owner", success: true, newDir: "/new/notes",
+    });
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(PEER_MIGRATION_STALE_MS);
+
+    expect(refs.callLog.filter((entry) => entry === "flag:false")).toHaveLength(0);
   });
 });
 

@@ -16,6 +16,11 @@ interface MigrationStartedPayload {
   migrationId: string;
 }
 
+interface MigrationHeartbeatPayload {
+  sourceWindow: string;
+  migrationId: string;
+}
+
 interface MigrationAckPayload {
   sourceWindow: string;
   migrationId: string;
@@ -65,6 +70,28 @@ interface MigrationFinishedPayload {
 }
 
 const WINDOW_LABEL = getCurrentWindow().label;
+export const MIGRATION_HEARTBEAT_INTERVAL_MS = 2000;
+export const PEER_MIGRATION_STALE_MS = 15000;
+
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let heartbeatMigrationId: string | null = null;
+
+function stopMigrationHeartbeat(migrationId?: string) {
+  if (migrationId && heartbeatMigrationId && heartbeatMigrationId !== migrationId) return;
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+  heartbeatMigrationId = null;
+}
+
+function startMigrationHeartbeat(migrationId: string) {
+  stopMigrationHeartbeat();
+  heartbeatMigrationId = migrationId;
+  const payload = { sourceWindow: WINDOW_LABEL, migrationId } satisfies MigrationHeartbeatPayload;
+  const send = () => { emit("notes-migration-heartbeat", payload).catch(() => {}); };
+  send();
+  heartbeatTimer = setInterval(send, MIGRATION_HEARTBEAT_INTERVAL_MS);
+  (heartbeatTimer as { unref?: () => void }).unref?.();
+}
 
 /**
  * Announce a migration and wait until every other window has flushed its
@@ -93,6 +120,7 @@ export async function broadcastMigrationStarted(timeoutMs = 5000): Promise<Migra
   // unconfirmed so the caller keeps the old dir and cleans up later.
   if (!enumerated) {
     await emit("notes-migration-started", payload).catch(() => {});
+    startMigrationHeartbeat(migrationId);
     return { migrationId, outcome: "unconfirmed" };
   }
 
@@ -123,6 +151,7 @@ export async function broadcastMigrationStarted(timeoutMs = 5000): Promise<Migra
   } catch { /* listener failed — cannot confirm other windows drained */ }
 
   await emit("notes-migration-started", payload).catch(() => {});
+  startMigrationHeartbeat(migrationId);
 
   // Without the ack listener we can't confirm anything drained.
   if (!unlistenAck) return { migrationId, outcome: "unconfirmed" };
@@ -148,6 +177,7 @@ export function broadcastMigrationFinished(
   newDir: string,
   sourceRetained = false,
 ): void {
+  stopMigrationHeartbeat();
   emit("notes-migration-finished", {
     sourceWindow: WINDOW_LABEL, migrationId, success, newDir, sourceRetained,
   } satisfies MigrationFinishedPayload).catch(() => {});
@@ -177,6 +207,25 @@ export function useMigrationSync(params: MigrationSyncParams) {
     // late drain cannot re-enable the global migration guard after it was
     // already released.
     const finishedMigrationIds = new Set<string>();
+    let peerWatchdog:
+      | { sourceWindow: string; migrationId: string; timer: ReturnType<typeof setTimeout> | null }
+      | null = null;
+
+    const clearPeerWatchdog = (migrationId?: string) => {
+      if (migrationId && peerWatchdog?.migrationId !== migrationId) return;
+      if (peerWatchdog?.timer) clearTimeout(peerWatchdog.timer);
+      peerWatchdog = null;
+    };
+
+    const armPeerWatchdog = (sourceWindow: string, migrationId: string) => {
+      if (peerWatchdog?.timer) clearTimeout(peerWatchdog.timer);
+      peerWatchdog = { sourceWindow, migrationId, timer: null };
+      peerWatchdog.timer = setTimeout(() => {
+        if (peerWatchdog?.migrationId !== migrationId || peerWatchdog.sourceWindow !== sourceWindow) return;
+        peerWatchdog = null;
+        setMigrationInProgress(false);
+      }, PEER_MIGRATION_STALE_MS);
+    };
 
     Promise.all([
       listen<MigrationStartedPayload>("notes-migration-started", (event) => {
@@ -200,8 +249,12 @@ export function useMigrationSync(params: MigrationSyncParams) {
           // behind the drain barrier.
           const manifestSave = p.flushManifestRef.current?.().catch(() => false);
           setMigrationInProgress(true);
+          armPeerWatchdog(sourceWindow, migrationId);
           const manifestSaved = (await manifestSave) === true;
-          if (finishedMigrationIds.has(migrationId)) return;
+          if (finishedMigrationIds.has(migrationId)) {
+            clearPeerWatchdog(migrationId);
+            return;
+          }
           // Report whether the drain actually persisted everything. If a
           // backup/write error stranded edits, ok:false tells the migrating
           // window to abort rather than clear the old dir out from under us.
@@ -212,10 +265,19 @@ export function useMigrationSync(params: MigrationSyncParams) {
         })();
       }),
 
+      listen<MigrationHeartbeatPayload>("notes-migration-heartbeat", (event) => {
+        const { sourceWindow, migrationId } = event.payload;
+        if (sourceWindow === WINDOW_LABEL) return;
+        if (finishedMigrationIds.has(migrationId)) return;
+        if (peerWatchdog?.sourceWindow !== sourceWindow || peerWatchdog.migrationId !== migrationId) return;
+        armPeerWatchdog(sourceWindow, migrationId);
+      }),
+
       listen<MigrationFinishedPayload>("notes-migration-finished", (event) => {
         const { sourceWindow, migrationId, success, newDir, sourceRetained } = event.payload;
         if (sourceWindow === WINDOW_LABEL) return;
         finishedMigrationIds.add(migrationId);
+        clearPeerWatchdog(migrationId);
         const p = paramsRef.current;
         if (!success) {
           setMigrationInProgress(false);
@@ -267,6 +329,10 @@ export function useMigrationSync(params: MigrationSyncParams) {
       unlisteners = fns;
     });
 
-    return () => { mounted = false; unlisteners.forEach((fn) => fn()); };
+    return () => {
+      mounted = false;
+      clearPeerWatchdog();
+      unlisteners.forEach((fn) => fn());
+    };
   }, []);
 }

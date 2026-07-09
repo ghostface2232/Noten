@@ -7,7 +7,12 @@ import {
   DismissRegular,
 } from "@fluentui/react-icons";
 import type { Editor } from "@tiptap/core";
-import { searchPluginKey, findSearchMatches, type SearchPluginState } from "../extensions/SearchHighlight";
+import {
+  searchPluginKey,
+  findSearchMatches,
+  selectNonOverlappingMatches,
+  type SearchPluginState,
+} from "../extensions/SearchHighlight";
 import { scrollToPos } from "../utils/scrollToPos";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
@@ -224,11 +229,12 @@ export function SearchBar({ editor, onClose, replaceOpen, onToggleReplace, local
   const handleReplaceAll = useCallback(() => {
     if (!editor || !query || matchCount === 0) return;
     const ps = searchPluginKey.getState(editor.state) as SearchPluginState;
-    const { matches } = ps;
+    const matches = selectNonOverlappingMatches(ps.matches);
+    if (matches.length === 0) return;
 
     const { tr } = editor.state;
-    for (let idx = matches.length - 1; idx >= 0; idx--) {
-      tr.insertText(replaceText, matches[idx].from, matches[idx].to);
+    for (const match of matches) {
+      tr.insertText(replaceText, tr.mapping.map(match.from), tr.mapping.map(match.to));
     }
     editor.view.dispatch(tr);
     syncAfterReplace(0);
