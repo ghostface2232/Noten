@@ -113,6 +113,12 @@ const useStyles = makeStyles({
     padding: "0",
     borderRadius: "6px",
     border: "none",
+    transitionProperty: "background-color, color, scale",
+    transitionDuration: "0.12s",
+    transitionTimingFunction: "ease-out",
+    ":active": {
+      scale: 0.96,
+    },
   },
   toolBtnActive: {
     minWidth: "28px",
@@ -122,6 +128,12 @@ const useStyles = makeStyles({
     border: "none",
     backgroundColor: "var(--ui-active-bg)",
     fontWeight: 500,
+    transitionProperty: "background-color, color, scale",
+    transitionDuration: "0.12s",
+    transitionTimingFunction: "ease-out",
+    ":active": {
+      scale: 0.96,
+    },
   },
   headingBtn: {
     width: "64px",
@@ -134,6 +146,12 @@ const useStyles = makeStyles({
     fontSize: "12px",
     fontWeight: 400,
     gap: "2px",
+    transitionProperty: "background-color, color, scale",
+    transitionDuration: "0.12s",
+    transitionTimingFunction: "ease-out",
+    ":active": {
+      scale: 0.96,
+    },
   },
   headingBtnActive: {
     width: "64px",
@@ -146,6 +164,21 @@ const useStyles = makeStyles({
     fontSize: "12px",
     gap: "2px",
     fontWeight: 400,
+    transitionProperty: "background-color, color, scale",
+    transitionDuration: "0.12s",
+    transitionTimingFunction: "ease-out",
+    ":active": {
+      scale: 0.96,
+    },
+  },
+  popoverSurface: {
+    animationName: {
+      from: { opacity: 0, filter: "blur(4px)" },
+      to: { opacity: 1, filter: "blur(0px)" },
+    },
+    animationDuration: "0.16s",
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+    animationFillMode: "backwards",
   },
 });
 
@@ -210,9 +243,10 @@ interface TableInsertButtonProps {
   locale: Locale;
   tooltip: string;
   buttonClassName: string;
+  popoverClassName: string;
 }
 
-function TableInsertButton({ editor, locale, tooltip, buttonClassName }: TableInsertButtonProps) {
+function TableInsertButton({ editor, locale, tooltip, buttonClassName, popoverClassName }: TableInsertButtonProps) {
   const [open, setOpen] = useState(false);
   return (
     <Popover
@@ -232,7 +266,7 @@ function TableInsertButton({ editor, locale, tooltip, buttonClassName }: TableIn
           />
         </Tooltip>
       </PopoverTrigger>
-      <PopoverSurface tabIndex={-1} style={{ padding: 8 }}>
+      <PopoverSurface tabIndex={-1} className={popoverClassName} style={{ padding: 8 }}>
         <TableGridPicker
           editor={editor}
           locale={locale}
@@ -423,7 +457,7 @@ function EditorToolbarImpl({
                     {headingLabel}
                   </Button>
                 </MenuTrigger>
-                <MenuPopover>
+                <MenuPopover className={styles.popoverSurface}>
                   <MenuList>
                     <MenuItem onClick={() => editor?.chain().focus().setParagraph().run()}>
                       <span style={{ fontSize: "0.95em", fontWeight: 400 }}>{i("heading.body")}</span>
@@ -493,6 +527,7 @@ function EditorToolbarImpl({
                 locale={locale}
                 tooltip={i("tool.table")}
                 buttonClassName={styles.toolBtn}
+                popoverClassName={styles.popoverSurface}
               />
             </div>
 

@@ -45,6 +45,7 @@ const useStyles = makeStyles({
     paddingRight: "4px",
     minWidth: "36px",
     textAlign: "right",
+    fontVariantNumeric: "tabular-nums",
   },
   btn: {
     display: "inline-flex",
@@ -59,8 +60,14 @@ const useStyles = makeStyles({
     cursor: "pointer",
     flexShrink: 0,
     padding: 0,
+    transitionProperty: "background-color, color, scale",
+    transitionDuration: "0.12s",
+    transitionTimingFunction: "ease-out",
     ":hover": {
       backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+    ":active": {
+      scale: 0.96,
     },
   },
 });

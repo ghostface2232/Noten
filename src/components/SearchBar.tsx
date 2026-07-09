@@ -38,6 +38,13 @@ const useStyles = makeStyles({
     gap: "2px",
     padding: "0 5px 6px 12px",
     overflow: "hidden",
+    animationName: {
+      from: { opacity: 0, transform: "translateY(-4px)", filter: "blur(4px)" },
+      to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
+    },
+    animationDuration: "0.16s",
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+    animationFillMode: "backwards",
   },
   input: {
     flex: 1,
@@ -61,6 +68,7 @@ const useStyles = makeStyles({
     paddingRight: "4px",
     minWidth: "36px",
     textAlign: "right",
+    fontVariantNumeric: "tabular-nums",
   },
   btn: {
     display: "inline-flex",
@@ -75,8 +83,14 @@ const useStyles = makeStyles({
     cursor: "pointer",
     flexShrink: 0,
     padding: 0,
+    transitionProperty: "background-color, color, scale",
+    transitionDuration: "0.12s",
+    transitionTimingFunction: "ease-out",
     ":hover": {
       backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+    ":active": {
+      scale: 0.96,
     },
   },
   btnActive: {
@@ -97,8 +111,14 @@ const useStyles = makeStyles({
     fontSize: "12px",
     fontFamily: "inherit",
     whiteSpace: "nowrap",
+    transitionProperty: "background-color, color, scale",
+    transitionDuration: "0.12s",
+    transitionTimingFunction: "ease-out",
     ":hover": {
       backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+    ":active": {
+      scale: 0.96,
     },
   },
 });

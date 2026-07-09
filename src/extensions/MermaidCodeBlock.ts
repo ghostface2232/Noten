@@ -39,6 +39,15 @@ function isMermaidLanguage(language: unknown): boolean {
   return normalizeLanguage(language) === MERMAID_LANGUAGE;
 }
 
+function iconSwapHtml(restingIcon: string, successIcon: string): string {
+  return [
+    '<span class="noten-icon-swap" aria-hidden="true">',
+    `<span class="noten-icon-swap-layer noten-icon-swap-resting">${restingIcon}</span>`,
+    `<span class="noten-icon-swap-layer noten-icon-swap-success">${successIcon}</span>`,
+    "</span>",
+  ].join("");
+}
+
 async function ensureMermaidFontsReady() {
   if (mermaidFontsReadyPromise) {
     return mermaidFontsReadyPromise;
@@ -129,7 +138,7 @@ class MermaidCodeBlockView implements NodeView {
     this.copyButton = document.createElement("button");
     this.copyButton.type = "button";
     this.copyButton.className = "noten-code-copy";
-    this.copyButton.innerHTML = COPY_ICON;
+    this.copyButton.innerHTML = iconSwapHtml(COPY_ICON, CHECK_ICON);
     this.copyButton.setAttribute("aria-label", "Copy code");
     this.copyButton.setAttribute("title", "Copy code");
     this.copyButton.addEventListener("click", this.handleCopyClick);
@@ -146,7 +155,7 @@ class MermaidCodeBlockView implements NodeView {
     this.exportButton = document.createElement("button");
     this.exportButton.type = "button";
     this.exportButton.className = "noten-mermaid-code-export";
-    this.exportButton.innerHTML = DOWNLOAD_ICON;
+    this.exportButton.innerHTML = iconSwapHtml(DOWNLOAD_ICON, CHECK_ICON);
     this.syncExportButtonLabel();
     this.exportButton.addEventListener("click", this.handleExportClick);
     this.preElement.append(this.exportButton);
@@ -294,18 +303,12 @@ class MermaidCodeBlockView implements NodeView {
     event.preventDefault();
     event.stopPropagation();
     void navigator.clipboard.writeText(this.node.textContent).then(() => {
-      this.copyButton.innerHTML = CHECK_ICON;
       this.copyButton.classList.add("is-copied");
       if (this.copyFeedbackTimeout !== null) {
         window.clearTimeout(this.copyFeedbackTimeout);
       }
       this.copyFeedbackTimeout = window.setTimeout(() => {
-        this.copyButton.innerHTML = COPY_ICON;
         this.copyButton.classList.remove("is-copied");
-        this.copyButton.classList.add("is-restoring");
-        requestAnimationFrame(() => {
-          setTimeout(() => this.copyButton.classList.remove("is-restoring"), 150);
-        });
         this.copyFeedbackTimeout = null;
       }, COPY_FEEDBACK_MS);
     });
@@ -324,18 +327,12 @@ class MermaidCodeBlockView implements NodeView {
   };
 
   private showExportSuccessFeedback() {
-    this.exportButton.innerHTML = CHECK_ICON;
     this.exportButton.classList.add("is-copied");
     if (this.exportFeedbackTimeout !== null) {
       window.clearTimeout(this.exportFeedbackTimeout);
     }
     this.exportFeedbackTimeout = window.setTimeout(() => {
-      this.exportButton.innerHTML = DOWNLOAD_ICON;
       this.exportButton.classList.remove("is-copied");
-      this.exportButton.classList.add("is-restoring");
-      requestAnimationFrame(() => {
-        setTimeout(() => this.exportButton.classList.remove("is-restoring"), 150);
-      });
       this.exportFeedbackTimeout = null;
     }, COPY_FEEDBACK_MS);
   }

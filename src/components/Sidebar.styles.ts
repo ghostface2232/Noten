@@ -419,6 +419,12 @@ export const useStyles = makeStyles({
     padding: 0,
     borderRadius: "4px",
     flexShrink: 0,
+    transitionProperty: "background-color, color, scale",
+    transitionDuration: "0.12s",
+    transitionTimingFunction: "ease-out",
+    ":active": {
+      scale: 0.96,
+    },
   },
   sectionLabel: {
     fontSize: "11px",
@@ -490,8 +496,12 @@ export const useStyles = makeStyles({
     padding: "0",
     opacity: 0,
     pointerEvents: "none",
-    transitionProperty: "opacity",
+    transitionProperty: "opacity, scale",
     transitionDuration: "0.1s",
+    transitionTimingFunction: "ease-out",
+    ":active": {
+      scale: 0.96,
+    },
   },
   moreBtnVisible: {
     opacity: 1,
@@ -622,6 +632,13 @@ export const useStyles = makeStyles({
     boxShadow: tokens.shadow16,
     padding: "4px",
     minWidth: "210px",
+    animationName: {
+      from: { opacity: 0, transform: "translateY(4px)", filter: "blur(4px)" },
+      to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
+    },
+    animationDuration: "0.14s",
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+    animationFillMode: "backwards",
   },
   contextMenuItem: {
     display: "flex",
@@ -636,6 +653,12 @@ export const useStyles = makeStyles({
     minHeight: "32px",
     paddingLeft: "8px",
     paddingRight: "12px",
+    transitionProperty: "background-color, color, scale",
+    transitionDuration: "0.12s",
+    transitionTimingFunction: "ease-out",
+    ":active": {
+      scale: 0.96,
+    },
   },
   contextMenuDanger: {
     color: tokens.colorPaletteRedForeground1,
@@ -664,6 +687,13 @@ export const useStyles = makeStyles({
     boxShadow: tokens.shadow16,
     padding: "4px",
     minWidth: "140px",
+    animationName: {
+      from: { opacity: 0, transform: "translateY(3px)", filter: "blur(4px)" },
+      to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
+    },
+    animationDuration: "0.14s",
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+    animationFillMode: "backwards",
   },
   colorRow: {
     display: "flex",
@@ -690,6 +720,9 @@ export const useStyles = makeStyles({
     ":hover": {
       transform: "scale(1.18)",
     },
+    ":active": {
+      transform: "scale(0.96)",
+    },
     // Keyboard focus indicator (2.4.7): swatches are part of the context menu's
     // roving focus, so an arrowed-to swatch must be visibly distinguishable.
     ":focus-visible": {
@@ -712,6 +745,13 @@ export const useStyles = makeStyles({
     padding: "4px",
     display: "flex",
     flexDirection: "column",
+    animationName: {
+      from: { opacity: 0, transform: "translateY(4px)", filter: "blur(4px)" },
+      to: { opacity: 1, transform: "translateY(0)", filter: "blur(0px)" },
+    },
+    animationDuration: "0.14s",
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+    animationFillMode: "backwards",
   },
   confirmOverlay: {
     position: "fixed",
@@ -791,6 +831,12 @@ export const useStyles = makeStyles({
     height: "24px",
     padding: "0",
     flexShrink: 0,
+    transitionProperty: "background-color, color, scale",
+    transitionDuration: "0.12s",
+    transitionTimingFunction: "ease-out",
+    ":active": {
+      scale: 0.96,
+    },
   },
   groupHeader: {
     position: "relative",
@@ -883,6 +929,14 @@ export const useStyles = makeStyles({
     fontSize: "14px",
     lineHeight: 1,
     pointerEvents: "none",
+    "& svg": {
+      opacity: 0,
+      scale: 0.25,
+      filter: "blur(4px)",
+      transitionProperty: "opacity, scale, filter",
+      transitionDuration: "0.3s",
+      transitionTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+    },
   },
   selectCheckboxVisible: {
     width: "16px",
@@ -894,6 +948,11 @@ export const useStyles = makeStyles({
     opacity: 1,
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralBackground1,
+    "& svg": {
+      opacity: 1,
+      scale: 1,
+      filter: "blur(0px)",
+    },
   },
   selectToolbar: {
     display: "flex",
@@ -921,5 +980,11 @@ export const useStyles = makeStyles({
     width: "28px",
     padding: "0",
     flexShrink: 0,
+    transitionProperty: "background-color, color, scale",
+    transitionDuration: "0.12s",
+    transitionTimingFunction: "ease-out",
+    ":active": {
+      scale: 0.96,
+    },
   },
 });

@@ -194,6 +194,11 @@
   background: transparent;
   color: var(--editor-color-text-secondary);
   cursor: pointer;
+  transition: color 120ms ease-out, scale 120ms ease-out;
+}
+
+.ProseMirror pre .noten-code-copy:active {
+  scale: 0.96;
 }
 
 .ProseMirror pre .noten-code-copy:hover {
@@ -203,17 +208,40 @@
 .ProseMirror pre .noten-code-copy svg {
   width: 14px;
   height: 14px;
-  transition: opacity 0.15s ease;
 }
 
-@keyframes noten-copy-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+.ProseMirror pre .noten-icon-swap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
 }
 
-.ProseMirror pre .noten-code-copy.is-copied svg,
-.ProseMirror pre .noten-code-copy.is-restoring svg {
-  animation: noten-copy-fade-in 0.15s ease;
+.ProseMirror pre .noten-icon-swap-layer {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  scale: 0.25;
+  filter: blur(4px);
+  transition: opacity 0.3s cubic-bezier(0.2, 0, 0, 1), scale 0.3s cubic-bezier(0.2, 0, 0, 1), filter 0.3s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.ProseMirror pre .noten-icon-swap-resting,
+.ProseMirror pre .noten-code-copy.is-copied .noten-icon-swap-success {
+  opacity: 1;
+  scale: 1;
+  filter: blur(0px);
+}
+
+.ProseMirror pre .noten-code-copy.is-copied .noten-icon-swap-resting {
+  opacity: 0;
+  scale: 0.25;
+  filter: blur(4px);
 }
 
 .ProseMirror pre .noten-code-copy.is-copied {
