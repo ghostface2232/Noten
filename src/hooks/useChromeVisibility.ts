@@ -6,6 +6,7 @@ const CHROME_LOCK_MS = 300;
 export function useChromeVisibility(
   contentRef: RefObject<HTMLDivElement | null>,
   activeDocId: string | undefined,
+  pinEditorToolbar: boolean,
 ) {
   const [chromeVisible, setChromeVisible] = useState(true);
   const chromeLockUntilRef = useRef(0);
@@ -25,6 +26,13 @@ export function useChromeVisibility(
   }, []);
 
   useEffect(() => {
+    if (pinEditorToolbar) {
+      chromeVisibleRef.current = true;
+      setChromeVisible(true);
+      chromeLockUntilRef.current = 0;
+      return;
+    }
+
     const el = contentRef.current;
     if (!el) return;
 
@@ -76,9 +84,16 @@ export function useChromeVisibility(
       el.removeEventListener("scroll", onScroll);
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, []);
+  }, [contentRef, pinEditorToolbar]);
 
   useEffect(() => {
+    if (pinEditorToolbar) {
+      chromeVisibleRef.current = true;
+      setChromeVisible(true);
+      lastScrollTopRef.current = contentRef.current?.scrollTop ?? 0;
+      return;
+    }
+
     requestAnimationFrame(() => {
       const el = contentRef.current;
       if (!el) return;
@@ -88,7 +103,7 @@ export function useChromeVisibility(
       chromeVisibleRef.current = next;
       setChromeVisible(next);
     });
-  }, [activeDocId]);
+  }, [activeDocId, contentRef, pinEditorToolbar]);
 
   return {
     chromeVisible,

@@ -20,6 +20,7 @@ export interface Settings {
   wordWrap: WordWrap;
   paragraphSpacing: ParagraphSpacing;
   keepFormatOnPaste: boolean;
+  pinEditorToolbar: boolean;
   spellcheck: boolean;
   groupLayout: GroupLayout;
   fontFamily: FontFamily;
@@ -37,6 +38,7 @@ const DEFAULTS: Settings = {
   wordWrap: "word",
   paragraphSpacing: 30,
   keepFormatOnPaste: true,
+  pinEditorToolbar: false,
   spellcheck: false,
   groupLayout: "groups-first",
   fontFamily: "sans",
@@ -88,6 +90,7 @@ function parseSettings(raw: string): Settings {
       ? (parsed.paragraphSpacing as ParagraphSpacing)
       : DEFAULTS.paragraphSpacing,
     keepFormatOnPaste: typeof parsed.keepFormatOnPaste === "boolean" ? parsed.keepFormatOnPaste : DEFAULTS.keepFormatOnPaste,
+    pinEditorToolbar: typeof parsed.pinEditorToolbar === "boolean" ? parsed.pinEditorToolbar : DEFAULTS.pinEditorToolbar,
     spellcheck: typeof parsed.spellcheck === "boolean" ? parsed.spellcheck : DEFAULTS.spellcheck,
     groupLayout: parsed.groupLayout === "mixed" ? "mixed" : DEFAULTS.groupLayout,
     fontFamily: parsed.fontFamily === "serif" ? "serif" : DEFAULTS.fontFamily,

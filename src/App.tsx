@@ -947,7 +947,7 @@ function App() {
     editorTopOffset,
     handleShowEditorChrome,
     handleBarHeight,
-  } = useChromeVisibility(contentRef, activeDoc?.id);
+  } = useChromeVisibility(contentRef, activeDoc?.id, settings.pinEditorToolbar);
 
   useKeyboardShortcuts({
     tiptapRef,

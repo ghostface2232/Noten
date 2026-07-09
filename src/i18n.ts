@@ -170,6 +170,7 @@ const dict = {
   "settings.wordWrap.char": { en: "Character", ko: "문자 단위" },
   "settings.paragraphSpacing": { en: "Paragraph Spacing", ko: "문단 간격" },
   "settings.keepFormat": { en: "Keep formatting on paste", ko: "붙여넣기 시 원문 서식 유지" },
+  "settings.pinEditorToolbar": { en: "Pin toolbar", ko: "툴바 고정" },
   "settings.shortcuts": { en: "Keyboard Shortcuts", ko: "단축키 안내" },
   "settings.shortcut.showChrome": { en: "Show or hide editor chrome", ko: "편집 막대 표시 / 숨기기" },
   "settings.shortcut.import": { en: "Open file", ko: "파일 열기" },

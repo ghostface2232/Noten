@@ -499,6 +499,14 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   />
                 </div>
 
+                <div className={mergeClasses(styles.row, settingItemClass(styles))}>
+                  <Label className={styles.label}>{i("settings.pinEditorToolbar")}</Label>
+                  <Switch
+                    checked={settings.pinEditorToolbar}
+                    onChange={(_, data) => onUpdate("pinEditorToolbar", data.checked)}
+                  />
+                </div>
+
                 <div className={mergeClasses(styles.sliderRow, settingItemClass(styles))}>
                   <div className={styles.sliderHeader}>
                     <Label className={styles.label}>{i("settings.paragraphSpacing")}</Label>
