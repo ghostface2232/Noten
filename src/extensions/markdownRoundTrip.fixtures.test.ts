@@ -21,6 +21,7 @@ import MermaidCodeBlock from "./MermaidCodeBlock";
 import WikiLink from "./WikiLink";
 import { serializeImageMarkdown } from "../utils/imageMarkdownSerialize";
 import { isSafeLinkHref } from "../utils/linkHref";
+import { stripTableCellNbsp } from "../utils/tableCellNbsp";
 
 const lowlight = createLowlight(common);
 const fastMarked = createFastMarked();
@@ -35,12 +36,6 @@ const fixtureNames = [
 function readFixture(name: (typeof fixtureNames)[number]): string {
   const path = join(process.cwd(), "src", "extensions", "__fixtures__", "markdown", name);
   return readFileSync(path, "utf8").replace(/\r\n?/g, "\n").trimEnd();
-}
-
-function stripTableCellNbsp(md: string): string {
-  return md.replace(/^\|[^\n]*\|[ \t]*$/gm, (line) =>
-    line.replace(/&nbsp;/g, ""),
-  );
 }
 
 function createMarkdownEditor(content: string): Editor {
@@ -204,6 +199,48 @@ describe("Markdown fixture round-trip compatibility", () => {
     expect(markdown).toContain('width="320"');
     expect(markdown).toContain('width="480"');
     expect(markdown).not.toContain("&nbsp;");
+  });
+
+  it("preserves a table cell that documents &nbsp; in inline code (P2-2)", () => {
+    const source = [
+      "| Entity | Meaning |",
+      "| --- | --- |",
+      "| `&nbsp;` | non-breaking space |",
+    ].join("\n");
+
+    const first = trackedEditor(source);
+    const firstMarkdown = stableMarkdown(first);
+
+    // The documented entity must survive the save path...
+    expect(firstMarkdown).toContain("`&nbsp;`");
+    expect(firstMarkdown).toContain("non-breaking space");
+
+    // ...and remain stable across a full reload (the load path strips too).
+    const second = trackedEditor(firstMarkdown);
+    const secondMarkdown = stableMarkdown(second);
+    expect(secondMarkdown).toBe(firstMarkdown);
+    expect(secondMarkdown).toContain("`&nbsp;`");
+
+    // The code mark is preserved in the document model, not flattened to text.
+    expect(hasMark(second.getJSON(), "code")).toBe(true);
+  });
+
+  it("keeps empty table cells clean without leaking a visible &nbsp;", () => {
+    const source = [
+      "| Image | Description |",
+      "| --- | --- |",
+      "|  | empty leading cell |",
+    ].join("\n");
+
+    const editor = trackedEditor(source);
+    const markdown = stableMarkdown(editor);
+
+    expect(markdown).not.toContain("&nbsp;");
+    expect(markdown).toContain("empty leading cell");
+
+    // Idempotent across reload.
+    const second = trackedEditor(markdown);
+    expect(stableMarkdown(second)).toBe(markdown);
   });
 
   it("preserves multilingual text, safe links, and wiki-link marks", () => {

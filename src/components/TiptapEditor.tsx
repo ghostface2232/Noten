@@ -54,6 +54,7 @@ import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
 import { isSafeLinkHref, normalizeLinkHref } from "../utils/linkHref";
 import { serializeImageMarkdown } from "../utils/imageMarkdownSerialize";
+import { stripTableCellNbsp } from "../utils/tableCellNbsp";
 import "../styles/tiptap-editor.css";
 import "../styles/mermaid-theme.css";
 import "../styles/wiki-link.css";
@@ -98,19 +99,6 @@ function getScrollParent(element: HTMLElement | null): HTMLElement | null {
   }
 
   return null;
-}
-
-/**
- * Paragraph.renderMarkdown emits "&nbsp;" for empty paragraphs so they survive
- * the round-trip through Paragraph.parseMarkdown's empty-cell detection. But
- * inside a table cell, Table.parseMarkdown calls parseInline directly and
- * bypasses that rule — the entity then leaks through as visible text after a
- * reload. Strip "&nbsp;" from table-row lines so empty cells round-trip clean.
- */
-function stripTableCellNbsp(md: string): string {
-  return md.replace(/^\|[^\n]*\|[ \t]*$/gm, (line) =>
-    line.replace(/&nbsp;/g, ""),
-  );
 }
 
 function readEditorMarkdown(editor: Editor): string {
