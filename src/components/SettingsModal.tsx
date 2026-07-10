@@ -660,6 +660,11 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                         {updaterState.status === "checking" ? i("about.checkingShort") : i("about.checkUpdate")}
                       </Button>
                     )}
+                    {updaterState.status === "available" && (
+                      <Button appearance="primary" size="medium" onClick={onInstallUpdate} style={{ borderRadius: "6px" }}>
+                        {i("about.install")}
+                      </Button>
+                    )}
                   </div>
 
                   {!updateAvailable && (
@@ -711,15 +716,12 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     )}
 
                     {updaterState.status === "available" && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                        <span style={{ fontSize: "13px", fontWeight: 500 }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                        <span style={{ fontSize: "15px", fontWeight: 500 }}>
                           {i("about.available")}: v{updaterState.version}
                         </span>
-                        <Button appearance="primary" size="medium" onClick={onInstallUpdate} style={{ borderRadius: "6px" }}>
-                          {i("about.install")}
-                        </Button>
                         {updaterState.body && (
-                          <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, whiteSpace: "pre-wrap", maxHeight: "120px", overflow: "auto" }}>
+                          <div style={{ fontSize: "13px", color: tokens.colorNeutralForeground3, lineHeight: "1.6", whiteSpace: "pre-wrap", maxHeight: "160px", overflow: "auto" }}>
                             {updaterState.body}
                           </div>
                         )}
