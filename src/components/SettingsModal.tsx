@@ -38,6 +38,7 @@ import {
   Pin20Regular,
 } from "@fluentui/react-icons";
 import { getVersion } from "@tauri-apps/api/app";
+import { pressableButton } from "../styles/interactions";
 import { t } from "../i18n";
 import type { UpdaterState } from "../hooks/useUpdater";
 import type {
@@ -110,6 +111,7 @@ const useStyles = makeStyles({
     backgroundColor: "transparent",
     color: tokens.colorNeutralForeground3,
     fontFamily: "inherit",
+    ...pressableButton,
     ":hover": {
       backgroundColor: "var(--settings-nav-hover)",
       color: tokens.colorNeutralForeground1,
@@ -130,6 +132,7 @@ const useStyles = makeStyles({
     cursor: "pointer",
     color: tokens.colorNeutralForeground1,
     fontFamily: "inherit",
+    ...pressableButton,
     ":hover": {
       backgroundColor: "var(--settings-nav-hover)",
     },
@@ -189,6 +192,17 @@ const useStyles = makeStyles({
   sublabel: {
     fontSize: "12px",
     color: tokens.colorNeutralForeground3,
+    fontVariantNumeric: "tabular-nums",
+  },
+  subtleButton: {
+    fontSize: "13px",
+    fontWeight: 500,
+    borderRadius: CONTROL_RADIUS,
+    ...pressableButton,
+  },
+  primaryButton: {
+    borderRadius: CONTROL_RADIUS,
+    ...pressableButton,
   },
   sliderRow: {
     display: "flex",
@@ -216,6 +230,7 @@ const useStyles = makeStyles({
     minWidth: "150px",
     fontSize: "13px",
     borderRadius: CONTROL_RADIUS,
+    ...pressableButton,
     borderTopColor: "transparent",
     borderRightColor: "transparent",
     borderBottomColor: "transparent",
@@ -231,6 +246,7 @@ const useStyles = makeStyles({
       borderRightColor: "transparent",
       borderBottomColor: "transparent",
       borderLeftColor: "transparent",
+      scale: 0.96,
     },
     ":focus-within": {
       borderTopColor: "transparent",
@@ -295,7 +311,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
   const [appVersion, setAppVersion] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const updateAvailable = updaterState.status === "available" || updaterState.status === "downloading" || updaterState.status === "ready";
-  const subtleBtnStyle: React.CSSProperties = { fontSize: "13px", fontWeight: 500, borderRadius: CONTROL_RADIUS, backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" };
+  const subtleBtnStyle: React.CSSProperties = { backgroundColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" };
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
@@ -415,11 +431,11 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   <div className={styles.row}>
                     <Label className={styles.label}>{i("settings.notesDirectory")}</Label>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
-                      <Button size="medium" appearance="subtle" onClick={onChangeNotesDir} style={{ ...subtleBtnStyle, minWidth: 0 }}>
+                      <Button size="medium" appearance="subtle" className={styles.subtleButton} onClick={onChangeNotesDir} style={{ ...subtleBtnStyle, minWidth: 0 }}>
                         {i("settings.notesDirectory.change")}
                       </Button>
                       {settings.notesDirectory && (
-                        <Button size="medium" appearance="subtle" onClick={onResetNotesDir} style={{ ...subtleBtnStyle, minWidth: 0 }}>
+                        <Button size="medium" appearance="subtle" className={styles.subtleButton} onClick={onResetNotesDir} style={{ ...subtleBtnStyle, minWidth: 0 }}>
                           {i("settings.notesDirectory.reset")}
                         </Button>
                       )}
@@ -580,6 +596,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     <Button
                       size="medium"
                       appearance="subtle"
+                      className={styles.subtleButton}
                       onClick={() => setConfirmOpen(true)}
                       style={{ ...subtleBtnStyle, color: tokens.colorPaletteRedForeground1 }}
                     >
@@ -609,6 +626,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                             <Button
                               size="medium"
                               appearance="subtle"
+                              className={styles.subtleButton}
                               onClick={() => onRestoreNote(note.id)}
                               style={subtleBtnStyle}
                             >
@@ -617,6 +635,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                             <Button
                               size="medium"
                               appearance="subtle"
+                              className={styles.subtleButton}
                               onClick={() => onPermanentlyDeleteNote(note.id)}
                               style={{ ...subtleBtnStyle, color: tokens.colorPaletteRedForeground1 }}
                             >
@@ -653,6 +672,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                       <Button
                         size="medium"
                         appearance="subtle"
+                        className={styles.subtleButton}
                         onClick={onCheckForUpdate}
                         disabled={updaterState.status === "checking"}
                         style={subtleBtnStyle}
@@ -661,7 +681,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                       </Button>
                     )}
                     {updaterState.status === "available" && (
-                      <Button appearance="primary" size="medium" onClick={onInstallUpdate} style={{ borderRadius: "6px" }}>
+                      <Button appearance="primary" size="medium" className={styles.primaryButton} onClick={onInstallUpdate}>
                         {i("about.install")}
                       </Button>
                     )}
@@ -730,7 +750,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
 
                     {updaterState.status === "downloading" && (
                       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                        <span style={{ fontSize: "13px", color: tokens.colorNeutralForeground3 }}>
+                        <span style={{ fontSize: "13px", color: tokens.colorNeutralForeground3, fontVariantNumeric: "tabular-nums" }}>
                           {i("about.downloading")} {updaterState.progress}%
                         </span>
                         <ProgressBar value={updaterState.progress / 100} />
@@ -738,7 +758,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     )}
 
                     {updaterState.status === "ready" && (
-                      <Button appearance="primary" size="medium" onClick={onRestartApp} style={{ borderRadius: "6px" }}>
+                      <Button appearance="primary" size="medium" className={styles.primaryButton} onClick={onRestartApp}>
                         {i("about.restart")}
                       </Button>
                     )}
@@ -783,6 +803,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
           <Button
             size="medium"
             appearance="subtle"
+            className={styles.subtleButton}
             onClick={() => setConfirmOpen(false)}
             style={subtleBtnStyle}
           >
@@ -791,6 +812,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
           <Button
             size="medium"
             appearance="subtle"
+            className={styles.subtleButton}
             onClick={async () => {
               setConfirmOpen(false);
               await onEmptyTrash();

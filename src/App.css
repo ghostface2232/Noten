@@ -214,6 +214,42 @@ body {
   transition: background-color var(--motion-medium) ease;
 }
 
+/* Toggle switch: the thumb (indicator's child) travels via transform, the
+   track (indicator) cross-fades color. Fluent's default curveEasyEase feels
+   flat, so the thumb rides a fast-launch/soft-settle spring instead, and
+   while pressed it squash-stretches toward where it will travel (the far
+   edge stays anchored) — releasing lets the spring carry it home.
+   Geometry (medium Switch): 18px thumb, 20px checked travel; scaleX(1.22)
+   widens the thumb 2px per side, so translateX(±2px) re-anchors one edge. */
+.fui-Switch__indicator {
+  transition-property: background, border, color !important;
+  transition-duration: var(--motion-medium) !important;
+  transition-timing-function: ease-out !important;
+}
+.fui-Switch__indicator > * {
+  transition-property: transform !important;
+  transition-duration: var(--motion-slower) !important;
+  transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1) !important;
+}
+.fui-Switch__input:active:not(:disabled):not(:checked) ~ .fui-Switch__indicator > * {
+  transform: translateX(2px) scaleX(1.22);
+  transition-duration: var(--motion-base) !important;
+  transition-timing-function: ease !important;
+}
+.fui-Switch__input:active:not(:disabled):checked ~ .fui-Switch__indicator > * {
+  transform: translateX(18px) scaleX(1.22);
+  transition-duration: var(--motion-base) !important;
+  transition-timing-function: ease !important;
+}
+@media screen and (prefers-reduced-motion: reduce) {
+  .fui-Switch__indicator,
+  .fui-Switch__indicator > *,
+  .fui-Switch__input:active:not(:disabled):not(:checked) ~ .fui-Switch__indicator > *,
+  .fui-Switch__input:active:not(:disabled):checked ~ .fui-Switch__indicator > * {
+    transition-duration: 0.01ms !important;
+  }
+}
+
 @media print {
   body, html, #root {
     height: auto !important;
