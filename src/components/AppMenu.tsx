@@ -211,6 +211,7 @@ export function AppMenu({
   const subMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const focusSubMenuOnOpenRef = useRef(false);
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
+  const [triggerRect, setTriggerRect] = useState<DOMRect | null>(null);
 
   const i = (key: I18nKey) => t(key, locale);
 
@@ -218,6 +219,7 @@ export function AppMenu({
     if (btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
       setMenuPos({ x: rect.left, y: rect.bottom + 4 });
+      setTriggerRect(rect);
     }
     setOpen(true);
     setSubMenu(null);
@@ -315,16 +317,23 @@ export function AppMenu({
         appearance="subtle"
         icon={<NavigationRegular />}
         className={styles.menuBtn}
-        onClick={openMenu}
+        onClick={() => (open ? close() : openMenu())}
       />
 
       {open && createPortal(
         <>
-          {/* Close on mousedown (not click) so a press aimed at the trigger
-              button isn't swallowed by the overlay for its whole duration —
-              the menu dismisses instantly and the next press hits the real
-              button with its press motion. */}
-          <div className={styles.overlay} onMouseDown={close} />
+          {/* The overlay dismisses on mousedown and swallows outside presses,
+              but a clip-path hole over the trigger lets presses land on the
+              real hamburger button — its :active press motion plays and the
+              click toggles the menu closed. Without the hole the overlay eats
+              the mousedown, so the trigger never enters :active. */}
+          <div
+            className={styles.overlay}
+            style={triggerRect ? {
+              clipPath: `polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${triggerRect.left}px ${triggerRect.top}px, ${triggerRect.left}px ${triggerRect.bottom}px, ${triggerRect.right}px ${triggerRect.bottom}px, ${triggerRect.right}px ${triggerRect.top}px, ${triggerRect.left}px ${triggerRect.top}px)`,
+            } : undefined}
+            onMouseDown={close}
+          />
           <div
             ref={menuRef}
             className={styles.menu}
