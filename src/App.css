@@ -222,11 +222,20 @@ body {
    Geometry (medium Switch): 18px thumb, 20px checked travel; scaleX(1.22)
    widens the thumb 2px per side, so translateX(±2px) re-anchors one edge. */
 .fui-Switch__indicator {
+  /* At fractional DPI (e.g. 165%) the track's 1px borders snap to device
+     pixels, leaving the 18px thumb ~0.8px of slack that inline layout dumps
+     entirely below it — the thumb reads as sitting high. Flex-center it. */
+  display: flex;
+  align-items: center;
   transition-property: background, border, color !important;
   transition-duration: var(--motion-medium) !important;
   transition-timing-function: ease-out !important;
 }
 .fui-Switch__indicator > * {
+  /* Optical nudge: at fractional DPI the track borders rasterize unevenly,
+     so the geometrically centered thumb reads slightly low. The independent
+     `translate` property composes with the travel/squash `transform`. */
+  translate: 0 -0.2px;
   transition-property: transform !important;
   transition-duration: var(--motion-slower) !important;
   transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1) !important;
