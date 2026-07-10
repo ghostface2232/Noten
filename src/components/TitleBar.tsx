@@ -7,6 +7,7 @@ import {
   Subtract20Regular,
 } from "@fluentui/react-icons";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { pressableButton } from "../styles/interactions";
 import { t } from "../i18n";
 import type { Locale, ParagraphSpacing } from "../hooks/useSettings";
 import type { Editor } from "@tiptap/react";
@@ -122,6 +123,7 @@ const useStyles = makeStyles({
     padding: "0",
     lineHeight: 1,
     alignSelf: "stretch",
+    ...pressableButton,
   },
   closeBtn: {
     width: "46px",
@@ -138,6 +140,7 @@ const useStyles = makeStyles({
     alignSelf: "stretch",
     color: tokens.colorNeutralForeground1,
     backgroundColor: "transparent",
+    ...pressableButton,
     ":hover": {
       backgroundColor: "#c42b1c !important",
       color: "#ffffff !important",
@@ -145,6 +148,7 @@ const useStyles = makeStyles({
     ":active": {
       backgroundColor: "#a42618 !important",
       color: "#ffffff !important",
+      scale: 0.96,
     },
     ":focus-visible": {
       outline: "none",

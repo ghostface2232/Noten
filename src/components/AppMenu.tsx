@@ -320,7 +320,11 @@ export function AppMenu({
 
       {open && createPortal(
         <>
-          <div className={styles.overlay} onClick={close} />
+          {/* Close on mousedown (not click) so a press aimed at the trigger
+              button isn't swallowed by the overlay for its whole duration —
+              the menu dismisses instantly and the next press hits the real
+              button with its press motion. */}
+          <div className={styles.overlay} onMouseDown={close} />
           <div
             ref={menuRef}
             className={styles.menu}
