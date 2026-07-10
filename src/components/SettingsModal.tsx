@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import {
   Button,
   Dialog,
@@ -38,7 +38,7 @@ import {
   Pin20Regular,
 } from "@fluentui/react-icons";
 import { getVersion } from "@tauri-apps/api/app";
-import { pressableButton } from "../styles/interactions";
+import { MOTION_DURATION_FAST, MOTION_DURATION_MEDIUM, pressableButton } from "../styles/interactions";
 import { t } from "../i18n";
 import type { UpdaterState } from "../hooks/useUpdater";
 import type {
@@ -204,6 +204,33 @@ const useStyles = makeStyles({
     borderRadius: CONTROL_RADIUS,
     ...pressableButton,
   },
+  // The check-for-updates button morphs its width as its label swaps between
+  // idle / checking / up-to-date, so status reads inline instead of in a
+  // separate block below. Width is measured off the label span and animated.
+  updateCheckBtn: {
+    paddingLeft: "12px",
+    paddingRight: "12px",
+    overflow: "hidden",
+    justifyContent: "center",
+    whiteSpace: "nowrap",
+    transitionProperty: "width, background-color, color, scale",
+    transitionDuration: `var(--motion-slower), ${MOTION_DURATION_FAST}, ${MOTION_DURATION_FAST}, ${MOTION_DURATION_FAST}`,
+    transitionTimingFunction: "cubic-bezier(0.32, 0.72, 0, 1), ease-out, ease-out, ease-out",
+  },
+  // Keyed by mode, so a label swap remounts the span and replays the fade.
+  updateCheckBtnLabel: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+    animationName: {
+      from: { opacity: 0 },
+      to: { opacity: 1 },
+    },
+    animationDuration: MOTION_DURATION_MEDIUM,
+    animationTimingFunction: "ease",
+  },
   sliderRow: {
     display: "flex",
     flexDirection: "column",
@@ -316,6 +343,33 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
   }, []);
+
+  // The up-to-date confirmation lingers briefly in the button, then the
+  // label fades back to the idle "check for updates" text.
+  const [showUpToDate, setShowUpToDate] = useState(false);
+  useEffect(() => {
+    if (updaterState.status !== "upToDate") {
+      setShowUpToDate(false);
+      return;
+    }
+    setShowUpToDate(true);
+    const timer = setTimeout(() => setShowUpToDate(false), 1800);
+    return () => clearTimeout(timer);
+  }, [updaterState.status]);
+
+  const checkBtnMode =
+    updaterState.status === "checking" ? "checking"
+    : updaterState.status === "upToDate" && showUpToDate ? "upToDate"
+    : "idle";
+
+  // Measure the active label and drive the morphing button's animated width
+  // (label width + 12px horizontal padding each side).
+  const checkBtnLabelRef = useRef<HTMLSpanElement>(null);
+  const [checkBtnWidth, setCheckBtnWidth] = useState<number | undefined>(undefined);
+  useLayoutEffect(() => {
+    const el = checkBtnLabelRef.current;
+    if (el) setCheckBtnWidth(Math.ceil(el.getBoundingClientRect().width) + 24);
+  }, [checkBtnMode, locale, open]);
 
   const themeStyles = useMemo(() => {
     const dark = isDarkMode;
@@ -672,12 +726,26 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                       <Button
                         size="medium"
                         appearance="subtle"
-                        className={styles.subtleButton}
+                        className={mergeClasses(styles.subtleButton, styles.updateCheckBtn)}
                         onClick={onCheckForUpdate}
                         disabled={updaterState.status === "checking"}
-                        style={subtleBtnStyle}
+                        style={{ ...subtleBtnStyle, width: checkBtnWidth }}
                       >
-                        {updaterState.status === "checking" ? i("about.checkingShort") : i("about.checkUpdate")}
+                        <span key={checkBtnMode} ref={checkBtnLabelRef} className={styles.updateCheckBtnLabel}>
+                          {checkBtnMode === "checking" ? (
+                            <>
+                              <Spinner size="tiny" />
+                              {i("about.checkingShort")}
+                            </>
+                          ) : checkBtnMode === "upToDate" ? (
+                            <>
+                              <CheckmarkCircle20Regular style={{ color: tokens.colorPaletteGreenForeground1, flexShrink: 0 }} />
+                              {i("about.upToDateShort")}
+                            </>
+                          ) : (
+                            i("about.checkUpdate")
+                          )}
+                        </span>
                       </Button>
                     )}
                     {updaterState.status === "available" && (
@@ -689,7 +757,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
 
                   {!updateAvailable && (
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
+                    <div style={{ fontSize: "13px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
                           · Windows 시스템 테마 감지를 추가해 시스템 모드가 실제 Windows 설정을 따르도록 개선<br />
@@ -715,25 +783,11 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   </div>
                   )}
 
+                  {(updaterState.status === "available" ||
+                    updaterState.status === "downloading" ||
+                    updaterState.status === "ready" ||
+                    updaterState.status === "error") && (
                   <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
-                    {updaterState.status === "checking" && (
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <Spinner size="tiny" />
-                        <span style={{ fontSize: "13px", color: tokens.colorNeutralForeground3 }}>
-                          {i("about.checking")}
-                        </span>
-                      </div>
-                    )}
-
-                    {updaterState.status === "upToDate" && (
-                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                        <CheckmarkCircle20Regular style={{ color: tokens.colorPaletteGreenForeground1 }} />
-                        <span style={{ fontSize: "13px", color: tokens.colorNeutralForeground2 }}>
-                          {i("about.upToDate")}
-                        </span>
-                      </div>
-                    )}
-
                     {updaterState.status === "available" && (
                       <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                         <span style={{ fontSize: "15px", fontWeight: 500 }}>
@@ -768,6 +822,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                       </span>
                     )}
                   </div>
+                  )}
                 </div>
 
                 <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, marginBottom: "-4px" }}>

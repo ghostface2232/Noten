@@ -202,6 +202,7 @@ const dict = {
   "about.checking": { en: "Checking for updates...", ko: "업데이트를 확인하는 중..." },
   "about.checkingShort": { en: "Checking...", ko: "확인 중..." },
   "about.upToDate": { en: "You're on the latest version", ko: "최신 버전입니다" },
+  "about.upToDateShort": { en: "Up to date", ko: "최신 버전" },
   "about.available": { en: "Update available", ko: "업데이트 가능" },
   "about.install": { en: "Install update", ko: "업데이트 설치" },
   "about.downloading": { en: "Downloading...", ko: "다운로드 중..." },
