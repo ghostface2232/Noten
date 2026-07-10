@@ -1,17 +1,31 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import type { NoteDoc, NoteGroup } from "./useNotesLoader";
+
+// Where a removed note sat in the last committed render: its section (null =
+// the ungrouped list, otherwise a group id), the id of the surviving note
+// rendered right below it (null = it was last in its section), and its
+// position within the section (orders stacked ghosts on a multi-delete).
+export interface ExitAnchor {
+  groupId: string | null;
+  beforeId: string | null;
+  orderIndex: number;
+}
+
+export interface ExitingDoc extends ExitAnchor {
+  doc: NoteDoc;
+}
 
 interface UseSidebarAnimationsOptions {
   docs: NoteDoc[];
   groups: NoteGroup[];
+  getExitAnchor: (removedId: string, survivingIds: Set<string>) => ExitAnchor | null;
 }
 
-export function useSidebarAnimations({ docs, groups }: UseSidebarAnimationsOptions) {
+export function useSidebarAnimations({ docs, groups, getExitAnchor }: UseSidebarAnimationsOptions) {
   const prevDocListRef = useRef<string[]>(docs.map((d) => d.id));
   const prevDocsSnapshotRef = useRef<Map<string, NoteDoc>>(new Map(docs.map((d) => [d.id, d])));
   const [newDocIds, setNewDocIds] = useState<Set<string>>(new Set());
-  const [slideUpFromIndex, setSlideUpFromIndex] = useState(-1);
-  const [exitingDoc, setExitingDoc] = useState<{ doc: NoteDoc; index: number } | null>(null);
+  const [exitingDocs, setExitingDocs] = useState<ExitingDoc[]>([]);
 
   // Set during render so collapsing groups keep their notes mounted for exit.
   const [collapsingGroupIds, setCollapsingGroupIds] = useState<Set<string>>(new Set());
@@ -22,47 +36,54 @@ export function useSidebarAnimations({ docs, groups }: UseSidebarAnimationsOptio
   const [removingGroupIds, setRemovingGroupIds] = useState<Set<string>>(new Set());
   const [newGroupIds, setNewGroupIds] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
+  // useLayoutEffect (not useEffect) so the enter/exit classes land in the
+  // same paint as the list change — with useEffect the list flashed one
+  // frame with the deleted row already gone (rows jumped up) before the
+  // exit ghost re-expanded it.
+  useLayoutEffect(() => {
     const prevList = prevDocListRef.current;
     const prevSet = new Set(prevList);
     const currentIds = docs.map((d) => d.id);
     const currentSet = new Set(currentIds);
-    const timers: ReturnType<typeof setTimeout>[] = [];
 
     const added = new Set<string>();
     for (const id of currentIds) {
       if (!prevSet.has(id)) added.add(id);
     }
-    let removedId: string | null = null;
-    let removedIdx = -1;
-    for (let idx = 0; idx < prevList.length; idx++) {
-      if (!currentSet.has(prevList[idx])) {
-        removedId = prevList[idx];
-        removedIdx = idx;
-        break;
-      }
-    }
+    const removedIds = prevList.filter((id) => !currentSet.has(id));
 
-    if (added.size > 0) {
-      setNewDocIds(added);
-      timers.push(setTimeout(() => setNewDocIds(new Set()), 300));
-    }
+    if (added.size > 0) setNewDocIds(added);
 
-    if (removedId && added.size === 0) {
-      const snapshot = prevDocsSnapshotRef.current.get(removedId);
-      if (snapshot) {
-        setExitingDoc({ doc: snapshot, index: removedIdx });
-        timers.push(setTimeout(() => setExitingDoc(null), 280));
-      } else {
-        setSlideUpFromIndex(removedIdx);
-        timers.push(setTimeout(() => setSlideUpFromIndex(-1), 250));
+    if (removedIds.length > 0 && added.size === 0) {
+      const ghosts: ExitingDoc[] = [];
+      for (const id of removedIds) {
+        const doc = prevDocsSnapshotRef.current.get(id);
+        // No anchor means the note wasn't visible in the last render
+        // (collapsed group, filtered out) — nothing to animate for it.
+        const anchor = getExitAnchor(id, currentSet);
+        if (doc && anchor) ghosts.push({ doc, ...anchor });
       }
+      if (ghosts.length > 0) setExitingDocs(ghosts);
     }
 
     prevDocListRef.current = currentIds;
     prevDocsSnapshotRef.current = new Map(docs.map((d) => [d.id, d]));
-    return () => timers.forEach(clearTimeout);
-  }, [docs]);
+  }, [docs, getExitAnchor]);
+
+  useEffect(() => {
+    if (newDocIds.size === 0) return;
+    const timer = setTimeout(() => setNewDocIds(new Set()), 300);
+    return () => clearTimeout(timer);
+  }, [newDocIds]);
+
+  // Keep in sync with the `docSlideOut` animation duration plus frame buffer.
+  const EXIT_CLEANUP_MS = 300 + 60;
+
+  useEffect(() => {
+    if (exitingDocs.length === 0) return;
+    const timer = setTimeout(() => setExitingDocs([]), EXIT_CLEANUP_MS);
+    return () => clearTimeout(timer);
+  }, [exitingDocs]);
 
   // Guarded render-time state update lets collapse animation start same-paint.
   {
@@ -125,8 +146,7 @@ export function useSidebarAnimations({ docs, groups }: UseSidebarAnimationsOptio
 
   return {
     newDocIds,
-    slideUpFromIndex,
-    exitingDoc,
+    exitingDocs,
     collapsingGroupIds,
     removingGroupIds,
     newGroupIds,

@@ -219,15 +219,11 @@ export const useStyles = makeStyles({
     animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
     animationFillMode: "backwards",
   },
-  docItemSlideUp: {
-    animationName: "docSlideUp",
-    animationDuration: MOTION_DURATION_MEDIUM,
-    animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
-  },
+  // Per-phase easing lives inside the docSlideOut keyframes (quick fade,
+  // then springy collapse) — no top-level timing function here.
   docItemExit: {
     animationName: "docSlideOut",
-    animationDuration: MOTION_DURATION_SLOW,
-    animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+    animationDuration: MOTION_DURATION_SLOWER,
     animationFillMode: "forwards",
     pointerEvents: "none" as const,
     overflow: "hidden",

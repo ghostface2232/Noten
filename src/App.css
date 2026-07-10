@@ -165,15 +165,16 @@ body {
   100% { opacity: 1; max-height: 40px; transform: translateY(0); }
 }
 
-@keyframes docSlideUp {
-  from { transform: translateY(34px); }
-  to   { transform: translateY(0); }
-}
-
+/* Exit ghost of a deleted note: fade the row out in place first, then
+   collapse its slot so the rows below slide up one step into it. Easing is
+   set per phase: quick fade, springy (no-overshoot) collapse. 32px matches
+   the real row height (a 40px start would stall the collapse), and the
+   final -2px margin cancels the flex gap the zero-height ghost would
+   otherwise still hold — without it the list snapped 2px on unmount. */
 @keyframes docSlideOut {
-  0%   { opacity: 1; max-height: 40px; }
-  40%  { opacity: 0; max-height: 40px; }
-  100% { opacity: 0; max-height: 0px; }
+  0%   { opacity: 1; max-height: 32px; margin-top: 0; animation-timing-function: ease-out; }
+  40%  { opacity: 0; max-height: 32px; margin-top: 0; animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1); }
+  100% { opacity: 0; max-height: 0px; margin-top: -2px; }
 }
 
 /* A group's note block slides as a single unit via the CSS Grid row trick

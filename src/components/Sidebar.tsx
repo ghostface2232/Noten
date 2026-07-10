@@ -21,7 +21,7 @@ import type { Locale, NotesSortOrder } from "../hooks/useSettings";
 import { colorHex, type NoteColorId } from "../utils/noteColors";
 import { useSidebarDrag } from "../hooks/useSidebarDrag";
 import { useSidebarGroupDrag } from "../hooks/useSidebarGroupDrag";
-import { useSidebarAnimations } from "../hooks/useSidebarAnimations";
+import { useSidebarAnimations, type ExitingDoc } from "../hooks/useSidebarAnimations";
 import { useStyles } from "./Sidebar.styles";
 import { SidebarContextMenus, FolderSubtractRegular } from "./SidebarContextMenus";
 import type { ContextMenuState } from "./SidebarContextMenus";
@@ -119,7 +119,6 @@ interface NoteRowProps {
   isContextTarget: boolean;
   isEditing: boolean;
   isNew: boolean;
-  slideUp: boolean;
   isSearching: boolean;
   snippet: SearchSnippet | null;
   searchIndex?: number;
@@ -147,7 +146,7 @@ interface NoteRowProps {
 const NoteRow = memo(function NoteRow(props: NoteRowProps) {
   const {
     doc, originalIndex, indented,
-    isActive, isSelected, isContextTarget, isEditing, isNew, slideUp,
+    isActive, isSelected, isContextTarget, isEditing, isNew,
     isSearching, snippet, searchIndex, noDrag, groupId, selectMode,
     locale, notesSortOrder, styles,
     editingValue, inputRef, onEditingValueChange, onCommitRename, onCancelRename,
@@ -166,7 +165,6 @@ const NoteRow = memo(function NoteRow(props: NoteRowProps) {
         selectMode && isActive && styles.docItemWrapperActive,
         selectMode && !isActive && styles.docItemWrapperHoverable,
         isNew && styles.docItemNew,
-        slideUp && styles.docItemSlideUp,
         isSearching && searchIndex !== undefined && styles.searchResultFadeIn,
       )}
       style={
@@ -462,11 +460,33 @@ export function Sidebar({
     }
   }, [sidebarSearchOpen]);
 
+  // Last committed render order per section ("" = the ungrouped list,
+  // otherwise a group id). The delete animation reads this (via
+  // getExitAnchor) to place a removed note's exit ghost at the exact visual
+  // slot it occupied — a docs-array index can't express that position, since
+  // the rendered list is pinned+sorted and split into group/ungrouped
+  // sections. Updated post-commit (see the layout effect further down), so
+  // during the deletion commit it still describes the pre-deletion render.
+  const renderOrderRef = useRef(new Map<string, string[]>());
+
+  const getExitAnchor = useCallback((removedId: string, survivingIds: Set<string>) => {
+    for (const [sectionKey, ids] of renderOrderRef.current) {
+      const idx = ids.indexOf(removedId);
+      if (idx < 0) continue;
+      let beforeId: string | null = null;
+      for (let i = idx + 1; i < ids.length; i++) {
+        if (survivingIds.has(ids[i])) { beforeId = ids[i]; break; }
+      }
+      return { groupId: sectionKey === "" ? null : sectionKey, beforeId, orderIndex: idx };
+    }
+    return null;
+  }, []);
+
   const {
-    newDocIds, slideUpFromIndex, exitingDoc,
+    newDocIds, exitingDocs,
     collapsingGroupIds, removingGroupIds, newGroupIds,
     animateGroupRemoval,
-  } = useSidebarAnimations({ docs, groups });
+  } = useSidebarAnimations({ docs, groups, getExitAnchor });
 
   useEffect(() => {
     if (!pendingRenameGroupId) return;
@@ -898,6 +918,19 @@ export function Sidebar({
   }, [filteredDocs, flatListMode, groupRenderList, inAllNotes, noteItems]);
   visibleNoteIdsRef.current = visibleNoteIds;
 
+  // Refresh the render-order snapshot after every commit. Deliberately a
+  // layout effect declared *after* useSidebarAnimations: on the deletion
+  // commit the hook's own layout effect reads the previous (pre-deletion)
+  // order first, then this one overwrites it with the new order.
+  useLayoutEffect(() => {
+    const order = new Map<string, string[]>();
+    order.set("", noteItems.map((item) => item.doc.id));
+    for (const { group, notes } of groupRenderList) {
+      order.set(group.id, notes.map(({ doc }) => doc.id));
+    }
+    renderOrderRef.current = order;
+  });
+
   // Re-measure the fade masks when the rendered lists or container size change,
   // so an overflowing list always shows its bottom fade — even before any scroll.
   useLayoutEffect(() => {
@@ -924,6 +957,47 @@ export function Sidebar({
     setEditingNoteId(null);
   }, []);
 
+  // Ghost of a just-deleted note: a static replica of its row, left at the
+  // exact slot the note occupied so it can fade out and collapse in place
+  // (docSlideOut) while the rows below slide up smoothly into the freed slot.
+  const renderExitGhost = (ghost: ExitingDoc) => (
+    <div
+      key={`exit-${ghost.doc.id}`}
+      className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}
+      aria-hidden="true"
+    >
+      <Button
+        appearance="subtle"
+        size="small"
+        tabIndex={-1}
+        icon={
+          <span className={styles.docItemIcon} style={ghost.doc.color ? { color: colorHex(ghost.doc.color) } : undefined}>
+            {ghost.doc.pinned ? <PinRegular /> : <DocumentRegular />}
+          </span>
+        }
+        className={mergeClasses(styles.docItem, ghost.groupId !== null && styles.docItemIndented)}
+      >
+        <span className={styles.docName}>{ghost.doc.fileName}</span>
+        <span className={styles.docTrailing}>
+          <span className={styles.docTimestamp}>
+            {formatTimestamp(
+              notesSortOrder.startsWith("created") ? ghost.doc.createdAt : ghost.doc.updatedAt,
+              locale,
+            )}
+          </span>
+        </span>
+      </Button>
+    </div>
+  );
+
+  // Exit ghosts anchored to a section slot: the ones that sat right above
+  // the surviving note `beforeId` (null = at the end of the section).
+  const exitGhostsAt = (sectionGroupId: string | null, beforeId: string | null) =>
+    exitingDocs
+      .filter((g) => g.groupId === sectionGroupId && g.beforeId === beforeId)
+      .sort((a, b) => a.orderIndex - b.orderIndex)
+      .map(renderExitGhost);
+
   const renderNoteItem = (
     doc: NoteDoc,
     originalIndex: number,
@@ -936,7 +1010,6 @@ export function Sidebar({
     const isContextTarget = contextMenu?.type === "note" && contextMenu.noteId === doc.id;
     const isEditing = editingNoteId === doc.id && paneActive;
     const isNew = newDocIds.has(doc.id);
-    const slideUp = slideUpFromIndex >= 0 && originalIndex >= slideUpFromIndex;
 
     return (
       <NoteRow
@@ -949,7 +1022,6 @@ export function Sidebar({
         isContextTarget={isContextTarget}
         isEditing={isEditing}
         isNew={isNew}
-        slideUp={slideUp}
         isSearching={isSearching}
         snippet={snippet}
         searchIndex={searchIndex}
@@ -1171,7 +1243,7 @@ export function Sidebar({
                 <ChevronRightRegular fontSize={14} className={styles.allNotesEntryChevron} />
               </Button>
             )}
-            {groupRenderList.length === 0 && noteItems.length === 0 && !exitingDoc ? (
+            {groupRenderList.length === 0 && noteItems.length === 0 && exitingDocs.length === 0 ? (
               <span className={styles.empty}>{debouncedQuery ? i("search.noResults") : sidebarSearchQuery ? "" : colorFilterActive ? i("sidebar.colorFilterEmpty") : i("sidebar.empty")}</span>
             ) : (
               <>
@@ -1194,8 +1266,13 @@ export function Sidebar({
                               )}
                             >
                               <div className={styles.groupNotesSlideInner}>
-                                {notes.map(({ doc, originalIndex }) =>
-                                  renderNoteItem(doc, originalIndex, true, { paneActive: !inAllNotes, groupId: group.id }))}
+                                {notes.map(({ doc, originalIndex }) => (
+                                  <Fragment key={doc.id}>
+                                    {exitGhostsAt(group.id, doc.id)}
+                                    {renderNoteItem(doc, originalIndex, true, { paneActive: !inAllNotes, groupId: group.id })}
+                                  </Fragment>
+                                ))}
+                                {exitGhostsAt(group.id, null)}
                               </div>
                             </div>
                           </Fragment>
@@ -1206,29 +1283,16 @@ export function Sidebar({
                 )}
 
                 <div data-notes-section className={styles.notesSection}>
-                  {!flatListMode && (noteItems.length > 0 || exitingDoc) && (
+                  {!flatListMode && (noteItems.length > 0 || exitingDocs.some((g) => g.groupId === null)) && (
                     <span className={styles.sectionLabel}>{i("sidebar.notesLabel")}</span>
                   )}
-                  {exitingDoc && exitingDoc.index === 0 && (
-                    <div key={`exit-${exitingDoc.doc.id}`} className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}>
-                      <div className={styles.docItem} style={{ opacity: 0.5 }}>
-                        <span className={styles.docName}>{exitingDoc.doc.fileName}</span>
-                      </div>
-                    </div>
-                  )}
-                  {noteItems.map((item, idx) => {
-                    const elements = [renderNoteItem(item.doc, item.originalIndex, item.indented, { snippet: item.snippet, searchIndex: isSearching ? idx : undefined, paneActive: !inAllNotes })];
-                    if (exitingDoc && exitingDoc.index === idx + 1) {
-                      elements.unshift(
-                        <div key={`exit-${exitingDoc.doc.id}`} className={mergeClasses(styles.docItemWrapper, styles.docItemExit)}>
-                          <div className={styles.docItem} style={{ opacity: 0.5 }}>
-                            <span className={styles.docName}>{exitingDoc.doc.fileName}</span>
-                          </div>
-                        </div>
-                      );
-                    }
-                    return elements;
-                  })}
+                  {noteItems.map((item, idx) => (
+                    <Fragment key={item.doc.id}>
+                      {exitGhostsAt(null, item.doc.id)}
+                      {renderNoteItem(item.doc, item.originalIndex, item.indented, { snippet: item.snippet, searchIndex: isSearching ? idx : undefined, paneActive: !inAllNotes })}
+                    </Fragment>
+                  ))}
+                  {exitGhostsAt(null, null)}
                 </div>
               </>
             )}
