@@ -1,6 +1,7 @@
 // Propagates the version from package.json to every other file that hardcodes
-// it (Cargo.toml × 4, Cargo.lock × 2, package-lock.json, tauri.conf.json, the
-// SettingsModal version label). Run after editing package.json's "version".
+// it (Cargo.toml × 4, Cargo.lock × 2, package-lock.json, tauri.conf.json).
+// Run after editing package.json's "version". The SettingsModal version label
+// reads getVersion() at runtime, so it needs no sync entry.
 //
 // The changelog block in SettingsModal.tsx is intentionally not touched — the
 // release notes are human-written copy, not a derived value.
@@ -82,12 +83,6 @@ patch(
   "src-tauri/Cargo.lock",
   /(name = "noten"\r?\nversion = )"[^"]+"/,
   `$1"${version}"`,
-);
-
-patch(
-  "src/components/SettingsModal.tsx",
-  /(marginBottom: "6px" \}\}>v)\d+\.\d+\.\d+(<\/div>)/,
-  `$1${version}$2`,
 );
 
 console.log(`\nDone. ${touched} file(s) updated, ${unchanged} already in sync.`);

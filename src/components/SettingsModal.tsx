@@ -760,23 +760,25 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     <div style={{ fontSize: "13px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · Windows 시스템 테마 감지를 추가해 시스템 모드가 실제 Windows 설정을 따르도록 개선<br />
-                          · 마크다운 가져오기가 현재 그룹을 유지하고, 빈 자리표시자 노트를 대체할 때도 그룹이 보존되도록 수정<br />
-                          · 노트 복제 시 이미지 자산을 함께 복사하고, 복사 실패 시 기존 자산 참조를 안전하게 유지하도록 개선<br />
-                          · 이미지 자산 마이그레이션과 원격 변경 반영을 더 안전하게 처리해 실패·경합 상황에서 데이터 손상 위험을 줄임<br />
-                          · 컨텍스트 메뉴의 키보드 탐색, 하위 메뉴 열기, 접근성 속성, 단축키 표시를 개선<br />
-                          · 선택 텍스트 복사와 마크다운 왕복 변환 안정성을 높이고 관련 회귀 테스트를 추가<br />
-                          · 툴바 고정 설정, 사이드바 Shift+클릭 범위 선택, 앱 전반의 누름/호버/모션 피드백을 개선
+                          · 업데이트 설치 전에 새 버전의 변경 사항을 미리 표시<br />
+                          · 붙여넣기 줄바꿈 처리와 모두 바꾸기 겹침 문제 수정<br />
+                          · 표 셀에 입력한 &amp;nbsp; 텍스트가 저장 시 사라지던 문제 수정<br />
+                          · 위키링크가 많은 대용량 문서의 입력 반응성 개선<br />
+                          · 에디터 컨텍스트 메뉴에서 Windows 이모지 선택기 지원<br />
+                          · 노트 삭제 애니메이션이 잘못된 위치에서 재생되던 문제 수정<br />
+                          · 창 컨트롤·설정 화면 등 앱 전반의 누름/전환 모션 개선<br />
+                          · 하위 메뉴 키보드 탐색과 화면 경계 처리 개선
                         </>
                       ) : (
                         <>
-                          · Added Windows system theme detection so system mode follows the actual Windows setting<br />
-                          · Markdown imports now stay in the active group, including when replacing an empty placeholder note<br />
-                          · Duplicating a note now copies image assets, and safely preserves the original asset references if a copy fails<br />
-                          · Image-asset migration and remote change handling are more resilient in failure and race conditions<br />
-                          · Improved context-menu keyboard navigation, submenu opening, accessibility attributes, and shortcut hints<br />
-                          · Made selected-text copying and Markdown round-trips more reliable, with regression coverage added<br />
-                          · Added a toolbar pin setting, Shift-click range selection in the sidebar, and more consistent press/hover/motion feedback
+                          · Release notes are now shown before installing an update<br />
+                          · Fixed paste newline handling and overlapping replace-all matches<br />
+                          · Fixed table cells losing typed &amp;nbsp; text on save<br />
+                          · Faster typing in large documents with many wiki links<br />
+                          · Windows emoji picker in the editor context menu<br />
+                          · Fixed the note delete animation playing at the wrong row<br />
+                          · Refined press/transition motion across window controls and settings<br />
+                          · Improved submenu keyboard navigation and viewport clamping
                         </>
                       )}
                     </div>

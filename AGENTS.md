@@ -174,7 +174,8 @@ To cut a release:
    - `src-tauri/tauri.conf.json`
    - the four `Cargo.toml` (`src-tauri`, `bootstrapper`, `maintenance-helper`, `noten-splash-ui`)
    - our entries in `Cargo.lock` + `src-tauri/Cargo.lock`
-   - the `v…` label in `SettingsModal.tsx`
+
+   The `v…` label in `SettingsModal.tsx` reads `getVersion()` at runtime and needs no sync.
 
    Add a new entry only if you introduce another hardcoded version site.
 2. Rewrite the SettingsModal changelog block (Korean + English) — this is human-written copy and is intentionally not touched by the script.
