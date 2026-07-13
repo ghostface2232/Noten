@@ -53,6 +53,18 @@ describe("extractHeadings", () => {
     expect(headings[1].level).toBe(2);
   });
 
+  it("finds headings nested inside block containers", () => {
+    // The traversal skips into non-heading textblocks but must still descend
+    // through block containers like blockquote, which can hold headings.
+    const editor = makeEditor(
+      "<h1>Top</h1><blockquote><p>quote</p><h2>Quoted</h2></blockquote><p>tail</p>",
+    );
+    const headings = extractHeadings(editor.state.doc);
+    expect(headings.map((h) => h.text)).toEqual(["Top", "Quoted"]);
+    expect(headings.map((h) => h.level)).toEqual([1, 2]);
+    expect(editor.state.doc.nodeAt(headings[1].pos)?.type.name).toBe("heading");
+  });
+
   it("flattens inline marks (bold, code, wiki link) to plain text", () => {
     const editor = makeEditor(
       "<h2>see <strong>bold</strong> and <code>code()</code> and [[Target]]</h2>",

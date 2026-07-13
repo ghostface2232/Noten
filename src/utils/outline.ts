@@ -15,14 +15,19 @@ export const OUTLINE_MAX_INDENT_LEVEL = 3;
 export function extractHeadings(doc: ProseMirrorNode): OutlineHeading[] {
   const headings: OutlineHeading[] = [];
   doc.descendants((node, pos) => {
-    if (node.type.name !== "heading") return true;
-    headings.push({
-      text: node.textContent,
-      level: Number(node.attrs.level) || 1,
-      pos,
-    });
-    // Headings hold only inline content — nothing to descend into.
-    return false;
+    if (node.type.name === "heading") {
+      headings.push({
+        text: node.textContent,
+        level: Number(node.attrs.level) || 1,
+        pos,
+      });
+      // Headings hold only inline content — nothing to descend into.
+      return false;
+    }
+    // Textblocks can't nest, so a non-heading textblock (paragraph, code
+    // block) can't contain a heading — skip its inline content. Block
+    // containers (blockquote, list) can, so keep descending into those.
+    return !node.isTextblock;
   });
   return headings;
 }
