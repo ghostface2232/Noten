@@ -33,6 +33,12 @@ export interface Settings {
   outlinePanelOpen: boolean;
   /** Focus mode: dim everything except the current block. */
   focusModeEnabled: boolean;
+  /**
+   * Outline state captured when focus mode was entered. Persisted (not kept
+   * in memory) so leaving focus mode restores the panel even when the app
+   * was restarted while focus mode was on.
+   */
+  outlineOpenBeforeFocus: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -51,6 +57,7 @@ const DEFAULTS: Settings = {
   persistColorFilterAcrossRestarts: false,
   outlinePanelOpen: false,
   focusModeEnabled: false,
+  outlineOpenBeforeFocus: false,
 };
 
 // First-run locale seed: with no settings file on disk yet, follow the OS/
@@ -120,6 +127,9 @@ function parseSettings(raw: string): Settings {
       : DEFAULTS.persistColorFilterAcrossRestarts,
     outlinePanelOpen: typeof parsed.outlinePanelOpen === "boolean" ? parsed.outlinePanelOpen : DEFAULTS.outlinePanelOpen,
     focusModeEnabled: typeof parsed.focusModeEnabled === "boolean" ? parsed.focusModeEnabled : DEFAULTS.focusModeEnabled,
+    outlineOpenBeforeFocus: typeof parsed.outlineOpenBeforeFocus === "boolean"
+      ? parsed.outlineOpenBeforeFocus
+      : DEFAULTS.outlineOpenBeforeFocus,
   };
 }
 

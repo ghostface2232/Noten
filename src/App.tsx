@@ -64,6 +64,7 @@ import { useWindowSync } from "./hooks/useWindowSync";
 import { useMigrationSync, broadcastMigrationStarted, broadcastMigrationFinished } from "./hooks/useMigrationSync";
 import { useChromeVisibility } from "./hooks/useChromeVisibility";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useFocusOutlineSync } from "./hooks/useFocusOutlineSync";
 import { useDragDrop } from "./hooks/useDragDrop";
 import { useUpdater } from "./hooks/useUpdater";
 import { MOTION_FAST_MS } from "./styles/interactions";
@@ -994,11 +995,17 @@ function App() {
     handleBarHeight,
   } = useChromeVisibility(contentRef, activeDoc?.id, settings.pinEditorToolbar);
 
-  // v0.3.0 editor-mode toggles.
+  // v0.3.0 editor-mode toggles. Focus mode and the outline panel are coupled
+  // (focus mode closes the outline and restores it on exit, the toggle is
+  // inert mid-focus) — useFocusOutlineSync owns that coupling.
   const { outlinePanelOpen, focusModeEnabled } = settings;
-  const handleToggleOutline = useCallback(() => {
-    void updateSetting("outlinePanelOpen", !outlinePanelOpen);
-  }, [updateSetting, outlinePanelOpen]);
+  const handleToggleOutline = useFocusOutlineSync({
+    settingsLoaded,
+    focusModeEnabled,
+    outlinePanelOpen,
+    outlineOpenBeforeFocus: settings.outlineOpenBeforeFocus,
+    updateSetting,
+  });
 
   // Transient on/off notice shown when focus mode is toggled via F8. The
   // aria-live region stays mounted (visibility travels via opacity) so screen
@@ -1025,23 +1032,6 @@ function App() {
       focusNoticeTimerRef.current = null;
     }, FOCUS_NOTICE_MS);
   }, [updateSetting, focusModeEnabled, locale]);
-
-  // Focus mode wants a bare canvas: entering closes the outline panel (and
-  // remembers whether it was open), leaving restores it. Only reacts to real
-  // transitions — outlinePanelOpen changing on its own must not re-trigger.
-  const outlineOpenBeforeFocusRef = useRef(false);
-  const prevFocusModeRef = useRef(focusModeEnabled);
-  useEffect(() => {
-    if (prevFocusModeRef.current === focusModeEnabled) return;
-    prevFocusModeRef.current = focusModeEnabled;
-    if (focusModeEnabled) {
-      outlineOpenBeforeFocusRef.current = outlinePanelOpen;
-      if (outlinePanelOpen) void updateSetting("outlinePanelOpen", false);
-    } else if (outlineOpenBeforeFocusRef.current) {
-      outlineOpenBeforeFocusRef.current = false;
-      void updateSetting("outlinePanelOpen", true);
-    }
-  }, [focusModeEnabled, outlinePanelOpen, updateSetting]);
 
   const handleCloseOutline = useCallback(() => {
     void updateSetting("outlinePanelOpen", false);
