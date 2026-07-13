@@ -81,11 +81,11 @@ const dict = {
   "slash.table": { en: "Table", ko: "표" },
   "slash.table.desc": { en: "Insert a 3 × 3 table", ko: "3 × 3 표 삽입" },
 
-  "outline.title": { en: "Outline", ko: "아웃라인" },
+  "outline.title": { en: "Table of Contents", ko: "목차" },
   "outline.empty": { en: "No headings in this note", ko: "이 노트에 헤딩이 없습니다" },
   "outline.untitled": { en: "(Empty heading)", ko: "(빈 제목)" },
-  "outline.close": { en: "Close outline", ko: "아웃라인 닫기" },
-  "outline.toggle": { en: "Outline (Ctrl+Shift+O)", ko: "아웃라인 (Ctrl+Shift+O)" },
+  "outline.close": { en: "Close table of contents", ko: "목차 닫기" },
+  "outline.toggle": { en: "Table of contents (Ctrl+Shift+O)", ko: "목차 (Ctrl+Shift+O)" },
 
   "focus.mode": { en: "Focus mode", ko: "포커스 모드" },
   "focus.mode.desc": {
@@ -200,7 +200,7 @@ const dict = {
   "settings.shortcut.find": { en: "Find in document", ko: "문서에서 찾기" },
   "settings.shortcut.replace": { en: "Find and replace", ko: "찾기 및 바꾸기" },
   "settings.shortcut.gotoLine": { en: "Go to line", ko: "줄 이동" },
-  "settings.shortcut.outline": { en: "Toggle outline panel", ko: "아웃라인 패널 토글" },
+  "settings.shortcut.outline": { en: "Toggle table of contents", ko: "목차 패널 토글" },
   "settings.shortcut.focusMode": { en: "Toggle focus mode", ko: "포커스 모드 토글" },
   "settings.shortcut.typewriter": { en: "Toggle typewriter scrolling", ko: "타이프라이터 스크롤 토글" },
   "settings.shortcut.undo": { en: "Undo", ko: "실행 취소" },

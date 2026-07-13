@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { Button, Tooltip, makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import { DismissRegular } from "@fluentui/react-icons";
-import type { Editor, EditorEvents } from "@tiptap/react";
+import type { Editor } from "@tiptap/react";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
 import { pressableButton } from "../styles/interactions";
@@ -29,12 +29,13 @@ const useStyles = makeStyles({
     alignItems: "center",
     justifyContent: "space-between",
     flexShrink: 0,
-    padding: "10px 8px 6px 16px",
+    padding: "12px 8px 10px 16px",
   },
+  // A step above the 13px list items so the title reads as a panel heading.
   title: {
-    fontSize: "12px",
+    fontSize: "14px",
     fontWeight: 600,
-    color: tokens.colorNeutralForeground3,
+    color: tokens.colorNeutralForeground1,
   },
   closeBtn: {
     minWidth: "24px",
@@ -86,15 +87,15 @@ const useStyles = makeStyles({
     fontStyle: "italic",
     color: tokens.colorNeutralForeground4,
   },
+  // Anchored at a fixed offset from the panel top — vertical centering would
+  // drift as the status bar shows/hides with scroll and changes panel height.
   empty: {
-    flex: 1,
     display: "flex",
-    alignItems: "center",
     justifyContent: "center",
     textAlign: "center",
     fontSize: "12px",
     color: tokens.colorNeutralForeground3,
-    padding: "0 16px 24px",
+    padding: "96px 16px 0",
   },
 });
 
@@ -102,11 +103,19 @@ const useStyles = makeStyles({
  * Heading list derived from the live document. Follows the StatusBar
  * useEditorStats pattern: subscribe to `transaction`, coalesce to one pass per
  * frame via rAF, unsubscribe + cancel on unmount. Two extra rules on top:
- * (a) a frame whose transactions were all selection-only skips the doc walk
- * and only refreshes the current-heading highlight, and (b) after a doc walk
- * the result is compared by signature so unchanged outlines skip setState.
+ * (a) a frame that left the document untouched skips the doc walk and only
+ * refreshes the current-heading highlight, and (b) after a doc walk the
+ * result is compared by signature so unchanged outlines skip setState.
+ *
+ * Whether the document changed is decided by doc-node identity, not by the
+ * transactions' docChanged flags: note switches go through openDocument's
+ * `view.updateState(...)`, which swaps the whole EditorState without emitting
+ * any transaction. The `docKey` dependency re-runs the initial compute on
+ * note switch so the panel refreshes even when no transaction follows the
+ * swap; the identity check then catches any updateState that a later
+ * selection-only transaction reveals.
  */
-function useOutline(editor: Editor | null) {
+function useOutline(editor: Editor | null, docKey: string | null) {
   const [headings, setHeadings] = useState<OutlineHeading[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
 
@@ -118,15 +127,16 @@ function useOutline(editor: Editor | null) {
     }
 
     let frame: number | null = null;
-    let docDirty = true;
+    let lastDoc: Editor["state"]["doc"] | null = null;
     let lastSignature: string | null = null;
     let current: OutlineHeading[] = [];
 
     const compute = () => {
       frame = null;
-      if (docDirty) {
-        docDirty = false;
-        const next = extractHeadings(editor.state.doc);
+      const doc = editor.state.doc;
+      if (doc !== lastDoc) {
+        lastDoc = doc;
+        const next = extractHeadings(doc);
         const signature = headingsSignature(next);
         if (signature !== lastSignature) {
           lastSignature = signature;
@@ -137,8 +147,7 @@ function useOutline(editor: Editor | null) {
       setActiveIndex(activeHeadingIndex(current, editor.state.selection.$head.pos));
     };
 
-    const schedule = ({ transaction }: EditorEvents["transaction"]) => {
-      if (transaction.docChanged) docDirty = true;
+    const schedule = () => {
       if (frame === null) frame = requestAnimationFrame(compute);
     };
 
@@ -148,7 +157,7 @@ function useOutline(editor: Editor | null) {
       editor.off("transaction", schedule);
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [editor]);
+  }, [editor, docKey]);
 
   return { headings, activeIndex };
 }
@@ -156,15 +165,17 @@ function useOutline(editor: Editor | null) {
 export interface OutlinePanelProps {
   editor: Editor | null;
   locale: Locale;
+  /** Active note id — recomputes the outline on note switch (see useOutline). */
+  docKey: string | null;
   onClose: () => void;
   /** Jump to a heading pos — chrome lock, selection, and scroll live in App. */
   onNavigate: (pos: number) => void;
 }
 
-function OutlinePanelImpl({ editor, locale, onClose, onNavigate }: OutlinePanelProps) {
+function OutlinePanelImpl({ editor, locale, docKey, onClose, onNavigate }: OutlinePanelProps) {
   const styles = useStyles();
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
-  const { headings, activeIndex } = useOutline(editor);
+  const { headings, activeIndex } = useOutline(editor, docKey);
   const listRef = useRef<HTMLUListElement>(null);
 
   const close = () => {

@@ -1514,6 +1514,7 @@ function App() {
               <OutlinePanel
                 editor={noteEditor}
                 locale={locale}
+                docKey={activeDoc?.id ?? null}
                 onClose={handleCloseOutline}
                 onNavigate={handleOutlineJump}
               />
