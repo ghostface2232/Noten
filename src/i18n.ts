@@ -83,6 +83,8 @@ const dict = {
 
   "outline.title": { en: "Outline", ko: "아웃라인" },
   "outline.empty": { en: "No headings in this note", ko: "이 노트에 헤딩이 없습니다" },
+  "outline.untitled": { en: "(Empty heading)", ko: "(빈 제목)" },
+  "outline.close": { en: "Close outline", ko: "아웃라인 닫기" },
   "outline.toggle": { en: "Outline (Ctrl+Shift+O)", ko: "아웃라인 (Ctrl+Shift+O)" },
 
   "focus.mode": { en: "Focus mode", ko: "포커스 모드" },

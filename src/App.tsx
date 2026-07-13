@@ -35,7 +35,9 @@ import { Sidebar } from "./components/Sidebar";
 import { ColorSwatchRow } from "./components/NoteColorPicker";
 import { useStyles as useSidebarStyles } from "./components/Sidebar.styles";
 import { EditorToolbar } from "./components/EditorToolbar";
+import { OutlinePanel } from "./components/OutlinePanel";
 import { StatusBar } from "./components/StatusBar";
+import { clampOutlinePos } from "./utils/outline";
 import { SettingsModal } from "./components/SettingsModal";
 import { SearchBar } from "./components/SearchBar";
 import { GoToLineBar } from "./components/GoToLineBar";
@@ -996,6 +998,31 @@ function App() {
     void updateSetting("typewriterScrollEnabled", !typewriterScrollEnabled);
   }, [updateSetting, typewriterScrollEnabled]);
 
+  const handleCloseOutline = useCallback(() => {
+    void updateSetting("outlinePanelOpen", false);
+  }, [updateSetting]);
+
+  // Outline jump: place the clicked heading near the top of the scroll
+  // container instead of wherever scrollIntoView happens to leave it.
+  const handleOutlineJump = useCallback((pos: number) => {
+    const editor = tiptapRef.current?.getEditor();
+    const container = contentRef.current;
+    if (!editor || !container) return;
+    // Reuse the 300ms chrome lock so the programmatic downward scroll below
+    // doesn't read as a hide-chrome scroll gesture.
+    handleShowEditorChrome();
+    // A click can race the outline's rAF-coalesced recompute by a frame, so
+    // the stored pos may be stale — clamp instead of throwing.
+    const target = clampOutlinePos(pos + 1, editor.state.doc.content.size);
+    editor.chain().setTextSelection(target).focus(null, { scrollIntoView: false }).run();
+    const coords = editor.view.coordsAtPos(target);
+    const containerTop = container.getBoundingClientRect().top;
+    container.scrollTop = Math.max(
+      0,
+      coords.top - containerTop + container.scrollTop - (editorTopOffset + 16),
+    );
+  }, [handleShowEditorChrome, editorTopOffset]);
+
   useKeyboardShortcuts({
     tiptapRef,
     docSearchOpen,
@@ -1416,6 +1443,7 @@ function App() {
           </div>
 
           <div className={styles.floatingCard}>
+            <div className={styles.editorRow}>
             <div ref={contentRef} className={`${styles.content} editor-scroll-area`} style={toolbarHeight > 0 ? { "--scrollbar-offset": `${toolbarHeight}px` } as React.CSSProperties : undefined}>
               <div className={styles.toolbarAnchor}>
                 <EditorToolbar
@@ -1426,6 +1454,8 @@ function App() {
                   onBarHeight={handleBarHeight}
                   onOpenSearch={handleOpenSearch}
                   onOpenGoToLine={handleOpenGoToLine}
+                  outlineOpen={settings.outlinePanelOpen}
+                  onToggleOutline={handleToggleOutline}
                 />
               </div>
               {renderedFloatingEditorControl && (
@@ -1472,6 +1502,22 @@ function App() {
                   onChromeActivate={docReady ? handleShowEditorChrome : undefined}
                 />
               </div>
+            </div>
+
+            <div
+              className={mergeClasses(
+                styles.outlineSlot,
+                !settings.outlinePanelOpen && styles.outlineSlotClosed,
+              )}
+              aria-hidden={!settings.outlinePanelOpen}
+            >
+              <OutlinePanel
+                editor={noteEditor}
+                locale={locale}
+                onClose={handleCloseOutline}
+                onNavigate={handleOutlineJump}
+              />
+            </div>
             </div>
 
             <StatusBar

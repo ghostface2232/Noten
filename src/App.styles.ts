@@ -3,6 +3,7 @@ import {
   MOTION_DURATION_BASE,
   MOTION_DURATION_FAST,
   MOTION_DURATION_MEDIUM,
+  MOTION_DURATION_SLOW,
   MOTION_DURATION_SLOWER,
   MOTION_DURATION_SLOWEST,
   pressableButton,
@@ -219,6 +220,37 @@ export const useStyles = makeStyles({
     overscrollBehavior: "contain",
     scrollbarGutter: "stable",
     position: "relative",
+  },
+  // Horizontal band above the status bar: editor scroll area + outline panel.
+  editorRow: {
+    display: "flex",
+    flex: "1",
+    minHeight: 0,
+    minWidth: 0,
+  },
+  // Fixed-width outline slot (no resize handle, unlike the sidebar). The slot
+  // animates width so the panel slides open/closed; visibility flips after the
+  // collapse so hidden items leave the tab order and accessibility tree.
+  outlineSlot: {
+    width: "240px",
+    flexShrink: 0,
+    overflow: "hidden",
+    visibility: "visible",
+    transitionProperty: "width, visibility",
+    transitionDuration: `${MOTION_DURATION_SLOW}, 0s`,
+    transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+    transitionDelay: "0s, 0s",
+    "@media screen and (prefers-reduced-motion: reduce)": {
+      transitionDuration: "0.01ms, 0s",
+    },
+  },
+  outlineSlotClosed: {
+    width: "0px",
+    visibility: "hidden",
+    transitionDelay: `0s, ${MOTION_DURATION_SLOW}`,
+    "@media screen and (prefers-reduced-motion: reduce)": {
+      transitionDelay: "0s, 0s",
+    },
   },
   toolbarAnchor: {
     position: "sticky",

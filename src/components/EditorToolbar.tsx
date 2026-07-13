@@ -33,6 +33,7 @@ import {
   ArrowRedoRegular,
   ChevronDownRegular,
   SearchRegular,
+  TextBulletListTreeRegular,
   TextFirstLineRegular,
 } from "@fluentui/react-icons";
 import { pickAndInsertImage } from "../extensions/ImageDrop";
@@ -278,6 +279,8 @@ interface EditorToolbarProps {
   onBarHeight?: (height: number) => void;
   onOpenSearch: () => void;
   onOpenGoToLine: () => void;
+  outlineOpen: boolean;
+  onToggleOutline: () => void;
 }
 
 function EditorToolbarImpl({
@@ -288,6 +291,8 @@ function EditorToolbarImpl({
   onBarHeight,
   onOpenSearch,
   onOpenGoToLine,
+  outlineOpen,
+  onToggleOutline,
 }: EditorToolbarProps) {
   const styles = useStyles();
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
@@ -527,6 +532,15 @@ function EditorToolbarImpl({
             false,
           )}
           {tb(i("tool.gotoLine"), <TextFirstLineRegular />, onOpenGoToLine, false)}
+          <Tooltip content={i("outline.toggle")} relationship="label">
+            <Button
+              appearance="subtle"
+              icon={<TextBulletListTreeRegular />}
+              className={outlineOpen ? styles.toolBtnActive : styles.toolBtn}
+              onClick={onToggleOutline}
+              aria-pressed={outlineOpen}
+            />
+          </Tooltip>
         </div>
       </div>
     </div>
