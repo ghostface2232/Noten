@@ -108,40 +108,43 @@ export function useKeyboardShortcuts({
       if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); return; }
       if (e.key === "BrowserBack" || e.key === "BrowserForward") { e.preventDefault(); return; }
 
-      // F8 toggles focus mode globally (editor focus not required), but is
-      // ignored while a modal dialog (e.g. Settings) holds focus.
-      if (e.key === "F8" && !isDialogTarget(e.target)) {
+      // F8 (bare — Ctrl/Shift/Alt+F8 are different chords) toggles focus mode
+      // globally (editor focus not required), but is ignored while a modal
+      // dialog (e.g. Settings) holds focus.
+      if (e.key === "F8" && !ctrl && !e.altKey && !e.shiftKey && !isDialogTarget(e.target)) {
         e.preventDefault();
         onToggleFocusMode();
         return;
       }
 
-      if (ctrl && e.shiftKey && key === "o") { e.preventDefault(); onToggleOutline(); return; }
-      if (ctrl && !e.shiftKey && key === "o") { e.preventDefault(); onImportFile(); }
-      if (ctrl && !e.shiftKey && key === "n") { e.preventDefault(); void onNewNote(); }
-      if (ctrl && e.shiftKey && key === "n") { e.preventDefault(); openNewWindow(); }
-      if (ctrl && !e.shiftKey && key === "f") {
+      // Outline is a global editor toggle like F8: it must not fire from
+      // inside a modal dialog either.
+      if (ctrl && e.shiftKey && !e.altKey && key === "o" && !isDialogTarget(e.target)) { e.preventDefault(); onToggleOutline(); return; }
+      if (ctrl && !e.shiftKey && !e.altKey && key === "o") { e.preventDefault(); onImportFile(); }
+      if (ctrl && !e.shiftKey && !e.altKey && key === "n") { e.preventDefault(); void onNewNote(); }
+      if (ctrl && e.shiftKey && !e.altKey && key === "n") { e.preventDefault(); openNewWindow(); }
+      if (ctrl && !e.shiftKey && !e.altKey && key === "f") {
         e.preventDefault();
         setDocGoToLineOpen(false);
         setDocSearchReplace(false);
         setDocSearchOpen((o) => !o);
         return;
       }
-      if (ctrl && !e.shiftKey && key === "h") {
+      if (ctrl && !e.shiftKey && !e.altKey && key === "h") {
         e.preventDefault();
         setDocGoToLineOpen(false);
         setDocSearchOpen(true);
         setDocSearchReplace(true);
         return;
       }
-      if (ctrl && !e.shiftKey && key === "g") {
+      if (ctrl && !e.shiftKey && !e.altKey && key === "g") {
         e.preventDefault();
         setDocSearchOpen(false);
         setDocSearchReplace(false);
         setDocGoToLineOpen((o) => !o);
         return;
       }
-      if (ctrl && e.shiftKey && key === "x" && isEditorShortcutTarget(e.target)) {
+      if (ctrl && e.shiftKey && !e.altKey && key === "x" && isEditorShortcutTarget(e.target)) {
         e.preventDefault();
         tiptapRef.current?.getEditor()?.chain().focus().toggleStrike().run();
         return;

@@ -722,7 +722,7 @@ export function Sidebar({
       const closeMenuIfRouted = () => { if (viaMenu) setContextMenu(null); };
 
       const ctrl = e.ctrlKey || e.metaKey;
-      if (ctrl && e.key === "d") {
+      if (ctrl && !e.shiftKey && !e.altKey && e.key === "d") {
         e.preventDefault();
         onDuplicateNote(targetIndex);
         closeMenuIfRouted();
@@ -730,7 +730,7 @@ export function Sidebar({
         e.preventDefault();
         onExportNote(targetIndex);
         closeMenuIfRouted();
-      } else if ((ctrl && e.key === "r") || e.key === "F2") {
+      } else if ((ctrl && !e.shiftKey && !e.altKey && e.key === "r") || (e.key === "F2" && !ctrl && !e.shiftKey && !e.altKey)) {
         e.preventDefault();
         handleDoubleClick(targetIndex);
         closeMenuIfRouted();
