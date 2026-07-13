@@ -117,6 +117,7 @@ Noten's privacy posture is "your notes never leave the disk," and it should stay
 
 ## Editor Decorations
 
+- The outline panel stays mounted for its width transition, but its editor transaction subscription and full heading extraction run only while the panel is open. Opening recomputes in a layout effect so a document changed while closed never flashes a stale heading list.
 - In-editor find (`SearchHighlight.ts`): `findSearchMatches` is the single match finder shared by `SearchBar` and the plugin. The full match list backs the counter, next/prev, and replace-all, but only `SEARCH_DECORATION_CAP` (2000) decorations are drawn — `selectMatchesToDecorate` picks those nearest the visible range, fed by a scroll-driven plugin `view` (falling back to a window around the active match). Keep the count truthful and the drawn set bounded; do not decorate every match.
 - Wiki-link "missing link" decorations (`WikiLink.ts`): a target note's existence changes only via the forced refresh meta (`refreshWikiLinkDecorations`, dispatched from `App.tsx` when the docs/title set or locale changes), so a plain edit remaps the existing `DecorationSet` and recomputes only the changed range — it does not rebuild the whole set per keystroke. `findDocByTitle` is O(1) via a title map cached per `docs` array reference.
 

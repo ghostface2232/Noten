@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 import { Button, Tooltip, makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import { DismissRegular } from "@fluentui/react-icons";
 import type { Editor } from "@tiptap/react";
@@ -115,11 +115,16 @@ const useStyles = makeStyles({
  * swap; the identity check then catches any updateState that a later
  * selection-only transaction reveals.
  */
-function useOutline(editor: Editor | null, docKey: string | null) {
+function useOutline(editor: Editor | null, docKey: string | null, enabled: boolean) {
   const [headings, setHeadings] = useState<OutlineHeading[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    // Keep the panel mounted for its width transition, but do no document
+    // work while it is closed. Existing state intentionally stays rendered
+    // during the close animation; reopening recomputes below before paint.
+    if (!enabled) return;
+
     if (!editor) {
       setHeadings([]);
       setActiveIndex(-1);
@@ -157,7 +162,7 @@ function useOutline(editor: Editor | null, docKey: string | null) {
       editor.off("transaction", schedule);
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [editor, docKey]);
+  }, [editor, docKey, enabled]);
 
   return { headings, activeIndex };
 }
@@ -165,6 +170,8 @@ function useOutline(editor: Editor | null, docKey: string | null) {
 export interface OutlinePanelProps {
   editor: Editor | null;
   locale: Locale;
+  /** Whether the panel is open and should observe the editor document. */
+  open: boolean;
   /** Active note id — recomputes the outline on note switch (see useOutline). */
   docKey: string | null;
   onClose: () => void;
@@ -172,10 +179,10 @@ export interface OutlinePanelProps {
   onNavigate: (pos: number) => void;
 }
 
-function OutlinePanelImpl({ editor, locale, docKey, onClose, onNavigate }: OutlinePanelProps) {
+function OutlinePanelImpl({ editor, locale, open, docKey, onClose, onNavigate }: OutlinePanelProps) {
   const styles = useStyles();
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
-  const { headings, activeIndex } = useOutline(editor, docKey);
+  const { headings, activeIndex } = useOutline(editor, docKey, open);
   const listRef = useRef<HTMLUListElement>(null);
 
   const close = () => {

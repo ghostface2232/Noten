@@ -32,12 +32,13 @@ function swapDocument(editor: Editor, content: string) {
   editor.view.updateState(EditorState.create({ doc, plugins: editor.state.plugins }));
 }
 
-function renderPanel(editor: Editor, docKey: string) {
+function renderPanel(editor: Editor, docKey: string, open = true) {
   return render(
     <FluentProvider theme={webLightTheme}>
       <OutlinePanel
         editor={editor as unknown as ReactEditor}
         locale="en"
+        open={open}
         docKey={docKey}
         onClose={vi.fn()}
         onNavigate={vi.fn()}
@@ -50,12 +51,14 @@ function rerenderPanel(
   view: ReturnType<typeof renderPanel>,
   editor: Editor,
   docKey: string,
+  open = true,
 ) {
   view.rerender(
     <FluentProvider theme={webLightTheme}>
       <OutlinePanel
         editor={editor as unknown as ReactEditor}
         locale="en"
+        open={open}
         docKey={docKey}
         onClose={vi.fn()}
         onNavigate={vi.fn()}
@@ -105,5 +108,31 @@ describe("OutlinePanel — document loading and note switches", () => {
       expect(screen.getByText("No headings in this note")).toBeTruthy();
       expect(screen.queryByText("Old heading")).toBeNull();
     });
+  });
+});
+
+describe("OutlinePanel — closed-state lifecycle", () => {
+  it("subscribes only while open and refreshes before showing after a closed document change", () => {
+    const editor = makeEditor("<h1>Old heading</h1>");
+    const onSpy = vi.spyOn(editor, "on");
+    const offSpy = vi.spyOn(editor, "off");
+    const view = renderPanel(editor, "note-a", false);
+
+    expect(onSpy).not.toHaveBeenCalledWith("transaction", expect.any(Function));
+
+    rerenderPanel(view, editor, "note-a", true);
+    expect(onSpy).toHaveBeenCalledWith("transaction", expect.any(Function));
+    expect(screen.getByRole("button", { name: "Old heading" })).toBeTruthy();
+
+    rerenderPanel(view, editor, "note-a", false);
+    expect(offSpy).toHaveBeenCalledWith("transaction", expect.any(Function));
+
+    swapDocument(editor, "<h1>Current heading</h1><h2>Current section</h2>");
+    rerenderPanel(view, editor, "note-b", false);
+    rerenderPanel(view, editor, "note-b", true);
+
+    expect(screen.getByRole("button", { name: "Current heading" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Current section" })).toBeTruthy();
+    expect(screen.queryByText("Old heading")).toBeNull();
   });
 });
