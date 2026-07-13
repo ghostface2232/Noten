@@ -182,6 +182,32 @@ describe("Sidebar keyboard shortcuts — exact modifier matching", () => {
     expect(props.onDeleteNote).toHaveBeenCalledWith(0);
   });
 
+  it("handles Ctrl+R and Ctrl+D with CapsLock on (uppercase key, no Shift) — no WebView reload leak", () => {
+    const { props } = renderSidebar();
+    activateSidebar();
+
+    // CapsLock reports "R"/"D" without shiftKey. These must still be handled
+    // (and preventDefaulted): the useKeyboardShortcuts hook deliberately lets
+    // Ctrl+R through when the sidebar is active, so an unhandled chord here
+    // would reach the WebView reload accelerator.
+    expect(press({ key: "D", ctrlKey: true })).toBe(true);
+    expect(props.onDuplicateNote).toHaveBeenCalledTimes(1);
+
+    expect(press({ key: "R", ctrlKey: true })).toBe(true);
+    expect(renameField()).not.toBeNull();
+  });
+
+  it("Ctrl+Alt+P pins; Ctrl+Alt+Shift+P does not", () => {
+    const { props } = renderSidebar();
+    activateSidebar();
+
+    expect(press({ key: "p", ctrlKey: true, altKey: true })).toBe(true);
+    expect(props.onToggleNotePinned).toHaveBeenCalledTimes(1);
+
+    expect(press({ key: "P", ctrlKey: true, altKey: true, shiftKey: true })).toBe(false);
+    expect(props.onToggleNotePinned).toHaveBeenCalledTimes(1);
+  });
+
   it("ignores note shortcuts entirely while the sidebar is not active", () => {
     const { props } = renderSidebar();
     // No activateSidebar() — focus never entered the sidebar.
