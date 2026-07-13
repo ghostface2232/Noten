@@ -777,25 +777,21 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     <div style={{ fontSize: "13px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 업데이트 설치 전에 새 버전의 변경 사항을 미리 표시<br />
-                          · 붙여넣기 줄바꿈 처리와 모두 바꾸기 겹침 문제 수정<br />
-                          · 표 셀에 입력한 &amp;nbsp; 텍스트가 저장 시 사라지던 문제 수정<br />
-                          · 위키링크가 많은 대용량 문서의 입력 반응성 개선<br />
-                          · 에디터 컨텍스트 메뉴에서 Windows 이모지 선택기 지원<br />
-                          · 노트 삭제 애니메이션이 잘못된 위치에서 재생되던 문제 수정<br />
-                          · 창 컨트롤·설정 화면 등 앱 전반의 누름/전환 모션 개선<br />
-                          · 하위 메뉴 키보드 탐색과 화면 경계 처리 개선
+                          · 문서의 제목 구조를 한눈에 보고 이동하는 목차 패널 추가 (Ctrl+Shift+O)<br />
+                          · 작성 중인 블록만 밝게 표시하는 포커스 모드 추가<br />
+                          · 목차에서 제목으로 이동할 때 화면 깜빡임 없이 부드럽게 스크롤<br />
+                          · 단축키가 정확한 조합에서만 동작하도록 개선 (Ctrl+R 오동작 수정)<br />
+                          · 다이얼로그가 열려 있을 때 단축키가 새어 들어가던 문제 수정<br />
+                          · Windows 이모지 선택기 입력이 에디터에 반영되지 않던 문제 수정
                         </>
                       ) : (
                         <>
-                          · Release notes are now shown before installing an update<br />
-                          · Fixed paste newline handling and overlapping replace-all matches<br />
-                          · Fixed table cells losing typed &amp;nbsp; text on save<br />
-                          · Faster typing in large documents with many wiki links<br />
-                          · Windows emoji picker in the editor context menu<br />
-                          · Fixed the note delete animation playing at the wrong row<br />
-                          · Refined press/transition motion across window controls and settings<br />
-                          · Improved submenu keyboard navigation and viewport clamping
+                          · New table of contents panel for navigating headings (Ctrl+Shift+O)<br />
+                          · New focus mode that highlights only the block you're editing<br />
+                          · Jumping to a heading now scrolls smoothly without flashing<br />
+                          · Shortcuts now require exact modifier combinations (fixes stray Ctrl+R)<br />
+                          · Fixed shortcuts leaking through while dialogs are open<br />
+                          · Fixed Windows emoji picker input not reaching the editor
                         </>
                       )}
                     </div>
