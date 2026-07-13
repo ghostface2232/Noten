@@ -21,6 +21,8 @@ Windows-native Markdown note app built with Tauri v2, React, and TypeScript.
 - Scrolling down past a short threshold hides editor chrome.
 - Scrolling up or clicking inside the editor shows editor chrome again.
 - When `pinEditorToolbar` is enabled, both bars remain visible regardless of scroll position.
+- Focus mode (F8) pins the chrome hidden while active, regardless of scroll direction. This is intentional design — chrome popping in and out contradicts the mode — not a scroll-state bug. Leaving focus mode returns to the normal `pinEditorToolbar`-driven behavior.
+- Programmatic scrolls that must not flash the chrome (outline jumps) freeze the current visibility via `lockEditorChrome(ms)`; user wheel/mousedown input drops the lock immediately (`unlockEditorChrome`).
 
 ## Editor Synchronization
 
@@ -117,7 +119,11 @@ Noten's privacy posture is "your notes never leave the disk," and it should stay
 
 ## Editor Decorations
 
+Per-keystroke work in the editor must be incremental — no plugin or observer may re-derive whole-document state on every transaction:
+
+- Focus mode (`FocusMode.ts`): per-selection cost is constant regardless of document size. The plugin never walks the document (no `doc.descendants` on any path); the current top-level block's boundaries come from the resolved selection head (`$head.before(1)` / `$head.after(1)`) in constant time. The decoration set always holds at most one node decoration; same-block caret moves return the previous plugin state by reference, and same-block edits remap the existing set through `tr.mapping` instead of rebuilding it. Dimming every other block is pure CSS (`.tiptap-focus-mode` in `tiptap-editor.css`). The active flag lives in extension storage so it survives `view.updateState()` note swaps, which emit no transaction.
 - The outline panel stays mounted for its width transition, but its editor transaction subscription and full heading extraction run only while the panel is open. Opening recomputes in a layout effect so a document changed while closed never flashes a stale heading list.
+- Outline recomputation (`useOutline` in `OutlinePanel.tsx`) coalesces to one pass per frame via rAF. Whether the document changed is decided by doc-node identity (`editor.state.doc !== lastDoc`) — not `tr.docChanged`, because note switches arrive via `view.updateState()` without a transaction. Selection-only frames skip the heading walk and only refresh the active-heading highlight, and after a walk the result is compared by `${level}:${pos}:${text}` signature so unchanged outlines skip setState.
 - In-editor find (`SearchHighlight.ts`): `findSearchMatches` is the single match finder shared by `SearchBar` and the plugin. The full match list backs the counter, next/prev, and replace-all, but only `SEARCH_DECORATION_CAP` (2000) decorations are drawn — `selectMatchesToDecorate` picks those nearest the visible range, fed by a scroll-driven plugin `view` (falling back to a window around the active match). Keep the count truthful and the drawn set bounded; do not decorate every match.
 - Wiki-link "missing link" decorations (`WikiLink.ts`): a target note's existence changes only via the forced refresh meta (`refreshWikiLinkDecorations`, dispatched from `App.tsx` when the docs/title set or locale changes), so a plain edit remaps the existing `DecorationSet` and recomputes only the changed range — it does not rebuild the whole set per keystroke. `findDocByTitle` is O(1) via a title map cached per `docs` array reference.
 
@@ -161,7 +167,7 @@ Do not use old community-package APIs such as `editor.storage.markdown.getMarkdo
 - A note's color label is set from the note context menu (or, in select mode, the bulk right-click menu) and tints the note's sidebar icon. The sidebar "filter" button opens a swatch popover; picking a color filters the sidebar to a flat list of only that color's notes (composes with search; reuses the search flat-list rendering path, so drag is inert while filtered). The active filter persists across restarts only when `persistColorFilterAcrossRestarts` is enabled; otherwise it is cleared on startup.
 - Sidebar shortcuts (Ctrl+D, Ctrl+R, F2, Ctrl+E, Ctrl+Alt+P, Ctrl+Alt+C, Delete) are active when last mousedown was inside the sidebar. Tracked via `data-sidebar-active` attribute on `document.documentElement`.
 - Toggling/resizing the sidebar updates the OS window min-size and grows a too-narrow window to fit (`ensureWindowFitsSidebar` in `App.tsx`). This is skipped while the window is maximized or fullscreen — mutating window size there pops it back to windowed (and shifts position) on Windows — and the deferred min-size is re-applied when the window is later restored, detected via `onResized`.
-- Editor shortcuts include `Ctrl+Shift+X` for strike-through, `Ctrl+G` for Go to Line, and `Ctrl+H` for Find and Replace. All are handled at the window level via `useKeyboardShortcuts`, not inside individual editor keymaps.
+- Editor shortcuts include `Ctrl+Shift+X` for strike-through, `Ctrl+G` for Go to Line, `Ctrl+H` for Find and Replace, `Ctrl+Shift+O` for the table-of-contents panel, and `F8` for focus mode. All are handled at the window level via `useKeyboardShortcuts`, not inside individual editor keymaps. `F8` works globally but is ignored while a modal dialog (role="dialog") holds focus; `Ctrl+O` (import) requires the explicit `!shiftKey` guard so `Ctrl+Shift+O` never falls through to it. `Ctrl+P` stays blocked, reserved for a future quick switcher.
 - Sidebar shortcut hints are displayed in context menus. Shortcut style is unified across all menus (opacity 0.45, 12px, 24px left padding).
 
 ## Local Dev Workflow

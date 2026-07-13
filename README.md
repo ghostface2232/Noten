@@ -25,6 +25,8 @@ Download `noten-setup.exe` from [GitHub Releases](https://github.com/ghostface22
 - **Local-first autosave** - Notes stay on disk and save automatically; choose the app directory or a local/cloud-synced folder
 - **Slash commands** - Type `/` to insert headings, lists, code blocks, images, tables, Mermaid diagrams, and more
 - **Wiki links** - Type `[[` to link or create notes; links keep following notes when they are renamed
+- **Table of contents** - Toggleable heading outline panel with click-to-jump, current-heading highlight, and keyboard navigation
+- **Focus mode** - Dim everything except the block you are writing, with the editor chrome tucked away
 - **Tables** - Insert with a grid picker, resize columns in-place, and edit rows/columns from the table bubble toolbar
 - **Mermaid diagrams** - Render Mermaid code blocks inline, collapse source, and export diagrams as SVG or PNG
 - **Image support** - Drag & drop, paste, resize with corner handles, and drag to reorder
@@ -65,6 +67,8 @@ Download `noten-setup.exe` from [GitHub Releases](https://github.com/ghostface22
 | Find in document | `Ctrl+F` |
 | Find and replace | `Ctrl+H` |
 | Go to line | `Ctrl+G` |
+| Table of contents | `Ctrl+Shift+O` |
+| Focus mode | `F8` |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Y` |
 | Edit link | `Ctrl+K` |
 | Strike-through | `Ctrl+Shift+X` |
