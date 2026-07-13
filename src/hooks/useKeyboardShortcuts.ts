@@ -14,6 +14,13 @@ function isEditorShortcutTarget(target: EventTarget | null) {
   return !!element?.closest(".ProseMirror");
 }
 
+function isDialogTarget(target: EventTarget | null) {
+  const element = shortcutTargetElement(target);
+  // Fluent modals (Settings, confirm dialogs) trap focus inside a
+  // role="dialog" surface; global editor toggles must not fire from there.
+  return !!element?.closest('[role="dialog"]');
+}
+
 function isTextEntryTarget(target: EventTarget | null) {
   const element = shortcutTargetElement(target);
   if (!element) return false;
@@ -35,6 +42,9 @@ export interface UseKeyboardShortcutsParams {
   setDocGoToLineOpen: Dispatch<SetStateAction<boolean>>;
   onNewNote: () => Promise<void>;
   onImportFile: () => void;
+  onToggleOutline: () => void;
+  onToggleFocusMode: () => void;
+  onToggleTypewriter: () => void;
 }
 
 export function useKeyboardShortcuts({
@@ -46,6 +56,9 @@ export function useKeyboardShortcuts({
   setDocGoToLineOpen,
   onNewNote,
   onImportFile,
+  onToggleOutline,
+  onToggleFocusMode,
+  onToggleTypewriter,
 }: UseKeyboardShortcutsParams) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -97,7 +110,17 @@ export function useKeyboardShortcuts({
       if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); return; }
       if (e.key === "BrowserBack" || e.key === "BrowserForward") { e.preventDefault(); return; }
 
-      if (ctrl && key === "o") { e.preventDefault(); onImportFile(); }
+      // F8/F9 toggle editor modes globally (editor focus not required), but
+      // are ignored while a modal dialog (e.g. Settings) holds focus.
+      if ((e.key === "F8" || e.key === "F9") && !isDialogTarget(e.target)) {
+        e.preventDefault();
+        if (e.key === "F8") onToggleFocusMode();
+        else onToggleTypewriter();
+        return;
+      }
+
+      if (ctrl && e.shiftKey && key === "o") { e.preventDefault(); onToggleOutline(); return; }
+      if (ctrl && !e.shiftKey && key === "o") { e.preventDefault(); onImportFile(); }
       if (ctrl && !e.shiftKey && key === "n") { e.preventDefault(); void onNewNote(); }
       if (ctrl && e.shiftKey && key === "n") { e.preventDefault(); openNewWindow(); }
       if (ctrl && !e.shiftKey && key === "f") {
@@ -141,6 +164,9 @@ export function useKeyboardShortcuts({
     docSearchOpen,
     onImportFile,
     onNewNote,
+    onToggleFocusMode,
+    onToggleOutline,
+    onToggleTypewriter,
     setDocGoToLineOpen,
     setDocSearchOpen,
     setDocSearchReplace,

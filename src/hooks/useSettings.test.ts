@@ -106,3 +106,89 @@ describe("useSettings — update chain serializes back-to-back writes", () => {
   });
 
 });
+
+/** Seed the on-disk settings file with DEFAULT-shaped JSON plus overrides. */
+function seedSettingsFile(overrides: Record<string, unknown>) {
+  refs.files.set(SETTINGS_PATH, JSON.stringify({ locale: "ko", ...overrides }));
+}
+
+describe("useSettings — v0.3.0 boolean fields (outlinePanelOpen, focusModeEnabled, typewriterScrollEnabled)", () => {
+  it("loads persisted true values", async () => {
+    seedSettingsFile({
+      outlinePanelOpen: true,
+      focusModeEnabled: true,
+      typewriterScrollEnabled: true,
+    });
+    const result = await mountSettings();
+    expect(result.current.settings.outlinePanelOpen).toBe(true);
+    expect(result.current.settings.focusModeEnabled).toBe(true);
+    expect(result.current.settings.typewriterScrollEnabled).toBe(true);
+  });
+
+  it("defaults all three to false when the fields are missing (upgrade from v0.2.x)", async () => {
+    seedSettingsFile({});
+    const result = await mountSettings();
+    expect(result.current.settings.outlinePanelOpen).toBe(false);
+    expect(result.current.settings.focusModeEnabled).toBe(false);
+    expect(result.current.settings.typewriterScrollEnabled).toBe(false);
+  });
+
+  it("falls back to false when the fields hold non-boolean garbage", async () => {
+    seedSettingsFile({
+      outlinePanelOpen: "yes",
+      focusModeEnabled: 1,
+      typewriterScrollEnabled: null,
+    });
+    const result = await mountSettings();
+    expect(result.current.settings.outlinePanelOpen).toBe(false);
+    expect(result.current.settings.focusModeEnabled).toBe(false);
+    expect(result.current.settings.typewriterScrollEnabled).toBe(false);
+  });
+});
+
+describe("useSettings — first-run locale seed (navigator.language)", () => {
+  let languageSpy: ReturnType<typeof vi.spyOn> | null = null;
+
+  function mockLanguage(lang: string) {
+    languageSpy = vi.spyOn(window.navigator, "language", "get").mockReturnValue(lang);
+  }
+
+  afterEach(() => {
+    languageSpy?.mockRestore();
+    languageSpy = null;
+  });
+
+  it("seeds locale ko when no settings file exists and the system language is ko-*", async () => {
+    mockLanguage("ko-KR");
+    const result = await mountSettings();
+    expect(result.current.settings.locale).toBe("ko");
+    const onDisk = JSON.parse(refs.files.get(SETTINGS_PATH)!);
+    expect(onDisk.locale).toBe("ko");
+  });
+
+  it("seeds locale en when no settings file exists and the system language is not ko", async () => {
+    mockLanguage("en-US");
+    const result = await mountSettings();
+    expect(result.current.settings.locale).toBe("en");
+    const onDisk = JSON.parse(refs.files.get(SETTINGS_PATH)!);
+    expect(onDisk.locale).toBe("en");
+  });
+
+  it("never touches an existing settings file (upgrade user keeps ko even on an en system)", async () => {
+    mockLanguage("en-US");
+    seedSettingsFile({ locale: "ko" });
+    const before = refs.files.get(SETTINGS_PATH);
+    const result = await mountSettings();
+    expect(result.current.settings.locale).toBe("ko");
+    // Load path must not rewrite the file at all.
+    expect(refs.writeCalls).toBe(0);
+    expect(refs.files.get(SETTINGS_PATH)).toBe(before);
+  });
+
+  it("falls back to ko (not the system language) when the file exists but its locale field is missing", async () => {
+    mockLanguage("en-US");
+    refs.files.set(SETTINGS_PATH, JSON.stringify({ themeMode: "dark" }));
+    const result = await mountSettings();
+    expect(result.current.settings.locale).toBe("ko");
+  });
+});

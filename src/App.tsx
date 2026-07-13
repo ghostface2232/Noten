@@ -983,6 +983,19 @@ function App() {
     handleBarHeight,
   } = useChromeVisibility(contentRef, activeDoc?.id, settings.pinEditorToolbar);
 
+  // v0.3.0 editor-mode toggles. No consuming UI yet (outline panel, focus
+  // plugins land in later steps) — the settings just flip and persist.
+  const { outlinePanelOpen, focusModeEnabled, typewriterScrollEnabled } = settings;
+  const handleToggleOutline = useCallback(() => {
+    void updateSetting("outlinePanelOpen", !outlinePanelOpen);
+  }, [updateSetting, outlinePanelOpen]);
+  const handleToggleFocusMode = useCallback(() => {
+    void updateSetting("focusModeEnabled", !focusModeEnabled);
+  }, [updateSetting, focusModeEnabled]);
+  const handleToggleTypewriter = useCallback(() => {
+    void updateSetting("typewriterScrollEnabled", !typewriterScrollEnabled);
+  }, [updateSetting, typewriterScrollEnabled]);
+
   useKeyboardShortcuts({
     tiptapRef,
     docSearchOpen,
@@ -992,6 +1005,9 @@ function App() {
     setDocGoToLineOpen,
     onNewNote: fs.newNote,
     onImportFile: fs.importFile,
+    onToggleOutline: handleToggleOutline,
+    onToggleFocusMode: handleToggleFocusMode,
+    onToggleTypewriter: handleToggleTypewriter,
   });
 
   useEffect(() => {

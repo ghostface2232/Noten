@@ -29,6 +29,12 @@ export interface Settings {
   colorFilter: NoteColorId | null;
   /** When false, an active colorFilter is cleared on app start. */
   persistColorFilterAcrossRestarts: boolean;
+  /** Outline panel open state — persisted like the sidebar's open state. */
+  outlinePanelOpen: boolean;
+  /** Focus mode: dim everything except the current block. */
+  focusModeEnabled: boolean;
+  /** Typewriter scrolling: keep the caret vertically centered while typing. */
+  typewriterScrollEnabled: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -45,7 +51,23 @@ const DEFAULTS: Settings = {
   notesDirectory: "",
   colorFilter: null,
   persistColorFilterAcrossRestarts: false,
+  outlinePanelOpen: false,
+  focusModeEnabled: false,
+  typewriterScrollEnabled: false,
 };
+
+// First-run locale seed: with no settings file on disk yet, follow the OS/
+// browser language. Never applied to an existing file — a file whose locale
+// field is missing or corrupt still falls back to DEFAULTS.locale ("ko") in
+// parseSettings, exactly as before.
+function detectFirstRunLocale(): Locale {
+  const lang = typeof navigator !== "undefined" ? navigator.language ?? "" : "";
+  return lang.toLowerCase().startsWith("ko") ? "ko" : "en";
+}
+
+function firstRunDefaults(): Settings {
+  return { ...DEFAULTS, locale: detectFirstRunLocale() };
+}
 
 let settingsPathPromise: Promise<string> | null = null;
 let settingsDirPromise: Promise<string> | null = null;
@@ -99,6 +121,11 @@ function parseSettings(raw: string): Settings {
     persistColorFilterAcrossRestarts: typeof parsed.persistColorFilterAcrossRestarts === "boolean"
       ? parsed.persistColorFilterAcrossRestarts
       : DEFAULTS.persistColorFilterAcrossRestarts,
+    outlinePanelOpen: typeof parsed.outlinePanelOpen === "boolean" ? parsed.outlinePanelOpen : DEFAULTS.outlinePanelOpen,
+    focusModeEnabled: typeof parsed.focusModeEnabled === "boolean" ? parsed.focusModeEnabled : DEFAULTS.focusModeEnabled,
+    typewriterScrollEnabled: typeof parsed.typewriterScrollEnabled === "boolean"
+      ? parsed.typewriterScrollEnabled
+      : DEFAULTS.typewriterScrollEnabled,
   };
 }
 
@@ -117,7 +144,7 @@ async function readMergeWriteSetting<K extends keyof Settings>(
   value: Settings[K],
 ): Promise<Settings> {
   const existing = await loadSettingsFromFile();
-  const onDisk = existing === null ? DEFAULTS : existing;
+  const onDisk = existing === null ? firstRunDefaults() : existing;
   const merged = { ...onDisk, [key]: value };
   await persistSettings(merged);
   return merged;
@@ -170,11 +197,19 @@ export function useSettings() {
         return;
       }
 
+      // No settings file: first run. Seed the locale from the system language
+      // before persisting, so upgrade users (file already on disk) are never
+      // touched by this path.
+      const seeded = firstRunDefaults();
+      if (!cancelled && !didUserUpdateRef.current) {
+        settingsRef.current = seeded;
+        setSettingsRaw(seeded);
+      }
       try {
-        await persistSettings(DEFAULTS);
+        await persistSettings(seeded);
       } catch {
         if (import.meta.env.DEV) {
-          console.warn("Failed to persist default settings:", DEFAULTS);
+          console.warn("Failed to persist default settings:", seeded);
         }
       }
       if (!cancelled) setIsLoaded(true);

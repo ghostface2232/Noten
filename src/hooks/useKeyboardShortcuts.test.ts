@@ -22,6 +22,9 @@ function makeParams(): UseKeyboardShortcutsParams {
     setDocGoToLineOpen: vi.fn(),
     onNewNote: vi.fn(async () => {}),
     onImportFile: vi.fn(),
+    onToggleOutline: vi.fn(),
+    onToggleFocusMode: vi.fn(),
+    onToggleTypewriter: vi.fn(),
   };
 }
 
@@ -132,5 +135,71 @@ describe("useKeyboardShortcuts — Tab is not hijacked (keyboard navigation)", (
     // ProseMirror handles list/indent Tab itself; this hook must not intervene.
     expect(press(editorChild, { key: "Tab" })).toBe(false);
     expect(focusSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("useKeyboardShortcuts — v0.3.0 toggles (Ctrl+Shift+O, F8, F9)", () => {
+  let dialogChild: HTMLElement;
+
+  beforeEach(() => {
+    const dialogEl = document.createElement("div");
+    dialogEl.setAttribute("role", "dialog");
+    dialogChild = document.createElement("button");
+    dialogEl.appendChild(dialogChild);
+    document.body.appendChild(dialogEl);
+  });
+
+  afterEach(() => {
+    dialogChild.parentElement?.remove();
+  });
+
+  it("Ctrl+Shift+O toggles the outline panel and does NOT fall through to the Ctrl+O import handler", () => {
+    const params = makeParams();
+    renderHook(() => useKeyboardShortcuts(params));
+    expect(press(plainEl, { key: "o", ctrlKey: true, shiftKey: true })).toBe(true);
+    expect(params.onToggleOutline).toHaveBeenCalledTimes(1);
+    expect(params.onImportFile).not.toHaveBeenCalled();
+  });
+
+  it("Ctrl+O still opens the import dialog, not the outline panel", () => {
+    const params = makeParams();
+    renderHook(() => useKeyboardShortcuts(params));
+    expect(press(plainEl, { key: "o", ctrlKey: true })).toBe(true);
+    expect(params.onImportFile).toHaveBeenCalledTimes(1);
+    expect(params.onToggleOutline).not.toHaveBeenCalled();
+  });
+
+  it("F8 toggles focus mode globally — from app chrome and from inside the editor", () => {
+    const params = makeParams();
+    renderHook(() => useKeyboardShortcuts(params));
+    expect(press(plainEl, { key: "F8" })).toBe(true);
+    expect(press(editorEl.querySelector("p")!, { key: "F8" })).toBe(true);
+    expect(params.onToggleFocusMode).toHaveBeenCalledTimes(2);
+  });
+
+  it("F9 toggles typewriter scrolling globally", () => {
+    const params = makeParams();
+    renderHook(() => useKeyboardShortcuts(params));
+    expect(press(plainEl, { key: "F9" })).toBe(true);
+    expect(press(editorEl.querySelector("p")!, { key: "F9" })).toBe(true);
+    expect(params.onToggleTypewriter).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores F8/F9 while focus is inside an open dialog (e.g. Settings modal)", () => {
+    const params = makeParams();
+    renderHook(() => useKeyboardShortcuts(params));
+    expect(press(dialogChild, { key: "F8" })).toBe(false);
+    expect(press(dialogChild, { key: "F9" })).toBe(false);
+    expect(params.onToggleFocusMode).not.toHaveBeenCalled();
+    expect(params.onToggleTypewriter).not.toHaveBeenCalled();
+  });
+
+  it("keeps Ctrl+P blocked (reserved for the future quick switcher)", () => {
+    const params = makeParams();
+    renderHook(() => useKeyboardShortcuts(params));
+    expect(press(plainEl, { key: "p", ctrlKey: true })).toBe(true);
+    expect(params.onToggleOutline).not.toHaveBeenCalled();
+    expect(params.onToggleFocusMode).not.toHaveBeenCalled();
+    expect(params.onToggleTypewriter).not.toHaveBeenCalled();
   });
 });

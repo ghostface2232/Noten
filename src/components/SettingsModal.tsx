@@ -23,7 +23,10 @@ import {
   WindowNew20Regular,
   ArrowDownload20Regular,
   Code20Regular,
+  Eye20Regular,
+  Keyboard20Regular,
   Search20Regular,
+  TextBulletListTree20Regular,
   TextNumberListLtr20Regular,
   TextStrikethrough20Regular,
   Rename20Regular,
@@ -577,6 +580,32 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   />
                 </div>
 
+                <div className={settingItemClass(styles)}>
+                  <div className={styles.row}>
+                    <Label className={styles.label}>{i("focus.mode")}</Label>
+                    <Switch
+                      checked={settings.focusModeEnabled}
+                      onChange={(_, data) => onUpdate("focusModeEnabled", data.checked)}
+                    />
+                  </div>
+                  <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, marginTop: "4px", lineHeight: "1.5" }}>
+                    {i("focus.mode.desc")}
+                  </div>
+                </div>
+
+                <div className={settingItemClass(styles)}>
+                  <div className={styles.row}>
+                    <Label className={styles.label}>{i("focus.typewriter")}</Label>
+                    <Switch
+                      checked={settings.typewriterScrollEnabled}
+                      onChange={(_, data) => onUpdate("typewriterScrollEnabled", data.checked)}
+                    />
+                  </div>
+                  <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, marginTop: "4px", lineHeight: "1.5" }}>
+                    {i("focus.typewriter.desc")}
+                  </div>
+                </div>
+
                 <div className={mergeClasses(styles.sliderRow, settingItemClass(styles))}>
                   <div className={styles.sliderHeader}>
                     <Label className={styles.label}>{i("settings.paragraphSpacing")}</Label>
@@ -619,6 +648,9 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   ["settings.shortcut.find", "Ctrl+F", Search20Regular],
                   ["settings.shortcut.replace", "Ctrl+H", ArrowSwap20Regular],
                   ["settings.shortcut.gotoLine", "Ctrl+G", TextNumberListLtr20Regular],
+                  ["settings.shortcut.outline", "Ctrl+Shift+O", TextBulletListTree20Regular],
+                  ["settings.shortcut.focusMode", "F8", Eye20Regular],
+                  ["settings.shortcut.typewriter", "F9", Keyboard20Regular],
                   ["settings.shortcut.undo", "Ctrl+Z", ArrowUndo20Regular],
                   ["settings.shortcut.redo", "Ctrl+Y", ArrowRedo20Regular],
                   ["settings.shortcut.link", "Ctrl+K", Link20Regular],

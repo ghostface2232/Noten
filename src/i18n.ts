@@ -81,6 +81,25 @@ const dict = {
   "slash.table": { en: "Table", ko: "표" },
   "slash.table.desc": { en: "Insert a 3 × 3 table", ko: "3 × 3 표 삽입" },
 
+  "outline.title": { en: "Outline", ko: "아웃라인" },
+  "outline.empty": { en: "No headings in this note", ko: "이 노트에 헤딩이 없습니다" },
+  "outline.toggle": { en: "Outline (Ctrl+Shift+O)", ko: "아웃라인 (Ctrl+Shift+O)" },
+
+  "focus.mode": { en: "Focus mode", ko: "포커스 모드" },
+  "focus.mode.desc": {
+    en: "Dim everything except the paragraph you are writing.",
+    ko: "작성 중인 문단 외의 내용을 흐리게 표시합니다.",
+  },
+  "focus.modeOn": { en: "Focus mode on", ko: "포커스 모드 켬" },
+  "focus.modeOff": { en: "Focus mode off", ko: "포커스 모드 끔" },
+  "focus.typewriter": { en: "Typewriter scrolling", ko: "타이프라이터 스크롤" },
+  "focus.typewriter.desc": {
+    en: "Keep the caret vertically centered while typing.",
+    ko: "입력 중 캐럿을 화면 세로 중앙에 유지합니다.",
+  },
+  "focus.typewriterOn": { en: "Typewriter scrolling on", ko: "타이프라이터 스크롤 켬" },
+  "focus.typewriterOff": { en: "Typewriter scrolling off", ko: "타이프라이터 스크롤 끔" },
+
   "wiki.createNew": { en: "Create new note", ko: "새 노트 만들기" },
   "wiki.hover.edit": { en: "Edit wiki link", ko: "위키 링크 편집" },
 
@@ -179,6 +198,9 @@ const dict = {
   "settings.shortcut.find": { en: "Find in document", ko: "문서에서 찾기" },
   "settings.shortcut.replace": { en: "Find and replace", ko: "찾기 및 바꾸기" },
   "settings.shortcut.gotoLine": { en: "Go to line", ko: "줄 이동" },
+  "settings.shortcut.outline": { en: "Toggle outline panel", ko: "아웃라인 패널 토글" },
+  "settings.shortcut.focusMode": { en: "Toggle focus mode", ko: "포커스 모드 토글" },
+  "settings.shortcut.typewriter": { en: "Toggle typewriter scrolling", ko: "타이프라이터 스크롤 토글" },
   "settings.shortcut.undo": { en: "Undo", ko: "실행 취소" },
   "settings.shortcut.redo": { en: "Redo", ko: "다시 실행" },
   "settings.shortcut.link": { en: "Insert or edit link", ko: "링크 삽입 / 편집" },
