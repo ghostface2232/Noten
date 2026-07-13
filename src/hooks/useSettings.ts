@@ -33,8 +33,6 @@ export interface Settings {
   outlinePanelOpen: boolean;
   /** Focus mode: dim everything except the current block. */
   focusModeEnabled: boolean;
-  /** Typewriter scrolling: keep the caret vertically centered while typing. */
-  typewriterScrollEnabled: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -53,7 +51,6 @@ const DEFAULTS: Settings = {
   persistColorFilterAcrossRestarts: false,
   outlinePanelOpen: false,
   focusModeEnabled: false,
-  typewriterScrollEnabled: false,
 };
 
 // First-run locale seed: with no settings file on disk yet, follow the OS/
@@ -123,9 +120,6 @@ function parseSettings(raw: string): Settings {
       : DEFAULTS.persistColorFilterAcrossRestarts,
     outlinePanelOpen: typeof parsed.outlinePanelOpen === "boolean" ? parsed.outlinePanelOpen : DEFAULTS.outlinePanelOpen,
     focusModeEnabled: typeof parsed.focusModeEnabled === "boolean" ? parsed.focusModeEnabled : DEFAULTS.focusModeEnabled,
-    typewriterScrollEnabled: typeof parsed.typewriterScrollEnabled === "boolean"
-      ? parsed.typewriterScrollEnabled
-      : DEFAULTS.typewriterScrollEnabled,
   };
 }
 

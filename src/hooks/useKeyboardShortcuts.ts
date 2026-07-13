@@ -44,7 +44,6 @@ export interface UseKeyboardShortcutsParams {
   onImportFile: () => void;
   onToggleOutline: () => void;
   onToggleFocusMode: () => void;
-  onToggleTypewriter: () => void;
 }
 
 export function useKeyboardShortcuts({
@@ -58,7 +57,6 @@ export function useKeyboardShortcuts({
   onImportFile,
   onToggleOutline,
   onToggleFocusMode,
-  onToggleTypewriter,
 }: UseKeyboardShortcutsParams) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -110,12 +108,11 @@ export function useKeyboardShortcuts({
       if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); return; }
       if (e.key === "BrowserBack" || e.key === "BrowserForward") { e.preventDefault(); return; }
 
-      // F8/F9 toggle editor modes globally (editor focus not required), but
-      // are ignored while a modal dialog (e.g. Settings) holds focus.
-      if ((e.key === "F8" || e.key === "F9") && !isDialogTarget(e.target)) {
+      // F8 toggles focus mode globally (editor focus not required), but is
+      // ignored while a modal dialog (e.g. Settings) holds focus.
+      if (e.key === "F8" && !isDialogTarget(e.target)) {
         e.preventDefault();
-        if (e.key === "F8") onToggleFocusMode();
-        else onToggleTypewriter();
+        onToggleFocusMode();
         return;
       }
 
@@ -166,7 +163,6 @@ export function useKeyboardShortcuts({
     onNewNote,
     onToggleFocusMode,
     onToggleOutline,
-    onToggleTypewriter,
     setDocGoToLineOpen,
     setDocSearchOpen,
     setDocSearchReplace,

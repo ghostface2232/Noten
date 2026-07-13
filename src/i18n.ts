@@ -94,13 +94,6 @@ const dict = {
   },
   "focus.modeOn": { en: "Focus mode on", ko: "포커스 모드 켬" },
   "focus.modeOff": { en: "Focus mode off", ko: "포커스 모드 끔" },
-  "focus.typewriter": { en: "Typewriter scrolling", ko: "타이프라이터 스크롤" },
-  "focus.typewriter.desc": {
-    en: "Keep the caret vertically centered while typing.",
-    ko: "입력 중 캐럿을 화면 세로 중앙에 유지합니다.",
-  },
-  "focus.typewriterOn": { en: "Typewriter scrolling on", ko: "타이프라이터 스크롤 켬" },
-  "focus.typewriterOff": { en: "Typewriter scrolling off", ko: "타이프라이터 스크롤 끔" },
 
   "wiki.createNew": { en: "Create new note", ko: "새 노트 만들기" },
   "wiki.hover.edit": { en: "Edit wiki link", ko: "위키 링크 편집" },
@@ -202,7 +195,6 @@ const dict = {
   "settings.shortcut.gotoLine": { en: "Go to line", ko: "줄 이동" },
   "settings.shortcut.outline": { en: "Toggle table of contents", ko: "목차 패널 토글" },
   "settings.shortcut.focusMode": { en: "Toggle focus mode", ko: "포커스 모드 토글" },
-  "settings.shortcut.typewriter": { en: "Toggle typewriter scrolling", ko: "타이프라이터 스크롤 토글" },
   "settings.shortcut.undo": { en: "Undo", ko: "실행 취소" },
   "settings.shortcut.redo": { en: "Redo", ko: "다시 실행" },
   "settings.shortcut.link": { en: "Insert or edit link", ko: "링크 삽입 / 편집" },

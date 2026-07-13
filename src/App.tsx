@@ -995,7 +995,7 @@ function App() {
   } = useChromeVisibility(contentRef, activeDoc?.id, settings.pinEditorToolbar);
 
   // v0.3.0 editor-mode toggles.
-  const { outlinePanelOpen, focusModeEnabled, typewriterScrollEnabled } = settings;
+  const { outlinePanelOpen, focusModeEnabled } = settings;
   const handleToggleOutline = useCallback(() => {
     void updateSetting("outlinePanelOpen", !outlinePanelOpen);
   }, [updateSetting, outlinePanelOpen]);
@@ -1025,9 +1025,6 @@ function App() {
       focusNoticeTimerRef.current = null;
     }, FOCUS_NOTICE_MS);
   }, [updateSetting, focusModeEnabled, locale]);
-  const handleToggleTypewriter = useCallback(() => {
-    void updateSetting("typewriterScrollEnabled", !typewriterScrollEnabled);
-  }, [updateSetting, typewriterScrollEnabled]);
 
   // Focus mode wants a bare canvas: entering closes the outline panel (and
   // remembers whether it was open), leaving restores it. Only reacts to real
@@ -1090,7 +1087,6 @@ function App() {
     onImportFile: fs.importFile,
     onToggleOutline: handleToggleOutline,
     onToggleFocusMode: handleToggleFocusMode,
-    onToggleTypewriter: handleToggleTypewriter,
   });
 
   useEffect(() => {

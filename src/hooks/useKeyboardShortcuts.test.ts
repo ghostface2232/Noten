@@ -24,7 +24,6 @@ function makeParams(): UseKeyboardShortcutsParams {
     onImportFile: vi.fn(),
     onToggleOutline: vi.fn(),
     onToggleFocusMode: vi.fn(),
-    onToggleTypewriter: vi.fn(),
   };
 }
 
@@ -138,7 +137,7 @@ describe("useKeyboardShortcuts — Tab is not hijacked (keyboard navigation)", (
   });
 });
 
-describe("useKeyboardShortcuts — v0.3.0 toggles (Ctrl+Shift+O, F8, F9)", () => {
+describe("useKeyboardShortcuts — v0.3.0 toggles (Ctrl+Shift+O, F8)", () => {
   let dialogChild: HTMLElement;
 
   beforeEach(() => {
@@ -177,21 +176,11 @@ describe("useKeyboardShortcuts — v0.3.0 toggles (Ctrl+Shift+O, F8, F9)", () =>
     expect(params.onToggleFocusMode).toHaveBeenCalledTimes(2);
   });
 
-  it("F9 toggles typewriter scrolling globally", () => {
-    const params = makeParams();
-    renderHook(() => useKeyboardShortcuts(params));
-    expect(press(plainEl, { key: "F9" })).toBe(true);
-    expect(press(editorEl.querySelector("p")!, { key: "F9" })).toBe(true);
-    expect(params.onToggleTypewriter).toHaveBeenCalledTimes(2);
-  });
-
-  it("ignores F8/F9 while focus is inside an open dialog (e.g. Settings modal)", () => {
+  it("ignores F8 while focus is inside an open dialog (e.g. Settings modal)", () => {
     const params = makeParams();
     renderHook(() => useKeyboardShortcuts(params));
     expect(press(dialogChild, { key: "F8" })).toBe(false);
-    expect(press(dialogChild, { key: "F9" })).toBe(false);
     expect(params.onToggleFocusMode).not.toHaveBeenCalled();
-    expect(params.onToggleTypewriter).not.toHaveBeenCalled();
   });
 
   it("keeps Ctrl+P blocked (reserved for the future quick switcher)", () => {
@@ -200,6 +189,5 @@ describe("useKeyboardShortcuts — v0.3.0 toggles (Ctrl+Shift+O, F8, F9)", () =>
     expect(press(plainEl, { key: "p", ctrlKey: true })).toBe(true);
     expect(params.onToggleOutline).not.toHaveBeenCalled();
     expect(params.onToggleFocusMode).not.toHaveBeenCalled();
-    expect(params.onToggleTypewriter).not.toHaveBeenCalled();
   });
 });
