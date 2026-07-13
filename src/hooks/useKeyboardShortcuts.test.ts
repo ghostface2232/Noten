@@ -202,24 +202,36 @@ describe("useKeyboardShortcuts — v0.3.0 toggles (Ctrl+Shift+O, F8)", () => {
     expect(params.onToggleFocusMode).not.toHaveBeenCalled();
   });
 
-  it("does not fire Ctrl+O / Ctrl+Shift+O actions when Alt is also held", () => {
+  it("does not fire Ctrl+O / Ctrl+Shift+O actions when Alt is also held — the chord falls through", () => {
     const params = makeParams();
     renderHook(() => useKeyboardShortcuts(params));
-    press(plainEl, { key: "o", ctrlKey: true, altKey: true });
-    press(plainEl, { key: "o", ctrlKey: true, shiftKey: true, altKey: true });
+    expect(press(plainEl, { key: "o", ctrlKey: true, altKey: true })).toBe(false);
+    expect(press(plainEl, { key: "o", ctrlKey: true, shiftKey: true, altKey: true })).toBe(false);
     expect(params.onImportFile).not.toHaveBeenCalled();
     expect(params.onToggleOutline).not.toHaveBeenCalled();
   });
 
-  it("does not fire Ctrl+N / Ctrl+Shift+N / Ctrl+F actions when Alt is also held", () => {
+  it("does not fire Ctrl+N / Ctrl+Shift+N / Ctrl+F actions when Alt is also held — the chord falls through", () => {
     const params = makeParams();
     renderHook(() => useKeyboardShortcuts(params));
-    press(plainEl, { key: "n", ctrlKey: true, altKey: true });
-    press(plainEl, { key: "n", ctrlKey: true, shiftKey: true, altKey: true });
-    press(plainEl, { key: "f", ctrlKey: true, altKey: true });
+    expect(press(plainEl, { key: "n", ctrlKey: true, altKey: true })).toBe(false);
+    expect(press(plainEl, { key: "n", ctrlKey: true, shiftKey: true, altKey: true })).toBe(false);
+    expect(press(plainEl, { key: "f", ctrlKey: true, altKey: true })).toBe(false);
     expect(params.onNewNote).not.toHaveBeenCalled();
     expect(openNewWindow).not.toHaveBeenCalled();
     expect(params.setDocSearchOpen).not.toHaveBeenCalled();
+  });
+
+  it("does not fire Ctrl+H / Ctrl+G / Ctrl+Shift+X actions when Alt is also held — the chord falls through", () => {
+    const params = makeParams();
+    renderHook(() => useKeyboardShortcuts(params));
+    expect(press(plainEl, { key: "h", ctrlKey: true, altKey: true })).toBe(false);
+    expect(press(plainEl, { key: "g", ctrlKey: true, altKey: true })).toBe(false);
+    expect(
+      press(editorEl.querySelector("p")!, { key: "x", ctrlKey: true, shiftKey: true, altKey: true }),
+    ).toBe(false);
+    expect(params.setDocSearchReplace).not.toHaveBeenCalled();
+    expect(params.setDocGoToLineOpen).not.toHaveBeenCalled();
   });
 
   it("keeps Ctrl+P blocked (reserved for the future quick switcher)", () => {
