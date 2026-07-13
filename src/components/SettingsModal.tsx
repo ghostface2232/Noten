@@ -779,7 +779,6 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                         <>
                           · 문서의 제목 구조를 한눈에 보고 이동하는 목차 패널 추가 (Ctrl+Shift+O)<br />
                           · 작성 중인 블록만 밝게 표시하는 포커스 모드 추가<br />
-                          · 목차에서 제목으로 이동할 때 화면 깜빡임 없이 부드럽게 스크롤<br />
                           · 단축키가 정확한 조합에서만 동작하도록 개선 (Ctrl+R 오동작 수정)<br />
                           · 다이얼로그가 열려 있을 때 단축키가 새어 들어가던 문제 수정<br />
                           · Windows 이모지 선택기 입력이 에디터에 반영되지 않던 문제 수정
@@ -788,7 +787,6 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                         <>
                           · New table of contents panel for navigating headings (Ctrl+Shift+O)<br />
                           · New focus mode that highlights only the block you're editing<br />
-                          · Jumping to a heading now scrolls smoothly without flashing<br />
                           · Shortcuts now require exact modifier combinations (fixes stray Ctrl+R)<br />
                           · Fixed shortcuts leaking through while dialogs are open<br />
                           · Fixed Windows emoji picker input not reaching the editor
