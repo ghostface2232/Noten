@@ -253,7 +253,9 @@ export const useStyles = makeStyles({
     },
   },
   // Transient F8 focus-mode notice: a small non-interactive pill floating
-  // over the editor card. Dark translucent so it reads on both themes.
+  // over the editor card. Theme tokens follow the FluentProvider, so it
+  // matches light/dark automatically; the border + shadow lift it off the
+  // same-colored editor card.
   focusNotice: {
     position: "absolute",
     bottom: "44px",
@@ -262,8 +264,10 @@ export const useStyles = makeStyles({
     zIndex: 30,
     padding: "6px 14px",
     borderRadius: "16px",
-    backgroundColor: "rgba(0, 0, 0, 0.65)",
-    color: "#fff",
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    boxShadow: tokens.shadow4,
     fontSize: "12px",
     fontWeight: 500,
     lineHeight: "16px",
