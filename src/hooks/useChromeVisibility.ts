@@ -19,6 +19,20 @@ export function useChromeVisibility(
     chromeLockUntilRef.current = Date.now() + CHROME_LOCK_MS;
   }, []);
 
+  // Freeze the show/hide reaction without changing the current visibility —
+  // for programmatic scrolls (outline jumps) that must not flash the toolbar.
+  // Scroll positions keep being recorded during the lock, so on unlock only
+  // genuinely new user deltas are evaluated.
+  const lockEditorChrome = useCallback((ms: number) => {
+    chromeLockUntilRef.current = Date.now() + ms;
+  }, []);
+
+  // Drop an active lock immediately — the user intervened and normal
+  // scroll-driven behavior must resume at once.
+  const unlockEditorChrome = useCallback(() => {
+    chromeLockUntilRef.current = 0;
+  }, []);
+
   const [toolbarHeight, setToolbarHeight] = useState(0);
   const editorTopOffset = Math.max(toolbarHeight - 16, 0);
   const handleBarHeight = useCallback((h: number) => {
@@ -110,6 +124,8 @@ export function useChromeVisibility(
     toolbarHeight,
     editorTopOffset,
     handleShowEditorChrome,
+    lockEditorChrome,
+    unlockEditorChrome,
     handleBarHeight,
   };
 }

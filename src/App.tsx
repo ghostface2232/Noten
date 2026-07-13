@@ -38,6 +38,11 @@ import { EditorToolbar } from "./components/EditorToolbar";
 import { OutlinePanel } from "./components/OutlinePanel";
 import { StatusBar } from "./components/StatusBar";
 import { clampOutlinePos } from "./utils/outline";
+import { animateScrollTop } from "./utils/scrollAnimation";
+
+// Outline jump scroll animation — short and snappy, and the chrome lock that
+// suppresses toolbar reaction during the jump must outlast it.
+const OUTLINE_JUMP_SCROLL_MS = 280;
 import { SettingsModal } from "./components/SettingsModal";
 import { SearchBar } from "./components/SearchBar";
 import { GoToLineBar } from "./components/GoToLineBar";
@@ -982,6 +987,8 @@ function App() {
     toolbarHeight,
     editorTopOffset,
     handleShowEditorChrome,
+    lockEditorChrome,
+    unlockEditorChrome,
     handleBarHeight,
   } = useChromeVisibility(contentRef, activeDoc?.id, settings.pinEditorToolbar);
 
@@ -1004,24 +1011,32 @@ function App() {
 
   // Outline jump: place the clicked heading near the top of the scroll
   // container instead of wherever scrollIntoView happens to leave it.
+  const outlineScrollCancelRef = useRef<(() => void) | null>(null);
   const handleOutlineJump = useCallback((pos: number) => {
     const editor = tiptapRef.current?.getEditor();
     const container = contentRef.current;
     if (!editor || !container) return;
-    // Reuse the 300ms chrome lock so the programmatic downward scroll below
-    // doesn't read as a hide-chrome scroll gesture.
-    handleShowEditorChrome();
+    // Freeze the toolbar/status bar in their current state for the whole
+    // animation (plus a margin for the trailing rAF-coalesced scroll
+    // evaluation) — an outline jump must not flash the chrome in or out.
+    lockEditorChrome(OUTLINE_JUMP_SCROLL_MS + 120);
     // A click can race the outline's rAF-coalesced recompute by a frame, so
     // the stored pos may be stale — clamp instead of throwing.
     const target = clampOutlinePos(pos + 1, editor.state.doc.content.size);
     editor.chain().setTextSelection(target).focus(null, { scrollIntoView: false }).run();
     const coords = editor.view.coordsAtPos(target);
     const containerTop = container.getBoundingClientRect().top;
-    container.scrollTop = Math.max(
+    const targetTop = Math.max(
       0,
       coords.top - containerTop + container.scrollTop - (editorTopOffset + 16),
     );
-  }, [handleShowEditorChrome, editorTopOffset]);
+    outlineScrollCancelRef.current?.();
+    outlineScrollCancelRef.current = animateScrollTop(container, targetTop, OUTLINE_JUMP_SCROLL_MS, {
+      // The user took over mid-jump — drop the lock so scroll-driven chrome
+      // behavior resumes immediately.
+      onUserCancel: unlockEditorChrome,
+    });
+  }, [lockEditorChrome, unlockEditorChrome, editorTopOffset]);
 
   useKeyboardShortcuts({
     tiptapRef,
