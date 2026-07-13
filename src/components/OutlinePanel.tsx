@@ -10,12 +10,13 @@ import {
   extractHeadings,
   headingsSignature,
   outlineIndentDepth,
+  OUTLINE_PANEL_WIDTH,
   type OutlineHeading,
 } from "../utils/outline";
 
 const useStyles = makeStyles({
   panel: {
-    width: "240px",
+    width: `${OUTLINE_PANEL_WIDTH}px`,
     height: "100%",
     display: "flex",
     flexDirection: "column",
