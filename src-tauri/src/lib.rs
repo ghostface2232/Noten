@@ -4,38 +4,13 @@ use std::io;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
-use tauri::{AppHandle, Manager, Runtime, path::BaseDirectory};
+use tauri::{path::BaseDirectory, AppHandle, Manager, Runtime};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
+    VIRTUAL_KEY, VK_LWIN, VK_OEM_PERIOD,
+};
 
 const CREATE_NO_WINDOW_FLAG: u32 = 0x08000000;
-const INPUT_KEYBOARD: u32 = 1;
-const KEYEVENTF_KEYUP: u32 = 0x0002;
-const VK_LWIN: u16 = 0x5B;
-const VK_OEM_PERIOD: u16 = 0xBE;
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct KeybdInput {
-    w_vk: u16,
-    w_scan: u16,
-    dw_flags: u32,
-    time: u32,
-    dw_extra_info: usize,
-}
-
-#[repr(C)]
-union InputUnion {
-    ki: KeybdInput,
-}
-
-#[repr(C)]
-struct Input {
-    input_type: u32,
-    union: InputUnion,
-}
-
-extern "system" {
-    fn SendInput(c_inputs: u32, p_inputs: *const Input, cb_size: i32) -> u32;
-}
 
 #[tauri::command]
 fn toggle_devtools<R: Runtime>(window: tauri::WebviewWindow<R>) {
@@ -176,16 +151,17 @@ fn get_windows_app_theme() -> Result<Option<&'static str>, String> {
     Ok(value.map(|v| if v == 0 { "dark" } else { "light" }))
 }
 
-fn keyboard_input(vk: u16, flags: u32) -> Input {
-    Input {
-        input_type: INPUT_KEYBOARD,
-        union: InputUnion {
-            ki: KeybdInput {
-                w_vk: vk,
-                w_scan: 0,
-                dw_flags: flags,
+// SendInput validates the full INPUT union size, which is larger than KEYBDINPUT on 64-bit Windows.
+fn keyboard_input(vk: VIRTUAL_KEY, flags: u32) -> INPUT {
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk,
+                wScan: 0,
+                dwFlags: flags,
                 time: 0,
-                dw_extra_info: 0,
+                dwExtraInfo: 0,
             },
         },
     }
@@ -194,17 +170,17 @@ fn keyboard_input(vk: u16, flags: u32) -> Input {
 #[tauri::command]
 fn open_windows_emoji_picker() -> Result<(), String> {
     let inputs = [
-        keyboard_input(VK_LWIN, 0),
+        keyboard_input(VK_LWIN, KEYEVENTF_EXTENDEDKEY),
         keyboard_input(VK_OEM_PERIOD, 0),
         keyboard_input(VK_OEM_PERIOD, KEYEVENTF_KEYUP),
-        keyboard_input(VK_LWIN, KEYEVENTF_KEYUP),
+        keyboard_input(VK_LWIN, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP),
     ];
 
     let sent = unsafe {
         SendInput(
             inputs.len() as u32,
             inputs.as_ptr(),
-            std::mem::size_of::<Input>() as i32,
+            std::mem::size_of::<INPUT>() as i32,
         )
     };
 
