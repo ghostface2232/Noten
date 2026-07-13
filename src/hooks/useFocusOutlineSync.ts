@@ -43,6 +43,16 @@ export function useFocusOutlineSync({
     if (!settingsLoaded) return;
     if (prevFocusModeRef.current === null) {
       prevFocusModeRef.current = focusModeEnabled;
+      // The first loaded state must satisfy the invariant too: focus mode on
+      // with the outline open can reach disk (an F8 press racing the settings
+      // load, or state persisted by older builds that allowed the toggle
+      // mid-focus). Close the panel and record that it was open — but only
+      // when it IS open, so the normal restart-mid-focus state (outline
+      // closed, outlineOpenBeforeFocus true) keeps its pending restore.
+      if (focusModeEnabled && outlinePanelOpen) {
+        if (!outlineOpenBeforeFocus) void updateSetting("outlineOpenBeforeFocus", true);
+        void updateSetting("outlinePanelOpen", false);
+      }
       return;
     }
     if (prevFocusModeRef.current === focusModeEnabled) return;

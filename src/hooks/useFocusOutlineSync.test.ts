@@ -88,6 +88,36 @@ describe("useFocusOutlineSync — restart while focus mode is on", () => {
   });
 });
 
+describe("useFocusOutlineSync — invariant enforcement on the first loaded state", () => {
+  // Focus on + outline open can reach the first loaded state: persisted by
+  // older builds that let Ctrl+Shift+O reopen the outline mid-focus, or an
+  // F8 press racing the settings load (update() can commit focus=true to
+  // state before isLoaded flips). The seed must still close the panel.
+  it("closes an open outline and records it as the pre-focus state", () => {
+    mount({ focusModeEnabled: true, outlinePanelOpen: true, outlineOpenBeforeFocus: false });
+    expect(updateSetting).toHaveBeenCalledWith("outlineOpenBeforeFocus", true);
+    expect(updateSetting).toHaveBeenCalledWith("outlinePanelOpen", false);
+  });
+
+  it("closes an open outline without rewriting an already-true outlineOpenBeforeFocus", () => {
+    mount({ focusModeEnabled: true, outlinePanelOpen: true, outlineOpenBeforeFocus: true });
+    expect(updateSetting).toHaveBeenCalledWith("outlinePanelOpen", false);
+    expect(updateSetting).not.toHaveBeenCalledWith("outlineOpenBeforeFocus", expect.anything());
+  });
+
+  it("enforces after a deferred load too (settingsLoaded flips with focus already on)", () => {
+    const h = mount({ settingsLoaded: false });
+    h.set({ settingsLoaded: true, focusModeEnabled: true, outlinePanelOpen: true, outlineOpenBeforeFocus: false });
+    expect(updateSetting).toHaveBeenCalledWith("outlineOpenBeforeFocus", true);
+    expect(updateSetting).toHaveBeenCalledWith("outlinePanelOpen", false);
+  });
+
+  it("leaves a closed outline and its pending restore untouched (normal restart-mid-focus)", () => {
+    mount({ focusModeEnabled: true, outlinePanelOpen: false, outlineOpenBeforeFocus: true });
+    expect(updateSetting).not.toHaveBeenCalled();
+  });
+});
+
 describe("useFocusOutlineSync — non-transitions", () => {
   it("ignores outlinePanelOpen changing on its own (no focus transition)", () => {
     const h = mount({ outlinePanelOpen: false });
