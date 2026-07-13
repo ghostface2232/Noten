@@ -1,4 +1,5 @@
 import { makeStyles, tokens } from "@fluentui/react-components";
+import { OUTLINE_PANEL_WIDTH } from "./utils/outline";
 import {
   MOTION_DURATION_BASE,
   MOTION_DURATION_FAST,
@@ -232,7 +233,7 @@ export const useStyles = makeStyles({
   // animates width so the panel slides open/closed; visibility flips after the
   // collapse so hidden items leave the tab order and accessibility tree.
   outlineSlot: {
-    width: "240px",
+    width: `${OUTLINE_PANEL_WIDTH}px`,
     flexShrink: 0,
     overflow: "hidden",
     visibility: "visible",

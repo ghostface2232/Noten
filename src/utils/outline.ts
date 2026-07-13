@@ -12,6 +12,14 @@ export interface OutlineHeading {
 /** Deepest indent step shown in the panel — h3..h6 render at the same depth. */
 export const OUTLINE_MAX_INDENT_LEVEL = 3;
 
+/**
+ * Fixed logical width of the outline panel. Shared by the panel itself, the
+ * shell's outline slot, and the window min-width calculation — the panel takes
+ * this much away from the editor, so the window minimum must grow by it while
+ * the panel is open.
+ */
+export const OUTLINE_PANEL_WIDTH = 240;
+
 export function extractHeadings(doc: ProseMirrorNode): OutlineHeading[] {
   const headings: OutlineHeading[] = [];
   doc.descendants((node, pos) => {
