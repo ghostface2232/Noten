@@ -509,6 +509,30 @@
   outline-offset: -1px;
 }
 
+/* Focus mode: dim every top-level block except the one carrying the caret.
+   The active block is marked by a single node decoration (`noten-focus-active`,
+   see extensions/FocusMode.ts) — everything else is these selectors, so the
+   per-keystroke cost stays constant regardless of document size. The direct
+   child selector deliberately matches whatever element PM renders at the top
+   level, which covers the NodeView wrappers whose DOM differs from plain
+   blocks: `.noten-code-block` (Mermaid/code), `.tiptap-image-node` (images)
+   and the resizable table's `.tableWrapper` all receive the decoration class
+   on their outer element. Dimmed blocks keep pointer-events, so clicking one
+   moves the caret — and with it the focus — into that block. */
+.tiptap-focus-mode .ProseMirror > * {
+  transition: opacity var(--motion-medium) ease-out;
+}
+
+.tiptap-focus-mode .ProseMirror > *:not(.noten-focus-active):not(.ProseMirror-gapcursor) {
+  opacity: 0.3;
+}
+
+@media screen and (prefers-reduced-motion: reduce) {
+  .tiptap-focus-mode .ProseMirror > * {
+    transition-duration: 0.01ms;
+  }
+}
+
 .image-drag-ghost {
   position: fixed;
   pointer-events: none;

@@ -252,6 +252,35 @@ export const useStyles = makeStyles({
       transitionDelay: "0s, 0s",
     },
   },
+  // Transient F8 focus-mode notice: a small non-interactive pill floating
+  // over the editor card. Dark translucent so it reads on both themes.
+  focusNotice: {
+    position: "absolute",
+    bottom: "44px",
+    left: "50%",
+    transform: "translateX(-50%)",
+    zIndex: 30,
+    padding: "6px 14px",
+    borderRadius: "16px",
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    color: "#fff",
+    fontSize: "12px",
+    fontWeight: 500,
+    lineHeight: "16px",
+    whiteSpace: "nowrap",
+    pointerEvents: "none",
+    userSelect: "none",
+    opacity: 0,
+    transitionProperty: "opacity",
+    transitionDuration: MOTION_DURATION_MEDIUM,
+    transitionTimingFunction: "ease-out",
+    "@media screen and (prefers-reduced-motion: reduce)": {
+      transitionDuration: "0.01ms",
+    },
+  },
+  focusNoticeVisible: {
+    opacity: 1,
+  },
   toolbarAnchor: {
     position: "sticky",
     top: 0,

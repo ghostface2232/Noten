@@ -43,6 +43,8 @@ import { animateScrollTop } from "./utils/scrollAnimation";
 // Outline jump scroll animation — short and snappy, and the chrome lock that
 // suppresses toolbar reaction during the jump must outlast it.
 const OUTLINE_JUMP_SCROLL_MS = 280;
+// How long the F8 focus-mode on/off notice stays on screen.
+const FOCUS_NOTICE_MS = 1100;
 import { SettingsModal } from "./components/SettingsModal";
 import { SearchBar } from "./components/SearchBar";
 import { GoToLineBar } from "./components/GoToLineBar";
@@ -992,18 +994,57 @@ function App() {
     handleBarHeight,
   } = useChromeVisibility(contentRef, activeDoc?.id, settings.pinEditorToolbar);
 
-  // v0.3.0 editor-mode toggles. No consuming UI yet (outline panel, focus
-  // plugins land in later steps) — the settings just flip and persist.
+  // v0.3.0 editor-mode toggles.
   const { outlinePanelOpen, focusModeEnabled, typewriterScrollEnabled } = settings;
   const handleToggleOutline = useCallback(() => {
     void updateSetting("outlinePanelOpen", !outlinePanelOpen);
   }, [updateSetting, outlinePanelOpen]);
+
+  // Transient on/off notice shown when focus mode is toggled via F8. The
+  // aria-live region stays mounted (visibility travels via opacity) so screen
+  // readers announce the text change without a DOM insertion.
+  const [focusNoticeText, setFocusNoticeText] = useState("");
+  const [focusNoticeVisible, setFocusNoticeVisible] = useState(false);
+  const focusNoticeTimerRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (focusNoticeTimerRef.current !== null) {
+      window.clearTimeout(focusNoticeTimerRef.current);
+    }
+  }, []);
+
   const handleToggleFocusMode = useCallback(() => {
-    void updateSetting("focusModeEnabled", !focusModeEnabled);
-  }, [updateSetting, focusModeEnabled]);
+    const next = !focusModeEnabled;
+    void updateSetting("focusModeEnabled", next);
+    setFocusNoticeText(t(next ? "focus.modeOn" : "focus.modeOff", locale));
+    setFocusNoticeVisible(true);
+    if (focusNoticeTimerRef.current !== null) {
+      window.clearTimeout(focusNoticeTimerRef.current);
+    }
+    focusNoticeTimerRef.current = window.setTimeout(() => {
+      setFocusNoticeVisible(false);
+      focusNoticeTimerRef.current = null;
+    }, FOCUS_NOTICE_MS);
+  }, [updateSetting, focusModeEnabled, locale]);
   const handleToggleTypewriter = useCallback(() => {
     void updateSetting("typewriterScrollEnabled", !typewriterScrollEnabled);
   }, [updateSetting, typewriterScrollEnabled]);
+
+  // Focus mode wants a bare canvas: entering closes the outline panel (and
+  // remembers whether it was open), leaving restores it. Only reacts to real
+  // transitions — outlinePanelOpen changing on its own must not re-trigger.
+  const outlineOpenBeforeFocusRef = useRef(false);
+  const prevFocusModeRef = useRef(focusModeEnabled);
+  useEffect(() => {
+    if (prevFocusModeRef.current === focusModeEnabled) return;
+    prevFocusModeRef.current = focusModeEnabled;
+    if (focusModeEnabled) {
+      outlineOpenBeforeFocusRef.current = outlinePanelOpen;
+      if (outlinePanelOpen) void updateSetting("outlinePanelOpen", false);
+    } else if (outlineOpenBeforeFocusRef.current) {
+      outlineOpenBeforeFocusRef.current = false;
+      void updateSetting("outlinePanelOpen", true);
+    }
+  }, [focusModeEnabled, outlinePanelOpen, updateSetting]);
 
   const handleCloseOutline = useCallback(() => {
     void updateSetting("outlinePanelOpen", false);
@@ -1206,7 +1247,10 @@ function App() {
     scheduleAutoSave,
   });
 
-  const hideEditorChrome = !chromeVisible;
+  // Focus mode pins the chrome hidden regardless of scroll direction — a
+  // toolbar that pops in and out contradicts the whole point of the mode.
+  // Leaving it falls back to the usual pinEditorToolbar-driven behavior.
+  const hideEditorChrome = focusModeEnabled || !chromeVisible;
   const hideToolbar = hideEditorChrome;
   const hideStatusBar = hideEditorChrome;
 
@@ -1512,6 +1556,7 @@ function App() {
                   wordWrap={settings.wordWrap}
                   keepFormatOnPaste={settings.keepFormatOnPaste}
                   spellcheck={settings.spellcheck}
+                  focusMode={focusModeEnabled}
                   onDirtyChange={handleTiptapDirty}
                   onReady={syncEditorRef}
                   onChromeActivate={docReady ? handleShowEditorChrome : undefined}
@@ -1541,6 +1586,16 @@ function App() {
               hidden={hideStatusBar}
               locale={locale}
             />
+
+            <div
+              className={mergeClasses(
+                styles.focusNotice,
+                focusNoticeVisible && styles.focusNoticeVisible,
+              )}
+              aria-live="polite"
+            >
+              {focusNoticeText}
+            </div>
           </div>
         </div>
       </div>

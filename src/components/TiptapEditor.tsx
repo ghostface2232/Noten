@@ -49,6 +49,7 @@ import TextContextMenu, {
   showGenericContextMenu,
 } from "../extensions/TextContextMenu";
 import { SearchHighlight } from "../extensions/SearchHighlight";
+import FocusMode, { focusModePluginKey } from "../extensions/FocusMode";
 import { TableBubbleMenu } from "./TableBubbleMenu";
 import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
@@ -619,6 +620,7 @@ interface TiptapEditorProps {
   wordWrap: WordWrap;
   keepFormatOnPaste: boolean;
   spellcheck: boolean;
+  focusMode: boolean;
   onDirtyChange: (dirty: boolean) => void;
   onReady?: () => void;
   onChromeActivate?: () => void;
@@ -641,6 +643,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     wordWrap,
     keepFormatOnPaste,
     spellcheck,
+    focusMode,
     onDirtyChange,
     onReady,
     onChromeActivate,
@@ -833,6 +836,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         ImageFocusGuard,
         TextContextMenu,
         SearchHighlight,
+        FocusMode,
         LinkPopoverShortcut,
       ],
       content: initialMarkdown,
@@ -1170,6 +1174,21 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       scheduleSpellcheckRefresh(editor, spellcheck);
     }, [editor, scheduleSpellcheckRefresh, spellcheck]);
 
+    // Sync the React setting into the FocusMode plugin. Activation travels as
+    // a plugin meta transaction; the plugin's storage keeps the flag across
+    // view.updateState() (note switches), so this only needs to fire on real
+    // setting changes.
+    useEffect(() => {
+      if (!editor) return;
+      const pluginState = focusModePluginKey.getState(editor.state) as
+        | { active: boolean }
+        | undefined;
+      if (pluginState?.active === focusMode) return;
+      const tr = editor.state.tr.setMeta(focusModePluginKey, { active: focusMode });
+      tr.setMeta("addToHistory", false);
+      editor.view.dispatch(tr);
+    }, [editor, focusMode]);
+
     useEffect(() => () => {
       if (spellcheckRefreshFrameRef.current !== null) {
         cancelAnimationFrame(spellcheckRefreshFrameRef.current);
@@ -1359,7 +1378,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
 
     return (
       <div
-        className={`${editable ? "tiptap-editable" : "tiptap-readonly"} ${wrapClass}`}
+        className={`${editable ? "tiptap-editable" : "tiptap-readonly"} ${wrapClass}${focusMode ? " tiptap-focus-mode" : ""}`}
         data-theme={isDarkMode ? "dark" : "light"}
         style={editorStyle}
         onMouseDownCapture={(event) => {
