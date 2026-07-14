@@ -9,8 +9,8 @@ This document is the high-level map of the current repository. Keep it concise: 
 | `src/` | React and TypeScript application code. |
 | `src/components/` | Fluent UI app chrome and the persistent Tiptap editor component. |
 | `src/hooks/` | Application orchestration for settings, loading, autosave, file operations, file watching, cross-window sync, and notes-directory migration. |
-| `src/extensions/` | Tiptap extensions and NodeViews for Markdown, images, Mermaid, wiki links, search decorations, slash commands, and editor behavior. |
-| `src/utils/` | Persistence, reconciliation, conflict backup, migration, image assets, export, error logging, and other shared utilities. Tests are colocated with the modules they cover. |
+| `src/extensions/` | Tiptap extensions and NodeViews for Markdown, images, Mermaid, wiki links, anchor links (`AnchorLink.ts`), search decorations, slash commands, and editor behavior. |
+| `src/utils/` | Persistence, reconciliation, conflict backup, migration, image assets, export, error logging, outline/heading-slug helpers (`outline.ts`, `headingSlug.ts`), and other shared utilities. Tests are colocated with the modules they cover. |
 | `src/styles/` | Shared editor, theme, interaction, wiki-link, slash-command, and Mermaid styles. |
 | `src/i18n.ts` | Korean and English user-visible strings. |
 | `src-tauri/` | Tauri v2 application crate, configuration, capability allowlist, icons, NSIS hooks, and native commands. |

@@ -24,6 +24,7 @@ Download `noten-setup.exe` from [GitHub Releases](https://github.com/ghostface22
 - **Local-first autosave** - Notes stay on disk and save automatically; choose the app directory or a local/cloud-synced folder
 - **Slash commands** - Type `/` to insert headings, lists, code blocks, images, tables, Mermaid diagrams, and more
 - **Wiki links** - Type `[[` to link or create notes; links keep following notes when they are renamed
+- **Anchor links** - Link to a heading in the same note with `[text](#heading-slug)`; typing `#` in the link editor suggests headings, clicking jumps to the target, and a broken target shows a notice
 - **Table of contents** - Toggleable heading outline panel with click-to-jump, current-heading highlight, and keyboard navigation
 - **Focus mode** - Dim everything except the block you are writing, with the editor chrome tucked away
 - **Tables** - Insert with a grid picker, resize columns in-place, and edit rows/columns from the table bubble toolbar

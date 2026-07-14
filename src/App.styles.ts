@@ -253,11 +253,11 @@ export const useStyles = makeStyles({
       transitionDelay: "0s, 0s",
     },
   },
-  // Transient F8 focus-mode notice: a small non-interactive pill floating
-  // over the editor card. Theme tokens follow the FluentProvider, so it
-  // matches light/dark automatically; the border + shadow lift it off the
-  // same-colored editor card.
-  focusNotice: {
+  // Transient editor notice (focus-mode toggle, broken anchor link, ...): a
+  // small non-interactive pill floating over the editor card. Theme tokens
+  // follow the FluentProvider, so it matches light/dark automatically; the
+  // border + shadow lift it off the same-colored editor card.
+  editorNotice: {
     position: "absolute",
     bottom: "44px",
     left: "50%",
@@ -283,7 +283,7 @@ export const useStyles = makeStyles({
       transitionDuration: "0.01ms",
     },
   },
-  focusNoticeVisible: {
+  editorNoticeVisible: {
     opacity: 1,
   },
   toolbarAnchor: {

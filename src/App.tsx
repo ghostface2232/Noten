@@ -43,8 +43,9 @@ import { animateScrollTop } from "./utils/scrollAnimation";
 // Outline jump scroll animation — short and snappy, and the chrome lock that
 // suppresses toolbar reaction during the jump must outlast it.
 const OUTLINE_JUMP_SCROLL_MS = 280;
-// How long the F8 focus-mode on/off notice stays on screen.
-const FOCUS_NOTICE_MS = 1100;
+// How long a transient editor notice (focus-mode toggle, broken anchor link)
+// stays on screen.
+const EDITOR_NOTICE_MS = 1100;
 import { SettingsModal } from "./components/SettingsModal";
 import { SearchBar } from "./components/SearchBar";
 import { GoToLineBar } from "./components/GoToLineBar";
@@ -1011,31 +1012,35 @@ function App() {
     updateSetting,
   });
 
-  // Transient on/off notice shown when focus mode is toggled via F8. The
+  // Transient editor notice (focus-mode toggle, broken anchor link). The
   // aria-live region stays mounted (visibility travels via opacity) so screen
   // readers announce the text change without a DOM insertion.
-  const [focusNoticeText, setFocusNoticeText] = useState("");
-  const [focusNoticeVisible, setFocusNoticeVisible] = useState(false);
-  const focusNoticeTimerRef = useRef<number | null>(null);
+  const [editorNoticeText, setEditorNoticeText] = useState("");
+  const [editorNoticeVisible, setEditorNoticeVisible] = useState(false);
+  const editorNoticeTimerRef = useRef<number | null>(null);
   useEffect(() => () => {
-    if (focusNoticeTimerRef.current !== null) {
-      window.clearTimeout(focusNoticeTimerRef.current);
+    if (editorNoticeTimerRef.current !== null) {
+      window.clearTimeout(editorNoticeTimerRef.current);
     }
+  }, []);
+
+  const showEditorNotice = useCallback((text: string) => {
+    setEditorNoticeText(text);
+    setEditorNoticeVisible(true);
+    if (editorNoticeTimerRef.current !== null) {
+      window.clearTimeout(editorNoticeTimerRef.current);
+    }
+    editorNoticeTimerRef.current = window.setTimeout(() => {
+      setEditorNoticeVisible(false);
+      editorNoticeTimerRef.current = null;
+    }, EDITOR_NOTICE_MS);
   }, []);
 
   const handleToggleFocusMode = useCallback(() => {
     const next = !focusModeEnabled;
     void updateSetting("focusModeEnabled", next);
-    setFocusNoticeText(t(next ? "focus.modeOn" : "focus.modeOff", locale));
-    setFocusNoticeVisible(true);
-    if (focusNoticeTimerRef.current !== null) {
-      window.clearTimeout(focusNoticeTimerRef.current);
-    }
-    focusNoticeTimerRef.current = window.setTimeout(() => {
-      setFocusNoticeVisible(false);
-      focusNoticeTimerRef.current = null;
-    }, FOCUS_NOTICE_MS);
-  }, [updateSetting, focusModeEnabled, locale]);
+    showEditorNotice(t(next ? "focus.modeOn" : "focus.modeOff", locale));
+  }, [updateSetting, focusModeEnabled, locale, showEditorNotice]);
 
   const handleCloseOutline = useCallback(() => {
     void updateSetting("outlinePanelOpen", false);
@@ -1069,6 +1074,16 @@ function App() {
       onUserCancel: unlockEditorChrome,
     });
   }, [lockEditorChrome, unlockEditorChrome, editorTopOffset]);
+
+  // Anchor-link ("#fragment") clicks share the outline jump path; a link whose
+  // target heading no longer exists surfaces the transient notice instead.
+  useEffect(() => {
+    if (!tiptapEditor?.storage.anchorLink) return;
+    tiptapEditor.storage.anchorLink.onJump = handleOutlineJump;
+    tiptapEditor.storage.anchorLink.onMissing = () => {
+      showEditorNotice(t("link.anchorMissing", locale));
+    };
+  }, [tiptapEditor, handleOutlineJump, showEditorNotice, locale]);
 
   useKeyboardShortcuts({
     tiptapRef,
@@ -1580,12 +1595,12 @@ function App() {
 
             <div
               className={mergeClasses(
-                styles.focusNotice,
-                focusNoticeVisible && styles.focusNoticeVisible,
+                styles.editorNotice,
+                editorNoticeVisible && styles.editorNoticeVisible,
               )}
               aria-live="polite"
             >
-              {focusNoticeText}
+              {editorNoticeText}
             </div>
           </div>
         </div>
