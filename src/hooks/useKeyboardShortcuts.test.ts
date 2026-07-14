@@ -3,6 +3,7 @@ import { renderHook } from "@testing-library/react";
 import type { RefObject } from "react";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import { useKeyboardShortcuts, type UseKeyboardShortcutsParams } from "./useKeyboardShortcuts";
+import { openNewWindow } from "../utils/newWindow";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => {}) }));
 vi.mock("../utils/newWindow", () => ({ openNewWindow: vi.fn() }));
@@ -181,6 +182,56 @@ describe("useKeyboardShortcuts — v0.3.0 toggles (Ctrl+Shift+O, F8)", () => {
     renderHook(() => useKeyboardShortcuts(params));
     expect(press(dialogChild, { key: "F8" })).toBe(false);
     expect(params.onToggleFocusMode).not.toHaveBeenCalled();
+  });
+
+  it("ignores Ctrl+Shift+O while focus is inside an open dialog (e.g. Settings modal)", () => {
+    const params = makeParams();
+    renderHook(() => useKeyboardShortcuts(params));
+    expect(press(dialogChild, { key: "o", ctrlKey: true, shiftKey: true })).toBe(false);
+    expect(params.onToggleOutline).not.toHaveBeenCalled();
+    expect(params.onImportFile).not.toHaveBeenCalled();
+  });
+
+  it("only bare F8 toggles focus mode — Ctrl/Meta/Shift/Alt+F8 do nothing", () => {
+    const params = makeParams();
+    renderHook(() => useKeyboardShortcuts(params));
+    expect(press(plainEl, { key: "F8", ctrlKey: true })).toBe(false);
+    expect(press(plainEl, { key: "F8", metaKey: true })).toBe(false);
+    expect(press(plainEl, { key: "F8", shiftKey: true })).toBe(false);
+    expect(press(plainEl, { key: "F8", altKey: true })).toBe(false);
+    expect(params.onToggleFocusMode).not.toHaveBeenCalled();
+  });
+
+  it("does not fire Ctrl+O / Ctrl+Shift+O actions when Alt is also held — the chord falls through", () => {
+    const params = makeParams();
+    renderHook(() => useKeyboardShortcuts(params));
+    expect(press(plainEl, { key: "o", ctrlKey: true, altKey: true })).toBe(false);
+    expect(press(plainEl, { key: "o", ctrlKey: true, shiftKey: true, altKey: true })).toBe(false);
+    expect(params.onImportFile).not.toHaveBeenCalled();
+    expect(params.onToggleOutline).not.toHaveBeenCalled();
+  });
+
+  it("does not fire Ctrl+N / Ctrl+Shift+N / Ctrl+F actions when Alt is also held — the chord falls through", () => {
+    const params = makeParams();
+    renderHook(() => useKeyboardShortcuts(params));
+    expect(press(plainEl, { key: "n", ctrlKey: true, altKey: true })).toBe(false);
+    expect(press(plainEl, { key: "n", ctrlKey: true, shiftKey: true, altKey: true })).toBe(false);
+    expect(press(plainEl, { key: "f", ctrlKey: true, altKey: true })).toBe(false);
+    expect(params.onNewNote).not.toHaveBeenCalled();
+    expect(openNewWindow).not.toHaveBeenCalled();
+    expect(params.setDocSearchOpen).not.toHaveBeenCalled();
+  });
+
+  it("does not fire Ctrl+H / Ctrl+G / Ctrl+Shift+X actions when Alt is also held — the chord falls through", () => {
+    const params = makeParams();
+    renderHook(() => useKeyboardShortcuts(params));
+    expect(press(plainEl, { key: "h", ctrlKey: true, altKey: true })).toBe(false);
+    expect(press(plainEl, { key: "g", ctrlKey: true, altKey: true })).toBe(false);
+    expect(
+      press(editorEl.querySelector("p")!, { key: "x", ctrlKey: true, shiftKey: true, altKey: true }),
+    ).toBe(false);
+    expect(params.setDocSearchReplace).not.toHaveBeenCalled();
+    expect(params.setDocGoToLineOpen).not.toHaveBeenCalled();
   });
 
   it("keeps Ctrl+P blocked (reserved for the future quick switcher)", () => {

@@ -112,32 +112,37 @@ function seedSettingsFile(overrides: Record<string, unknown>) {
   refs.files.set(SETTINGS_PATH, JSON.stringify({ locale: "ko", ...overrides }));
 }
 
-describe("useSettings — v0.3.0 boolean fields (outlinePanelOpen, focusModeEnabled)", () => {
+describe("useSettings — v0.3.0 boolean fields (outlinePanelOpen, focusModeEnabled, outlineOpenBeforeFocus)", () => {
   it("loads persisted true values", async () => {
     seedSettingsFile({
       outlinePanelOpen: true,
       focusModeEnabled: true,
+      outlineOpenBeforeFocus: true,
     });
     const result = await mountSettings();
     expect(result.current.settings.outlinePanelOpen).toBe(true);
     expect(result.current.settings.focusModeEnabled).toBe(true);
+    expect(result.current.settings.outlineOpenBeforeFocus).toBe(true);
   });
 
-  it("defaults both to false when the fields are missing (upgrade from v0.2.x)", async () => {
+  it("defaults all to false when the fields are missing (upgrade from v0.2.x)", async () => {
     seedSettingsFile({});
     const result = await mountSettings();
     expect(result.current.settings.outlinePanelOpen).toBe(false);
     expect(result.current.settings.focusModeEnabled).toBe(false);
+    expect(result.current.settings.outlineOpenBeforeFocus).toBe(false);
   });
 
   it("falls back to false when the fields hold non-boolean garbage", async () => {
     seedSettingsFile({
       outlinePanelOpen: "yes",
       focusModeEnabled: 1,
+      outlineOpenBeforeFocus: "open",
     });
     const result = await mountSettings();
     expect(result.current.settings.outlinePanelOpen).toBe(false);
     expect(result.current.settings.focusModeEnabled).toBe(false);
+    expect(result.current.settings.outlineOpenBeforeFocus).toBe(false);
   });
 });
 

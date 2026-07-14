@@ -37,7 +37,7 @@ import { useStyles as useSidebarStyles } from "./components/Sidebar.styles";
 import { EditorToolbar } from "./components/EditorToolbar";
 import { OutlinePanel } from "./components/OutlinePanel";
 import { StatusBar } from "./components/StatusBar";
-import { clampOutlinePos } from "./utils/outline";
+import { clampOutlinePos, OUTLINE_PANEL_WIDTH } from "./utils/outline";
 import { animateScrollTop } from "./utils/scrollAnimation";
 
 // Outline jump scroll animation — short and snappy, and the chrome lock that
@@ -65,6 +65,7 @@ import { useWindowSync } from "./hooks/useWindowSync";
 import { useMigrationSync, broadcastMigrationStarted, broadcastMigrationFinished } from "./hooks/useMigrationSync";
 import { useChromeVisibility } from "./hooks/useChromeVisibility";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useFocusOutlineSync } from "./hooks/useFocusOutlineSync";
 import { useDragDrop } from "./hooks/useDragDrop";
 import { useUpdater } from "./hooks/useUpdater";
 import { MOTION_FAST_MS } from "./styles/interactions";
@@ -127,16 +128,18 @@ function App() {
     const frame = requestAnimationFrame(() => setSidebarTopActionsVisible(true));
     return () => cancelAnimationFrame(frame);
   }, [sidebarOpen]);
-  // Latest desired min window width (editor + open sidebar), read by the
+  const { settings, update: updateSetting, applyExternal: applySettingExternal, isLoaded: settingsLoaded } = useSettings();
+  // Latest desired min window width (editor + open side panels), read by the
   // resize listener after the window is restored from a maximized state.
   const minWidthRef = useRef(EDITOR_MIN_WIDTH);
   // Tracks the in-flight sizing animation so a newer invocation cancels it.
   const sizingRunRef = useRef<{ cancelled: boolean } | null>(null);
-  // Apply the window min-size for the current sidebar state and, if the window
-  // is narrower than that minimum, animate it wider. No-op while maximized or
-  // fullscreen, where mutating size/min-size would pop the window back to
-  // windowed mode (the sidebar reflows via CSS inside the existing window).
-  const ensureWindowFitsSidebar = useCallback(async (minWidth: number) => {
+  // Apply the window min-size for the current side-panel state (sidebar and
+  // outline panel) and, if the window is narrower than that minimum, animate
+  // it wider. No-op while maximized or fullscreen, where mutating size/min-size
+  // would pop the window back to windowed mode (the panels reflow via CSS
+  // inside the existing window).
+  const ensureWindowFitsPanels = useCallback(async (minWidth: number) => {
     if (sizingRunRef.current) sizingRunRef.current.cancelled = true;
     const run = { cancelled: false };
     sizingRunRef.current = run;
@@ -187,15 +190,18 @@ function App() {
 
   useEffect(() => {
     const effectiveSidebar = sidebarOpen ? sidebarWidth : 0;
-    const minWidth = EDITOR_MIN_WIDTH + effectiveSidebar;
+    // The outline panel occupies a fixed-width slot beside the editor, so an
+    // open panel eats into the editor's minimum just like the sidebar does.
+    const effectiveOutline = settings.outlinePanelOpen ? OUTLINE_PANEL_WIDTH : 0;
+    const minWidth = EDITOR_MIN_WIDTH + effectiveSidebar + effectiveOutline;
     minWidthRef.current = minWidth;
-    void ensureWindowFitsSidebar(minWidth);
+    void ensureWindowFitsPanels(minWidth);
     return () => { if (sizingRunRef.current) sizingRunRef.current.cancelled = true; };
-  }, [sidebarOpen, sidebarWidth, ensureWindowFitsSidebar]);
+  }, [sidebarOpen, sidebarWidth, settings.outlinePanelOpen, ensureWindowFitsPanels]);
 
   // When the window is restored from maximized (or fullscreen) we deferred the
-  // min-size update, so re-apply it now and grow the restored window to fit an
-  // open sidebar. Detect the transition by watching resize events.
+  // min-size update, so re-apply it now and grow the restored window to fit
+  // the open side panels. Detect the transition by watching resize events.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let disposed = false;
@@ -209,7 +215,7 @@ function App() {
           const wasMaximized = prevMaximized;
           prevMaximized = maximized;
           if (wasMaximized && !maximized) {
-            void ensureWindowFitsSidebar(minWidthRef.current);
+            void ensureWindowFitsPanels(minWidthRef.current);
           }
         })();
       })
@@ -219,7 +225,7 @@ function App() {
       })
       .catch(() => {});
     return () => { disposed = true; unlisten?.(); };
-  }, [ensureWindowFitsSidebar]);
+  }, [ensureWindowFitsPanels]);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [docSearchOpen, setDocSearchOpen] = useState(false);
@@ -231,7 +237,6 @@ function App() {
   const [sidebarSearchOpen, setSidebarSearchOpen] = useState(false);
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   const [notesDirConflict, setNotesDirConflict] = useState<NotesDirConflictDialogState | null>(null);
-  const { settings, update: updateSetting, applyExternal: applySettingExternal, isLoaded: settingsLoaded } = useSettings();
   const updater = useUpdater();
   const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDarkFromMatchMedia);
   const isDarkMode = settings.themeMode === "system"
@@ -995,11 +1000,17 @@ function App() {
     handleBarHeight,
   } = useChromeVisibility(contentRef, activeDoc?.id, settings.pinEditorToolbar);
 
-  // v0.3.0 editor-mode toggles.
+  // v0.3.0 editor-mode toggles. Focus mode and the outline panel are coupled
+  // (focus mode closes the outline and restores it on exit, the toggle is
+  // inert mid-focus) — useFocusOutlineSync owns that coupling.
   const { outlinePanelOpen, focusModeEnabled } = settings;
-  const handleToggleOutline = useCallback(() => {
-    void updateSetting("outlinePanelOpen", !outlinePanelOpen);
-  }, [updateSetting, outlinePanelOpen]);
+  const handleToggleOutline = useFocusOutlineSync({
+    settingsLoaded,
+    focusModeEnabled,
+    outlinePanelOpen,
+    outlineOpenBeforeFocus: settings.outlineOpenBeforeFocus,
+    updateSetting,
+  });
 
   // Transient editor notice (focus-mode toggle, broken anchor link). The
   // aria-live region stays mounted (visibility travels via opacity) so screen
@@ -1030,23 +1041,6 @@ function App() {
     void updateSetting("focusModeEnabled", next);
     showEditorNotice(t(next ? "focus.modeOn" : "focus.modeOff", locale));
   }, [updateSetting, focusModeEnabled, locale, showEditorNotice]);
-
-  // Focus mode wants a bare canvas: entering closes the outline panel (and
-  // remembers whether it was open), leaving restores it. Only reacts to real
-  // transitions — outlinePanelOpen changing on its own must not re-trigger.
-  const outlineOpenBeforeFocusRef = useRef(false);
-  const prevFocusModeRef = useRef(focusModeEnabled);
-  useEffect(() => {
-    if (prevFocusModeRef.current === focusModeEnabled) return;
-    prevFocusModeRef.current = focusModeEnabled;
-    if (focusModeEnabled) {
-      outlineOpenBeforeFocusRef.current = outlinePanelOpen;
-      if (outlinePanelOpen) void updateSetting("outlinePanelOpen", false);
-    } else if (outlineOpenBeforeFocusRef.current) {
-      outlineOpenBeforeFocusRef.current = false;
-      void updateSetting("outlinePanelOpen", true);
-    }
-  }, [focusModeEnabled, outlinePanelOpen, updateSetting]);
 
   const handleCloseOutline = useCallback(() => {
     void updateSetting("outlinePanelOpen", false);

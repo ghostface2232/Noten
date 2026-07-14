@@ -4,9 +4,8 @@
 
 # Noten
 
-<p>
-<img width="1994" height="1607" alt="스크린샷 2026-05-24 115950" src="https://github.com/user-attachments/assets/41f996bf-a74c-4416-a662-ed1ebf6daa0a" />
-</p>
+<img width="1440" alt="Noten_Screenshot" src="https://github.com/user-attachments/assets/7b3f3e64-81b4-49bb-898f-a24f7764050b" />
+
 
 [![License](https://img.shields.io/github/license/ghostface2232/Noten?style=flat-square)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/ghostface2232/Noten?style=flat-square)](https://github.com/ghostface2232/Noten/releases)

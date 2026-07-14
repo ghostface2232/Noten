@@ -722,23 +722,30 @@ export function Sidebar({
       const closeMenuIfRouted = () => { if (viaMenu) setContextMenu(null); };
 
       const ctrl = e.ctrlKey || e.metaKey;
-      if (ctrl && e.key === "d") {
+      // Match letters case-insensitively like useKeyboardShortcuts does: with
+      // CapsLock on, Ctrl+R reports key "R", and a case-sensitive compare here
+      // would leave the chord unhandled — the hook deliberately lets Ctrl+R
+      // through when the sidebar is active, so nothing would preventDefault
+      // and the WebView reload accelerator (which ignores CapsLock) would
+      // fire. Shift is excluded explicitly on every branch instead.
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (ctrl && !e.shiftKey && !e.altKey && key === "d") {
         e.preventDefault();
         onDuplicateNote(targetIndex);
         closeMenuIfRouted();
-      } else if (ctrl && !e.shiftKey && !e.altKey && e.key === "e") {
+      } else if (ctrl && !e.shiftKey && !e.altKey && key === "e") {
         e.preventDefault();
         onExportNote(targetIndex);
         closeMenuIfRouted();
-      } else if ((ctrl && e.key === "r") || e.key === "F2") {
+      } else if ((ctrl && !e.shiftKey && !e.altKey && key === "r") || (key === "F2" && !ctrl && !e.shiftKey && !e.altKey)) {
         e.preventDefault();
         handleDoubleClick(targetIndex);
         closeMenuIfRouted();
-      } else if (ctrl && e.altKey && e.key === "p") {
+      } else if (ctrl && e.altKey && !e.shiftKey && key === "p") {
         e.preventDefault();
         onToggleNotePinned(targetIndex);
         closeMenuIfRouted();
-      } else if (ctrl && e.altKey && e.key === "c") {
+      } else if (ctrl && e.altKey && !e.shiftKey && key === "c") {
         e.preventDefault();
         const content = getDocumentContent(targetIndex);
         navigator.clipboard.writeText(content).catch(() => {});
