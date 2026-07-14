@@ -42,6 +42,7 @@ import ImageDrop from "../extensions/ImageDrop";
 import { createImageNodeView } from "../extensions/ImageView";
 import WikiLink from "../extensions/WikiLink";
 import WikiLinkSuggestion from "../extensions/WikiLinkSuggestion";
+import AnchorLink from "../extensions/AnchorLink";
 import TextContextMenu, {
   createTiptapTextContextMenuContext,
   isBelowTiptapDocumentEnd,
@@ -54,6 +55,13 @@ import { TableBubbleMenu } from "./TableBubbleMenu";
 import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
 import { isSafeLinkHref, normalizeLinkHref } from "../utils/linkHref";
+import {
+  buildHeadingAnchors,
+  filterHeadingAnchors,
+  normalizeFragmentHref,
+  type HeadingAnchor,
+} from "../utils/headingSlug";
+import { extractHeadings, outlineIndentDepth } from "../utils/outline";
 import { serializeImageMarkdown } from "../utils/imageMarkdownSerialize";
 import { stripTableCellNbsp } from "../utils/tableCellNbsp";
 import "../styles/tiptap-editor.css";
@@ -67,6 +75,7 @@ declare module "@tiptap/core" {
     markdownPaste: { keepFormatOnPaste: boolean };
     documentContext: { noteId: string | null; filePath: string | null };
     wikiLink: import("../extensions/WikiLink").WikiLinkStorage;
+    anchorLink: import("../extensions/AnchorLink").AnchorLinkStorage;
   }
 }
 
@@ -656,6 +665,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     const [linkHasValue, setLinkHasValue] = useState(false);
     const [linkInputFadeLeft, setLinkInputFadeLeft] = useState(false);
     const [linkInputFadeRight, setLinkInputFadeRight] = useState(false);
+    const [linkSuggestIndex, setLinkSuggestIndex] = useState(0);
     const [linkHoverPopoverOpen, setLinkHoverPopoverOpen] = useState(false);
     const [linkHoverHref, setLinkHoverHref] = useState("");
     const [linkHoverAnchorEl, setLinkHoverAnchorEl] = useState<HTMLAnchorElement | null>(null);
@@ -670,6 +680,9 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     const linkPopoverRef = useRef<HTMLDivElement | null>(null);
     const linkInputRef = useRef<HTMLInputElement | null>(null);
     const linkRangeRef = useRef<TextRange | null>(null);
+    // Heading anchors for the "#" autocomplete, built lazily per popover
+    // session — the popover is transient, so one on-demand doc walk is fine.
+    const linkAnchorsRef = useRef<HeadingAnchor[] | null>(null);
     const linkPopoverTeardownRef = useRef<(() => void) | null>(null);
     const linkHoverPopoverRef = useRef<HTMLDivElement | null>(null);
     const linkHoverClientXRef = useRef<number | null>(null);
@@ -720,6 +733,8 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       setLinkPopoverOpen(false);
       setLinkHasValue(false);
       linkRangeRef.current = null;
+      linkAnchorsRef.current = null;
+      setLinkSuggestIndex(0);
       linkPopoverTeardownRef.current?.();
     }, []);
 
@@ -754,6 +769,8 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
 
     const openLinkPopoverAtRange = useCallback((range: TextRange, href: string) => {
       linkRangeRef.current = range;
+      linkAnchorsRef.current = null;
+      setLinkSuggestIndex(0);
       setLinkUrl(href);
       setLinkHasValue(Boolean(href));
       setLinkPopoverOpen(true);
@@ -832,6 +849,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         SlashCommands,
         WikiLink,
         WikiLinkSuggestion,
+        AnchorLink,
         ImageDrop,
         ImageFocusGuard,
         TextContextMenu,
@@ -1054,12 +1072,11 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
 
     linkPopoverCallbackRef.current = triggerLinkPopover;
 
-    const applyLinkFromPopover = useCallback(() => {
+    const applyLinkWithHref = useCallback((href: string) => {
       if (!editor) return;
       const range = linkRangeRef.current;
       if (!range || range.from === range.to) return;
 
-      const href = normalizeLinkHref(linkUrl);
       const chain = editor.chain().focus().setTextSelection({ from: range.from, to: range.to });
       if (href) {
         chain.setLink({ href }).run();
@@ -1069,7 +1086,16 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
 
       closeLinkPopover();
       editor.commands.focus();
-    }, [closeLinkPopover, editor, linkUrl]);
+    }, [closeLinkPopover, editor]);
+
+    const applyLinkFromPopover = useCallback(() => {
+      const trimmed = linkUrl.trim();
+      // Fragment hrefs are stored as GitHub-style slugs so the markdown
+      // destination never contains spaces (which would break re-parsing).
+      applyLinkWithHref(
+        trimmed.startsWith("#") ? normalizeFragmentHref(trimmed) : normalizeLinkHref(linkUrl),
+      );
+    }, [applyLinkWithHref, linkUrl]);
 
     const removeLinkFromPopover = useCallback(() => {
       if (!editor) return;
@@ -1376,6 +1402,23 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       [closeLinkHoverPopover, closeLinkPopover, editor, invalidateDocumentSession, openDocument, scheduleSpellcheckRefresh],
     );
 
+    // "#" in the link popover switches the input into heading-autocomplete
+    // mode. Anchors are built once per popover session (lazily, on the first
+    // "#" keystroke) and filtered per render — both trivially cheap.
+    const linkFragmentQuery = linkPopoverOpen && linkUrl.trimStart().startsWith("#")
+      ? linkUrl.trimStart().slice(1)
+      : null;
+    let headingSuggestions: HeadingAnchor[] = [];
+    if (linkFragmentQuery !== null && editor) {
+      if (!linkAnchorsRef.current) {
+        linkAnchorsRef.current = buildHeadingAnchors(extractHeadings(editor.state.doc));
+      }
+      headingSuggestions = filterHeadingAnchors(linkAnchorsRef.current, linkFragmentQuery);
+    }
+    const activeSuggestIndex = headingSuggestions.length > 0
+      ? Math.min(linkSuggestIndex, headingSuggestions.length - 1)
+      : 0;
+
     return (
       <div
         className={`${editable ? "tiptap-editable" : "tiptap-readonly"} ${wrapClass}${focusMode ? " tiptap-focus-mode" : ""}`}
@@ -1584,15 +1627,35 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
                 value={linkUrl}
                 onChange={(event) => {
                   setLinkUrl(event.target.value);
+                  setLinkSuggestIndex(0);
                   requestAnimationFrame(updateLinkInputFades);
                 }}
                 onClick={() => requestAnimationFrame(updateLinkInputFades)}
                 onKeyUp={() => requestAnimationFrame(updateLinkInputFades)}
                 placeholder={t("link.popover.placeholder", locale)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") {
+                  if (event.key === "ArrowDown" && headingSuggestions.length > 0) {
                     event.preventDefault();
-                    applyLinkFromPopover();
+                    setLinkSuggestIndex((activeSuggestIndex + 1) % headingSuggestions.length);
+                    return;
+                  }
+                  if (event.key === "ArrowUp" && headingSuggestions.length > 0) {
+                    event.preventDefault();
+                    setLinkSuggestIndex(
+                      (activeSuggestIndex - 1 + headingSuggestions.length) % headingSuggestions.length,
+                    );
+                    return;
+                  }
+                  if (event.key === "Enter") {
+                    // A Hangul IME commit also lands as Enter — don't apply
+                    // the link mid-composition.
+                    if (event.nativeEvent.isComposing) return;
+                    event.preventDefault();
+                    if (headingSuggestions.length > 0) {
+                      applyLinkWithHref(`#${headingSuggestions[activeSuggestIndex].slug}`);
+                    } else {
+                      applyLinkFromPopover();
+                    }
                   }
                   if (event.key === "Escape") {
                     event.preventDefault();
@@ -1602,6 +1665,41 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
                 }}
               />
             </div>
+            {linkFragmentQuery !== null && (
+              <div className="tiptap-link-popover-suggestions" role="listbox">
+                {headingSuggestions.length === 0 ? (
+                  <div className="tiptap-link-popover-suggestion-empty">
+                    {t("link.popover.noHeadings", locale)}
+                  </div>
+                ) : (
+                  headingSuggestions.map((anchor, index) => (
+                    <button
+                      key={`${anchor.slug}:${anchor.heading.pos}`}
+                      type="button"
+                      role="option"
+                      aria-selected={index === activeSuggestIndex}
+                      className={`tiptap-link-popover-suggestion${index === activeSuggestIndex ? " is-active" : ""}`}
+                      style={{
+                        paddingLeft: `${10 + outlineIndentDepth(anchor.heading.level) * 12}px`,
+                      }}
+                      ref={index === activeSuggestIndex
+                        ? (el) => el?.scrollIntoView({ block: "nearest" })
+                        : undefined}
+                      // Keep focus in the URL input so the popover's
+                      // focus-out dismissal doesn't fire before the click.
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => applyLinkWithHref(`#${anchor.slug}`)}
+                      onMouseEnter={() => setLinkSuggestIndex(index)}
+                    >
+                      <span className="tiptap-link-popover-suggestion-title">
+                        {anchor.heading.text || t("outline.untitled", locale)}
+                      </span>
+                      <span className="tiptap-link-popover-suggestion-slug">#{anchor.slug}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
             <div className="tiptap-link-popover-actions">
               <button
                 type="button"

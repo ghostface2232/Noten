@@ -243,6 +243,27 @@ describe("Markdown fixture round-trip compatibility", () => {
     expect(stableMarkdown(second)).toBe(markdown);
   });
 
+  it("round-trips anchor links with Hangul slug destinations verbatim", () => {
+    // Anchor hrefs are stored as GitHub-style slugs precisely so the markdown
+    // destination never needs encoding — guard that assumption end to end.
+    const source = [
+      "## 서론 개요",
+      "",
+      "본문입니다.",
+      "",
+      "[서론으로 이동](#서론-개요) 그리고 [go](#my-heading)",
+    ].join("\n");
+
+    const first = trackedEditor(source);
+    const firstMarkdown = stableMarkdown(first);
+    expect(firstMarkdown).toContain("[서론으로 이동](#서론-개요)");
+    expect(firstMarkdown).toContain("[go](#my-heading)");
+
+    const second = trackedEditor(firstMarkdown);
+    expect(stableMarkdown(second)).toBe(firstMarkdown);
+    expect(hasMark(second.getJSON(), "link")).toBe(true);
+  });
+
   it("preserves multilingual text, safe links, and wiki-link marks", () => {
     const editor = trackedEditor(readFixture("international-and-links.md"));
     const doc = editor.getJSON();

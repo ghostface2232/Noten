@@ -46,6 +46,8 @@ const dict = {
   "link.hover.edit": { en: "Edit link", ko: "링크 편집" },
   "link.hover.copyShort": { en: "Copy", ko: "복사" },
   "link.hover.editShort": { en: "Edit", ko: "편집" },
+  "link.anchorMissing": { en: "Heading not found", ko: "헤딩을 찾을 수 없습니다" },
+  "link.popover.noHeadings": { en: "No matching heading", ko: "일치하는 헤딩이 없습니다" },
 
   "slash.text": { en: "Text", ko: "텍스트" },
   "slash.text.desc": { en: "Plain body text", ko: "일반 본문 텍스트" },
