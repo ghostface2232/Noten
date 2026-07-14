@@ -11,10 +11,13 @@ import { isProbablyMarkdown } from "./isProbablyMarkdown";
 export interface TextContextMenuContext {
   hasSelection: boolean;
   isEditable: boolean;
+  /** Whether the link popover can open here (selection, or caret in a link). */
+  canLink: boolean;
   locale: Locale;
   cut: () => void;
   copy: () => void;
   paste: (plain?: boolean) => void;
+  link: () => void;
   selectAll: () => void;
   focus: () => void;
 }
@@ -30,6 +33,7 @@ export function showGenericContextMenu(pos: { x: number; y: number }, ctx: TextC
   const iconPastePlain = '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M6.5 8a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7ZM6 11.5c0-.28.22-.5.5-.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1-.5-.5Zm.5 2.5a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5Zm2-12c-.65 0-1.2.42-1.41 1H5.5C4.67 3 4 3.67 4 4.5v12c0 .83.67 1.5 1.5 1.5h9c.83 0 1.5-.67 1.5-1.5v-12c0-.83-.67-1.5-1.5-1.5h-1.59c-.2-.58-.76-1-1.41-1h-3Zm3 1a.5.5 0 0 1 0 1h-3a.5.5 0 0 1 0-1h3Zm-6 1h1.59c.2.58.76 1 1.41 1h3c.65 0 1.2-.42 1.41-1h1.59c.28 0 .5.22.5.5v12a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-12c0-.28.22-.5.5-.5Z"/></svg>';
   const iconSelectAll = '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M12.33 6.62c.2.19.23.5.05.7l-3.5 4a.5.5 0 0 1-.73.03l-2-2a.5.5 0 1 1 .7-.7l1.63 1.62 3.14-3.6a.5.5 0 0 1 .7-.05ZM3 6a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6Zm3-2a2 2 0 0 0-2 2v6c0 1.1.9 2 2 2h6a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H6Zm-.25 12A3 3 0 0 0 8 17h4.5a4.5 4.5 0 0 0 4.5-4.5V8a3 3 0 0 0-1-2.23v6.73a3.5 3.5 0 0 1-3.5 3.5H5.75Z"/></svg>';
   const iconEmoji = '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M18 10a8 8 0 1 0-16 0 8 8 0 0 0 16 0ZM3 10a7 7 0 1 1 14 0 7 7 0 0 1-14 0Zm10.5-1.5a1 1 0 1 0-2 0 1 1 0 0 0 2 0Zm-5 0a1 1 0 1 0-2 0 1 1 0 0 0 2 0Zm-1.61 4.01a.5.5 0 1 0-.78.63 5 5 0 0 0 7.78 0 .5.5 0 1 0-.78-.63 4 4 0 0 1-6.22 0Z"/></svg>';
+  const iconLink = '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M9.5 6a.5.5 0 0 1 .09.99L9.5 7h-2a2.75 2.75 0 0 0-.17 5.5l.17.01h2a.5.5 0 0 1 .09.99l-.09.01h-2a3.75 3.75 0 0 1-.2-7.5l.2-.01h2Zm3 0a3.75 3.75 0 0 1 .2 7.49l-.2.01h-2a.5.5 0 0 1-.09-.99l.09-.01h2a2.75 2.75 0 0 0 .17-5.5l-.17-.01h-2a.5.5 0 0 1-.09-.99l.09-.01h2Zm-5.5 3.5h6a.5.5 0 0 1 .09.99l-.09.01H7a.5.5 0 0 1-.09-.99L7 9.5h6-6Z"/></svg>';
 
   const items: { label: string; shortcut: string | null; icon: string; disabled?: boolean; separator?: boolean; action: () => void }[] = [
     {
@@ -51,6 +55,11 @@ export function showGenericContextMenu(pos: { x: number; y: number }, ctx: TextC
       label: i("ctx.pasteNoFormat"), shortcut: "Ctrl+Shift+V", icon: iconPastePlain,
       disabled: !ctx.isEditable,
       action: () => { closeContextMenu(); ctx.paste(true); },
+    },
+    {
+      label: i("ctx.link"), shortcut: "Ctrl+K", icon: iconLink, separator: true,
+      disabled: !ctx.canLink || !ctx.isEditable,
+      action: () => { closeContextMenu(); ctx.link(); },
     },
     {
       label: i("ctx.selectAll"), shortcut: "Ctrl+A", icon: iconSelectAll, separator: true,
@@ -165,6 +174,7 @@ function tiptapContext(editor: Editor): TextContextMenuContext {
   return {
     hasSelection: from !== to,
     isEditable: !editor.storage.readonlyGuard?.readonly,
+    canLink: from !== to || editor.isActive("link"),
     locale: (editor.storage.slashCommands?.locale ?? "en") as Locale,
     cut: async () => {
       const copied = await copyEditorSelection(editor);
@@ -190,6 +200,7 @@ function tiptapContext(editor: Editor): TextContextMenuContext {
         pastePlainText(editor, text);
       } catch { document.execCommand("paste"); }
     },
+    link: () => { editor.storage.linkPopoverShortcut?.trigger(); },
     selectAll: () => editor.chain().focus().selectAll().run(),
     focus: () => editor.commands.focus(),
   };

@@ -76,6 +76,7 @@ declare module "@tiptap/core" {
     documentContext: { noteId: string | null; filePath: string | null };
     wikiLink: import("../extensions/WikiLink").WikiLinkStorage;
     anchorLink: import("../extensions/AnchorLink").AnchorLinkStorage;
+    linkPopoverShortcut: { trigger: () => boolean };
   }
 }
 
@@ -411,16 +412,18 @@ const TableNodeSelect = Extension.create({
   },
 });
 
-const linkPopoverCallbackRef: { current: (() => boolean) | undefined } = { current: undefined };
-
-const LinkPopoverShortcut = Extension.create({
+// The live trigger is assigned by the component each render; storage-based so
+// other entry points (Mod-k, the text context menu) share the same path.
+const LinkPopoverShortcut = Extension.create<unknown, { trigger: () => boolean }>({
   name: "linkPopoverShortcut",
+
+  addStorage() {
+    return { trigger: () => false };
+  },
 
   addKeyboardShortcuts() {
     return {
-      "Mod-k": () => {
-        return linkPopoverCallbackRef.current?.() ?? false;
-      },
+      "Mod-k": () => this.storage.trigger(),
     };
   },
 });
@@ -1070,7 +1073,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       return true;
     }, [closeLinkPopover, editable, editor, linkPopoverOpen, openLinkPopoverAtRange]);
 
-    linkPopoverCallbackRef.current = triggerLinkPopover;
+    if (editor) editor.storage.linkPopoverShortcut.trigger = triggerLinkPopover;
 
     const applyLinkWithHref = useCallback((href: string) => {
       if (!editor) return;

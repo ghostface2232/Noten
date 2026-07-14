@@ -109,6 +109,7 @@ const dict = {
   "ctx.copy": { en: "Copy", ko: "복사" },
   "ctx.paste": { en: "Paste", ko: "붙여넣기" },
   "ctx.pasteNoFormat": { en: "Paste plain text", ko: "서식 없이 붙여넣기" },
+  "ctx.link": { en: "Link", ko: "링크" },
   "ctx.selectAll": { en: "Select all", ko: "모두 선택" },
   "ctx.emoji": { en: "Emoji", ko: "이모지" },
 

@@ -133,7 +133,7 @@ Per-keystroke work in the editor must be incremental — no plugin or observer m
 - Editor/NodeView DOM context menus use shared helpers from `src/utils/contextMenuRegistry.ts` (`createMenuShell`, `createMenuItem`, `createMenuSeparator`) and its singleton registry, so only one of those menus is open at a time. React sidebar and app menus have their own Fluent-based state and focus handling.
 - All menus are clamped to the viewport via `clampMenuToViewport()`, accounting for the 25px status bar at the bottom.
 - Image context menu: save, copy, replace, delete.
-- Text context menu: cut, copy, paste, paste plain text, select all, emoji. DOM menus use Fluent-style inline SVG glyphs; React chrome uses `@fluentui/react-icons`.
+- Text context menu: cut, copy, paste, paste plain text, link, select all, emoji. DOM menus use Fluent-style inline SVG glyphs; React chrome uses `@fluentui/react-icons`. The link item routes through `editor.storage.linkPopoverShortcut.trigger` — the same entry point as Mod-k — so popover behavior stays single-sourced.
 - Tiptap uses `TextContextMenuContext` as the shared text context menu interface.
 
 ## Tiptap Markdown Rules
