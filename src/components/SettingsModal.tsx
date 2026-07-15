@@ -777,19 +777,17 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     <div style={{ fontSize: "13px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
                       {locale === "ko" ? (
                         <>
-                          · 문서의 제목 구조를 한눈에 보고 이동하는 목차 패널 추가 (Ctrl+Shift+O)<br />
-                          · 작성 중인 블록만 밝게 표시하는 포커스 모드 추가<br />
-                          · 단축키가 정확한 조합에서만 동작하도록 개선 (Ctrl+R 오동작 수정)<br />
-                          · 다이얼로그가 열려 있을 때 단축키가 새어 들어가던 문제 수정<br />
-                          · Windows 이모지 선택기 입력이 에디터에 반영되지 않던 문제 수정
+                          · 같은 노트의 헤딩으로 이동하는 앵커 링크와 # 자동완성 추가<br />
+                          · ##, ### 입력으로 링크할 헤딩을 깊이별로 필터링<br />
+                          · 텍스트 메뉴에 링크 추가 명령 제공<br />
+                          · 중복 헤딩, 인코딩된 앵커, 빈 헤딩의 링크 처리 개선
                         </>
                       ) : (
                         <>
-                          · New table of contents panel for navigating headings (Ctrl+Shift+O)<br />
-                          · New focus mode that highlights only the block you're editing<br />
-                          · Shortcuts now require exact modifier combinations (fixes stray Ctrl+R)<br />
-                          · Fixed shortcuts leaking through while dialogs are open<br />
-                          · Fixed Windows emoji picker input not reaching the editor
+                          · Added anchor links and # autocomplete for headings in the same note<br />
+                          · Filter link targets by heading depth with ## and ###<br />
+                          · Added the link command to the text context menu<br />
+                          · Improved links for duplicate headings, encoded anchors, and empty headings
                         </>
                       )}
                     </div>
