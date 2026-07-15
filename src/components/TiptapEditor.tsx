@@ -1406,8 +1406,8 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
     );
 
     // "#" in the link popover switches the input into heading-autocomplete
-    // mode. Anchors are built once per popover session (lazily, on the first
-    // "#" keystroke) and filtered per render — both trivially cheap.
+    // mode. Additional leading hashes filter by minimum heading level. Anchors
+    // are built once per popover session and filtered per render.
     const linkFragmentQuery = linkPopoverOpen && linkUrl.trimStart().startsWith("#")
       ? linkUrl.trimStart().slice(1)
       : null;

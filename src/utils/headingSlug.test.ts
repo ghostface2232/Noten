@@ -189,4 +189,37 @@ describe("filterHeadingAnchors", () => {
   it("returns empty for no matches", () => {
     expect(filterHeadingAnchors(anchors, "zzz")).toEqual([]);
   });
+
+  it("uses additional leading hashes as a minimum heading-level filter", () => {
+    const hierarchy = buildHeadingAnchors([
+      heading("Overview", 0, 1),
+      heading("Install", 10, 2),
+      heading("Windows", 20, 3),
+      heading("Advanced", 30, 4),
+    ]);
+
+    expect(filterHeadingAnchors(hierarchy, "").map((a) => a.heading.level)).toEqual([
+      1, 2, 3, 4,
+    ]);
+    expect(filterHeadingAnchors(hierarchy, "#").map((a) => a.heading.level)).toEqual([
+      2, 3, 4,
+    ]);
+    expect(filterHeadingAnchors(hierarchy, "##").map((a) => a.heading.level)).toEqual([
+      3, 4,
+    ]);
+    expect(filterHeadingAnchors(hierarchy, "###").map((a) => a.heading.level)).toEqual([4]);
+  });
+
+  it("combines the heading-level prefix with title filtering", () => {
+    const hierarchy = buildHeadingAnchors([
+      heading("Install", 0, 2),
+      heading("Install on Windows", 10, 3),
+      heading("Install on Linux", 20, 4),
+    ]);
+
+    expect(filterHeadingAnchors(hierarchy, "##windows").map((a) => a.slug)).toEqual([
+      "install-on-windows",
+    ]);
+    expect(filterHeadingAnchors(hierarchy, "###windows")).toEqual([]);
+  });
 });

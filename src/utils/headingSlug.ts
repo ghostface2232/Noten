@@ -119,19 +119,28 @@ export function normalizeFragmentHref(value: string): string {
 }
 
 /**
- * Autocomplete filter for the link popover: empty query lists every heading;
- * otherwise match on the slug (space-insensitive via slugification) or on the
- * raw title, case-insensitively.
+ * Autocomplete filter for the link popover. The query excludes the first "#"
+ * that enters fragment mode, so each additional leading "#" sets the minimum
+ * heading level: "" lists all headings, "#" lists h2-h6, and "##" lists
+ * h3-h6. Any remaining text filters by slug or raw title.
  */
 export function filterHeadingAnchors(
   anchors: HeadingAnchor[],
   query: string,
 ): HeadingAnchor[] {
   const trimmed = query.trim();
-  if (!trimmed) return anchors;
-  const slugged = slugifyHeading(trimmed);
-  const lower = trimmed.normalize("NFC").toLowerCase();
-  return anchors.filter(
+  const levelPrefixLength = trimmed.match(/^#+/)?.[0].length ?? 0;
+  const minimumLevel = levelPrefixLength + 1;
+  const textQuery = trimmed.slice(levelPrefixLength).trim();
+  const levelMatches = levelPrefixLength === 0
+    ? anchors
+    : anchors.filter((anchor) => anchor.heading.level >= minimumLevel);
+
+  if (!textQuery) return levelMatches;
+
+  const slugged = slugifyHeading(textQuery);
+  const lower = textQuery.normalize("NFC").toLowerCase();
+  return levelMatches.filter(
     (a) =>
       (slugged && a.slug.includes(slugged))
       || a.heading.text.normalize("NFC").toLowerCase().includes(lower),
