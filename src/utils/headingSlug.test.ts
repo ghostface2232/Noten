@@ -58,6 +58,34 @@ describe("buildHeadingAnchors", () => {
     const anchors = buildHeadingAnchors([heading("A", 0), heading("B", 5), heading("A", 9)]);
     expect(anchors.map((a) => a.slug)).toEqual(["a", "b", "a-1"]);
   });
+
+  it("keeps every generated slug unique when a title collides with a suffix", () => {
+    const anchors = buildHeadingAnchors([
+      heading("A", 0),
+      heading("A", 5),
+      heading("A-1", 9),
+    ]);
+    expect(anchors.map((a) => a.slug)).toEqual(["a", "a-1", "a-1-1"]);
+    expect(resolveHeadingFragment(anchors.map((a) => a.heading), "#a-1-1")?.pos).toBe(9);
+  });
+
+  it("skips suffixes already reserved by literal heading titles", () => {
+    const anchors = buildHeadingAnchors([
+      heading("A", 0),
+      heading("A-1", 5),
+      heading("A", 9),
+    ]);
+    expect(anchors.map((a) => a.slug)).toEqual(["a", "a-1", "a-2"]);
+  });
+
+  it("omits headings that cannot produce a linkable slug", () => {
+    const anchors = buildHeadingAnchors([
+      heading("Intro", 0),
+      heading("!!!", 5),
+      heading("", 9),
+    ]);
+    expect(anchors.map((a) => a.slug)).toEqual(["intro"]);
+  });
 });
 
 describe("resolveHeadingFragment", () => {
@@ -122,6 +150,16 @@ describe("normalizeFragmentHref", () => {
   it("is idempotent on already-slugged values", () => {
     expect(normalizeFragmentHref("#my-heading-1")).toBe("#my-heading-1");
     expect(normalizeFragmentHref(normalizeFragmentHref("#My Heading"))).toBe("#my-heading");
+  });
+
+  it("decodes percent-encoded fragments before slugifying", () => {
+    expect(normalizeFragmentHref("#%EC%84%9C%EB%A1%A0-%EA%B0%9C%EC%9A%94")).toBe(
+      "#서론-개요",
+    );
+  });
+
+  it("preserves malformed percent-encoded fragments", () => {
+    expect(normalizeFragmentHref("#broken%2-fragment")).toBe("#broken%2-fragment");
   });
 });
 

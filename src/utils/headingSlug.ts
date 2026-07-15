@@ -21,19 +21,33 @@ export interface HeadingAnchor {
 }
 
 /**
- * Slug per heading in document order, with GitHub's duplicate rule: the first
- * occurrence keeps the bare slug, later ones get "-1", "-2", ... A heading
- * literally titled "a-1" alongside duplicate "a" headings can collide — the
- * simple counter is kept (raw-title fallback in the resolver still covers it).
+ * Slug per linkable heading in document order, with GitHub's duplicate rule:
+ * the first occurrence keeps the bare slug and later collisions get "-1",
+ * "-2", ... Every assigned slug is reserved so a literal title such as "a-1"
+ * cannot collide with the suffix generated for a duplicate "a" heading.
  */
 export function buildHeadingAnchors(headings: OutlineHeading[]): HeadingAnchor[] {
-  const counts = new Map<string, number>();
-  return headings.map((heading) => {
+  const anchors: HeadingAnchor[] = [];
+  const used = new Set<string>();
+  const suffixes = new Map<string, number>();
+
+  for (const heading of headings) {
     const base = slugifyHeading(heading.text);
-    const seen = counts.get(base) ?? 0;
-    counts.set(base, seen + 1);
-    return { slug: seen === 0 ? base : `${base}-${seen}`, heading };
-  });
+    if (!base) continue;
+
+    let suffix = suffixes.get(base) ?? 0;
+    let slug = base;
+    while (used.has(slug)) {
+      suffix += 1;
+      slug = `${base}-${suffix}`;
+    }
+
+    suffixes.set(base, suffix);
+    used.add(slug);
+    anchors.push({ slug, heading });
+  }
+
+  return anchors;
 }
 
 function decodeFragment(fragment: string): string {
@@ -82,13 +96,25 @@ export function resolveHeadingFragment(
 
 /**
  * Popover apply-time normalization: "#My Heading" -> "#my-heading".
- * "" / "#" / "#   " normalize to "" (caller unsets the link). Idempotent on
- * already-slugged values.
+ * Percent-encoded fragments are decoded before slugification; malformed
+ * encodings are preserved rather than destructively rewritten. "" / "#" /
+ * "#   " normalize to "" (caller unsets the link).
  */
 export function normalizeFragmentHref(value: string): string {
   const trimmed = value.trim();
-  if (!trimmed.startsWith("#")) return trimmed ? `#${slugifyHeading(trimmed)}` : "";
-  const slug = slugifyHeading(trimmed.slice(1).trim());
+  if (!trimmed) return "";
+
+  const raw = trimmed.startsWith("#") ? trimmed.slice(1).trim() : trimmed;
+  if (!raw) return "";
+
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    return trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
+  }
+
+  const slug = slugifyHeading(decoded.trim());
   return slug ? `#${slug}` : "";
 }
 

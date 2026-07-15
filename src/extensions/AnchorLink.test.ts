@@ -81,6 +81,19 @@ describe("AnchorLink handleClick", () => {
     expect(onJump).toHaveBeenCalledWith(secondPos);
   });
 
+  it("jumps to a literal suffixed heading without colliding with duplicate suffixes", () => {
+    const editor = makeEditor(
+      '<h2>A</h2><h2>A</h2><h2>A-1</h2><p><a href="#a-1-1">go</a></p>',
+    );
+    const onJump = vi.fn();
+    editor.storage.anchorLink.onJump = onJump;
+
+    expect(clickPlugin(editor)(fakeClick(editor.view.dom.querySelector("a")))).toBe(true);
+
+    const literalSuffixPos = extractHeadings(editor.state.doc)[2].pos;
+    expect(onJump).toHaveBeenCalledWith(literalSuffixPos);
+  });
+
   it("reports a missing target and still handles the click", () => {
     const editor = makeEditor('<h1>Intro</h1><p><a href="#ghost">go</a></p>');
     const onJump = vi.fn();
