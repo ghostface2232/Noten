@@ -118,6 +118,7 @@ export function useWindowSync(
   onActiveDocChanged?: (doc: { filePath: string; content: string }) => void,
   notesSortOrder: NotesSortOrder = "updated-desc",
   locale: Locale = "en",
+  settleRemoteDeletedDoc?: (docId: string) => Promise<boolean>,
 ) {
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
@@ -133,6 +134,7 @@ export function useWindowSync(
   useEffect(() => {
     let mounted = true;
     let unlisteners: (() => void)[] = [];
+    const deletingDocIds = new Set<string>();
 
     Promise.all([
       listen<DocUpdatedPayload>("doc-updated", (event) => {
@@ -190,45 +192,58 @@ export function useWindowSync(
 
       listen<DocDeletedPayload>("doc-deleted", (event) => {
         const { sourceWindow, docId } = event.payload;
-        if (sourceWindow === WINDOW_LABEL) return;
+        if (sourceWindow === WINDOW_LABEL || deletingDocIds.has(docId)) return;
+        deletingDocIds.add(docId);
 
-        setDocs((prev) => {
-          const idx = prev.findIndex((d) => d.id === docId);
-          if (idx < 0) return prev;
+        void (async () => {
+          try {
+            // Preservation is best-effort. The originating window already
+            // committed the delete, so a false result must not resurrect it.
+            if (settleRemoteDeletedDoc) {
+              try { await settleRemoteDeletedDoc(docId); } catch { /* deletion remains authoritative */ }
+            }
+            if (!mounted) return;
 
-          const filtered = prev.filter((d) => d.id !== docId);
-          if (filtered.length === 0) {
-            setActiveIndex(0);
-            return filtered;
-          }
+            flushSync(() => {
+              setDocs((prev) => {
+                const idx = prev.findIndex((d) => d.id === docId);
+                if (idx < 0) return prev;
 
-          const currentActive = activeIndexRef.current;
-          const deletedActiveDoc = getRoutedActiveDocId() === docId;
+                const filtered = prev.filter((d) => d.id !== docId);
+                if (filtered.length === 0) {
+                  setActiveIndex(0);
+                  return filtered;
+                }
 
-          if (deletedActiveDoc) {
-            // Deleted doc is the active doc — load new active doc's content
-            const newIdx = Math.min(idx, filtered.length - 1);
-            setActiveIndex(newIdx);
-            const newDoc = filtered[newIdx];
-            if (tiptapRef.current && newDoc) {
-              tiptapRef.current.openDocument?.({
-                noteId: newDoc.id,
-                filePath: newDoc.filePath,
-                markdown: newDoc.content,
-                reason: "window-sync",
+                const currentActive = activeIndexRef.current;
+                const deletedActiveDoc = getRoutedActiveDocId() === docId;
+
+                if (deletedActiveDoc) {
+                  const newIdx = Math.min(idx, filtered.length - 1);
+                  setActiveIndex(newIdx);
+                  const newDoc = filtered[newIdx];
+                  if (tiptapRef.current && newDoc) {
+                    tiptapRef.current.openDocument?.({
+                      noteId: newDoc.id,
+                      filePath: newDoc.filePath,
+                      markdown: newDoc.content,
+                      reason: "window-sync",
+                    });
+                  }
+                  if (newDoc) {
+                    onActiveDocChangedRef.current?.({ filePath: newDoc.filePath, content: newDoc.content });
+                  }
+                } else if (idx < currentActive) {
+                  setActiveIndex(currentActive - 1);
+                }
+
+                return filtered;
               });
-            }
-            if (newDoc) {
-              onActiveDocChangedRef.current?.({ filePath: newDoc.filePath, content: newDoc.content });
-            }
-          } else if (idx < currentActive) {
-            // Deleted doc is before active doc — shift index down
-            setActiveIndex(currentActive - 1);
+            });
+          } finally {
+            deletingDocIds.delete(docId);
           }
-          // idx > currentActive — no change needed
-
-          return filtered;
-        });
+        })();
       }),
 
       listen<DocCreatedPayload>("doc-created", (event) => {
@@ -295,5 +310,5 @@ export function useWindowSync(
     });
 
     return () => { mounted = false; unlisteners.forEach((fn) => fn()); };
-  }, [getRoutedActiveDocId, setDocs, setActiveIndex, tiptapRef, setGroups, setTrashedNotes, onActiveDocChanged, notesSortOrder, locale]);
+  }, [getRoutedActiveDocId, setDocs, setActiveIndex, tiptapRef, setGroups, setTrashedNotes, onActiveDocChanged, notesSortOrder, locale, settleRemoteDeletedDoc]);
 }

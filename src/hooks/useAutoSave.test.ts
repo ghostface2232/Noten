@@ -10,8 +10,10 @@ import { NotenError } from "../utils/notenError";
 const refs = vi.hoisted(() => ({
   migrationInProgress: false,
   backupShouldThrow: null as Error | null,
+  remoteBackupShouldThrow: null as Error | null,
   writeShouldThrow: null as Error | null,
   editorContent: "",
+  files: new Map<string, string>(),
 }));
 
 vi.mock("@tauri-apps/api/path", () => ({
@@ -54,6 +56,10 @@ vi.mock("../utils/conflictBackup", () => ({
     if (refs.backupShouldThrow) throw refs.backupShouldThrow;
     return false;
   }),
+  backupLocalDeletionVersion: vi.fn(async (_fs: unknown, _dir: string, _id: string, _body: string) => {
+    if (refs.remoteBackupShouldThrow) throw refs.remoteBackupShouldThrow;
+    return "/notes/.conflicts/a-1.md";
+  }),
   setKnownDiskContent: vi.fn(),
 }));
 
@@ -62,6 +68,13 @@ vi.mock("../utils/fs", () => ({
     writeTextFile: vi.fn(async () => {
       if (refs.writeShouldThrow) throw refs.writeShouldThrow;
     }),
+    readTextFile: vi.fn(async (path: string) => {
+      if (!refs.files.has(path)) throw new Error("ENOENT");
+      return refs.files.get(path)!;
+    }),
+    exists: vi.fn(async (path: string) => refs.files.has(path)),
+    mkdir: vi.fn(async () => {}),
+    remove: vi.fn(async (path: string) => { refs.files.delete(path); }),
   },
 }));
 
@@ -101,6 +114,7 @@ import * as crashLogModule from "../utils/crashLog";
 const saveManifestMock = useNotesLoaderModule.saveManifest as ReturnType<typeof vi.fn>;
 const getCurrentMarkdownMock = useFileSystemModule.getCurrentMarkdown as ReturnType<typeof vi.fn>;
 const backupMock = conflictBackupModule.backupIfRemoteWroteFirst as ReturnType<typeof vi.fn>;
+const localDeletionBackupMock = conflictBackupModule.backupLocalDeletionVersion as ReturnType<typeof vi.fn>;
 const writeMock = fsModule.tauriFileSystem.writeTextFile as ReturnType<typeof vi.fn>;
 const logMock = crashLogModule.logNotenError as ReturnType<typeof vi.fn>;
 
@@ -172,13 +186,79 @@ function renderAutoSave(opts: {
 beforeEach(() => {
   refs.migrationInProgress = false;
   refs.backupShouldThrow = null;
+  refs.remoteBackupShouldThrow = null;
   refs.writeShouldThrow = null;
   refs.editorContent = "hello world";
+  refs.files.clear();
 });
 
 afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
+});
+
+describe("useAutoSave — remote deletion race", () => {
+  it("keeps deletion authoritative while folding dirty editor Markdown into trash", async () => {
+    vi.useFakeTimers();
+    refs.editorContent = "base plus local edit";
+    refs.files.set("/notes/.trash/a.md", "base");
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+
+    act(() => result.current.scheduleAutoSave());
+    await act(async () => {
+      expect(await result.current.settleRemoteDeletedDoc("a")).toBe(true);
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+    expect(writeMock).toHaveBeenCalledWith("/notes/.trash/a.md", "base plus local edit");
+    expect(writeMock).not.toHaveBeenCalledWith("/notes/a.md", expect.anything());
+    expect(localDeletionBackupMock).not.toHaveBeenCalled();
+  });
+
+  it("uses a conflict backup only when the trash body also diverged", async () => {
+    refs.editorContent = "local edit";
+    refs.files.set("/notes/.trash/a.md", "other-window edit");
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+
+    await act(async () => {
+      expect(await result.current.settleRemoteDeletedDoc("a")).toBe(true);
+    });
+
+    expect(localDeletionBackupMock).toHaveBeenCalledWith(
+      fsModule.tauriFileSystem,
+      "/notes",
+      "a",
+      "local edit",
+    );
+    expect(writeMock).not.toHaveBeenCalledWith("/notes/.trash/a.md", expect.anything());
+  });
+
+  it("falls back to a conflict artifact when the trash body cannot be updated", async () => {
+    refs.editorContent = "local edit";
+    refs.files.set("/notes/.trash/a.md", "base");
+    refs.writeShouldThrow = new Error("trash locked");
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+
+    await act(async () => {
+      expect(await result.current.settleRemoteDeletedDoc("a")).toBe(true);
+    });
+
+    expect(localDeletionBackupMock).toHaveBeenCalledWith(
+      fsModule.tauriFileSystem,
+      "/notes",
+      "a",
+      "local edit",
+    );
+  });
 });
 
 

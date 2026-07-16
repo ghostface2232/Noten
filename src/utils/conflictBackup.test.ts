@@ -3,6 +3,7 @@ import { createInMemoryFileSystem, type InMemoryFileSystem } from "./fs.test-uti
 import { wrapWithFaults, type FaultInjectingFileSystem } from "./fs.fault.test-utils";
 import {
   backupIfRemoteWroteFirst,
+  backupLocalDeletionVersion,
   backupRemoteVersion,
   resetKnownDiskContent,
   setKnownDiskContent,
@@ -181,5 +182,14 @@ describe("backupRemoteVersion", () => {
       expect(ne.context?.noteId).toBe(NOTE_ID);
       expect(ne.context?.filePath).toMatch(CONFLICTS_DIR_RE);
     }
+  });
+});
+
+describe("backupLocalDeletionVersion", () => {
+  it("writes an artifact even when the dirty local body is empty", async () => {
+    const path = await backupLocalDeletionVersion(fs, DIR, NOTE_ID, "");
+
+    expect(path).toMatch(CONFLICTS_DIR_RE);
+    expect(await fs.readTextFile(path)).toBe("");
   });
 });

@@ -471,7 +471,7 @@ function App() {
     flushDocSaveRef,
   );
 
-  const { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, notifyActiveDoc, cancelDocSave } = useAutoSave(
+  const { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc } = useAutoSave(
     state,
     tiptapRef,
     docs,
@@ -550,6 +550,7 @@ function App() {
     handleActiveDocChanged,
     settings.notesSortOrder,
     locale,
+    settleRemoteDeletedDoc,
   );
 
   useFileWatcher(

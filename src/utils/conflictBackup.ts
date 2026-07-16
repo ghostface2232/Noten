@@ -3,8 +3,8 @@ import { normalizeSep } from "./pathUtils";
 import { NotenError } from "./notenError";
 import { markdownEqual } from "./markdownEqual";
 
-const README_BODY = `This folder holds backups of note bodies that were on disk
-when another change was about to overwrite them. Files are named
+const README_BODY = `This folder holds note bodies preserved during sync
+conflicts. Files are named
 "\`{noteId}-{timestamp-ms}.md\`" and are kept indefinitely so you can recover
 content lost to a multi-device race.
 
@@ -43,13 +43,12 @@ export function resetKnownDiskContent(): void {
   lastKnownDiskContent.clear();
 }
 
-export async function backupRemoteVersion(
+async function writeConflictVersion(
   fs: FileSystem,
   notesDir: string,
   noteId: string,
   body: string,
-): Promise<string | null> {
-  if (!body) return null;
+): Promise<string> {
   const conflictsDir = `${normalizeSep(notesDir)}.conflicts`;
   try { await fs.mkdir(conflictsDir, { recursive: true }); } catch { /* ignore */ }
   const path = `${normalizeSep(conflictsDir)}${noteId}-${Date.now()}.md`;
@@ -66,10 +65,31 @@ export async function backupRemoteVersion(
     throw new NotenError(
       "BACKUP_FAILED",
       "fatal",
-      "backupRemoteVersion: conflict body write failed",
+      "writeConflictVersion: conflict body write failed",
       { context: { filePath: path, noteId }, cause: err },
     );
   }
+}
+
+export async function backupRemoteVersion(
+  fs: FileSystem,
+  notesDir: string,
+  noteId: string,
+  body: string,
+): Promise<string | null> {
+  if (!body) return null;
+  return writeConflictVersion(fs, notesDir, noteId, body);
+}
+
+/** Preserve dirty local content that lost to a deletion in another window. */
+export async function backupLocalDeletionVersion(
+  fs: FileSystem,
+  notesDir: string,
+  noteId: string,
+  body: string,
+): Promise<string> {
+  // An empty body is still a real edit when the user cleared all text.
+  return writeConflictVersion(fs, notesDir, noteId, body);
 }
 
 /** Back up an unseen remote body before overwriting it. */

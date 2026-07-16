@@ -9,10 +9,12 @@ import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { emitDocUpdated } from "./useWindowSync";
 import { markOwnWrite } from "./ownWriteTracker";
-import { backupIfRemoteWroteFirst, setKnownDiskContent } from "../utils/conflictBackup";
+import { backupIfRemoteWroteFirst, backupLocalDeletionVersion, setKnownDiskContent } from "../utils/conflictBackup";
 import { atomicWriteText } from "../utils/atomicWrite";
 import { NotenError } from "../utils/notenError";
 import { logNotenError } from "../utils/crashLog";
+import { markdownEqual } from "../utils/markdownEqual";
+import { normalizeSep } from "../utils/pathUtils";
 
 const DEBOUNCE_MS = 1000;
 
@@ -540,5 +542,102 @@ export function useAutoSave(
     refreshHasPendingChanges();
   }, [refreshHasPendingChanges]);
 
-  return { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, captureAndQueueSave, awaitInFlightSaves, awaitDocSave, flushDocSave, flushPendingSnapshots, notifyActiveDoc, cancelDocSave };
+  const settleRemoteDeletedDoc = useCallback(async (docId: string): Promise<boolean> => {
+    const live = stateRef.current;
+    const doc = live.docs.find((entry) => entry.id === docId);
+    if (!doc) return true;
+
+    const isActive = activeDocRef.current?.id === docId;
+    const pendingSnapshot = pendingSnapshotsRef.current.get(docId);
+    const hasLocalEdits = hasPendingForDoc(docId)
+      || doc.isDirty
+      || (isActive && live.state.isDirty);
+    const localContent = isActive
+      ? getCurrentMarkdown(live.tiptapRef)
+      : pendingSnapshot?.content ?? doc.content;
+    const possibleLocalWrites = [localContent, pendingSnapshot?.content, doc.content]
+      .filter((body): body is string => body !== undefined);
+
+    // Invalidate before the first await. An atomic write already in progress
+    // may finish, but it can no longer commit state or emit doc-updated.
+    latestEditSerialByDocRef.current.set(
+      docId,
+      (latestEditSerialByDocRef.current.get(docId) ?? 0) + 1,
+    );
+    latestRevisionByDocRef.current.set(
+      docId,
+      (latestRevisionByDocRef.current.get(docId) ?? 0) + 1,
+    );
+    const timer = timersRef.current.get(docId);
+    if (timer) clearTimeout(timer);
+    timersRef.current.delete(docId);
+    pendingTargetsRef.current.delete(docId);
+    pendingSnapshotsRef.current.delete(docId);
+    refreshHasPendingChanges();
+
+    await awaitDocSave(docId);
+    if (!hasLocalEdits) return true;
+
+    let notesDir: string | null = null;
+    try {
+      const dir = await getNotesDir();
+      notesDir = dir;
+      const base = normalizeSep(dir);
+      const trashDir = `${base}.trash`;
+      const trashPath = `${trashDir}/${docId}.md`;
+      let trashContent: string | null = null;
+      try {
+        trashContent = await tauriFileSystem.readTextFile(trashPath);
+      } catch (err) {
+        if (await tauriFileSystem.exists(trashPath)) throw err;
+      }
+
+      if (trashContent === null || markdownEqual(trashContent, doc.content)) {
+        // The deleting window's trash copy is the same body this editor was
+        // based on, so fold the local edit into the deleted note. Deletion
+        // still wins; restoring from trash later recovers the latest text.
+        await tauriFileSystem.mkdir(trashDir, { recursive: true });
+        markOwnWrite(trashPath, localContent);
+        await atomicWriteText(tauriFileSystem, trashPath, localContent, { failClosed: true });
+      } else if (!markdownEqual(trashContent, localContent)) {
+        // Both windows changed the body. Keep the deleting window's trash
+        // version authoritative and preserve only this genuinely divergent
+        // local edit as a conflict artifact.
+        await backupLocalDeletionVersion(tauriFileSystem, dir, docId, localContent);
+      }
+
+      // If an older local autosave crossed the deletion and recreated the live
+      // body, remove only a body matching one of our captured local versions.
+      if (await tauriFileSystem.exists(doc.filePath)) {
+        const diskContent = await tauriFileSystem.readTextFile(doc.filePath);
+        if (possibleLocalWrites.some((body) => markdownEqual(body, diskContent))) {
+          markOwnWrite(doc.filePath);
+          await tauriFileSystem.remove(doc.filePath);
+        }
+      }
+      return true;
+    } catch (err) {
+      try {
+        const dir = notesDir ?? await getNotesDir();
+        await backupLocalDeletionVersion(tauriFileSystem, dir, docId, localContent);
+        return true;
+      } catch (backupErr) {
+        // Deletion remains authoritative even when both preservation paths are
+        // unavailable. Record the exceptional loss of the recovery copy, but
+        // never resurrect or retain a note the user deleted in another window.
+        const failure = backupErr ?? err;
+        void logNotenError(failure instanceof NotenError
+          ? failure
+          : new NotenError(
+              "BACKUP_FAILED",
+              "fatal",
+              failure instanceof Error ? failure.message : String(failure),
+              { context: { noteId: docId, filePath: doc.filePath }, cause: failure },
+            ));
+        return true;
+      }
+    }
+  }, [awaitDocSave, hasPendingForDoc, refreshHasPendingChanges]);
+
+  return { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, captureAndQueueSave, awaitInFlightSaves, awaitDocSave, flushDocSave, flushPendingSnapshots, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc };
 }

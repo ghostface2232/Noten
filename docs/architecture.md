@@ -77,7 +77,7 @@ The active notes directory contains shared, syncable data:
 ### Folder sync, windows, and migration
 
 - `useFileWatcher` and `reconcileFolder` merge changes arriving through local or cloud-synced folders. Remote body conflicts use last-write-wins and preserve the displaced body under `.conflicts/`.
-- `useWindowSync` broadcasts note, group, pin, color, and trash changes between Tauri windows while dirty local edits remain protected.
+- `useWindowSync` broadcasts note, group, pin, color, and trash changes between Tauri windows. Remote updates leave dirty local documents untouched. Remote deletion always wins: autosave for that note is cancelled, a dirty local body is folded into the matching trash body when possible, and only a divergent or unwritable trash version falls back to `.conflicts/`; preservation failure is logged but never resurrects the deleted note.
 - Notes-directory changes are coordinated by `useMigrationSync`: peer windows drain saves and block old-directory writes before the copy. Timeouts retain the source for deferred cleanup, and heartbeat/watchdog events release peers if the migrating window disappears.
 - Migration ordering is copy, persist `notesDirectory`, then clear or defer cleanup of the source so a crash does not leave a partial-only authoritative directory.
 
