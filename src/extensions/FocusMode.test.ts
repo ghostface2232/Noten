@@ -7,7 +7,11 @@ import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { EditorState, NodeSelection, AllSelection } from "@tiptap/pm/state";
 import type { DecorationSet } from "@tiptap/pm/view";
-import FocusMode, { focusModePluginKey, topLevelBlockRange } from "./FocusMode";
+import FocusMode, {
+  focusModePluginKey,
+  syncFocusModeState,
+  topLevelBlockRange,
+} from "./FocusMode";
 
 let active: Editor | null = null;
 afterEach(() => {
@@ -168,6 +172,26 @@ describe("FocusMode", () => {
       EditorState.create({ doc, plugins: editor.state.plugins }),
     );
 
+    expect(pluginState(editor).active).toBe(true);
+    expect(decoRanges(editor)).toEqual([blockRangeAt(editor, 0)]);
+  });
+
+  it("reconciles an inactive cached session restored while focus mode is enabled", () => {
+    const editor = makeEditor("<p>cached note</p><p>second block</p>");
+    const inactiveCachedState = editor.state;
+
+    setFocusActive(editor, true);
+    expect(pluginState(editor).active).toBe(true);
+    expect(decoRanges(editor)).toHaveLength(1);
+
+    // openDocument restores the whole cached state, including the plugin's
+    // old inactive value. The focusMode prop itself has not changed, so its
+    // React effect does not run again.
+    editor.view.updateState(inactiveCachedState);
+    expect(pluginState(editor).active).toBe(false);
+    expect(decoRanges(editor)).toEqual([]);
+
+    syncFocusModeState(editor, true);
     expect(pluginState(editor).active).toBe(true);
     expect(decoRanges(editor)).toEqual([blockRangeAt(editor, 0)]);
   });

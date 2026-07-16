@@ -1,4 +1,4 @@
-import { Extension } from "@tiptap/core";
+import { Extension, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey, NodeSelection, type Selection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { Node } from "@tiptap/pm/model";
@@ -34,6 +34,18 @@ const INACTIVE: FocusModePluginState = {
   from: -1,
   to: -1,
 };
+
+/** Keep a restored EditorState aligned with the current React setting. */
+export function syncFocusModeState(editor: Editor, active: boolean) {
+  const pluginState = focusModePluginKey.getState(editor.state) as
+    | FocusModePluginState
+    | undefined;
+  if (pluginState?.active === active) return;
+
+  const tr = editor.state.tr.setMeta(focusModePluginKey, { active });
+  tr.setMeta("addToHistory", false);
+  editor.view.dispatch(tr);
+}
 
 /**
  * Boundaries of the top-level (depth 1) block containing the selection head,

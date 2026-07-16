@@ -50,7 +50,7 @@ import TextContextMenu, {
   showGenericContextMenu,
 } from "../extensions/TextContextMenu";
 import { SearchHighlight } from "../extensions/SearchHighlight";
-import FocusMode, { focusModePluginKey } from "../extensions/FocusMode";
+import FocusMode, { syncFocusModeState } from "../extensions/FocusMode";
 import { TableBubbleMenu } from "./TableBubbleMenu";
 import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
@@ -1006,6 +1006,12 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         editor.storage.readonlyGuard.readonly = wasReadonly;
       }
 
+      // A cached EditorState also contains the FocusMode plugin state from
+      // when that note was last visited. Reconcile it after every state swap
+      // so an older inactive session cannot leave the focus-mode CSS without
+      // an active-block decoration (and vice versa).
+      syncFocusModeState(editor, focusMode);
+
       dirtyRef.current = false;
 
       const resolvedKey = nextKey ?? buildDocumentSessionKey(noteId, filePath);
@@ -1026,6 +1032,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       closeLinkHoverPopover,
       closeLinkPopover,
       editor,
+      focusMode,
       parseMarkdownToState,
       replaceCurrentDocumentContent,
       scheduleSpellcheckRefresh,
@@ -1203,19 +1210,11 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       scheduleSpellcheckRefresh(editor, spellcheck);
     }, [editor, scheduleSpellcheckRefresh, spellcheck]);
 
-    // Sync the React setting into the FocusMode plugin. Activation travels as
-    // a plugin meta transaction; the plugin's storage keeps the flag across
-    // view.updateState() (note switches), so this only needs to fire on real
-    // setting changes.
+    // Sync setting changes into the plugin. openDocument performs the same
+    // reconciliation after restoring a cached whole-document EditorState.
     useEffect(() => {
       if (!editor) return;
-      const pluginState = focusModePluginKey.getState(editor.state) as
-        | { active: boolean }
-        | undefined;
-      if (pluginState?.active === focusMode) return;
-      const tr = editor.state.tr.setMeta(focusModePluginKey, { active: focusMode });
-      tr.setMeta("addToHistory", false);
-      editor.view.dispatch(tr);
+      syncFocusModeState(editor, focusMode);
     }, [editor, focusMode]);
 
     useEffect(() => () => {
