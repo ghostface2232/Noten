@@ -158,8 +158,9 @@ describe("normalizeFragmentHref", () => {
     );
   });
 
-  it("preserves malformed percent-encoded fragments", () => {
-    expect(normalizeFragmentHref("#broken%2-fragment")).toBe("#broken%2-fragment");
+  it("slugifies malformed percent-encoded fragments into safe destinations", () => {
+    expect(normalizeFragmentHref("#broken%2-fragment")).toBe("#broken2-fragment");
+    expect(normalizeFragmentHref("#broken%2 fragment")).toBe("#broken2-fragment");
   });
 });
 

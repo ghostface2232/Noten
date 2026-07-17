@@ -19,6 +19,7 @@ import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import MermaidCodeBlock from "./MermaidCodeBlock";
 import WikiLink from "./WikiLink";
+import { normalizeFragmentHref } from "../utils/headingSlug";
 import { serializeImageMarkdown } from "../utils/imageMarkdownSerialize";
 import { isSafeLinkHref } from "../utils/linkHref";
 import { stripTableCellNbsp } from "../utils/tableCellNbsp";
@@ -258,6 +259,26 @@ describe("Markdown fixture round-trip compatibility", () => {
     const firstMarkdown = stableMarkdown(first);
     expect(firstMarkdown).toContain("[서론으로 이동](#서론-개요)");
     expect(firstMarkdown).toContain("[go](#my-heading)");
+
+    const second = trackedEditor(firstMarkdown);
+    expect(stableMarkdown(second)).toBe(firstMarkdown);
+    expect(hasMark(second.getJSON(), "link")).toBe(true);
+  });
+
+  it("keeps malformed-percent anchor links with spaces across reload", () => {
+    const href = normalizeFragmentHref("#broken%2 fragment");
+    expect(href).toBe("#broken2-fragment");
+
+    const source = [
+      "## Broken%2 Fragment",
+      "",
+      `[go](${href})`,
+    ].join("\n");
+
+    const first = trackedEditor(source);
+    const firstMarkdown = stableMarkdown(first);
+    expect(firstMarkdown).toContain("[go](#broken2-fragment)");
+    expect(hasMark(first.getJSON(), "link")).toBe(true);
 
     const second = trackedEditor(firstMarkdown);
     expect(stableMarkdown(second)).toBe(firstMarkdown);

@@ -97,7 +97,8 @@ export function resolveHeadingFragment(
 /**
  * Popover apply-time normalization: "#My Heading" -> "#my-heading".
  * Percent-encoded fragments are decoded before slugification; malformed
- * encodings are preserved rather than destructively rewritten. "" / "#" /
+ * encodings fall back to slugifying the raw text so unsafe percent sequences
+ * and spaces cannot leak into a Markdown link destination. "" / "#" /
  * "#   " normalize to "" (caller unsets the link).
  */
 export function normalizeFragmentHref(value: string): string {
@@ -111,7 +112,7 @@ export function normalizeFragmentHref(value: string): string {
   try {
     decoded = decodeURIComponent(raw);
   } catch {
-    return trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
+    decoded = raw;
   }
 
   const slug = slugifyHeading(decoded.trim());
