@@ -102,3 +102,16 @@ export function __resetOwnWriteTrackerForTests(): void {
   hashes.clear();
   hashTimestamps.clear();
 }
+
+/** Test-only introspection: entry counts of the internal maps, so the perf
+ *  suite can assert pruning actually bounds them (behavioral checks alone
+ *  cannot distinguish "expired" from "leaked but ignored"). */
+export function __ownWriteTrackerSizesForTests(): {
+  timestamps: number;
+  hashes: number;
+  hashTimestamps: number;
+} {
+  let hashCount = 0;
+  for (const set of hashes.values()) hashCount += set.size;
+  return { timestamps: timestamps.size, hashes: hashCount, hashTimestamps: hashTimestamps.size };
+}

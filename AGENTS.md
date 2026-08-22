@@ -137,6 +137,7 @@ The status bar's line count, its caret row, and Go to Line all use the *logical 
 - `npm run tauri:dev` for normal development; it runs `scripts/prepare-helper.ps1` to prepare `src-tauri/resources/maintenance-helper.exe`, then starts `tauri dev`. `scripts/prepare-helper.ps1 -Release` builds only a release-mode helper, without bundling.
 - `npm run check` chains `typecheck` + `lint` + `test`; `.github/workflows/ci.yml` runs the same on every push and PR to `main`.
 - `npm run test:smoke` runs just `src/smoke/` — the cross-module suite described under Quality Gates. It is a subset of `npm test`, useful as a fast first signal after touching the store, persistence, reconcile, or group-merge paths.
+- `npm run test:perf` runs just `src/perf/` — performance guards for the loading, saving, note-switch, and memory-boundedness paths, defined in `docs/performance-testing.md`. They are regression tripwires, not benchmarks: deterministic data, best-of-three timing, budgets ~10x a dev-machine measurement. Also a subset of `npm test`.
 - `node scripts/gen-notes.mjs --out <dir> --count <n> [--groups <n>]` writes a synthetic notes directory for measuring startup, sidebar, and search behavior at library sizes real test folders never reach. Development aid only; it refuses to overwrite an existing library without `--force`.
 - `scripts/build-release.ps1` is a **local smoke test only** — it does not sign and is not what ships. It also fails at the Tauri step without `TAURI_SIGNING_PRIVATE_KEY` in env, because `bundle.createUpdaterArtifacts` is on.
 

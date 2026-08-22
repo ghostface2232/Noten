@@ -6,6 +6,7 @@ import {
   pathKey,
   pruneOwnWrites,
   __resetOwnWriteTrackerForTests,
+  __ownWriteTrackerSizesForTests,
 } from "./ownWriteTracker";
 
 beforeEach(() => {
@@ -154,10 +155,14 @@ describe("isOwnWriteContentMatch", () => {
 });
 
 // markOwnWrite kicks off `void sha256Hex(...).then(...)`. The digest is a real
-// async API, so several macrotask + microtask drains are needed to be sure the
-// hash has been recorded before we assert.
+// async API, so the test must wait until the hash is actually recorded before
+// asserting. A fixed number of event-loop ticks is not enough under a loaded
+// parallel test run, so poll the tracker's own bookkeeping (every caller here
+// marks exactly one content hash before flushing), with a generous bound.
 async function flushPendingHashes(): Promise<void> {
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 500; i++) {
+    if (__ownWriteTrackerSizesForTests().hashTimestamps >= 1) return;
     await new Promise((r) => setTimeout(r, 0));
   }
+  throw new Error("own-write hash never landed");
 }
