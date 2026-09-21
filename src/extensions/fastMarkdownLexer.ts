@@ -1,6 +1,6 @@
 import { marked, Lexer, Marked } from "marked";
-import type { Token } from "marked";
-import { boundBlockExtension } from "./boundedBlockTokenizers";
+import type { Token, Tokens } from "marked";
+import { boundBlockExtension, MAYBE_ORDERED_ITEM } from "./boundedBlockTokenizers";
 
 // Why this file exists
 // --------------------
@@ -264,7 +264,10 @@ export function fastLex(src: string, options?: any): Token[] {
 // raw text instead of a wrapping paragraph (a schema-invalid node that throws
 // the moment the user edits it). The nested `lexer(...)` path already forwards
 // `instance.defaults`; binding the class keeps both paths in lockstep.
-export function createFastMarked(): typeof marked {
+//
+// `boundBlockTokenizers: false` exists for the equivalence tests, which need
+// the same instance with only the bounding left out.
+export function createFastMarked({ boundBlockTokenizers = true } = {}): typeof marked {
   const instance = new Marked();
   class BoundFastLexer extends FastLexer {
     constructor(options?: any) {
@@ -277,12 +280,34 @@ export function createFastMarked(): typeof marked {
   // Tiptap registers its markdown tokenizers through `use`; bound the block
   // tokenizers that would otherwise re-split the whole remaining document at
   // every block (see boundedBlockTokenizers.ts).
+  let orderedListTokenizer: ((this: unknown, src: string, tokens: Token[]) => Tokens.List | undefined) | null = null;
   const use = instance.use.bind(instance);
-  (instance as any).use = (...extensions: any[]) => use(...extensions.map((ext) => (
-    Array.isArray(ext?.extensions)
-      ? { ...ext, extensions: ext.extensions.map(boundBlockExtension) }
-      : ext
-  )));
+  (instance as any).use = (...extensions: any[]) => use(...extensions.map((ext) => {
+    if (!Array.isArray(ext?.extensions)) return ext;
+    const bounded = boundBlockTokenizers ? ext.extensions.map(boundBlockExtension) : ext.extensions;
+    const ordered = bounded.find((e: any) => e.name === "orderedList" && e.level === "block" && e.tokenizer);
+    if (ordered) orderedListTokenizer = ordered.tokenizer;
+    return { ...ext, extensions: bounded };
+  }));
+  // A blockquote whose last token is a list re-lexes that list, with the
+  // quote's remaining lines appended, by calling the built-in `list` tokenizer
+  // directly, and assumes it succeeds. A list from Tiptap's orderedList
+  // extension ("a.", "iv.") is one the built-in tokenizer cannot read, so it
+  // returns undefined and marked throws — "> q\na. x\n> q\na. x" could not be
+  // opened. Re-lex such a list with the extension that produced it. Anywhere
+  // else `list` is only reached after every block extension, orderedList
+  // included, has already declined the same input, so the fallback declines
+  // too and the built-in result is unchanged.
+  instance.use({
+    tokenizer: {
+      list(src: string) {
+        if (!orderedListTokenizer || (this as any).rules.block.list.test(src) || !MAYBE_ORDERED_ITEM.test(src)) {
+          return false;
+        }
+        return orderedListTokenizer.call({ lexer: (this as any).lexer }, src, []) ?? false;
+      },
+    },
+  });
   return instance as unknown as typeof marked;
 }
 

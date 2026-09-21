@@ -210,3 +210,64 @@ describe("Markdown extension integration", () => {
     }
   });
 });
+
+describe("blockquote ending in an extension-only ordered list", () => {
+  // marked's blockquote continues its last list token through the built-in
+  // `list` tokenizer, which cannot read the "a." / "iv." lists Tiptap's
+  // orderedList extension produces; it returned undefined and marked threw
+  // "Cannot read properties of undefined (reading 'raw')", so such a note
+  // could not be opened at all.
+  let editor: Editor | null = null;
+  afterEach(() => {
+    editor?.destroy();
+    editor = null;
+  });
+
+  function makeEditor() {
+    editor = new Editor({
+      extensions: [StarterKit, Markdown.configure({ marked: createFastMarked() }), TaskList, TaskItem.configure({ nested: true })],
+    });
+    return editor;
+  }
+
+  function textOf(json: unknown): string {
+    return JSON.stringify(json).match(/"text":"[^"]*"/g)?.map((t) => t.slice(8, -1)).join("|") ?? "";
+  }
+
+  it("parses instead of throwing, keeping every line's text", () => {
+    const md = makeEditor().markdown!;
+    for (const src of [
+      "> quote\na. alpha\n> quote\na. alpha",
+      "> quote\niv. roman\n> more\nv. five",
+      "> a. alpha\n> quote\nb. beta",
+      "> > nested\n> a. alpha\n> > again\nb. beta",
+    ]) {
+      const doc = md.parse(src);
+      for (const word of src.split(/[\s>]+/).filter((w) => /^[a-z]{3,}$/.test(w))) {
+        expect(textOf(doc)).toContain(word);
+      }
+    }
+  });
+
+  it("round-trips to a stable document", () => {
+    const md = makeEditor().markdown!;
+    for (const src of ["> quote\na. alpha\n> quote\nb. beta", "> quote\niv. roman\n> more\nv. five"]) {
+      const first = md.parse(src);
+      const again = md.parse(md.serialize(first));
+      expect(again).toEqual(first);
+    }
+  });
+
+  it("never throws on randomized quote/list mixtures", () => {
+    const md = makeEditor().markdown!;
+    const rand = mulberry32(0x5eed);
+    const lines = [
+      "> quote", "> > deep quote", ">", "a. alpha", "b) beta", "iv. roman", "1. one", "2) two", "- bullet",
+      "- [ ] task", "> a. quoted alpha", "> 1. quoted one", "> - quoted bullet", "lazy text", "  indented", "",
+    ];
+    for (let i = 0; i < 2000; i++) {
+      const src = Array.from({ length: 2 + Math.floor(rand() * 8) }, () => lines[Math.floor(rand() * lines.length)]).join("\n");
+      expect(() => md.parse(src), JSON.stringify(src)).not.toThrow();
+    }
+  });
+});

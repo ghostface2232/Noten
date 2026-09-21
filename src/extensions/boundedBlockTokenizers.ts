@@ -109,7 +109,7 @@ function boundTaskList(src: string): string {
 // Superset of @tiptap/extension-list's ORDERED_LIST_ITEM_REGEX
 // (`^(\s*)(\d+|[ivxlcdmIVXLCDM]+|[a-zA-Z]{1,2})([.)])\s+(.*)$`): every line the
 // real pattern accepts matches this one, so "does not match" is conclusive.
-const MAYBE_ORDERED_ITEM = /^\s*[0-9A-Za-z]+[.)]\s/;
+export const MAYBE_ORDERED_ITEM = /^\s*[0-9A-Za-z]+[.)]\s/;
 
 // Copied verbatim from @tiptap/extension-list's PARAGRAPH_INTERRUPTERS.
 const LAZY_INTERRUPTERS = [

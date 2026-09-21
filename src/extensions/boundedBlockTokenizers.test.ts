@@ -9,26 +9,14 @@ import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
-import { createFastMarked, FastLexer } from "./fastMarkdownLexer";
+import { createFastMarked } from "./fastMarkdownLexer";
 import { __test } from "./boundedBlockTokenizers";
 
 // The bounded tokenizers must be observationally identical to Tiptap's own:
 // same token tree (marked advances by each token's `raw`, so any difference in
 // what a tokenizer consumed shows up here) and same parsed document. The
-// reference instance is createFastMarked's lexer WITHOUT the bounding, so the
-// only variable is the bounding itself.
-
-function unboundedFastMarked(): Marked {
-  const instance = new Marked();
-  class Bound extends FastLexer {
-    constructor(options?: any) {
-      super(options ?? (instance as any).defaults);
-    }
-  }
-  (instance as any).Lexer = Bound;
-  (instance as any).lexer = (src: string, options?: any) => new Bound(options ?? (instance as any).defaults).lex(src);
-  return instance;
-}
+// reference instance is createFastMarked WITHOUT the bounding, so the only
+// variable is the bounding itself.
 
 const editors: Editor[] = [];
 function makeEditor(marked: unknown): Editor {
@@ -50,7 +38,7 @@ function makeEditor(marked: unknown): Editor {
 afterAll(() => editors.forEach((e) => e.destroy()));
 
 const boundedMarked = createFastMarked();
-const referenceMarked = unboundedFastMarked();
+const referenceMarked = createFastMarked({ boundBlockTokenizers: false });
 const bounded = makeEditor(boundedMarked);
 const reference = makeEditor(referenceMarked);
 
