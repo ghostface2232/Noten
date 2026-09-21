@@ -52,6 +52,7 @@ import TextContextMenu, {
 import { SearchHighlight } from "../extensions/SearchHighlight";
 import FocusMode, { syncFocusModeState } from "../extensions/FocusMode";
 import OffscreenBlocks from "../extensions/OffscreenBlocks";
+import IncrementalMarkdown from "../extensions/IncrementalMarkdown";
 import { TableBubbleMenu } from "./TableBubbleMenu";
 import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
@@ -801,6 +802,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       extensions: [
         StarterKit.configure({ codeBlock: false, underline: false, link: false }),
         Markdown.configure({ marked: fastMarked }),
+        IncrementalMarkdown,
         Link.configure({
           autolink: true,
           linkOnPaste: true,
