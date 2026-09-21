@@ -6,8 +6,8 @@
 //   node bench/corpus.mjs --offline  # generate from the cached downloads only
 //
 // Downloads land in <cache>/raw, documents in <cache>/docs, where <cache> is
-// $NOTEN_BENCH_CACHE or %LOCALAPPDATA%
-oten-bench. Generation is deterministic (seeded PRNG), so two machines that
+// $NOTEN_BENCH_CACHE or %LOCALAPPDATA%\noten-bench. Generation is
+// deterministic (seeded PRNG), so two machines that
 // hold the same downloads produce byte-identical documents.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
