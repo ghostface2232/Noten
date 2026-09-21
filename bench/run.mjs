@@ -195,7 +195,7 @@ const INSTRUMENT = String.raw`
     requestAnimationFrame(poll);
   };
   requestAnimationFrame(poll);
-  // Image NodeViews resolve their source asynchronously (IPC read + data URL).
+  // Images load asynchronously (the browser fetches their noten-asset URL).
   // Record when every <img> in the editor has a source and has decoded.
   B.images = { total: 0, withSrc: 0, decoded: 0, allSrcAt: null, allDecodedAt: null };
   const imgTimer = setInterval(() => {
@@ -728,6 +728,11 @@ async function runDoc(docName, kind, webDir, loads, profile) {
     // (e.g. strip a kind of DOM node to see what a cost depends on).
     const evalJs = opt("eval", null);
     if (evalJs) result.evalResult = await cdp.eval(evalJs);
+    // --shot <file.png>: a screenshot of the page after --eval.
+    if (opt("shot", null)) {
+      await sleep(500);
+      writeFileSync(opt("shot"), Buffer.from((await cdp.send("Page.captureScreenshot", { format: "png" })).data, "base64"));
+    }
     if (flag("micro")) {
       result.micro = await microScenario(cdp);
       return result;
