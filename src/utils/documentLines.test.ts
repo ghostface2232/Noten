@@ -405,3 +405,52 @@ describe("countWords", () => {
     expect(countWords("first\nsecond\nthird")).toBe(3);
   });
 });
+
+describe("buildLineIndex after edits", () => {
+  // The per-node cache must never make an incremental rebuild disagree with a
+  // cold one. Rebuild the same content from JSON (fresh nodes, no cache hits)
+  // and compare after every random edit.
+  it("matches a cold rebuild across random edits", () => {
+    const editor = makeEditor(
+      "<h1>Title</h1><p>alpha beta</p><ul><li><p>one two</p></li><li><p>three</p></li></ul>"
+      + "<pre><code>line1\nline2</code></pre><p>tail words<br>after break</p>",
+    );
+    let seed = 11;
+    const rand = () => { seed = (seed * 48271) % 0x7fffffff; return seed / 0x7fffffff; };
+    const pieces = ["x", " ", "word ", "\n", "한글 ", "  "];
+    for (let step = 0; step < 300; step++) {
+      const doc = editor.state.doc;
+      const pos = 1 + Math.floor(rand() * (doc.content.size - 1));
+      const $pos = doc.resolve(pos);
+      const r = rand();
+      if (r < 0.45 && $pos.parent.inlineContent) {
+        editor.view.dispatch(editor.state.tr.insertText(pieces[Math.floor(rand() * pieces.length)], pos));
+      } else if (r < 0.6 && $pos.parent.inlineContent && $pos.parentOffset > 0) {
+        editor.view.dispatch(editor.state.tr.delete(pos - 1, pos));
+      } else if (r < 0.7) {
+        // Across block boundaries: joins and removes whole blocks.
+        const to = Math.min(doc.content.size - 1, pos + 1 + Math.floor(rand() * 12));
+        editor.commands.deleteRange({ from: pos, to });
+      } else if (r < 0.8 && $pos.parent.inlineContent) {
+        editor.chain().setTextSelection(pos).setHardBreak().run();
+      } else if (r < 0.85 && $pos.parent.inlineContent) {
+        editor.chain().setTextSelection(pos).setHorizontalRule().run();
+      } else if ($pos.parent.inlineContent && $pos.parent.type.name === "paragraph") {
+        editor.view.dispatch(editor.state.tr.split(pos));
+      }
+      if (editor.state.doc.content.size < 20) editor.commands.insertContent("<p>refill words here</p><ul><li><p>item</p></li></ul>");
+      const warm = buildLineIndex(editor.state.doc);
+      const cold = buildLineIndex(editor.schema.nodeFromJSON(editor.state.doc.toJSON()));
+      expect({ ...warm, doc: null }).toEqual({ ...cold, doc: null });
+      expect(warm.chars).toBe(editor.state.doc.textContent.length);
+      // Independent word count: per textblock, hard breaks as spaces.
+      let words = 0;
+      editor.state.doc.descendants((node) => {
+        if (!node.isTextblock) return true;
+        words += countWords(node.textBetween(0, node.content.size, undefined, " "));
+        return false;
+      });
+      expect(warm.words).toBe(words);
+    }
+  });
+});

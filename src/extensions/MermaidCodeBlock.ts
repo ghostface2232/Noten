@@ -1,4 +1,5 @@
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
+import { createIncrementalLowlightPlugin, isStockLowlightPlugin } from "./incrementalLowlight";
 import type { NodeViewRendererProps } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type { NodeView, ViewMutationRecord } from "@tiptap/pm/view";
@@ -617,6 +618,20 @@ class MermaidCodeBlockView implements NodeView {
 }
 
 export const MermaidCodeBlock = CodeBlockLowlight.extend({
+  // Keep the parent's plugins except its highlighter, which re-scans the whole
+  // document per transaction; see incrementalLowlight.ts.
+  addProseMirrorPlugins() {
+    const inherited = (this.parent?.() ?? []).filter((plugin) => !isStockLowlightPlugin(plugin));
+    return [
+      ...inherited,
+      createIncrementalLowlightPlugin({
+        name: this.name,
+        lowlight: this.options.lowlight,
+        defaultLanguage: this.options.defaultLanguage,
+      }),
+    ];
+  },
+
   addNodeView() {
     const editor = this.editor;
     return ({ node }: NodeViewRendererProps) => new MermaidCodeBlockView(
