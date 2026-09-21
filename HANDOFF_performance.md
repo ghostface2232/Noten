@@ -7,8 +7,8 @@
 
 ## 1. 현재 상태
 
-- **브랜치**: `claude/perf-bench`. `origin`에 push했고, PR은 아직 없습니다. 기준은 `main`의 `0a73537`입니다.
-- **커밋**:
+- **머지 완료**: `claude/perf-bench`가 PR [#51](https://github.com/ghostface2232/Noten/pull/51)로 `main`에 머지됐습니다(머지 커밋 `a7b1741`, 2026-09-21). 기준이던 `0a73537` 위에 아래 커밋이 모두 올라가 있으므로, 다음 작업은 `main`에서 새 `claude/` 브랜치를 끊어 시작하면 됩니다.
+- **커밋**(머지된 순서):
 
 | 커밋 | 내용 |
 |---|---|
@@ -17,9 +17,13 @@
 | `50ace1f` | 바뀐 코드블럭만 다시 하이라이트 (`src/extensions/incrementalLowlight.ts`, `MermaidCodeBlock.ts`) |
 | `3dbf6df` | `bench/` 도구, 분석 문서, AGENTS.md 안내 |
 | `b5552d3` | 무작위 하이라이트 테스트 타임아웃 30초 (병렬 실행 시 5초 초과) |
+| `35f9d13` | 이 핸드오프 문서 추가 |
+| `124e751` | `bench/corpus.mjs`와 AGENTS.md에서 깨진 주석 복구 (아래 리뷰 항목) |
 
-- **검증**: `npm run check` 통과. 테스트 66파일 1,201개입니다.
-- **리뷰**: 수정 3건 모두 독립 리뷰 에이전트로 적대적 리뷰를 받았고, 지적 사항을 반영한 뒤 재리뷰에서 결함이 나오지 않았습니다.
+- **검증**: 머지된 `main`에서 `npm run check`(타입·린트·테스트)를 다시 돌려 통과를 확인했습니다. 테스트 66파일 1,201개입니다.
+- **리뷰**:
+  - 수정 3건 모두 독립 리뷰 에이전트로 적대적 리뷰를 받았고, 지적 사항을 반영한 뒤 재리뷰에서 결함이 나오지 않았습니다.
+  - PR #51에서 Codex 자동 리뷰가 P1 1건을 지적했습니다. `bench/corpus.mjs`의 캐시 경로 주석이 한 줄 깨져 문서화된 첫 단계인 `node bench/corpus.mjs`가 `SyntaxError`로 죽는 문제였고, `124e751`로 고친 뒤 머지했습니다.
 - **작업 절차 메모**: 검증 → 수정 + 회귀 테스트 → 커밋·배치마다 리뷰 에이전트 → 커밋 분리 → `claude/` 브랜치로 push(main 금지). 사용자 보고는 한국어, 코드·커밋·주석은 영어입니다.
 
 ## 2. 벤치 사용법 요약
@@ -44,7 +48,7 @@ node bench/report.mjs                    # 가장 최근 결과 표
 | `--css "<규칙>"` | CSS 주입 실험 |
 | `--trace-categories` | 트레이스 카테고리 지정 |
 
-- **환경 변수**: `BENCH_TIMEOUT_MS`는 큰 문서에서 settle 대기 시간을 늘립니다.
+- **환경 변수**: `BENCH_TIMEOUT_MS`는 큰 문서에서 settle 대기 시간을 늘립니다(기본 300초). `NOTEN_BENCH_CACHE`는 캐시 위치를 바꾸고, `BENCH_DEBUG`는 settle 대기 중 상태를 찍습니다.
 - **캐시**: `%LOCALAPPDATA%\noten-bench`(약 1.8GB)에 docs, raw, target, web-*, results가 있습니다. 앱 데이터는 `%APPDATA%\com.noten.bench`입니다.
 - **결과 태그**(`results/*-<tag>.json`):
 
@@ -151,4 +155,5 @@ node bench/report.mjs                    # 가장 최근 결과 표
 - **도구 관련**:
   - 셸에서 `npm run check | tail`을 쓰면 실패 코드가 가려집니다(이번에 push가 먼저 됨). `set -o pipefail`을 쓰거나 결과를 확인한 뒤 push합니다.
   - Python heredoc으로 TS의 정규식이나 `\n`을 치환하면 이스케이프가 깨지기 쉽습니다. Edit 도구를 씁니다.
+  - **같은 함정이 실제로 터졌습니다.** `%LOCALAPPDATA%\noten-bench`를 쓰려던 편집이 `\n`을 진짜 줄바꿈으로 바꿔, `bench/corpus.mjs`에서 주석 밖으로 나온 맨 텍스트가 `SyntaxError`를 냈습니다(AGENTS.md도 같은 자리에서 끊겼습니다). `npm run check`는 `bench/`를 보지 않으므로 잡히지 않았고, PR 리뷰에서야 드러났습니다. 경로나 정규식이 들어간 편집 뒤에는 `node --check bench/*.mjs`로 확인합니다.
   - 저장소가 OneDrive 폴더 안에 있어 대용량 캐시는 저장소 밖(`%LOCALAPPDATA%`)에 둡니다.
