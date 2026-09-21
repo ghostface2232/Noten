@@ -1113,12 +1113,20 @@ function App() {
     // the stored pos may be stale — clamp instead of throwing.
     const target = clampOutlinePos(pos + 1, editor.state.doc.content.size);
     editor.chain().setTextSelection(target).focus(null, { scrollIntoView: false }).run();
-    const coords = editor.view.coordsAtPos(target);
-    const containerTop = container.getBoundingClientRect().top;
-    const targetTop = Math.max(
-      0,
-      coords.top - containerTop + container.scrollTop - (editorTopOffset + 16),
-    );
+    // Re-read every frame: the heading can move while the animation runs
+    // (e.g. the outline panel finishing its width transition on a long note).
+    let lastTop = container.scrollTop;
+    const targetTop = () => {
+      try {
+        const pos = clampOutlinePos(target, editor.state.doc.content.size);
+        const coords = editor.view.coordsAtPos(pos);
+        const containerTop = container.getBoundingClientRect().top;
+        lastTop = Math.max(0, coords.top - containerTop + container.scrollTop - (editorTopOffset + 16));
+      } catch {
+        // The editor was torn down mid-jump; keep heading for the last target.
+      }
+      return lastTop;
+    };
     outlineScrollCancelRef.current?.();
     outlineScrollCancelRef.current = animateScrollTop(container, targetTop, OUTLINE_JUMP_SCROLL_MS, {
       // The user took over mid-jump — drop the lock so scroll-driven chrome

@@ -13,23 +13,29 @@
  * over, without reacting to its own programmatic cancels or natural
  * completion. With prefers-reduced-motion the scroll applies instantly.
  *
+ * `targetTop` may be a function, read again on every frame: the target of a
+ * jump into a long document can move while the animation runs (a side panel
+ * finishing its width transition, blocks re-measured), and a target fixed at
+ * the start then lands thousands of pixels off.
+ *
  * Returns a cancel function; safe to call more than once.
  */
 export function animateScrollTop(
   container: HTMLElement,
-  targetTop: number,
+  targetTop: number | (() => number),
   durationMs: number,
   options: { onUserCancel?: () => void } = {},
 ): () => void {
+  const target = typeof targetTop === "function" ? targetTop : () => targetTop;
   const startTop = container.scrollTop;
-  const distance = targetTop - startTop;
+  const distance = target() - startTop;
 
   const reduceMotion =
     typeof window.matchMedia === "function" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   if (reduceMotion || Math.abs(distance) < 1 || durationMs <= 0) {
-    container.scrollTop = targetTop;
+    container.scrollTop = startTop + distance;
     return () => {};
   }
 
@@ -58,7 +64,7 @@ export function animateScrollTop(
     if (startTime === null) startTime = now;
     const t = Math.min(1, (now - startTime) / durationMs);
     const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic: fast start, soft landing
-    container.scrollTop = startTop + distance * eased;
+    container.scrollTop = startTop + (target() - startTop) * eased;
     if (t < 1) {
       frame = requestAnimationFrame(step);
     } else {
