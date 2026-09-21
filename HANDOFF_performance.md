@@ -7,9 +7,10 @@
 
 ## 1. 현재 상태
 
-- **브랜치**: `claude/perf-phase2`
-  - `claude/perf-bench`(1차: 로딩 O(n²), 코드블럭 하이라이트, 상태바) 위에 쌓았습니다.
-  - `origin`에 push했고, PR은 아직 없습니다.
+- **브랜치**: `claude/perf-phase2`, PR [#53](https://github.com/ghostface2232/Noten/pull/53).
+  - 1차 작업(`claude/perf-bench`: 로딩 O(n²), 코드블럭 하이라이트, 상태바)은 PR [#51](https://github.com/ghostface2232/Noten/pull/51)로 `main`에 머지됐습니다(`a7b1741`). 1차 핸드오프 갱신은 PR #52입니다.
+  - 이 브랜치는 그 뒤 `main`을 병합해 충돌을 해소했습니다. 충돌은 이 문서뿐이었습니다.
+  - 1차 PR에서 Codex 자동 리뷰가 P1 1건을 지적했습니다. `bench/corpus.mjs` 주석이 깨져 `SyntaxError`가 났고, `124e751`로 고친 뒤 머지했습니다.
 - **2차 커밋**:
 
 | 커밋 | 내용 |
@@ -100,6 +101,7 @@
 - **`contain: layout`는 자식 margin이 부모 밖으로 겹쳐 나가는 것을 막습니다.** 목록 마지막 항목 margin 보정이 필요했습니다.
 - **WebView2 Blob 저장소에는 한도가 있습니다.** 이미지 수백 MB를 Blob으로 들면 일부 `blob:` URL이 무효가 됩니다.
 - **`window.__TAURI_INTERNALS__.invoke`는 writable이 아닙니다.** 벤치에서 IPC를 가로챌 수 없습니다.
+- **`npm run check`는 `bench/`를 검사하지 않습니다.** 1차 PR에서 깨진 주석이 이 때문에 머지 직전까지 남았습니다. 벤치 스크립트를 고친 뒤에는 `node --check bench/*.mjs`로 확인합니다.
 - **Windows Python 텍스트 모드는 `\n`을 CRLF로 씁니다.** `newline='\n'`을 지정합니다. 또 heredoc 안의 `\\U` 같은 이스케이프가 깨지므로 raw 문자열 스크립트 파일이나 Edit 도구를 씁니다.
 - **벤치의 첫 측정 로드는 이후보다 빠르게 나옵니다**(images-100k ready 370 vs 500ms). 전후 비교는 같은 조건을 교차해서 합니다.
 - **`--loads 1`의 자동저장 수치는 GC 타이밍에 따라 크게 흔들립니다**(tables-1m 132~229ms). 두 빌드를 교차 측정해서 판단합니다.
