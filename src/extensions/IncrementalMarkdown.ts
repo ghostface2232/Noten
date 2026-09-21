@@ -1,4 +1,5 @@
-import { Extension, type JSONContent } from "@tiptap/core";
+import { Extension, type Editor, type JSONContent } from "@tiptap/core";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 
 // `editor.getMarkdown()` that re-renders only the top-level blocks a change
@@ -34,44 +35,123 @@ interface MarkdownManagerLike {
   isEmptyOutput(markdown: string): boolean;
 }
 
-export function createIncrementalSerializer(getManager: () => MarkdownManagerLike, getDoc: () => ProseMirrorNode) {
+export interface IncrementalSerializer {
+  /** The document's Markdown, identical to the stock serializer's. */
+  serialize(): string;
+  /**
+   * Render uncached blocks until `deadline` runs out, continuing where the
+   * previous call stopped (from the start if the document changed since).
+   * Returns true once every block of the current document is cached.
+   */
+  warm(deadline: { timeRemaining(): number }): boolean;
+}
+
+export function createIncrementalSerializer(
+  getManager: () => MarkdownManagerLike,
+  getDoc: () => ProseMirrorNode,
+): IncrementalSerializer {
   const cache = new WeakMap<ProseMirrorNode, CachedBlock>();
-  return (): string => {
-    const manager = getManager();
-    const doc = getDoc();
-    const parts: string[] = [];
-    let previous: ProseMirrorNode | null = null;
-    doc.forEach((block, _offset, index) => {
-      let cached = cache.get(block);
-      if (!cached || cached.previous !== previous) {
-        // The parent the full serializer passes is the doc's JSON; renderers
-        // read only its type, attrs and the previous sibling from it.
-        const siblings: JSONContent[] = [];
-        siblings.length = index;
-        if (previous) siblings[index - 1] = previous.toJSON();
-        const parent: JSONContent = { type: doc.type.name, content: siblings };
-        if (Object.keys(doc.attrs).length) parent.attrs = doc.attrs;
-        cached = { previous, markdown: manager.renderNodeToMarkdown(block.toJSON(), parent, index, 0) };
-        cache.set(block, cached);
+
+  const render = (doc: ProseMirrorNode, block: ProseMirrorNode, index: number, previous: ProseMirrorNode | null): string => {
+    let cached = cache.get(block);
+    if (!cached || cached.previous !== previous) {
+      // The parent the full serializer passes is the doc's JSON; renderers
+      // read only its type, attrs and the previous sibling from it.
+      const siblings: JSONContent[] = [];
+      siblings.length = index;
+      if (previous) siblings[index - 1] = previous.toJSON();
+      const parent: JSONContent = { type: doc.type.name, content: siblings };
+      if (Object.keys(doc.attrs).length) parent.attrs = doc.attrs;
+      cached = { previous, markdown: getManager().renderNodeToMarkdown(block.toJSON(), parent, index, 0) };
+      cache.set(block, cached);
+    }
+    return cached.markdown;
+  };
+
+  // Where warm() stopped: blocks before `index` of `doc` are cached.
+  let warmDoc: ProseMirrorNode | null = null;
+  let warmIndex = 0;
+
+  return {
+    serialize() {
+      const doc = getDoc();
+      const parts: string[] = [];
+      let previous: ProseMirrorNode | null = null;
+      doc.forEach((block, _offset, index) => {
+        parts.push(render(doc, block, index, previous));
+        previous = block;
+      });
+      const markdown = parts.join("\n\n");
+      return getManager().isEmptyOutput(markdown) ? "" : markdown;
+    },
+
+    warm(deadline) {
+      const doc = getDoc();
+      if (doc !== warmDoc) {
+        warmDoc = doc;
+        warmIndex = 0;
       }
-      parts.push(cached.markdown);
-      previous = block;
-    });
-    const markdown = parts.join("\n\n");
-    return manager.isEmptyOutput(markdown) ? "" : markdown;
+      while (warmIndex < doc.childCount) {
+        if (deadline.timeRemaining() < 1) return false;
+        render(doc, doc.child(warmIndex), warmIndex, warmIndex > 0 ? doc.child(warmIndex - 1) : null);
+        warmIndex += 1;
+      }
+      return true;
+    },
   };
 }
 
-function install(editor: import("@tiptap/core").Editor): void {
-  if (!editor.markdown || installed.has(editor)) return;
-  installed.add(editor);
-  editor.getMarkdown = createIncrementalSerializer(
+// After an edit settles, fill the cache in idle time, so the first
+// getMarkdown after opening a note (autosave, or leaving the note) finds the
+// blocks rendered instead of paying for the whole document at once — ~120 ms
+// for 1 MB. Waits a little less than the autosave debounce (1 s) so a burst of
+// typing does not restart it on every key.
+const WARM_DELAY_MS = 300;
+
+function warmUpPlugin(editor: Editor, warm: IncrementalSerializer["warm"]): Plugin {
+  return new Plugin({
+    key: new PluginKey("incrementalMarkdownWarmUp"),
+    view: () => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let idle: number | null = null;
+      const cancel = () => {
+        if (timer !== null) clearTimeout(timer);
+        if (idle !== null) cancelIdleCallback(idle);
+        timer = idle = null;
+      };
+      const step = (deadline: IdleDeadline) => {
+        idle = warm(deadline) ? null : requestIdleCallback(step);
+      };
+      const schedule = () => {
+        if (typeof requestIdleCallback === "undefined") return;
+        cancel();
+        timer = setTimeout(() => {
+          timer = null;
+          idle = requestIdleCallback(step);
+        }, WARM_DELAY_MS);
+      };
+      schedule();
+      return {
+        update: (view, prev) => {
+          if (view.state.doc !== prev.doc && !editor.isDestroyed) schedule();
+        },
+        destroy: cancel,
+      };
+    },
+  });
+}
+
+const serializers = new WeakMap<Editor, IncrementalSerializer>();
+
+function install(editor: Editor): void {
+  if (!editor.markdown || serializers.has(editor)) return;
+  const serializer = createIncrementalSerializer(
     () => editor.markdown as unknown as MarkdownManagerLike,
     () => editor.state.doc,
   );
+  serializers.set(editor, serializer);
+  editor.getMarkdown = () => serializer.serialize();
 }
-
-const installed = new WeakSet<object>();
 
 export const IncrementalMarkdown = Extension.create({
   name: "incrementalMarkdown",
@@ -86,6 +166,13 @@ export const IncrementalMarkdown = Extension.create({
 
   onCreate() {
     install(this.editor);
+  },
+
+  addProseMirrorPlugins() {
+    const editor = this.editor;
+    // Plugins are collected before onBeforeCreate installs the serializer;
+    // look it up when warming.
+    return [warmUpPlugin(editor, (deadline) => serializers.get(editor)?.warm(deadline) ?? true)];
   },
 });
 

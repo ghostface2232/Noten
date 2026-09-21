@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Editor } from "@tiptap/core";
@@ -19,7 +19,7 @@ import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import MermaidCodeBlock from "./MermaidCodeBlock";
 import WikiLink from "./WikiLink";
-import IncrementalMarkdown from "./IncrementalMarkdown";
+import IncrementalMarkdown, { createIncrementalSerializer } from "./IncrementalMarkdown";
 import { serializeImageMarkdown } from "../utils/imageMarkdownSerialize";
 
 // The incremental getMarkdown must be byte-identical to @tiptap/markdown's
@@ -187,5 +187,68 @@ describe("IncrementalMarkdown", () => {
     // The edited paragraph, and the one after it (its previous sibling
     // changed); each render recurses into its text node.
     expect(rendered).toBeLessThanOrEqual(4);
+  });
+
+  function countRenders(e: Editor) {
+    const manager = e.markdown as unknown as { renderNodeToMarkdown: (...args: unknown[]) => string };
+    const original = manager.renderNodeToMarkdown.bind(manager);
+    const counter = { n: 0, restore: () => { manager.renderNodeToMarkdown = original; } };
+    manager.renderNodeToMarkdown = (...args: unknown[]) => {
+      counter.n++;
+      return original(...args);
+    };
+    return counter;
+  }
+
+  it("fills the cache in idle time after an edit, a slice at a time", () => {
+    vi.useFakeTimers();
+    const idle: Array<(deadline: IdleDeadline) => void> = [];
+    vi.stubGlobal("requestIdleCallback", (cb: (deadline: IdleDeadline) => void) => idle.push(cb));
+    vi.stubGlobal("cancelIdleCallback", () => {});
+    try {
+      const e = makeEditor(Array.from({ length: 30 }, (_, i) => `paragraph ${i}`).join("\n\n"));
+      e.view.dispatch(e.state.tr.insertText("!", 3));
+      const renders = countRenders(e);
+
+      vi.advanceTimersByTime(299);
+      expect(idle).toHaveLength(0);
+      vi.advanceTimersByTime(1);
+      expect(idle).toHaveLength(1);
+
+      // Each idle slice renders until its deadline runs out, then yields.
+      let budget = 0;
+      const deadline = { didTimeout: false, timeRemaining: () => (budget-- > 0 ? 10 : 0) };
+      budget = 10;
+      idle.shift()!(deadline);
+      expect(renders.n).toBeGreaterThan(0);
+      expect(renders.n).toBeLessThan(30);
+      expect(idle).toHaveLength(1);
+      while (idle.length) {
+        budget = 10;
+        idle.shift()!(deadline);
+      }
+
+      renders.n = 0;
+      const md = e.getMarkdown();
+      expect(renders.n).toBe(0);
+      renders.restore();
+      expect(md).toBe(stock(e));
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("restarts warming for a changed document without losing correctness", () => {
+    const e = makeEditor(Array.from({ length: 20 }, (_, i) => `p ${i}`).join("\n\n"));
+    const serializer = createIncrementalSerializer(() => e.markdown as never, () => e.state.doc);
+    let budget = 5;
+    const deadline = { timeRemaining: () => (budget-- > 0 ? 10 : 0) };
+    expect(serializer.warm(deadline)).toBe(false);
+    // An edit mid-warm: the next pass starts over on the new document.
+    e.view.dispatch(e.state.tr.insert(0, e.state.schema.nodes.paragraph.create()));
+    budget = 1000;
+    expect(serializer.warm(deadline)).toBe(true);
+    expect(serializer.serialize()).toBe(stock(e));
   });
 });
