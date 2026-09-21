@@ -1,5 +1,6 @@
 import { marked, Lexer, Marked } from "marked";
 import type { Token, Tokens } from "marked";
+import Underline from "@tiptap/extension-underline";
 import { boundBlockExtension, MAYBE_ORDERED_ITEM } from "./boundedBlockTokenizers";
 
 // Why this file exists
@@ -101,7 +102,31 @@ function buildInlineMask(
   return masked;
 }
 
+// Inline `start` callbacks known to return the first index of a fixed string
+// (see firstIndexOf).
+const FIRST_INDEX_STARTS = new WeakSet<(src: string) => number>();
+
+/**
+ * An inline tokenizer `start` that returns the first index of `needle` in the
+ * source. marked calls `start` for every text token with the whole rest of
+ * the paragraph, so a plain `src.indexOf(needle)` rescans the paragraph each
+ * time — O(tokens × length) when the needle is absent (a 800 KB paragraph
+ * without "++" spent 450 ms on Underline's start alone). FastLexer remembers
+ * where a start made this way found its needle and asks again only once
+ * lexing has passed that point; that is exact because the first occurrence
+ * in a suffix is the first occurrence in the whole string at or after the
+ * suffix's offset.
+ */
+export function firstIndexOf(needle: string): (src: string) => number {
+  const start = (src: string) => src.indexOf(needle);
+  FIRST_INDEX_STARTS.add(start);
+  return start;
+}
+
 class FastLexer extends Lexer {
+  /** Remember firstIndexOf starts' results within a block (see firstIndexOf). */
+  protected rememberInlineStarts = true;
+
   // Transcribed verbatim from marked 17's `Lexer.inlineTokens` main loop, with
   // ONLY the leading mask-building replaced by the linear `buildInlineMask`.
   // Keep this in lockstep with the installed marked version; the fuzz test in
@@ -120,6 +145,9 @@ class FastLexer extends Lexer {
     let prevChar = "";
     let cutSrc = src;
     let token: any;
+    // firstIndexOf start → absolute index of its next match in `src`, or -1
+    // for none. Valid because `cutSrc` is always a suffix of `src`.
+    const nextStart = new Map<unknown, number>();
 
     while (cutSrc) {
       if (!keepPrevChar) prevChar = "";
@@ -200,9 +228,23 @@ class FastLexer extends Lexer {
       if (lexer.options.extensions?.startInline) {
         let startMin = Infinity;
         const tempSrc = cutSrc.slice(1);
+        const tempOffset = src.length - tempSrc.length;
         let startPos: number | undefined;
         lexer.options.extensions.startInline.forEach((getStart: any) => {
-          startPos = getStart.call({ lexer }, tempSrc);
+          if (this.rememberInlineStarts && FIRST_INDEX_STARTS.has(getStart)) {
+            const known = nextStart.get(getStart);
+            let next: number;
+            if (known === undefined || (known >= 0 && known < tempOffset)) {
+              const found: number = getStart(tempSrc);
+              next = found >= 0 ? tempOffset + found : -1;
+              nextStart.set(getStart, next);
+            } else {
+              next = known;
+            }
+            startPos = next < 0 ? -1 : next - tempOffset;
+          } else {
+            startPos = getStart.call({ lexer }, tempSrc);
+          }
           if (typeof startPos === "number" && startPos >= 0) {
             startMin = Math.min(startMin, startPos);
           }
@@ -265,13 +307,15 @@ export function fastLex(src: string, options?: any): Token[] {
 // the moment the user edits it). The nested `lexer(...)` path already forwards
 // `instance.defaults`; binding the class keeps both paths in lockstep.
 //
-// `boundBlockTokenizers: false` exists for the equivalence tests, which need
-// the same instance with only the bounding left out.
-export function createFastMarked({ boundBlockTokenizers = true } = {}): typeof marked {
+// `boundBlockTokenizers: false` and `rememberInlineStarts: false` exist for
+// the equivalence tests, which need the same instance with only that
+// optimization left out.
+export function createFastMarked({ boundBlockTokenizers = true, rememberInlineStarts = true } = {}): typeof marked {
   const instance = new Marked();
   class BoundFastLexer extends FastLexer {
     constructor(options?: any) {
       super(options ?? (instance as any).defaults);
+      this.rememberInlineStarts = rememberInlineStarts;
     }
   }
   (instance as any).Lexer = BoundFastLexer;
@@ -284,7 +328,8 @@ export function createFastMarked({ boundBlockTokenizers = true } = {}): typeof m
   const use = instance.use.bind(instance);
   (instance as any).use = (...extensions: any[]) => use(...extensions.map((ext) => {
     if (!Array.isArray(ext?.extensions)) return ext;
-    const bounded = boundBlockTokenizers ? ext.extensions.map(boundBlockExtension) : ext.extensions;
+    const bounded = (boundBlockTokenizers ? ext.extensions.map(boundBlockExtension) : ext.extensions)
+      .map(withKnownInlineStart);
     const ordered = bounded.find((e: any) => e.name === "orderedList" && e.level === "block" && e.tokenizer);
     if (ordered) orderedListTokenizer = ordered.tokenizer;
     return { ...ext, extensions: bounded };
@@ -309,6 +354,21 @@ export function createFastMarked({ boundBlockTokenizers = true } = {}): typeof m
     },
   });
   return instance as unknown as typeof marked;
+}
+
+// Tiptap's Underline starts with `src.indexOf("++")`; give it the equivalent
+// firstIndexOf so FastLexer need not rescan the paragraph for it. Only that
+// exact function is replaced (Tiptap passes it through unwrapped), so an
+// extended Underline with its own start keeps it. fastMarkdownLexer.test.ts
+// pins the equivalence against the installed Tiptap.
+const TIPTAP_UNDERLINE_START = (Underline.config as { markdownTokenizer?: { start?: unknown } })
+  .markdownTokenizer?.start;
+const UNDERLINE_START = firstIndexOf("++");
+
+function withKnownInlineStart(ext: any): any {
+  return ext?.level === "inline" && ext.start !== undefined && ext.start === TIPTAP_UNDERLINE_START
+    ? { ...ext, start: UNDERLINE_START }
+    : ext;
 }
 
 export { FastLexer };

@@ -6,6 +6,7 @@ import type {
   MarkdownToken,
 } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { firstIndexOf } from "./fastMarkdownLexer";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 import type {
   MarkType,
@@ -279,10 +280,7 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
   markdownTokenizer: {
     name: "wikiLink",
     level: "inline" as const,
-    start: (src: string) => {
-      const idx = src.indexOf("[[");
-      return idx < 0 ? -1 : idx;
-    },
+    start: firstIndexOf("[["),
     tokenize: (src: string) => {
       const match = /^\[\[([^\[\]\n]+)\]\]/.exec(src);
       if (!match) return undefined;

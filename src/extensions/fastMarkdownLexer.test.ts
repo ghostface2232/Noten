@@ -6,6 +6,8 @@ import { Markdown } from "@tiptap/markdown";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { createFastMarked, fastLex, FastLexer } from "./fastMarkdownLexer";
+import Underline from "@tiptap/extension-underline";
+import WikiLink from "./WikiLink";
 
 // FastLexer must produce byte-identical tokens to stock marked — it only
 // changes *how fast* the inline mask is built, never *what* is parsed. These
@@ -270,4 +272,61 @@ describe("blockquote ending in an extension-only ordered list", () => {
       expect(() => md.parse(src), JSON.stringify(src)).not.toThrow();
     }
   });
+});
+
+describe("remembered inline starts", () => {
+  // FastLexer remembers where a firstIndexOf start found its needle instead
+  // of rescanning the rest of the paragraph for every text token.
+  const editors: Editor[] = [];
+  afterEach(() => {
+    editors.forEach((e) => e.destroy());
+    editors.length = 0;
+  });
+
+  function instanceWith(rememberInlineStarts: boolean) {
+    const marked = createFastMarked({ rememberInlineStarts });
+    editors.push(new Editor({ extensions: [StarterKit, Markdown.configure({ marked }), WikiLink] }));
+    return marked;
+  }
+
+  it("Tiptap's Underline start is the first index of \"++\", which the lexer substitutes", () => {
+    const start = (Underline as unknown as { config: { markdownTokenizer: { start: (src: string) => number } } })
+      .config.markdownTokenizer.start;
+    const rand = mulberry32(0x2b2b);
+    const alphabet = ["+", "++", "a", " ", "\n", "[", "*"];
+    for (let i = 0; i < 2000; i++) {
+      const src = Array.from({ length: Math.floor(rand() * 30) }, () => alphabet[Math.floor(rand() * alphabet.length)]).join("");
+      expect(start(src)).toBe(src.indexOf("++"));
+    }
+  });
+
+  it("produces the same tokens as asking every start each time", () => {
+    const remembered = instanceWith(true);
+    const reference = instanceWith(false);
+    const rand = mulberry32(0x5717);
+    const pieces = ["plain words ", "++under++ ", "+ ", "++", "[[Note]] ", "[[", "]] ", "**b** ", "`c` ", "[l](http://x.io) ", "\\+\\+ ", "\n", "  \n", "_e_ ", "~~s~~ "];
+    for (let i = 0; i < 1500; i++) {
+      const md = Array.from({ length: 1 + Math.floor(rand() * 40) }, () => pieces[Math.floor(rand() * pieces.length)]).join("");
+      const a = JSON.parse(JSON.stringify(remembered.lexer(md)));
+      const b = JSON.parse(JSON.stringify(reference.lexer(md)));
+      expect(a, JSON.stringify(md)).toEqual(b);
+    }
+  });
+
+  it("lexes a long paragraph without \"++\" or \"[[\" in near-linear time", () => {
+    const remembered = instanceWith(true);
+    const reference = instanceWith(false);
+    const paragraph = "word **bold** more `code` text ".repeat(12_000);
+    const time = (marked: ReturnType<typeof createFastMarked>) => {
+      const t = performance.now();
+      marked.lexer(paragraph);
+      return performance.now() - t;
+    };
+    time(remembered);
+    const fast = time(remembered);
+    const slow = time(reference);
+    // Rescanning is quadratic here; remembering keeps it linear. Relative,
+    // so machine speed does not matter.
+    expect(slow / fast).toBeGreaterThan(3);
+  }, 60_000);
 });
