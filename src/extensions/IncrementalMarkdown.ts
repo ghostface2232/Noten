@@ -120,11 +120,17 @@ function warmUpPlugin(editor: Editor, warm: IncrementalSerializer["warm"]): Plug
         timer = idle = null;
       };
       const step = (deadline: IdleDeadline) => {
-        idle = warm(deadline) ? null : requestIdleCallback(step);
+        idle = null;
+        try {
+          if (!warm(deadline)) idle = requestIdleCallback(step);
+        } catch {
+          // A block that fails to render fails the same way in the save that
+          // needs it, which reports it; warming just stops.
+        }
       };
       const schedule = () => {
-        if (typeof requestIdleCallback === "undefined") return;
         cancel();
+        if (typeof requestIdleCallback === "undefined") return;
         timer = setTimeout(() => {
           timer = null;
           idle = requestIdleCallback(step);
