@@ -127,7 +127,9 @@ describe("incremental lowlight plugin", () => {
       if (editor.state.doc.childCount < 3) editor.commands.insertContentAt(editor.state.doc.content.size, DOC);
       expectFreshHighlight(editor, oracle);
     }
-  });
+    // 1,500 edits, each checked against a from-scratch highlight: ~2 s alone,
+    // longer when the whole suite runs in parallel.
+  }, 30_000);
 
   it("re-highlights a code block that was deleted and re-inserted as the same node", () => {
     const oracle = stockPluginOf(stockEditor());
