@@ -550,6 +550,14 @@ async function navScenario(cdp) {
     if (label == null) break;
     await sleep(1200);
     const landed = await where(caretRect);
+    // BENCH_NAV_DIAG: when a jump misses, compare every block's current
+    // (possibly remembered) height with its laid-out height.
+    if (process.env.BENCH_NAV_DIAG && landed && !landed.visible) {
+      landed.stale = await cdp.eval(`(() => { const pm = document.querySelector(".ProseMirror"); const kids = [...pm.children];
+        const h = () => kids.map((k) => k.getBoundingClientRect().height); const a = h(); const had = pm.classList.contains("noten-skip-offscreen");
+        pm.classList.remove("noten-skip-offscreen"); const b = h(); if (had) pm.classList.add("noten-skip-offscreen");
+        return { had, diffs: a.map((x, i) => [i, kids[i].tagName + "." + String(kids[i].className).split(" ")[0], +x.toFixed(1), +b[i].toFixed(1)]).filter(([, , x, y]) => Math.abs(x - y) > 1) }; })()`);
+    }
     const heading = await cdp.eval(`(() => { const v = document.querySelector(".ProseMirror").editor.view;
       const { node } = v.domAtPos(v.state.selection.head); const el = node.nodeType === 1 ? node : node.parentElement;
       return el?.closest("h1,h2,h3,h4,h5,h6")?.textContent ?? null; })()`);
