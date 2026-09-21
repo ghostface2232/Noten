@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import CodeBlock from "@tiptap/extension-code-block";
 import OffscreenBlocks, { SKIP_OFFSCREEN_CLASS } from "./OffscreenBlocks";
 
 // jsdom has no layout, ResizeObserver or frames: fake all three so the tests
@@ -170,6 +171,43 @@ describe("OffscreenBlocks", () => {
       () => ({ top: 5000, bottom: 5050, left: 0, right: 100, width: 100, height: 50, x: 0, y: 5000, toJSON() {} }) as DOMRect,
     );
     editor.commands.insertContentAt(editor.state.doc.content.size, "<ol><li><p>new</p></li></ol>");
+    expect(skipping(editor)).toBe(false);
+  });
+
+  it("re-measures when a replacement with equal-looking content shifts blocks into other elements", () => {
+    // Window sync / file reload replace the document with new node objects.
+    // For node views that accept updates (like the app's code blocks)
+    // ProseMirror reuses the old elements in order, so after an insertion
+    // each later block lands in its predecessor's element. A content diff
+    // sees only the insertion (on screen); the shifted blocks below are off
+    // screen and must still be re-measured.
+    const CodeBlockView = CodeBlock.extend({
+      addNodeView() {
+        return () => {
+          const dom = document.createElement("div");
+          dom.className = "noten-code-block";
+          const code = document.createElement("code");
+          dom.append(code);
+          return { dom, contentDOM: code, update: (node) => node.type.name === "codeBlock" };
+        };
+      },
+    });
+    const editor = new Editor({ extensions: [StarterKit.configure({ codeBlock: false }), CodeBlockView, OffscreenBlocks] });
+    active = editor;
+    const { schema } = editor.state;
+    const code = (text: string) => schema.nodes.codeBlock.create(null, schema.text(text));
+    editor.commands.setContent([schema.nodes.paragraph.create(null, schema.text("top")), code("a"), code("b"), code("c"), code("d")].map((n) => n.toJSON()));
+    observers[0].fire(800);
+    flushFrames();
+    expect(skipping(editor)).toBe(true);
+
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const index = Array.prototype.indexOf.call(this.parentElement?.children ?? [], this);
+      const top = index >= 3 ? 5000 : 100;
+      return { top, bottom: top + 50, left: 0, right: 100, width: 100, height: 50, x: 0, y: top, toJSON() {} } as DOMRect;
+    });
+    const fresh = [schema.nodes.paragraph.create(null, schema.text("top")), code("new"), code("a"), code("b"), code("c"), code("d")];
+    editor.view.dispatch(editor.state.tr.replaceWith(0, editor.state.doc.content.size, fresh));
     expect(skipping(editor)).toBe(false);
   });
 

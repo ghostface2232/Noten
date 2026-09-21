@@ -71,7 +71,23 @@ class OffscreenMeasure {
     });
     this.resizeObserver?.observe(view.dom);
     document.fonts?.addEventListener("loadingdone", this.remeasure);
+    this.watchResolution();
     this.remeasure();
+  }
+
+  // Moving the window to a monitor with another scale can rewrap text at the
+  // same CSS width, which the width observer does not see.
+  private resolutionQuery: MediaQueryList | null = null;
+  private readonly onResolutionChange = () => {
+    this.watchResolution();
+    this.remeasure();
+  };
+
+  private watchResolution() {
+    this.resolutionQuery?.removeEventListener("change", this.onResolutionChange);
+    if (typeof matchMedia !== "function") return;
+    this.resolutionQuery = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    this.resolutionQuery.addEventListener("change", this.onResolutionChange);
   }
 
   // Drop the class so the next frame lays out (and the browser records the
@@ -93,19 +109,31 @@ class OffscreenMeasure {
 
   update(view: EditorView, prev: EditorState) {
     const doc = view.state.doc;
-    if (doc === prev.doc) return;
-    const start = prev.doc.content.findDiffStart(doc.content);
-    if (start == null) return;
-    const end = prev.doc.content.findDiffEnd(doc.content);
-    const $from = doc.resolve(start);
-    const first = $from.index(0);
-    const last = Math.min(doc.resolve(Math.max(start, end?.b ?? start)).index(0), doc.childCount - 1);
-    if (last - first + 1 > MAX_INSPECTED_BLOCKS) {
+    const old = prev.doc;
+    if (doc === old) return;
+    // The changed top-level range, by node identity rather than content:
+    // ProseMirror redraws only nodes that are new objects, and when a whole
+    // document is replaced with equal-looking content (window sync, file
+    // reload, undoing one) it reuses the old elements in order, so a
+    // content-equal block can end up in another block's element. Every new
+    // object is a block whose element may have changed.
+    let first = 0;
+    while (first < doc.childCount && first < old.childCount && doc.child(first) === old.child(first)) first++;
+    let end = doc.childCount;
+    let oldEnd = old.childCount;
+    while (end > first && oldEnd > first && doc.child(end - 1) === old.child(oldEnd - 1)) {
+      end--;
+      oldEnd--;
+    }
+    // Pure deletions leave no new element to measure.
+    if (end <= first) return;
+    if (end - first > MAX_INSPECTED_BLOCKS) {
       this.remeasure();
       return;
     }
-    let pos = $from.posAtIndex(first, 0);
-    for (let i = first; i <= last; i++) {
+    let pos = 0;
+    for (let i = 0; i < first; i++) pos += doc.child(i).nodeSize;
+    for (let i = first; i < end; i++) {
       const dom = view.nodeDOM(pos);
       pos += doc.child(i).nodeSize;
       // Cheapest test first: the full selector's :has() walks the block's
@@ -124,6 +152,7 @@ class OffscreenMeasure {
 
   destroy() {
     this.resizeObserver?.disconnect();
+    this.resolutionQuery?.removeEventListener("change", this.onResolutionChange);
     document.fonts?.removeEventListener("loadingdone", this.remeasure);
     cancelAnimationFrame(this.frame);
     this.view.dom.classList.remove(SKIP_OFFSCREEN_CLASS);
