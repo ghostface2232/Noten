@@ -73,6 +73,16 @@ Download `noten-setup.exe` from [GitHub Releases](https://github.com/ghostface22
 | Edit link | `Ctrl+K` |
 | Strike-through | `Ctrl+Shift+X` |
 
+### Find bar (when the find bar is open)
+| Action | Shortcut |
+|---|---|
+| Next / previous match | `Enter` / `Shift+Enter` |
+| Replace current match | `Enter` (in the replace field) |
+| Replace all | `Ctrl+Enter` |
+| Match case on / off | `Alt+C` |
+| Return focus to the find / replace field | `Ctrl+F` / `Ctrl+H` |
+| Close | `Esc` |
+
 ### Sidebar (when sidebar is focused)
 | Action | Shortcut |
 |---|---|
