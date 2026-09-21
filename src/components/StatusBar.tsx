@@ -64,9 +64,10 @@ function useEditorStats(editor: Editor | null, enabled: boolean) {
       const doc = editor.state.doc;
       if (doc !== lastDoc) {
         lastDoc = doc;
-        // One walk produces lines, characters, and words. Counting words from
-        // `doc.textContent` instead would fuse each block's last word to the
-        // next block's first — a three-item list read as one word.
+        // Lines, characters, and words come from per-block stats cached by
+        // node identity, so only edited blocks are re-counted. Counting words
+        // from `doc.textContent` instead would fuse each block's last word to
+        // the next block's first — a three-item list read as one word.
         lineIndex = buildLineIndex(doc);
       }
       const row = lineIndex ? posToLine(lineIndex, editor.state.selection.head) : 1;

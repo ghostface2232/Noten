@@ -119,34 +119,6 @@ function textblockOffsetForLine(node: ProseMirrorNode, line: number): number {
   return found >= 0 ? found : 0;
 }
 
-// Line counts are a pure function of an immutable node, and ProseMirror reuses
-// untouched nodes across transactions — so caching by node identity makes the
-// per-caret-move walk skip every sibling it has already seen. Without it,
-// moving the caret inside a 5000-item list re-counted every preceding item.
-const linesInNodeCache = new WeakMap<ProseMirrorNode, number>();
-
-/** Logical lines inside one node, counting nested textblocks. */
-function linesInNode(node: ProseMirrorNode): number {
-  if (node.isTextblock) {
-    const cached = linesInNodeCache.get(node);
-    if (cached !== undefined) return cached;
-    const count = textblockLineCount(node);
-    linesInNodeCache.set(node, count);
-    return count;
-  }
-  if (node.isLeaf) return node.isBlock ? 1 : 0;
-
-  const cached = linesInNodeCache.get(node);
-  if (cached !== undefined) return cached;
-  let total = 0;
-  node.forEach((child) => { total += linesInNode(child); });
-  // A block container holding no textblock at all still occupies a line rather
-  // than vanishing from the count.
-  const count = total || 1;
-  linesInNodeCache.set(node, count);
-  return count;
-}
-
 interface CountState {
   chars: number;
   words: number;
@@ -187,39 +159,85 @@ function countTextblock(node: ProseMirrorNode, state: CountState): void {
   });
 }
 
-function countInNode(node: ProseMirrorNode, state: CountState): void {
+interface NodeStats {
+  lines: number;
+  chars: number;
+  words: number;
+}
+
+const LEAF_BLOCK_STATS: NodeStats = { lines: 1, chars: 0, words: 0 };
+const INLINE_LEAF_STATS: NodeStats = { lines: 0, chars: 0, words: 0 };
+
+// Lines, characters, and words are pure functions of an immutable node, and
+// ProseMirror reuses untouched nodes across transactions — so caching by node
+// identity makes a rebuild after an edit visit only the changed blocks. All
+// three are additive over child blocks because a word never spans a block
+// boundary. Without the cache, moving the caret inside a 5000-item list
+// re-counted every preceding item, and every keystroke re-scanned every
+// character of the document for the word count.
+const statsCache = new WeakMap<ProseMirrorNode, NodeStats>();
+
+function nodeStats(node: ProseMirrorNode): NodeStats {
+  if (node.isLeaf && !node.isTextblock) return node.isBlock ? LEAF_BLOCK_STATS : INLINE_LEAF_STATS;
+  const cached = statsCache.get(node);
+  if (cached !== undefined) return cached;
+  let stats: NodeStats;
   if (node.isTextblock) {
-    countTextblock(node, state);
-    return;
+    const counts: CountState = { chars: 0, words: 0, atBoundary: true };
+    countTextblock(node, counts);
+    stats = { lines: textblockLineCount(node), chars: counts.chars, words: counts.words };
+  } else {
+    let lines = 0;
+    let chars = 0;
+    let words = 0;
+    node.forEach((child) => {
+      const s = nodeStats(child);
+      lines += s.lines;
+      chars += s.chars;
+      words += s.words;
+    });
+    // A block container holding no textblock at all still occupies a line
+    // rather than vanishing from the count.
+    stats = { lines: lines || 1, chars, words };
   }
-  if (node.isLeaf) return;
-  node.forEach((child) => countInNode(child, state));
+  statsCache.set(node, stats);
+  return stats;
+}
+
+/** Logical lines inside one node, counting nested textblocks. */
+function linesInNode(node: ProseMirrorNode): number {
+  return nodeStats(node).lines;
 }
 
 /**
- * Build the per-block line offsets and the document-wide character/word counts
- * in a single walk. O(document); callers cache it against `doc` identity, which
- * ProseMirror preserves across selection-only transactions.
+ * Build the per-block line offsets and the document-wide character/word counts.
+ * Unchanged blocks come from the per-node cache, so a rebuild after an edit
+ * costs O(top-level blocks) plus the changed blocks' text; callers still cache
+ * it against `doc` identity, which ProseMirror preserves across selection-only
+ * transactions.
  */
 export function buildLineIndex(doc: ProseMirrorNode): LineIndex {
   const prefix: number[] = [0];
   const starts: number[] = [];
-  const counts: CountState = { chars: 0, words: 0, atBoundary: true };
+  let chars = 0;
+  let words = 0;
   let lines = 0;
   let pos = 0;
   doc.forEach((block) => {
     starts.push(pos);
     pos += block.nodeSize;
-    lines += linesInNode(block);
-    countInNode(block, counts);
+    const stats = nodeStats(block);
+    lines += stats.lines;
+    chars += stats.chars;
+    words += stats.words;
     prefix.push(lines);
   });
   return {
     total: Math.max(1, lines),
     prefix,
     starts,
-    chars: counts.chars,
-    words: counts.words,
+    chars,
+    words,
     doc,
   };
 }

@@ -106,7 +106,7 @@ The status bar's line count, its caret row, and Go to Line all use the *logical 
 
 - Counting top-level blocks (`doc.childCount`) instead made a ten-item list and a twenty-line code block read as one line.
 - A jump target goes through `selectionForLinePos`. A line that *is* a leaf block resolves to a block position, where `TextSelection.create` does not throw but yields a selection whose parent has no inline content, so the next keystroke inserts a stray paragraph. That fallback assumes every block leaf in the schema is selectable; a non-selectable block atom would silently jump to the wrong line.
-- `buildLineIndex` is O(document): cache it against `doc` identity (selection-only transactions reuse the node), never rebuild per caret move, and coalesce doc-change rebuilds to one per frame — both the status bar and Go to Line subscribe to every transaction. The same walk produces character and word counts; taking them from `doc.textContent` both allocates a second copy of the document and fuses each block's last word to the next block's first.
+- `buildLineIndex` sums per-node `{lines, chars, words}` cached by node identity, so a rebuild after an edit costs O(top-level blocks) plus the changed blocks' text. Still cache the index against `doc` identity (selection-only transactions reuse the node), never rebuild per caret move, and coalesce doc-change rebuilds to one per frame — both the status bar and Go to Line subscribe to every transaction. Character and word counts come from the same cached stats, which is exact because a word never spans a textblock boundary; taking them from `doc.textContent` both allocates a second copy of the document and fuses each block's last word to the next block's first.
 
 ## Context Menus
 
