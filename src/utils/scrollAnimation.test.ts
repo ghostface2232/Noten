@@ -30,6 +30,17 @@ describe("animateScrollTop", () => {
     expect(container.scrollTop).toBe(500);
   });
 
+  it("follows a target that moves while the animation runs", () => {
+    // A jump's heading can shift mid-animation (a panel finishing its width
+    // transition); a target fixed at the start would land off by the shift.
+    let target = 1000;
+    animateScrollTop(container, () => target, DURATION);
+    vi.advanceTimersByTime(96);
+    target = 4000;
+    advanceToEnd();
+    expect(container.scrollTop).toBe(4000);
+  });
+
   it("moves monotonically toward the target while animating", () => {
     animateScrollTop(container, 400, DURATION);
     const samples: number[] = [];

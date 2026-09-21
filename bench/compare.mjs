@@ -12,7 +12,8 @@ const dir = join(CACHE, "results");
 function load(tags) {
   const out = new Map();
   for (const tag of tags.split(",")) {
-    const file = readdirSync(dir).filter((f) => f.endsWith(`-${tag}.json`)).sort().at(-1);
+    // Exact tag after the timestamp: "final" must not pick up "geo-final".
+    const file = readdirSync(dir).filter((f) => /^[\dT-]+Z-(.+)\.json$/.exec(f)?.[1] === tag).sort().at(-1);
     if (!file) throw new Error(`no results for tag ${tag}`);
     for (const r of JSON.parse(readFileSync(join(dir, file), "utf8"))) out.set(r.doc, r);
   }

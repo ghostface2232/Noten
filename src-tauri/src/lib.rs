@@ -2,7 +2,7 @@ use std::env;
 use std::fs;
 use std::io;
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -295,6 +295,91 @@ fn ensure_maintenance_helper<R: Runtime>(app_handle: AppHandle<R>) {
     }
 }
 
+/// URI scheme the editor's `<img>` elements load note images from
+/// (`http://noten-asset.localhost/<percent-encoded absolute path>` on Windows,
+/// built by `convertFileSrc(path, "noten-asset")`).
+const NOTE_ASSET_SCHEME: &str = "noten-asset";
+
+/// Content type of a servable note image, by extension; anything else is
+/// refused.
+fn note_image_mime(path: &Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        _ => return None,
+    })
+}
+
+/// Whether `path` (already canonical) is a note image the webview may load: an
+/// image file inside a `.assets` directory under one of `roots` (canonical).
+/// Canonical paths resolve `..`, symlinks and junctions first, so a link
+/// inside `.assets` that points elsewhere is judged by where it lands.
+fn is_servable_note_image(path: &Path, roots: &[PathBuf]) -> bool {
+    note_image_mime(path).is_some()
+        && roots.iter().any(|root| path.starts_with(root))
+        && path
+            .parent()
+            .is_some_and(|dir| dir.components().any(|c| c == Component::Normal(".assets".as_ref())))
+}
+
+/// Serves note images for the editor. Unlike Tauri's asset protocol, which
+/// reads files synchronously on the UI thread (where WebView2 delivers the
+/// request), the read runs on a blocking worker: an image that OneDrive still
+/// has to download must not freeze the window and every IPC call behind it.
+/// The allowed set is fixed here — image files under a `.assets` directory in
+/// the same roots as the fs scope — so nothing at runtime can widen it.
+fn note_asset_response<R: Runtime>(
+    app: &AppHandle<R>,
+    request: &tauri::http::Request<Vec<u8>>,
+) -> tauri::http::Response<Vec<u8>> {
+    // Tauri treats every registered scheme's origin as local, so a document
+    // served from it would get the app's IPC permissions. Nothing here is
+    // meant to be a document: forbid scripts and sniffing on every response
+    // (an <img> ignores both), so a navigated-to SVG cannot run code.
+    let response = |code: u16| {
+        tauri::http::Response::builder()
+            .status(code)
+            .header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+            .header("X-Content-Type-Options", "nosniff")
+    };
+    // Not cached: an image OneDrive has not synced yet must load once it has.
+    let status = |code: u16| {
+        response(code)
+            .header("Cache-Control", "no-store")
+            .body(Vec::new())
+            .expect("static response")
+    };
+    let encoded = request.uri().path().as_bytes();
+    let raw = percent_encoding::percent_decode(encoded.get(1..).unwrap_or_default())
+        .decode_utf8_lossy()
+        .into_owned();
+    let Ok(path) = fs::canonicalize(&raw) else {
+        return status(404);
+    };
+    let roots: Vec<PathBuf> = [
+        app.path().home_dir(),
+        app.path().app_data_dir(),
+        app.path().app_local_data_dir(),
+    ]
+    .into_iter()
+    .filter_map(|dir| dir.ok().and_then(|dir| fs::canonicalize(dir).ok()))
+    .collect();
+    if !is_servable_note_image(&path, &roots) {
+        return status(403);
+    }
+    match fs::read(&path) {
+        Ok(bytes) => response(200)
+            .header("Content-Type", note_image_mime(&path).unwrap_or("application/octet-stream"))
+            .body(bytes)
+            .expect("image response"),
+        Err(_) => status(404),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -303,6 +388,12 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .register_asynchronous_uri_scheme_protocol(NOTE_ASSET_SCHEME, |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                responder.respond(note_asset_response(&app, &request));
+            });
+        })
         .invoke_handler(tauri::generate_handler![
             print_to_pdf,
             toggle_devtools,
@@ -322,7 +413,31 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{print_temp_stem, wide_null};
+    use super::{is_servable_note_image, note_image_mime, print_temp_stem, wide_null};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn serves_only_images_inside_assets_under_a_root() {
+        let roots = vec![PathBuf::from(r"C:\Users\u")];
+        let ok = |p: &str| is_servable_note_image(Path::new(p), &roots);
+        assert!(ok(r"C:\Users\u\notes\.assets\n1\a.png"));
+        assert!(ok(r"C:\Users\u\OneDrive\문서\notes\.assets\n1\사진.JPG"));
+        // Not an image, not under .assets, or outside every root.
+        assert!(!ok(r"C:\Users\u\notes\.assets\n1\note.md"));
+        assert!(!ok(r"C:\Users\u\notes\n1.png"));
+        assert!(!ok(r"C:\Users\u\notes\foo.assets\a.png"));
+        assert!(!ok(r"C:\Users\u\.assets.png"));
+        assert!(!ok(r"D:\notes\.assets\n1\a.png"));
+        assert!(!ok(r"C:\Users\uu\notes\.assets\a.png"));
+    }
+
+    #[test]
+    fn image_mime_by_extension() {
+        assert_eq!(note_image_mime(Path::new("a.SVG")), Some("image/svg+xml"));
+        assert_eq!(note_image_mime(Path::new("a.jpeg")), Some("image/jpeg"));
+        assert_eq!(note_image_mime(Path::new("a.html")), None);
+        assert_eq!(note_image_mime(Path::new("noext")), None);
+    }
 
     #[test]
     fn wide_null_encodes_utf16_with_one_terminator() {

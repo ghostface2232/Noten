@@ -13,7 +13,7 @@ vi.mock("../utils/imageAssetUtils", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../utils/imageAssetUtils")>();
   return {
     ...actual,
-    resolveRenderableImageSource: vi.fn(async () => null),
+    resolveRenderableImageSource: vi.fn(() => null),
   };
 });
 

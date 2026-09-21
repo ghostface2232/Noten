@@ -58,7 +58,6 @@ import { writeMigrationJournal, type MigrationCleanupMode } from "./utils/migrat
 import { recoverPendingMigration } from "./utils/migrationCleanup";
 import { colorHex } from "./utils/noteColors";
 import { clampMenuToViewport } from "./utils/clampMenuPosition";
-import { clearRenderableImageSourceCache } from "./utils/imageAssetUtils";
 import { sortSignature } from "./utils/docsSignature";
 import type { LibraryData } from "./utils/libraryStore";
 import { useFileWatcher } from "./hooks/useFileWatcher";
@@ -360,7 +359,6 @@ function App() {
   useEffect(() => {
     if (!settingsLoaded) return;
     (async () => {
-      clearRenderableImageSourceCache();
       if (settings.notesDirectory) {
         setNotesDir(settings.notesDirectory, reconcileStateRef.current);
       } else {
@@ -595,6 +593,12 @@ function App() {
 
   useEffect(syncEditorRef, [syncEditorRef]);
 
+  // The editor font is set on the app root; skipped blocks must be re-measured
+  // when it changes (see extensions/OffscreenBlocks.ts).
+  useEffect(() => {
+    tiptapEditor?.storage.offscreenBlocks.remeasure();
+  }, [tiptapEditor, settings.fontFamily]);
+
   // Wiki-link decorations depend on the live docs list and callbacks.
   useEffect(() => {
     if (!tiptapEditor?.storage.wikiLink) return;
@@ -789,7 +793,6 @@ function App() {
     previousNotesDirectory: string,
     preservedLibrary: LibraryData,
   ) => {
-    clearRenderableImageSourceCache();
     restoreNotesDir(oldDir, preservedLibrary, reconcileStateRef.current);
     await persistNotesDirectorySetting(previousNotesDirectory);
     setMigrationInProgress(false);
@@ -931,7 +934,6 @@ function App() {
       }
     }
 
-    clearRenderableImageSourceCache();
     setNotesDir(newDir, reconcileStateRef.current);
     setCurrentNotesDir(newDir);
     setReloadKey((k) => k + 1);
@@ -1013,7 +1015,6 @@ function App() {
       return;
     }
 
-    clearRenderableImageSourceCache();
     resetNotesDir(reconcileStateRef.current);
     if (sourceRetained) {
       // Journal the resolved default dir so a later cleanup knows where to
@@ -1112,12 +1113,20 @@ function App() {
     // the stored pos may be stale — clamp instead of throwing.
     const target = clampOutlinePos(pos + 1, editor.state.doc.content.size);
     editor.chain().setTextSelection(target).focus(null, { scrollIntoView: false }).run();
-    const coords = editor.view.coordsAtPos(target);
-    const containerTop = container.getBoundingClientRect().top;
-    const targetTop = Math.max(
-      0,
-      coords.top - containerTop + container.scrollTop - (editorTopOffset + 16),
-    );
+    // Re-read every frame: the heading can move while the animation runs
+    // (e.g. the outline panel finishing its width transition on a long note).
+    let lastTop = container.scrollTop;
+    const targetTop = () => {
+      try {
+        const pos = clampOutlinePos(target, editor.state.doc.content.size);
+        const coords = editor.view.coordsAtPos(pos);
+        const containerTop = container.getBoundingClientRect().top;
+        lastTop = Math.max(0, coords.top - containerTop + container.scrollTop - (editorTopOffset + 16));
+      } catch {
+        // The editor was torn down mid-jump; keep heading for the last target.
+      }
+      return lastTop;
+    };
     outlineScrollCancelRef.current?.();
     outlineScrollCancelRef.current = animateScrollTop(container, targetTop, OUTLINE_JUMP_SCROLL_MS, {
       // The user took over mid-jump — drop the lock so scroll-driven chrome

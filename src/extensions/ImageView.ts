@@ -234,19 +234,14 @@ export function createImageNodeView(editor: Editor) {
       filePath: editor.storage.documentContext?.filePath ?? null,
     });
 
-    let imageSourceToken = 0;
     let renderedImageSource: string | null = null;
     let currentContext = getContext();
     const syncImageSource = (source: string, context: DocumentImageContext) => {
-      const token = ++imageSourceToken;
-      void (async () => {
-        const resolved = await resolveRenderableImageSource(source, context);
-        if (token !== imageSourceToken) return;
-        if (!shouldAssignRenderableImageSource(renderedImageSource, resolved)) return;
-        renderedImageSource = resolved;
-        if (resolved) img.src = resolved;
-        else img.removeAttribute("src");
-      })();
+      const resolved = resolveRenderableImageSource(source, context);
+      if (!shouldAssignRenderableImageSource(renderedImageSource, resolved)) return;
+      renderedImageSource = resolved;
+      if (resolved) img.src = resolved;
+      else img.removeAttribute("src");
     };
     const refreshImageSource = () => {
       const nextSrc = currentNode.attrs.src;
@@ -262,6 +257,8 @@ export function createImageNodeView(editor: Editor) {
     if (HTMLAttributes.alt) img.alt = HTMLAttributes.alt;
     if (HTMLAttributes.title) img.title = HTMLAttributes.title;
     img.draggable = false;
+    // Decode off the main thread; a note can hold hundreds of images.
+    img.decoding = "async";
     img.style.cssText = "display:block;max-width:100%;height:auto;border-radius:var(--editor-radius);cursor:default;";
     if (HTMLAttributes.width) img.style.width = `${HTMLAttributes.width}px`;
     dom.appendChild(img);
@@ -448,7 +445,6 @@ export function createImageNodeView(editor: Editor) {
       },
       deselectNode: () => { dom.style.outline = "none"; hideHandles(); },
       destroy: () => {
-        imageSourceToken += 1;
         unregisterSourceSync();
         unregisterSelectionSync();
         activeDragCleanup?.();

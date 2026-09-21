@@ -6,6 +6,8 @@ import { Markdown } from "@tiptap/markdown";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { createFastMarked, fastLex, FastLexer } from "./fastMarkdownLexer";
+import Underline from "@tiptap/extension-underline";
+import WikiLink from "./WikiLink";
 
 // FastLexer must produce byte-identical tokens to stock marked — it only
 // changes *how fast* the inline mask is built, never *what* is parsed. These
@@ -209,4 +211,122 @@ describe("Markdown extension integration", () => {
       expect(parseToDoc(md, fast)).toEqual(parseToDoc(md));
     }
   });
+});
+
+describe("blockquote ending in an extension-only ordered list", () => {
+  // marked's blockquote continues its last list token through the built-in
+  // `list` tokenizer, which cannot read the "a." / "iv." lists Tiptap's
+  // orderedList extension produces; it returned undefined and marked threw
+  // "Cannot read properties of undefined (reading 'raw')", so such a note
+  // could not be opened at all.
+  let editor: Editor | null = null;
+  afterEach(() => {
+    editor?.destroy();
+    editor = null;
+  });
+
+  function makeEditor() {
+    editor = new Editor({
+      extensions: [StarterKit, Markdown.configure({ marked: createFastMarked() }), TaskList, TaskItem.configure({ nested: true })],
+    });
+    return editor;
+  }
+
+  function textOf(json: unknown): string {
+    return JSON.stringify(json).match(/"text":"[^"]*"/g)?.map((t) => t.slice(8, -1)).join("|") ?? "";
+  }
+
+  it("parses instead of throwing, keeping every line's text", () => {
+    const md = makeEditor().markdown!;
+    for (const src of [
+      "> quote\na. alpha\n> quote\na. alpha",
+      "> quote\niv. roman\n> more\nv. five",
+      "> a. alpha\n> quote\nb. beta",
+      "> > nested\n> a. alpha\n> > again\nb. beta",
+    ]) {
+      const doc = md.parse(src);
+      for (const word of src.split(/[\s>]+/).filter((w) => /^[a-z]{3,}$/.test(w))) {
+        expect(textOf(doc)).toContain(word);
+      }
+    }
+  });
+
+  it("round-trips to a stable document", () => {
+    const md = makeEditor().markdown!;
+    for (const src of ["> quote\na. alpha\n> quote\nb. beta", "> quote\niv. roman\n> more\nv. five"]) {
+      const first = md.parse(src);
+      const again = md.parse(md.serialize(first));
+      expect(again).toEqual(first);
+    }
+  });
+
+  it("never throws on randomized quote/list mixtures", () => {
+    const md = makeEditor().markdown!;
+    const rand = mulberry32(0x5eed);
+    const lines = [
+      "> quote", "> > deep quote", ">", "a. alpha", "b) beta", "iv. roman", "1. one", "2) two", "- bullet",
+      "- [ ] task", "> a. quoted alpha", "> 1. quoted one", "> - quoted bullet", "lazy text", "  indented", "",
+    ];
+    for (let i = 0; i < 2000; i++) {
+      const src = Array.from({ length: 2 + Math.floor(rand() * 8) }, () => lines[Math.floor(rand() * lines.length)]).join("\n");
+      expect(() => md.parse(src), JSON.stringify(src)).not.toThrow();
+    }
+  });
+});
+
+describe("remembered inline starts", () => {
+  // FastLexer remembers where a firstIndexOf start found its needle instead
+  // of rescanning the rest of the paragraph for every text token.
+  const editors: Editor[] = [];
+  afterEach(() => {
+    editors.forEach((e) => e.destroy());
+    editors.length = 0;
+  });
+
+  function instanceWith(rememberInlineStarts: boolean) {
+    const marked = createFastMarked({ rememberInlineStarts });
+    editors.push(new Editor({ extensions: [StarterKit, Markdown.configure({ marked }), WikiLink] }));
+    return marked;
+  }
+
+  it("Tiptap's Underline start is the first index of \"++\", which the lexer substitutes", () => {
+    const start = (Underline as unknown as { config: { markdownTokenizer: { start: (src: string) => number } } })
+      .config.markdownTokenizer.start;
+    const rand = mulberry32(0x2b2b);
+    const alphabet = ["+", "++", "a", " ", "\n", "[", "*"];
+    for (let i = 0; i < 2000; i++) {
+      const src = Array.from({ length: Math.floor(rand() * 30) }, () => alphabet[Math.floor(rand() * alphabet.length)]).join("");
+      expect(start(src)).toBe(src.indexOf("++"));
+    }
+  });
+
+  it("produces the same tokens as asking every start each time", () => {
+    const remembered = instanceWith(true);
+    const reference = instanceWith(false);
+    const rand = mulberry32(0x5717);
+    const pieces = ["plain words ", "++under++ ", "+ ", "++", "[[Note]] ", "[[", "]] ", "**b** ", "`c` ", "[l](http://x.io) ", "\\+\\+ ", "\n", "  \n", "_e_ ", "~~s~~ "];
+    for (let i = 0; i < 1500; i++) {
+      const md = Array.from({ length: 1 + Math.floor(rand() * 40) }, () => pieces[Math.floor(rand() * pieces.length)]).join("");
+      const a = JSON.parse(JSON.stringify(remembered.lexer(md)));
+      const b = JSON.parse(JSON.stringify(reference.lexer(md)));
+      expect(a, JSON.stringify(md)).toEqual(b);
+    }
+  });
+
+  it("lexes a long paragraph without \"++\" or \"[[\" in near-linear time", () => {
+    const remembered = instanceWith(true);
+    const reference = instanceWith(false);
+    const paragraph = "word **bold** more `code` text ".repeat(12_000);
+    const time = (marked: ReturnType<typeof createFastMarked>) => {
+      const t = performance.now();
+      marked.lexer(paragraph);
+      return performance.now() - t;
+    };
+    time(remembered);
+    const fast = time(remembered);
+    const slow = time(reference);
+    // Rescanning is quadratic here; remembering keeps it linear. Relative,
+    // so machine speed does not matter.
+    expect(slow / fast).toBeGreaterThan(3);
+  }, 60_000);
 });

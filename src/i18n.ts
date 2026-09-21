@@ -326,6 +326,10 @@ const dict = {
   "dialog.export": { en: "Export", ko: "내보내기" },
   "dialog.saveImage": { en: "Save image", ko: "이미지 저장" },
   "dialog.exportFailed": { en: "Export failed", ko: "내보내기 실패" },
+  "dialog.exportImagesMissing": {
+    en: "{n} image(s) could not be read and are missing from the PDF.",
+    ko: "이미지 {n}개를 읽지 못해 PDF에서 빠졌습니다.",
+  },
 
   "menu.file": { en: "File", ko: "파일" },
   "menu.newDoc": { en: "New note", ko: "새 노트" },

@@ -1,5 +1,17 @@
-import { describe, it, expect } from "vitest";
-import { cloneEditorContentForExport } from "./exportHandlers";
+import { describe, it, expect, vi } from "vitest";
+import { cloneEditorContentForExport, inlineAssetImages } from "./exportHandlers";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (path: string, protocol = "asset") => `http://${protocol}.localhost/${encodeURIComponent(path)}`,
+  invoke: vi.fn(),
+}));
+vi.mock("@tauri-apps/plugin-fs", () => ({
+  readFile: vi.fn(async (path: string) => {
+    if (path.endsWith("missing.png")) throw new Error("not found");
+    return new Uint8Array([1, 2, 3]);
+  }),
+  writeTextFile: vi.fn(),
+}));
 
 function editorWith(html: string): HTMLElement {
   const el = document.createElement("div");
@@ -47,5 +59,27 @@ describe("cloneEditorContentForExport", () => {
     cloneEditorContentForExport(el);
 
     expect(el.querySelector(".search-match")).not.toBeNull();
+  });
+});
+
+describe("inlineAssetImages", () => {
+  const assetUrl = (path: string) => `http://noten-asset.localhost/${encodeURIComponent(path)}`;
+
+  it("replaces asset-protocol sources with data URLs of the files", async () => {
+    const el = editorWith(
+      `<p><img src="${assetUrl("/notes/.assets/n/a.jpg")}"><img src="data:image/gif;base64,R0lG"><img src="${assetUrl("/notes/.assets/n/missing.png")}"><img src="${assetUrl("/notes/x.png")}"></p>`,
+    );
+
+    expect(await inlineAssetImages(el)).toBe(2);
+
+    const imgs = el.querySelectorAll("img");
+    expect(imgs[0].getAttribute("src")).toBe("data:image/jpeg;base64,AQID");
+    expect(imgs[1].getAttribute("src")).toBe("data:image/gif;base64,R0lG");
+    // A file that cannot be read is dropped rather than left as a URL the
+    // PDF renderer cannot resolve.
+    expect(imgs[2].hasAttribute("src")).toBe(false);
+    // A noten-asset URL outside `.assets` is not read, and not left behind
+    // for the PDF renderer to request either.
+    expect(imgs[3].hasAttribute("src")).toBe(false);
   });
 });

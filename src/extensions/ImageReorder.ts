@@ -22,7 +22,9 @@ export function startReorder(
   ghost.style.top = "0";
   ghost.style.transform = `translate3d(${event.clientX - offsetX}px, ${event.clientY - offsetY}px, 0)`;
   const ghostImg = document.createElement("img");
-  ghostImg.src = attrs.src as string;
+  // What the editor is showing (an object or data URL), not the node's
+  // relative `.assets/` path, which does not resolve against the page.
+  ghostImg.src = imgEl.currentSrc || imgEl.src;
   ghostImg.style.width = `${ghostW}px`;
   ghostImg.style.height = `${ghostH}px`;
   ghost.appendChild(ghostImg);
