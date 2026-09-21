@@ -595,6 +595,12 @@ function App() {
 
   useEffect(syncEditorRef, [syncEditorRef]);
 
+  // The editor font is set on the app root; skipped blocks must be re-measured
+  // when it changes (see extensions/OffscreenBlocks.ts).
+  useEffect(() => {
+    tiptapEditor?.storage.offscreenBlocks.remeasure();
+  }, [tiptapEditor, settings.fontFamily]);
+
   // Wiki-link decorations depend on the live docs list and callbacks.
   useEffect(() => {
     if (!tiptapEditor?.storage.wikiLink) return;

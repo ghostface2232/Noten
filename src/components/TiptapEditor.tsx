@@ -51,6 +51,7 @@ import TextContextMenu, {
 } from "../extensions/TextContextMenu";
 import { SearchHighlight } from "../extensions/SearchHighlight";
 import FocusMode, { syncFocusModeState } from "../extensions/FocusMode";
+import OffscreenBlocks from "../extensions/OffscreenBlocks";
 import { TableBubbleMenu } from "./TableBubbleMenu";
 import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
@@ -856,6 +857,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         TextContextMenu,
         SearchHighlight,
         FocusMode,
+        OffscreenBlocks,
         LinkPopoverShortcut,
       ],
       content: initialMarkdown,
@@ -1220,6 +1222,11 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       if (!editor) return;
       syncFocusModeState(editor, focusMode);
     }, [editor, focusMode]);
+
+    // Block heights depend on these; skipped blocks must be re-measured.
+    useEffect(() => {
+      editor?.storage.offscreenBlocks.remeasure();
+    }, [editor, paragraphSpacing, wordWrap]);
 
     useEffect(() => () => {
       if (spellcheckRefreshFrameRef.current !== null) {

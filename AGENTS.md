@@ -100,6 +100,14 @@ Per-keystroke work in the editor must be incremental — no plugin or observer m
 - Wiki-link "missing link" decorations (`WikiLink.ts`): a target's existence changes only via the forced refresh meta (`refreshWikiLinkDecorations`, dispatched from `App.tsx` when the docs/title set or locale changes), so a plain edit remaps the existing `DecorationSet` and recomputes only the changed range. `findDocByTitle` is O(1) via a title map cached per `docs` array reference.
 - Anchor links (`AnchorLink.ts` + `src/utils/headingSlug.ts`): a link mark whose href starts with `#` jumps through the same `handleOutlineJump` path the outline panel uses. Fragment resolution walks the document only at click time and once per link-popover session for `#` autocomplete — never per transaction. The popover stores GitHub-style slugs (`#서론-개요`) so serialized destinations never contain spaces, but `resolveHeadingFragment` stays tolerant of raw titles and percent-encoding — on-disk markdown is never rewritten to conform.
 
+## Off-screen Blocks
+
+Chromium's per-keystroke and per-IME-composition cost grows with the whole contenteditable, so DOM-heavy top-level blocks (lists, code blocks, tables) are skipped off screen with `content-visibility: auto` (`OffscreenBlocks.ts` + the "Off-screen skipping" CSS in `tiptap-editor.css`).
+
+- Skipped sizes are never guessed: `contain-intrinsic-size: auto` remembers each block's rendered size, and the plugin drops its root class for a frame (a full layout) whenever sizes could be missing or stale — an off-screen skippable block created or changed, a width change, a web-font load, or a typography setting (`remeasure()`). A new layout input that changes block heights must call `editor.storage.offscreenBlocks.remeasure()`, or jumps, find and the scrollbar land off target.
+- The containment is applied permanently (not only while skipped), so a block measures the same either way. It stops a list's last-item margins from collapsing out of the list; the list margin rules next to it compensate exactly and are layout-neutral without containment. Blocks whose content changes height asynchronously (images, Mermaid) or holds larger escaping margins (rule, heading, quote in a list) are excluded and keep today's layout. Keep the CSS selector and `SKIPPABLE_BLOCK` identical.
+- Check layout changes here with `node bench/run.mjs --geometry` against the previous build and `--nav` (see `bench/README.md`).
+
 ## Logical Lines
 
 The status bar's line count, its caret row, and Go to Line all use the *logical line* defined in `src/utils/documentLines.ts`: one line per textblock plus one per newline character or hard break inside it. Keep the three readouts on the same definition — the number the status bar shows must be the number Go to Line accepts.

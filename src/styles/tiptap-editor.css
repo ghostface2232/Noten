@@ -541,6 +541,59 @@
   }
 }
 
+/* Off-screen skipping (see extensions/OffscreenBlocks.ts). DOM-heavy
+   top-level blocks always carry the containment that `content-visibility:
+   auto` applies, so a block measures the same whether or not it is being
+   skipped, and `contain-intrinsic-size: auto` makes the browser remember that
+   size. The skipping itself is switched on by the plugin's root class, which
+   it drops for a frame whenever sizes need re-measuring.
+   Left out, so they keep today's layout exactly:
+   - Mermaid blocks and anything holding one or an image: their content
+     arrives asynchronously and would change height while skipped.
+   - Lists holding a rule, heading or quote: those carry bottom margins larger
+     than a list item's, which containment would stop from collapsing out of
+     the list (the margin rules below cover only list-item margins).
+   Paint containment clips at the padding box; `overflow-clip-margin` keeps
+   outside list markers ("1001.") and selection outlines unclipped.
+   The selector must match SKIPPABLE_BLOCK. */
+.ProseMirror > :is(ul, ol, .noten-code-block:not(.is-mermaid), .tableWrapper):not(:has(hr, h1, h2, h3, h4, h5, h6, blockquote, .tiptap-image-node, .is-mermaid)) {
+  contain: layout style paint;
+  contain-intrinsic-size: auto 3em;
+  overflow-clip-margin: 3em;
+}
+
+.ProseMirror.noten-skip-offscreen > :is(ul, ol, .noten-code-block:not(.is-mermaid), .tableWrapper):not(:has(hr, h1, h2, h3, h4, h5, h6, blockquote, .tiptap-image-node, .is-mermaid)) {
+  content-visibility: auto;
+}
+
+/* A table wider than the editor (many columns hold their minimum width)
+   scrolls inside its own wrapper: paint containment would otherwise clip the
+   overflow that used to widen the whole editor. The one inexact size this
+   leaves: a skipped block is sized from its remembered content box, which
+   does not include its own scrollbar, so such a table counts ~6px short
+   until it is next rendered. */
+.ProseMirror > .tableWrapper {
+  overflow-x: auto;
+}
+
+/* Layout containment keeps the bottom margins of a list's last item from
+   collapsing through the list, which would add 0.25em under every list. Give
+   the list that 0.25em itself — it collapses with the next block exactly as
+   the escaping margin did — and zero the margins that used to escape. Every
+   other zeroed last child sits in a list item (or nested list) that still
+   carries the same 0.25em, so the margins they collapsed into are unchanged.
+   Items of a task list are flex containers: margins inside them never
+   escaped, so they keep theirs. */
+.ProseMirror > :is(ul, ol) {
+  margin-bottom: 0.25em;
+}
+
+.ProseMirror > :is(ul, ol) > li:last-child,
+.ProseMirror > :is(ul, ol) li:not(ul[data-type="taskList"] li) > :is(p, ul, ol):last-child,
+.ProseMirror > :is(ul, ol) li:not(ul[data-type="taskList"] li) > :is(ul, ol) > li:last-child {
+  margin-bottom: 0;
+}
+
 .image-drag-ghost {
   position: fixed;
   pointer-events: none;

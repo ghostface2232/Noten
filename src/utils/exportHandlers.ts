@@ -118,6 +118,9 @@ export async function exportAsPdf(editorEl: HTMLElement, defaultName: string, lo
     line-height: 1.7 !important;
   }
   .ProseMirror * { color: inherit !important; }
+  /* The editor's off-screen containment (tiptap-editor.css) must not decide
+     how blocks break across pages. */
+  .ProseMirror > * { contain: none !important; content-visibility: visible !important; }
   .ProseMirror h1 { font-size: 22pt !important; font-weight: 600; }
   .ProseMirror h2 { font-size: 18pt !important; font-weight: 500; }
   .ProseMirror h3 { font-size: 14pt !important; font-weight: 500; }
