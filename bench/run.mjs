@@ -204,9 +204,16 @@ const INSTRUMENT = String.raw`
     let withSrc = 0, decoded = 0;
     for (const im of imgs) { if (im.getAttribute("src")) { withSrc++; if (im.complete && im.naturalWidth) decoded++; } }
     Object.assign(B.images, { total: imgs.length, withSrc, decoded });
+    const tl = B.images.timeline ??= [];
+    if (!tl.length || performance.now() - tl[tl.length - 1][0] >= 1000) tl.push([Math.round(performance.now()), withSrc, decoded]);
     if (withSrc === imgs.length && B.images.allSrcAt == null) B.images.allSrcAt = performance.now();
     if (decoded === imgs.length && B.images.allDecodedAt == null) { B.images.allDecodedAt = performance.now(); clearInterval(imgTimer); }
   }, 50);
+  // Object URLs the page creates and revokes, with their Blob bytes.
+  B.objectUrls = { created: 0, createdMB: 0, revoked: 0 };
+  const createObjectURL = URL.createObjectURL, revokeObjectURL = URL.revokeObjectURL;
+  URL.createObjectURL = (obj) => { B.objectUrls.created++; B.objectUrls.createdMB += (obj?.size ?? 0) / 1048576; return createObjectURL.call(URL, obj); };
+  URL.revokeObjectURL = (url) => { B.objectUrls.revoked++; return revokeObjectURL.call(URL, url); };
   // Latency = input event timestamp -> task after the next rendered frame.
   // IME composition updates emit no keydown, so they are probed separately.
   const probe = (e) => {
@@ -281,7 +288,10 @@ async function waitImages(cdp, timeoutMs = 300_000) {
     if (sig !== last) { last = sig; lastChange = Date.now(); }
     if (im.allDecodedAt != null || Date.now() - lastChange > 10_000 || Date.now() - start > timeoutMs) {
       const heap = await cdp.send("Runtime.getHeapUsage");
-      return { ...im, heapMB: +(heap.usedSize / 1048576).toFixed(1) };
+      // What stays alive, as opposed to garbage not yet collected.
+      await cdp.send("HeapProfiler.collectGarbage");
+      const live = await cdp.send("Runtime.getHeapUsage");
+      return { ...im, heapMB: +(heap.usedSize / 1048576).toFixed(1), liveHeapMB: +(live.usedSize / 1048576).toFixed(1) };
     }
     await sleep(250);
   }
@@ -746,6 +756,9 @@ async function runDoc(docName, kind, webDir, loads, profile) {
     result.enter = await typingScenario(cdp, sel, ["Enter", "a", "Enter", "b", "Enter", "c"], 200, false, trace);
     result.ime = await typingScenario(cdp, sel, "hangul", 90, profile, trace);
     result.scroll = await scrollScenario(cdp, trace);
+    // Experiments: read back whatever an --eval hook recorded during the run.
+    const evalAfter = opt("eval-after", null);
+    if (evalAfter) result.evalAfter = await cdp.eval(evalAfter);
   } catch (e) {
     result.error = String(e?.message ?? e);
   } finally {

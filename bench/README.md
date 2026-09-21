@@ -85,6 +85,11 @@ input scenarios):
   after injecting `css` into the same page; differing screenshots go to
   `<cache>/results/visual`, and `node bench/pngdiff.mjs` reports how many
   pixels differ and whether the difference is a whole-pixel shift.
+- `--eval-after "<js>"` runs after the input scenarios and stores what it
+  returns (e.g. read back counters an `--eval` hook installed).
+- For image notes, each load records a once-per-second timeline of images
+  with a source / decoded, the heap before and after a forced GC, and every
+  object URL the page created (`__bench.objectUrls`).
 - `--eval "<js>"` runs a script once after the loads (e.g. to strip a kind of
   DOM node and see whether a cost depends on it); `--doc-file <path.md>` runs
   any Markdown file instead of the corpus.
