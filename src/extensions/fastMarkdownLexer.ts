@@ -1,5 +1,6 @@
 import { marked, Lexer, Marked } from "marked";
 import type { Token } from "marked";
+import { boundBlockExtension } from "./boundedBlockTokenizers";
 
 // Why this file exists
 // --------------------
@@ -273,6 +274,15 @@ export function createFastMarked(): typeof marked {
   (instance as any).Lexer = BoundFastLexer;
   (instance as any).lexer = (src: string, options?: any) =>
     new BoundFastLexer(options ?? (instance as any).defaults).lex(src);
+  // Tiptap registers its markdown tokenizers through `use`; bound the block
+  // tokenizers that would otherwise re-split the whole remaining document at
+  // every block (see boundedBlockTokenizers.ts).
+  const use = instance.use.bind(instance);
+  (instance as any).use = (...extensions: any[]) => use(...extensions.map((ext) => (
+    Array.isArray(ext?.extensions)
+      ? { ...ext, extensions: ext.extensions.map(boundBlockExtension) }
+      : ext
+  )));
   return instance as unknown as typeof marked;
 }
 
