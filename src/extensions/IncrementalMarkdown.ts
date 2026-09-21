@@ -46,10 +46,22 @@ export interface IncrementalSerializer {
   warm(deadline: { timeRemaining(): number }): boolean;
 }
 
-export function createIncrementalSerializer(
-  getManager: () => MarkdownManagerLike,
-  getDoc: () => ProseMirrorNode,
-): IncrementalSerializer {
+export interface IncrementalSerializerSources {
+  getManager: () => MarkdownManagerLike;
+  getDoc: () => ProseMirrorNode;
+  /**
+   * Top-level index of the block being edited, which warm() leaves to the
+   * save: rendering it while typing continues would be discarded at the next
+   * key, and it may be large enough to fill a whole idle slice.
+   */
+  getActiveIndex?: () => number;
+}
+
+export function createIncrementalSerializer({
+  getManager,
+  getDoc,
+  getActiveIndex,
+}: IncrementalSerializerSources): IncrementalSerializer {
   const cache = new WeakMap<ProseMirrorNode, CachedBlock>();
 
   const render = (doc: ProseMirrorNode, block: ProseMirrorNode, index: number, previous: ProseMirrorNode | null): string => {
@@ -91,9 +103,12 @@ export function createIncrementalSerializer(
         warmDoc = doc;
         warmIndex = 0;
       }
+      const active = getActiveIndex?.() ?? -1;
       while (warmIndex < doc.childCount) {
         if (deadline.timeRemaining() < 1) return false;
-        render(doc, doc.child(warmIndex), warmIndex, warmIndex > 0 ? doc.child(warmIndex - 1) : null);
+        if (warmIndex !== active) {
+          render(doc, doc.child(warmIndex), warmIndex, warmIndex > 0 ? doc.child(warmIndex - 1) : null);
+        }
         warmIndex += 1;
       }
       return true;
@@ -151,10 +166,11 @@ const serializers = new WeakMap<Editor, IncrementalSerializer>();
 
 function install(editor: Editor): void {
   if (!editor.markdown || serializers.has(editor)) return;
-  const serializer = createIncrementalSerializer(
-    () => editor.markdown as unknown as MarkdownManagerLike,
-    () => editor.state.doc,
-  );
+  const serializer = createIncrementalSerializer({
+    getManager: () => editor.markdown as unknown as MarkdownManagerLike,
+    getDoc: () => editor.state.doc,
+    getActiveIndex: () => editor.state.selection.$head.index(0),
+  });
   serializers.set(editor, serializer);
   editor.getMarkdown = () => serializer.serialize();
 }

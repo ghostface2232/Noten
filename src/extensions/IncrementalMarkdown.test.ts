@@ -230,7 +230,9 @@ describe("IncrementalMarkdown", () => {
 
       renders.n = 0;
       const md = e.getMarkdown();
-      expect(renders.n).toBe(0);
+      // Everything but the block holding the caret, which is left to the
+      // save so continued typing does not waste idle work on it.
+      expect(renders.n).toBe(1);
       renders.restore();
       expect(md).toBe(stock(e));
     } finally {
@@ -241,7 +243,7 @@ describe("IncrementalMarkdown", () => {
 
   it("restarts warming for a changed document without losing correctness", () => {
     const e = makeEditor(Array.from({ length: 20 }, (_, i) => `p ${i}`).join("\n\n"));
-    const serializer = createIncrementalSerializer(() => e.markdown as never, () => e.state.doc);
+    const serializer = createIncrementalSerializer({ getManager: () => e.markdown as never, getDoc: () => e.state.doc });
     let budget = 5;
     const deadline = { timeRemaining: () => (budget-- > 0 ? 10 : 0) };
     expect(serializer.warm(deadline)).toBe(false);
