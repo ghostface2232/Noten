@@ -752,6 +752,7 @@ async function runDoc(docName, kind, webDir, loads, profile) {
     }
     if (flag("nav")) {
       result.nav = await navScenario(cdp);
+      if (opt("eval-after", null)) result.evalAfter = await cdp.eval(opt("eval-after"));
       return result;
     }
     const sel = CARET_TARGETS[kind] ?? CARET_TARGETS.default;
