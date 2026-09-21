@@ -14,12 +14,17 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
   remove: (path: string, opts?: { recursive?: boolean }) => removeMock(path, opts),
 }));
 
+// Tauri's convertFileSrc as it behaves on Windows.
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (path: string, protocol = "asset") => `http://${protocol}.localhost/${encodeURIComponent(path)}`,
+}));
+
 vi.mock("./crashLog", () => ({
   logNotenError: vi.fn(() => Promise.resolve()),
 }));
 
 import {
-  clearRenderableImageSourceCache,
+  assetPathForRenderedUrl,
   duplicateNoteAssets,
   removeNoteAssetDir,
   resolveRenderableImageSource,
@@ -31,7 +36,6 @@ async function getMockedLogger() {
 }
 
 beforeEach(async () => {
-  clearRenderableImageSourceCache();
   removeMock.mockClear();
   mkdirMock.mockClear();
   readDirMock.mockClear();
@@ -43,69 +47,46 @@ beforeEach(async () => {
   (await getMockedLogger()).mockClear();
 });
 
-describe("resolveRenderableImageSource cache", () => {
+describe("resolveRenderableImageSource", () => {
   const context = { noteId: "note-a", filePath: "/notes/note-a.md" };
 
-  it("reuses a cached asset render source while the entry is live", async () => {
-    readFileMock.mockResolvedValue(new Uint8Array([1, 2, 3]));
-
-    const first = await resolveRenderableImageSource(".assets/note-a/img.png", context);
-    const second = await resolveRenderableImageSource(".assets/note-a/img.png", context);
-
-    expect(first).toBe("data:image/png;base64,AQID");
-    expect(second).toBe(first);
-    expect(readFileMock).toHaveBeenCalledTimes(1);
+  it("returns inline data URLs as they are", () => {
+    const dataUrl = "data:image/png;base64,AQID";
+    expect(resolveRenderableImageSource(dataUrl, context)).toBe(dataUrl);
   });
 
-  it("evicts least-recently-used entries instead of growing without bound", async () => {
-    readFileMock.mockResolvedValue(new Uint8Array([1]));
+  it("points managed assets at the file through the noten-asset protocol, without reading it", () => {
+    const url = resolveRenderableImageSource(".assets/note-a/img.png", context);
+    expect(url).toBe(`http://noten-asset.localhost/${encodeURIComponent("/notes/.assets/note-a/img.png")}`);
+    expect(readFileMock).not.toHaveBeenCalled();
+  });
 
-    for (let i = 0; i < 129; i += 1) {
-      await resolveRenderableImageSource(`.assets/note-a/${i}.png`, context);
+  it("builds forward-slash paths from a Windows note path", () => {
+    // One spelling per file, so the URL of an image stays stable and
+    // assetPathForRenderedUrl round-trips it.
+    const url = resolveRenderableImageSource(".assets/n/img.png", { noteId: "n", filePath: "C:\\Users\\u\\notes\\n.md" });
+    expect(assetPathForRenderedUrl(url!)).toBe("C:/Users/u/notes/.assets/n/img.png");
+  });
+
+  it("refuses sources that are neither inline data nor managed assets", () => {
+    for (const src of ["https://example.com/x.png", "//example.com/x.png", "file:///C:/x.png", "C:/x.png", "../x.png"]) {
+      expect(resolveRenderableImageSource(src, context)).toBeNull();
     }
-    await resolveRenderableImageSource(".assets/note-a/0.png", context);
-    await resolveRenderableImageSource(".assets/note-a/128.png", context);
-
-    expect(readFileMock).toHaveBeenCalledTimes(130);
+    expect(resolveRenderableImageSource(".assets/note-a/img.png", { noteId: "note-a", filePath: null })).toBeNull();
   });
 
-  it("clears cached render sources when a note asset directory is removed", async () => {
-    readFileMock.mockResolvedValue(new Uint8Array([1, 2, 3]));
-
-    await resolveRenderableImageSource(".assets/note-a/img.png", context);
-    await removeNoteAssetDir("/notes", "note-a");
-    await resolveRenderableImageSource(".assets/note-a/img.png", context);
-
-    expect(removeMock).toHaveBeenCalledWith("/notes/.assets/note-a", { recursive: true });
-    expect(readFileMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("can be cleared when the notes directory changes", async () => {
-    readFileMock.mockResolvedValue(new Uint8Array([1, 2, 3]));
-
-    await resolveRenderableImageSource(".assets/note-a/img.png", context);
-    clearRenderableImageSourceCache();
-    await resolveRenderableImageSource(".assets/note-a/img.png", context);
-
-    expect(readFileMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not repopulate the cache from a stale read that finishes after clear", async () => {
-    let finishRead!: (bytes: Uint8Array) => void;
-    readFileMock
-      .mockImplementationOnce(() => new Promise<Uint8Array>((resolve) => {
-        finishRead = resolve;
-      }))
-      .mockResolvedValue(new Uint8Array([4, 5, 6]));
-
-    const pending = resolveRenderableImageSource(".assets/note-a/img.png", context);
-    clearRenderableImageSourceCache();
-    finishRead(new Uint8Array([1, 2, 3]));
-
-    expect(await pending).toBe("data:image/png;base64,AQID");
-    expect(await resolveRenderableImageSource(".assets/note-a/img.png", context))
-      .toBe("data:image/png;base64,BAUG");
-    expect(readFileMock).toHaveBeenCalledTimes(2);
+  it("maps a rendered asset URL back to its file, and nothing else", () => {
+    const url = resolveRenderableImageSource(".assets/note-a/한글 이름.png", context)!;
+    expect(assetPathForRenderedUrl(url)).toBe("/notes/.assets/note-a/한글 이름.png");
+    expect(assetPathForRenderedUrl("data:image/png;base64,AQID")).toBeNull();
+    expect(assetPathForRenderedUrl("https://example.com/x.png")).toBeNull();
+    expect(assetPathForRenderedUrl("not a url")).toBeNull();
+    // A well-formed URL for a file outside `.assets` (or one climbing out of
+    // it) is refused, though the fs scope could read it.
+    const outside = `http://noten-asset.localhost/${encodeURIComponent("C:/Users/u/Pictures/x.png")}`;
+    expect(assetPathForRenderedUrl(outside)).toBeNull();
+    const climbing = `http://noten-asset.localhost/${encodeURIComponent("C:/n/.assets/../secret.png")}`;
+    expect(assetPathForRenderedUrl(climbing)).toBeNull();
   });
 });
 

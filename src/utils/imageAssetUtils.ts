@@ -1,5 +1,6 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { mkdir, readDir, readFile, remove, writeFile } from "@tauri-apps/plugin-fs";
-import { bytesToDataUrl, dataUrlToUint8Array, mimeFromDataUrl, mimeFromExt, mimeToExt } from "./imageUtils";
+import { dataUrlToUint8Array, mimeFromDataUrl, mimeFromExt, mimeToExt } from "./imageUtils";
 import { isValidNoteId } from "./noteId";
 import { isStrictSubpath, normalizeSep } from "./pathUtils";
 import { NotenError } from "./notenError";
@@ -76,80 +77,6 @@ export function buildAssetRelativePath(noteId: string, filename: string): string
   return `.assets/${noteId}/${filename}`;
 }
 
-const MAX_RENDERABLE_SOURCE_CACHE_ENTRIES = 128;
-const MAX_RENDERABLE_SOURCE_CACHE_CHARS = 16 * 1024 * 1024;
-
-interface RenderableSourceCacheEntry {
-  dataUrl: string;
-  size: number;
-}
-
-const renderableSourceCache = new Map<string, RenderableSourceCacheEntry>();
-let renderableSourceCacheChars = 0;
-let renderableSourceCacheGeneration = 0;
-
-function normalizeCacheKey(path: string): string {
-  return toUnixPath(path);
-}
-
-function removeRenderableSourceCacheEntry(key: string): void {
-  const existing = renderableSourceCache.get(key);
-  if (!existing) return;
-  renderableSourceCache.delete(key);
-  renderableSourceCacheChars -= existing.size;
-}
-
-function invalidateRenderableSourceCache(): void {
-  renderableSourceCacheGeneration += 1;
-}
-
-function getCachedRenderableSource(absolutePath: string): string | null {
-  const key = normalizeCacheKey(absolutePath);
-  const cached = renderableSourceCache.get(key);
-  if (!cached) return null;
-  renderableSourceCache.delete(key);
-  renderableSourceCache.set(key, cached);
-  return cached.dataUrl;
-}
-
-function setCachedRenderableSource(absolutePath: string, dataUrl: string): void {
-  const key = normalizeCacheKey(absolutePath);
-  removeRenderableSourceCacheEntry(key);
-  const size = dataUrl.length;
-  renderableSourceCache.set(key, { dataUrl, size });
-  renderableSourceCacheChars += size;
-
-  while (
-    renderableSourceCache.size > MAX_RENDERABLE_SOURCE_CACHE_ENTRIES
-    || renderableSourceCacheChars > MAX_RENDERABLE_SOURCE_CACHE_CHARS
-  ) {
-    const oldest = renderableSourceCache.keys().next().value as string | undefined;
-    if (!oldest) break;
-    removeRenderableSourceCacheEntry(oldest);
-  }
-}
-
-export function clearRenderableImageSourceCache(): void {
-  renderableSourceCache.clear();
-  renderableSourceCacheChars = 0;
-  invalidateRenderableSourceCache();
-}
-
-export function evictRenderableImageSourceCachePath(absolutePath: string): void {
-  removeRenderableSourceCacheEntry(normalizeCacheKey(absolutePath));
-  invalidateRenderableSourceCache();
-}
-
-export function evictRenderableImageSourceCachePrefix(absolutePathPrefix: string): void {
-  const prefix = normalizeCacheKey(absolutePathPrefix).replace(/\/+$/, "");
-  for (const key of Array.from(renderableSourceCache.keys())) {
-    if (key === prefix || key.startsWith(`${prefix}/`)) {
-      removeRenderableSourceCacheEntry(key);
-    }
-  }
-  invalidateRenderableSourceCache();
-}
-
 export async function removeNoteAssetDir(notesDir: string, noteId: string): Promise<void> {
   if (!notesDir || !noteId) return;
   // This is a recursive delete: an unsafe id is catastrophic here. `..` makes
@@ -175,7 +102,6 @@ export async function removeNoteAssetDir(notesDir: string, noteId: string): Prom
     ));
     return;
   }
-  evictRenderableImageSourceCachePrefix(dir);
   try {
     await remove(dir, { recursive: true });
   } catch {
@@ -286,7 +212,6 @@ export async function persistDataUrlAsAsset(
 
   await mkdir(dirname(absolutePath), { recursive: true }).catch(() => {});
   await writeFile(absolutePath, bytes);
-  evictRenderableImageSourceCachePath(absolutePath);
   return relativePath;
 }
 
@@ -304,7 +229,6 @@ export async function persistBinaryAsAsset(
 
   await mkdir(dirname(absolutePath), { recursive: true }).catch(() => {});
   await writeFile(absolutePath, payload.bytes);
-  evictRenderableImageSourceCachePath(absolutePath);
   return relativePath;
 }
 
@@ -327,10 +251,26 @@ export async function readImageBinary(
   return { bytes, mime };
 }
 
-export async function resolveRenderableImageSource(
+/** URI scheme the Rust side serves note images on (`note_asset_response`). */
+const NOTE_ASSET_PROTOCOL = "noten-asset";
+
+/**
+ * What an <img> in the editor should show for `src`: the data URL itself for
+ * inline `data:image` sources, a `noten-asset` URL of the file for managed
+ * `.assets/` sources, or null for anything that must not render.
+ *
+ * The browser loads the file itself (like Obsidian's app:// or Joplin's
+ * joplin-content://): no IPC read, no base64, and the image lives in the
+ * browser's image cache, which it can evict. Reading every image into JS
+ * instead cost ~15 s of main thread for a note with 600 images (base64), or
+ * hit WebView2's Blob storage limit and left images broken (Blob URLs). The
+ * Rust handler serves only image files inside `.assets` directories, and
+ * reads them off the UI thread.
+ */
+export function resolveRenderableImageSource(
   src: string,
   context: DocumentImageContext,
-): Promise<string | null> {
+): string | null {
   if (isDataImageSource(src)) return src;
   // Only data:image and managed .assets/ sources are renderable. Anything
   // else — http(s), protocol-relative, file:, absolute local paths — is
@@ -341,17 +281,23 @@ export async function resolveRenderableImageSource(
 
   const absolutePath = resolveAssetAbsolutePath(src, context.filePath);
   if (!absolutePath) return null;
+  return convertFileSrc(absolutePath, NOTE_ASSET_PROTOCOL);
+}
 
-  const cached = getCachedRenderableSource(absolutePath);
-  if (cached) return cached;
-
-  const cacheGeneration = renderableSourceCacheGeneration;
-  const payload = await readImageBinary(src, context);
-  if (!payload) return null;
-
-  const dataUrl = bytesToDataUrl(payload.bytes, payload.mime);
-  if (cacheGeneration === renderableSourceCacheGeneration) {
-    setCachedRenderableSource(absolutePath, dataUrl);
+/**
+ * The `.assets` file behind a URL from `resolveRenderableImageSource`, or null
+ * for any other URL. PDF export uses it to inline images: the headless
+ * browser that prints cannot load the app's protocol. It reads with the
+ * broader fs scope, so it accepts only what the protocol itself would serve.
+ */
+export function assetPathForRenderedUrl(url: string): string | null {
+  let path: string;
+  try {
+    path = decodeURIComponent(new URL(url).pathname.slice(1));
+  } catch {
+    return null;
   }
-  return dataUrl;
+  const segments = toUnixPath(path).split("/");
+  if (!segments.slice(0, -1).includes(".assets") || segments.includes("..")) return null;
+  return convertFileSrc(path, NOTE_ASSET_PROTOCOL) === url ? path : null;
 }

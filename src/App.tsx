@@ -58,7 +58,6 @@ import { writeMigrationJournal, type MigrationCleanupMode } from "./utils/migrat
 import { recoverPendingMigration } from "./utils/migrationCleanup";
 import { colorHex } from "./utils/noteColors";
 import { clampMenuToViewport } from "./utils/clampMenuPosition";
-import { clearRenderableImageSourceCache } from "./utils/imageAssetUtils";
 import { sortSignature } from "./utils/docsSignature";
 import type { LibraryData } from "./utils/libraryStore";
 import { useFileWatcher } from "./hooks/useFileWatcher";
@@ -360,7 +359,6 @@ function App() {
   useEffect(() => {
     if (!settingsLoaded) return;
     (async () => {
-      clearRenderableImageSourceCache();
       if (settings.notesDirectory) {
         setNotesDir(settings.notesDirectory, reconcileStateRef.current);
       } else {
@@ -795,7 +793,6 @@ function App() {
     previousNotesDirectory: string,
     preservedLibrary: LibraryData,
   ) => {
-    clearRenderableImageSourceCache();
     restoreNotesDir(oldDir, preservedLibrary, reconcileStateRef.current);
     await persistNotesDirectorySetting(previousNotesDirectory);
     setMigrationInProgress(false);
@@ -937,7 +934,6 @@ function App() {
       }
     }
 
-    clearRenderableImageSourceCache();
     setNotesDir(newDir, reconcileStateRef.current);
     setCurrentNotesDir(newDir);
     setReloadKey((k) => k + 1);
@@ -1019,7 +1015,6 @@ function App() {
       return;
     }
 
-    clearRenderableImageSourceCache();
     resetNotesDir(reconcileStateRef.current);
     if (sourceRetained) {
       // Journal the resolved default dir so a later cleanup knows where to

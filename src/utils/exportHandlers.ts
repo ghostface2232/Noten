@@ -3,6 +3,9 @@ import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
+import { readFile } from "@tauri-apps/plugin-fs";
+import { assetPathForRenderedUrl } from "./imageAssetUtils";
+import { mimeFromExt } from "./imageUtils";
 
 async function fontToDataUrl(publicPath: string): Promise<string> {
   try {
@@ -60,6 +63,34 @@ export function cloneEditorContentForExport(editorEl: HTMLElement): HTMLElement 
   return clone;
 }
 
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Editor images load their asset through the app's noten-asset protocol, which the
+ * headless browser that prints the PDF cannot reach. Inline them into the
+ * export copy as data URLs.
+ */
+export async function inlineAssetImages(root: HTMLElement): Promise<void> {
+  await Promise.all(Array.from(root.querySelectorAll<HTMLImageElement>("img[src]"), async (img) => {
+    const path = assetPathForRenderedUrl(img.getAttribute("src")!);
+    if (!path) return;
+    try {
+      const bytes = await readFile(path);
+      const ext = path.slice(path.lastIndexOf(".") + 1);
+      img.setAttribute("src", await blobToDataUrl(new Blob([bytes], { type: mimeFromExt(ext) })));
+    } catch {
+      img.removeAttribute("src");
+    }
+  }));
+}
+
 export async function exportAsMarkdown(markdown: string, defaultName: string, locale: Locale = "en") {
   const selected = await save({
     title: t("dialog.export", locale),
@@ -98,6 +129,7 @@ export async function exportAsPdf(editorEl: HTMLElement, defaultName: string, lo
 
   const fontFaces = await buildFontFaces();
   const exportRoot = cloneEditorContentForExport(editorEl);
+  await inlineAssetImages(exportRoot);
 
   const htmlContent = `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
