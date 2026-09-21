@@ -1,12 +1,24 @@
 {
   "ko": [
-    "찾기 바의 대소문자 구분을 켜짐/꺼짐이 뚜렷한 스위치로 바꾸고 바꾸기 버튼 옆으로 이동",
-    "찾기 바 너비를 넓혀 \"찾을 내용\" 입력란이 잘리지 않도록 수정",
-    "찾기·바꾸기나 줄 이동 바가 열려 있는 동안 툴바가 숨지 않도록 해 바가 움직이는 문제 수정"
+    "큰 노트의 입력과 한글 입력, 스크롤이 크게 빨라졌습니다. 1MB 노트에서 한글 한 글자를 조합하는 데 1초 이상 걸리던 것이 수십 ms로 줄었습니다.",
+    "큰 노트를 여는 속도를 개선했습니다. 1MB 노트 로딩이 9초에서 0.5초 수준이 됐습니다.",
+    "이미지가 많은 노트가 훨씬 가볍게 열립니다. 이미지 627장 노트가 모두 표시되기까지 25-40초 걸리던 것이 3초 이내로 줄었고, 메모리 사용량도 크게 낮아졌습니다.",
+    "타이핑을 멈췄을 때 자동 저장이 일으키던 순간적인 멈춤을 없앴습니다.",
+    "인용문이 a. 또는 iv. 형태의 목록으로 끝나는 노트가 열리지 않던 문제를 고쳤습니다.",
+    "개요에서 제목을 눌렀을 때 간혹 엉뚱한 위치로 이동하던 문제를 고쳤습니다.",
+    "찾기·바꾸기 바의 버튼에 이름과 툴팁을 붙이고 결과 개수와 바꾼 개수를 읽어 주도록 했으며, Alt+C로 대소문자 구분을 켜고 끌 수 있게 했습니다.",
+    "PDF로 내보낼 때 읽지 못한 이미지가 있으면 알려 주고, 편집기보다 넓은 표도 잘리지 않게 인쇄합니다.",
+    "업데이트를 설치하기 전에 새 버전의 변경 사항을 먼저 확인할 수 있습니다."
   ],
   "en": [
-    "Turned the find bar's match-case control into a switch with a clear on/off state, next to the replace button",
-    "Widened the find bar so the query field no longer clips its placeholder",
-    "Kept the toolbar from hiding while the find or go-to-line bar is open, so the bar no longer shifts under the cursor"
+    "Typing, Korean IME input and scrolling in large notes are dramatically faster: composing one Hangul syllable in a 1 MB note went from over a second to tens of milliseconds.",
+    "Large notes open much faster — loading a 1 MB note went from about 9 seconds to half a second.",
+    "Image-heavy notes are far lighter. A note with 627 images took 25-40 seconds to display in full and now takes under 3 seconds, with much lower memory use.",
+    "Removed the brief freeze autosave caused when you paused typing.",
+    "Fixed notes that would not open when a blockquote ended in an \"a.\" or \"iv.\" style list.",
+    "Fixed outline jumps that occasionally landed far from the heading you clicked.",
+    "The find and replace bar's buttons now carry names and tooltips, the match and replacement counts are announced, and Alt+C toggles match case.",
+    "PDF export now tells you when an image could not be read, and prints tables wider than the editor without cutting them off.",
+    "You can read the new version's changes before installing an update."
   ]
 }
