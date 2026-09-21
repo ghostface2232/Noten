@@ -3,7 +3,7 @@
 // Run after editing package.json's "version". The SettingsModal version label
 // reads getVersion() at runtime, so it needs no sync entry.
 //
-// The changelog block in SettingsModal.tsx is intentionally not touched — the
+// changelog.json at the repository root is intentionally not touched — the
 // release notes are human-written copy, not a derived value.
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -86,4 +86,4 @@ patch(
 );
 
 console.log(`\nDone. ${touched} file(s) updated, ${unchanged} already in sync.`);
-console.log("Remember to update the changelog block in SettingsModal.tsx (Korean + English).");
+console.log("Remember to rewrite changelog.json for this release (ko + en, same line count).");
