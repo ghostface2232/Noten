@@ -72,23 +72,39 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+const NOTE_ASSET_ORIGIN = "http://noten-asset.localhost/";
+
 /**
- * Editor images load their asset through the app's noten-asset protocol, which the
- * headless browser that prints the PDF cannot reach. Inline them into the
- * export copy as data URLs.
+ * Editor images load their asset through the app's noten-asset scheme, which
+ * the headless browser that prints the PDF cannot reach. Inline them into the
+ * export copy as data URLs, one at a time (reading every image at once holds
+ * them all in memory together, which a note with hundreds of MB of images
+ * cannot afford). Returns how many images could not be inlined and were
+ * dropped; a noten-asset URL that does not map back to an `.assets` file is
+ * dropped too rather than left for the renderer to request.
  */
-export async function inlineAssetImages(root: HTMLElement): Promise<void> {
-  await Promise.all(Array.from(root.querySelectorAll<HTMLImageElement>("img[src]"), async (img) => {
-    const path = assetPathForRenderedUrl(img.getAttribute("src")!);
-    if (!path) return;
+export async function inlineAssetImages(root: HTMLElement): Promise<number> {
+  let dropped = 0;
+  for (const img of Array.from(root.querySelectorAll<HTMLImageElement>("img[src]"))) {
+    const src = img.getAttribute("src")!;
+    const path = assetPathForRenderedUrl(src);
+    if (!path) {
+      if (src.startsWith(NOTE_ASSET_ORIGIN)) {
+        img.removeAttribute("src");
+        dropped += 1;
+      }
+      continue;
+    }
     try {
       const bytes = await readFile(path);
       const ext = path.slice(path.lastIndexOf(".") + 1);
       img.setAttribute("src", await blobToDataUrl(new Blob([bytes], { type: mimeFromExt(ext) })));
     } catch {
       img.removeAttribute("src");
+      dropped += 1;
     }
-  }));
+  }
+  return dropped;
 }
 
 export async function exportAsMarkdown(markdown: string, defaultName: string, locale: Locale = "en") {
@@ -129,7 +145,7 @@ export async function exportAsPdf(editorEl: HTMLElement, defaultName: string, lo
 
   const fontFaces = await buildFontFaces();
   const exportRoot = cloneEditorContentForExport(editorEl);
-  await inlineAssetImages(exportRoot);
+  const droppedImages = await inlineAssetImages(exportRoot);
 
   const htmlContent = `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
@@ -153,6 +169,8 @@ export async function exportAsPdf(editorEl: HTMLElement, defaultName: string, lo
   /* The editor's off-screen containment (tiptap-editor.css) must not decide
      how blocks break across pages. */
   .ProseMirror > * { contain: none !important; content-visibility: visible !important; }
+  /* Print wide tables whole rather than inside the editor's scrolling wrapper. */
+  .ProseMirror > .tableWrapper { overflow: visible !important; }
   .ProseMirror h1 { font-size: 22pt !important; font-weight: 600; }
   .ProseMirror h2 { font-size: 18pt !important; font-weight: 500; }
   .ProseMirror h3 { font-size: 14pt !important; font-weight: 500; }
@@ -239,6 +257,12 @@ export async function exportAsPdf(editorEl: HTMLElement, defaultName: string, lo
 
   try {
     await invoke("print_to_pdf", { html: htmlContent, outputPath: selected });
+    if (droppedImages > 0) {
+      await message(t("dialog.exportImagesMissing", locale).replace("{n}", String(droppedImages)), {
+        title: t("dialog.export", locale),
+        kind: "warning",
+      });
+    }
   } catch (err) {
     if (import.meta.env.DEV) {
       console.error("PDF export failed:", err);

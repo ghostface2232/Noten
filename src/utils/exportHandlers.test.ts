@@ -67,10 +67,10 @@ describe("inlineAssetImages", () => {
 
   it("replaces asset-protocol sources with data URLs of the files", async () => {
     const el = editorWith(
-      `<p><img src="${assetUrl("/notes/.assets/n/a.jpg")}"><img src="data:image/gif;base64,R0lG"><img src="${assetUrl("/notes/.assets/n/missing.png")}"></p>`,
+      `<p><img src="${assetUrl("/notes/.assets/n/a.jpg")}"><img src="data:image/gif;base64,R0lG"><img src="${assetUrl("/notes/.assets/n/missing.png")}"><img src="${assetUrl("/notes/x.png")}"></p>`,
     );
 
-    await inlineAssetImages(el);
+    expect(await inlineAssetImages(el)).toBe(2);
 
     const imgs = el.querySelectorAll("img");
     expect(imgs[0].getAttribute("src")).toBe("data:image/jpeg;base64,AQID");
@@ -78,5 +78,8 @@ describe("inlineAssetImages", () => {
     // A file that cannot be read is dropped rather than left as a URL the
     // PDF renderer cannot resolve.
     expect(imgs[2].hasAttribute("src")).toBe(false);
+    // A noten-asset URL outside `.assets` is not read, and not left behind
+    // for the PDF renderer to request either.
+    expect(imgs[3].hasAttribute("src")).toBe(false);
   });
 });

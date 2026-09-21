@@ -346,7 +346,13 @@ fn note_asset_response<R: Runtime>(
             .header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
             .header("X-Content-Type-Options", "nosniff")
     };
-    let status = |code: u16| response(code).body(Vec::new()).expect("static response");
+    // Not cached: an image OneDrive has not synced yet must load once it has.
+    let status = |code: u16| {
+        response(code)
+            .header("Cache-Control", "no-store")
+            .body(Vec::new())
+            .expect("static response")
+    };
     let encoded = request.uri().path().as_bytes();
     let raw = percent_encoding::percent_decode(encoded.get(1..).unwrap_or_default())
         .decode_utf8_lossy()
