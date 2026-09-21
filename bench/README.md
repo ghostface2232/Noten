@@ -71,3 +71,20 @@ Experiment flags: `--micro` times `getMarkdown()`, `getJSON()` and
 `--css "<rules>"` injects a stylesheet into every load (how the
 `content-visibility` variants in docs/2026-09-21-editor-performance.md were
 measured); `--trace-categories` overrides the trace categories.
+
+Checks that a change keeps the page correct rather than fast (each replaces the
+input scenarios):
+
+- `--nav` — outline jumps, go-to-line and find driven through the real UI;
+  reports where each target lands relative to the scroll viewport. A layout
+  change that estimates off-screen sizes shows up here as jumps landing off
+  screen.
+- `--geometry` — every top-level block's height. Two builds with the same
+  document should agree to rounding (compare the `geometry` arrays).
+- `--visual "<css>"` — heights and screenshots of sampled blocks before and
+  after injecting `css` into the same page; differing screenshots go to
+  `<cache>/results/visual`, and `node bench/pngdiff.mjs` reports how many
+  pixels differ and whether the difference is a whole-pixel shift.
+- `--eval "<js>"` runs a script once after the loads (e.g. to strip a kind of
+  DOM node and see whether a cost depends on it); `--doc-file <path.md>` runs
+  any Markdown file instead of the corpus.

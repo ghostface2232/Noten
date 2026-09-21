@@ -19,7 +19,7 @@ import { createServer } from "node:http";
 import {
   existsSync, linkSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
-import { dirname, extname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -40,6 +40,7 @@ const opt = (name, fallback) => {
   return i >= 0 ? args[i + 1] : fallback;
 };
 const flag = (name) => args.includes(`--${name}`);
+const docFile = opt("doc-file", null);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -108,7 +109,7 @@ function prepareNotes(docName) {
   if (!APPDATA_DIR.includes(IDENTIFIER_GUARD)) throw new Error("refusing to touch a non-bench app data dir");
   rmSync(NOTES_DIR, { recursive: true, force: true });
   mkdirSync(join(NOTES_DIR, ".meta"), { recursive: true });
-  const body = readFileSync(join(DOCS, `${docName}.md`), "utf8");
+  const body = readFileSync(docFile ?? join(DOCS, `${docName}.md`), "utf8");
   const now = Date.now();
   writeNote(NOTE_ID, docName, body, now);
   writeNote(SMALL_ID, "small note", "# Small\n\nA short note used as the other end of a switch.\n", now - 60_000);
@@ -502,6 +503,129 @@ async function microScenario(cdp) {
   })()`, 600_000);
 }
 
+// Where navigation lands: outline jump, go-to-line and find, driven through
+// the real UI. Each target is reported relative to the scroll container's
+// viewport (`top` in px from its top edge, `visible` when fully inside), so a
+// layout change such as content-visibility can be checked for jumps that land
+// off target.
+async function navScenario(cdp) {
+  const key = async (k, code, vk, modifiers = 0) => {
+    for (const type of ["keyDown", "keyUp"]) {
+      await cdp.send("Input.dispatchKeyEvent", { type, key: k, code, windowsVirtualKeyCode: vk, modifiers });
+    }
+  };
+  const CTRL = 2, SHIFT = 8;
+  const where = (expr) => cdp.eval(`(() => {
+    const pm = document.querySelector(".ProseMirror");
+    let sc = pm; while (sc && !["auto", "scroll"].includes(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
+    const box = sc.getBoundingClientRect();
+    const r = (${expr});
+    if (!r) return null;
+    return { top: Math.round(r.top - box.top), visible: r.top >= box.top && r.bottom <= box.bottom, scrollTop: Math.round(sc.scrollTop), scrollHeight: sc.scrollHeight, width: pm.clientWidth };
+  })()`);
+  // The editor's own selection, not the DOM one: while the go-to-line input
+  // has focus, the DOM selection sits in that input.
+  const caretRect = `(() => { const v = document.querySelector(".ProseMirror").editor.view;
+    return v.coordsAtPos(v.state.selection.head); })()`;
+  const out = { outline: [], line: [], find: [] };
+
+  // Outline: open the panel, click items at fixed fractions of the list.
+  await clickMiddle(cdp, ".ProseMirror > *", 0.05);
+  await key("O", "KeyO", 79, CTRL | SHIFT);
+  await sleep(600);
+  for (const f of [0.8, 0.2, 0.95, 0.5]) {
+    const label = await cdp.eval(`(() => { const items = document.querySelectorAll("[data-outline-item]");
+      if (!items.length) return null; const b = items[Math.min(items.length - 1, Math.floor(items.length * ${f}))];
+      b.click(); return b.textContent; })()`);
+    if (label == null) break;
+    await sleep(1200);
+    const landed = await where(caretRect);
+    const heading = await cdp.eval(`(() => { const v = document.querySelector(".ProseMirror").editor.view;
+      const { node } = v.domAtPos(v.state.selection.head); const el = node.nodeType === 1 ? node : node.parentElement;
+      return el?.closest("h1,h2,h3,h4,h5,h6")?.textContent ?? null; })()`);
+    out.outline.push({ f, ...landed, sameHeading: heading === label });
+  }
+  await key("O", "KeyO", 79, CTRL | SHIFT);
+  await sleep(300);
+
+  // Go to line: fractions of the status bar's line total.
+  const total = await cdp.eval(`(() => { const e = document.querySelector(".ProseMirror").editor; let n = 0;
+    e.state.doc.descendants((node) => { if (node.isTextblock) { n++; return false; } return true; }); return n; })()`);
+  for (const f of [0.9, 0.3, 0.6]) {
+    await clickMiddle(cdp, ".ProseMirror > *", 0.05);
+    await key("g", "KeyG", 71, CTRL);
+    await sleep(300);
+    await cdp.send("Input.insertText", { text: String(Math.max(1, Math.floor(total * f))) });
+    await key("Enter", "Enter", 13);
+    await sleep(1500);
+    out.line.push({ f, ...(await where(caretRect)) });
+    await key("Escape", "Escape", 27);
+    await sleep(300);
+  }
+
+  // Find: a 10-character snippet taken from 85% into the text, so the first
+  // match is a long jump from the top.
+  const needle = await cdp.eval(`(() => { const t = document.querySelector(".ProseMirror").textContent;
+    for (let i = Math.floor(t.length * 0.85); i < t.length - 10; i++) { const s = t.slice(i, i + 10); if (/^[A-Za-z가-힣][\\w가-힣 ]{9}$/.test(s)) return s; }
+    return null; })()`);
+  if (needle) {
+    await clickMiddle(cdp, ".ProseMirror > *", 0.05);
+    await key("f", "KeyF", 70, CTRL);
+    await sleep(300);
+    await cdp.send("Input.insertText", { text: needle });
+    await sleep(1500);
+    out.find.push({ step: "first", ...(await where(`document.querySelector(".search-match-active")?.getBoundingClientRect()`)) });
+    await key("Enter", "Enter", 13, SHIFT);
+    await sleep(1500);
+    out.find.push({ step: "prev", ...(await where(`document.querySelector(".search-match-active")?.getBoundingClientRect()`)) });
+    await key("Escape", "Escape", 27);
+    await sleep(300);
+  }
+  return out;
+}
+
+// Visual equivalence of a CSS change: every top-level block's height, and
+// screenshots of sampled blocks (with a margin, to catch clipped overflow),
+// before and after injecting `css` into the same page. Differing shots are
+// written to <cache>/results/visual/<doc>-<i>-{before,after}.png.
+async function visualScenario(cdp, css, docName) {
+  const heights = () => cdp.eval(`[...document.querySelector(".ProseMirror").children]
+    .map((k) => [k.tagName.toLowerCase() + (k.className ? "." + String(k.className).split(" ")[0] : ""), +k.getBoundingClientRect().height.toFixed(2)])`);
+  const count = await cdp.eval(`document.querySelector(".ProseMirror").childElementCount`);
+  const picks = [...new Set(Array.from({ length: 24 }, (_, i) => Math.floor((i * count) / 24)))];
+  const shots = async () => {
+    const out = [];
+    for (const i of picks) {
+      const clip = await cdp.eval(`(() => { const k = document.querySelector(".ProseMirror").children[${i}];
+        k.scrollIntoView({ block: "start" }); const r = k.getBoundingClientRect();
+        return { x: Math.max(0, r.left - 32), y: Math.max(0, r.top - 16), width: r.width + 64, height: Math.max(1, Math.min(r.height + 32, innerHeight - r.top)), scale: 1 }; })()`);
+      await sleep(250);
+      out.push((await cdp.send("Page.captureScreenshot", { format: "png", clip })).data);
+    }
+    return out;
+  };
+  const h0 = await heights();
+  const s0 = await shots();
+  await cdp.eval(`(() => { const s = document.createElement("style"); s.id = "bench-visual"; s.textContent = ${JSON.stringify(css)}; document.head.appendChild(s); return 0; })()`);
+  await sleep(500);
+  const h1 = await heights();
+  const s1 = await shots();
+  const changed = [];
+  for (let i = 0; i < h0.length; i++) {
+    if (h0[i][1] !== h1[i]?.[1]) changed.push([i, h0[i][0], h0[i][1], h1[i]?.[1]]);
+  }
+  const dir = join(CACHE, "results", "visual");
+  mkdirSync(dir, { recursive: true });
+  const pixelDiffs = [];
+  s0.forEach((a, k) => {
+    if (a === s1[k]) return;
+    pixelDiffs.push(picks[k]);
+    writeFileSync(join(dir, `${docName}-${picks[k]}-before.png`), Buffer.from(a, "base64"));
+    writeFileSync(join(dir, `${docName}-${picks[k]}-after.png`), Buffer.from(s1[k], "base64"));
+  });
+  return { blocks: h0.length, heightChanged: changed.length, heightSamples: changed.slice(0, 12), shots: picks.length, pixelDiffs };
+}
+
 async function scrollScenario(cdp, trace = false) {
   await cdp.eval(`(() => { const s = document.querySelector(".ProseMirror"); let p = s;
     while (p && !(getComputedStyle(p).overflowY === "auto" || getComputedStyle(p).overflowY === "scroll")) p = p.parentElement;
@@ -590,8 +714,29 @@ async function runDoc(docName, kind, webDir, loads, profile) {
       nodes: runs.at(-1).nodes,
     };
 
+    // Experiments: a script run once after the load runs, before any scenario
+    // (e.g. strip a kind of DOM node to see what a cost depends on).
+    const evalJs = opt("eval", null);
+    if (evalJs) result.evalResult = await cdp.eval(evalJs);
     if (flag("micro")) {
       result.micro = await microScenario(cdp);
+      return result;
+    }
+    // Every top-level block's height as laid out (or, while skipped, as
+    // remembered), for comparing two builds' geometry.
+    if (flag("geometry")) {
+      await sleep(500);
+      result.geometry = await cdp.eval(`[...document.querySelector(".ProseMirror").children]
+        .map((k) => +k.getBoundingClientRect().height.toFixed(2))`);
+      result.skipping = await cdp.eval(`document.querySelector(".ProseMirror").classList.contains("noten-skip-offscreen")`);
+      return result;
+    }
+    if (opt("visual", null)) {
+      result.visual = await visualScenario(cdp, opt("visual"), docName);
+      return result;
+    }
+    if (flag("nav")) {
+      result.nav = await navScenario(cdp);
       return result;
     }
     const sel = CARET_TARGETS[kind] ?? CARET_TARGETS.default;
@@ -620,7 +765,10 @@ async function main() {
   const webDir = join(CACHE, opt("web", "web"));
   const loads = Number(opt("loads", "3"));
   const profile = flag("profile");
-  const selected = manifest.filter((m) => (!kinds || kinds.includes(m.kind)) && sizes.includes(m.size));
+  // --doc-file runs one Markdown file from anywhere instead of the corpus.
+  const selected = docFile
+    ? [{ name: basename(docFile, ".md"), kind: "file" }]
+    : manifest.filter((m) => (!kinds || kinds.includes(m.kind)) && sizes.includes(m.size));
 
   const server = await serve(webDir);
   const outDir = join(CACHE, "results");
@@ -634,7 +782,7 @@ async function main() {
       all.push(r);
       writeFileSync(outFile, JSON.stringify(all, null, 2));
       if (r.error) console.log(`ERROR ${r.error}`);
-      else if (r.micro) console.log(`ready ${r.loadMedian.readyMs}ms | ${JSON.stringify(r.micro)}`);
+      else if (r.micro || r.nav || r.visual || r.geometry) console.log(`ready ${r.loadMedian.readyMs}ms | ${JSON.stringify(r.micro ?? r.nav ?? r.visual ?? { blocks: r.geometry.length, skipping: r.skipping })}`);
       else console.log(`ready ${r.loadMedian.readyMs}ms settled ${r.loadMedian.settledMs}ms`
         + ` | type p50 ${r.typing.latency?.p50} p95 ${r.typing.latency?.p95}`
         + ` | enter p95 ${r.enter.latency?.p95} | autosave ${r.typing.autosave?.longest}ms`
