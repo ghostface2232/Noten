@@ -78,6 +78,14 @@ import { searchPluginKey, type SearchPluginState } from "./extensions/SearchHigh
 import { refreshWikiLinkDecorations } from "./extensions/WikiLink";
 import { t, type I18nKey } from "./i18n";
 import { registerFatalHandler, type NotenErrorCode } from "./utils/notenError";
+import { recoverJournalledEdits } from "./hooks/editRecovery";
+import type { RecoveryRecord } from "./utils/recoveryJournal";
+import { tauriFileSystem } from "./utils/fs";
+import { atomicWriteText } from "./utils/atomicWrite";
+import { markOwnWrite } from "./hooks/ownWriteTracker";
+import { setKnownDiskContent } from "./utils/conflictBackup";
+import { libraryStore } from "./utils/libraryStore";
+import { emitDocUpdated } from "./hooks/useWindowSync";
 import { exportAsMarkdown, exportAsPdf } from "./utils/exportHandlers";
 import { clearManagedNotesData, clearMigratedSource, hasExistingNotenData, migrateNotesDir } from "./utils/migrateNotesDir";
 import { writeMigrationJournal, type MigrationCleanupMode } from "./utils/migrationJournal";
@@ -1133,6 +1141,55 @@ function App() {
     });
     return () => registerFatalHandler(null);
   }, [showEditorNotice]);
+
+  // Replay edits a previous run could not get onto disk. Runs once the initial
+  // load settled, because deciding whether a record is safe to apply needs the
+  // note's current disk body — which is exactly what the load just read.
+  const editRecoveryDone = useRef(false);
+  useEffect(() => {
+    if (editRecoveryDone.current || isLoading) return;
+    editRecoveryDone.current = true;
+    void (async () => {
+      const outcome = await recoverJournalledEdits(async (record: RecoveryRecord) => {
+        try {
+          markOwnWrite(record.filePath, record.content);
+          await atomicWriteText(tauriFileSystem, record.filePath, record.content, { failClosed: true });
+          setKnownDiskContent(record.filePath, record.content);
+        } catch {
+          return false;
+        }
+        const restoredAt = Date.now();
+        setDocs((prev) => prev.map((doc) => (
+          doc.id === record.docId
+            ? { ...doc, content: record.content, updatedAt: restoredAt, isDirty: false }
+            : doc
+        )));
+        // The editor is still showing the pre-recovery body for the open note,
+        // and its next keystroke would serialize THAT back over what we just
+        // restored. Repoint it before anyone can type.
+        if (libraryStore.getSnapshot().activeNoteId === record.docId) {
+          tiptapRef.current?.openDocument?.({
+            noteId: record.docId,
+            filePath: record.filePath,
+            markdown: record.content,
+            reason: "window-sync",
+          });
+          state.primeMarkdown(record.content);
+          state.setIsDirty(false);
+        }
+        emitDocUpdated(record.docId, record.filePath, record.content, restoredAt);
+        return true;
+      }).catch(() => null);
+      if (!outcome) return;
+      if (outcome.applied > 0) {
+        showEditorNotice(t("recovery.applied", localeRef.current), FATAL_NOTICE_MS);
+      }
+      if (outcome.preserved > 0) {
+        showEditorNotice(t("recovery.preserved", localeRef.current), FATAL_NOTICE_MS);
+      }
+    })();
+  }, [isLoading, setDocs, showEditorNotice, state]);
+
 
   const handleToggleFocusMode = useCallback(() => {
     const next = !focusModeEnabled;

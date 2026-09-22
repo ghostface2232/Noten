@@ -467,3 +467,20 @@ describe("contract: unsaved edits get a last chance before the process ends", ()
     expect(body).toContain("journalPendingEdits");
   });
 });
+
+describe("contract: recovery repoints the editor at what it restored", () => {
+  // Applying a recovered body writes the file and commits the doc, but the
+  // open note's editor still holds the PRE-recovery text. Its next keystroke
+  // serializes that back over the restoration, so the recovery has to reload
+  // the editor before anyone can type.
+  it("the apply path reloads the editor for the active note", () => {
+    const src = read(resolve(SRC_ROOT, "App.tsx"));
+    const start = src.indexOf("recoverJournalledEdits(");
+    expect(start).toBeGreaterThan(-1);
+    const applyBody = src.slice(start, start + 2000);
+    expect(applyBody).toContain("atomicWriteText");
+    expect(applyBody).toContain("activeNoteId === record.docId");
+    expect(applyBody).toContain("openDocument");
+    expect(applyBody).toContain("primeMarkdown");
+  });
+});

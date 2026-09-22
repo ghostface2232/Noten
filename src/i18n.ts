@@ -290,6 +290,14 @@ const dict = {
     en: "Some changes still could not be saved. Closing now discards them. Close anyway?",
     ko: "일부 변경 사항을 여전히 저장하지 못했습니다. 지금 닫으면 해당 변경 사항이 사라집니다. 그래도 닫으시겠습니까?",
   },
+  "recovery.applied": {
+    en: "Restored edits that could not be saved last time.",
+    ko: "지난번에 저장하지 못한 편집을 복구했습니다.",
+  },
+  "recovery.preserved": {
+    en: "Edits that could not be saved were kept in the .conflicts folder — the note itself was left unchanged.",
+    ko: "저장하지 못한 편집을 .conflicts 폴더에 보관했습니다. 노트 자체는 그대로 두었습니다.",
+  },
   "error.saveFailed": {
     en: "Could not save to the notes folder. Your changes are still open here.",
     ko: "노트 폴더에 저장하지 못했습니다. 변경 사항은 아직 창에 남아 있습니다.",
