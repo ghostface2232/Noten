@@ -74,6 +74,18 @@ describe("migrateDataUrlImagesToAssets — atomic body rewrite", () => {
     expect(fsMock.rename).not.toHaveBeenCalled();
   });
 
+  it("writes a note id holding $ patterns into an <img> src literally", async () => {
+    // Legacy stems are kept as note ids, and `$` `&` `'` are valid in them.
+    // A string replacement expanded `$'` into the rest of the tag.
+    const path = "/notes/Q1 $' $& $$.md";
+    refs.bodyByPath.set(path, `<img alt="x" src="data:image/png;base64,AAAA" width="10">\n`);
+
+    await migrateDataUrlImagesToAssets([path]);
+
+    const written = fsMock.writeTextFile.mock.calls.find((c) => c[0] === `${path}.tmp`)?.[1];
+    expect(written).toMatch(/^<img alt="x" src="\.assets\/Q1 \$' \$& \$\$\/[0-9a-f]{64}\.png" width="10">\n$/);
+  });
+
   it("leaves notes without data URLs untouched", async () => {
     refs.bodyByPath.set(NOTE, "# plain note, no images\n");
 

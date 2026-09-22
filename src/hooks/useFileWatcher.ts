@@ -28,6 +28,7 @@ import { readMeta, invalidateReadAllMetaCache } from "../utils/metadataIO";
 import { scanAndAbsorbConflicts } from "../utils/conflictFileDetector";
 import { setKnownDiskContent } from "../utils/conflictBackup";
 import { markdownEqual } from "../utils/markdownEqual";
+import { keepManualTitle } from "../utils/documentTitle";
 import { NotenError } from "../utils/notenError";
 import { logNotenError } from "../utils/crashLog";
 import type { Locale } from "./useSettings";
@@ -164,8 +165,12 @@ export function useFileWatcher(
         next[idx] = { ...cur, pinned: meta.pinned === true, color: meta.color, updatedAt: meta.updatedAt };
         return next;
       }
+      // A sidecar read can predate a rename this window already applied from
+      // doc-renamed; the peer's own write of it may still be in flight.
+      const title = keepManualTitle(cur, { fileName: meta.fileName, customName: meta.customName });
       if (
-        cur.fileName === meta.fileName
+        cur.fileName === title.fileName
+        && !!cur.customName === !!title.customName
         && cur.updatedAt === meta.updatedAt
         && cur.pinned === (meta.pinned === true)
         && cur.color === meta.color
@@ -173,11 +178,11 @@ export function useFileWatcher(
       const next = [...prev];
       next[idx] = {
         ...cur,
-        fileName: meta.fileName,
+        fileName: title.fileName,
         updatedAt: meta.updatedAt,
         pinned: meta.pinned === true,
         color: meta.color,
-        customName: meta.customName,
+        customName: title.customName,
       };
       return next;
     });

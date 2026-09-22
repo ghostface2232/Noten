@@ -2,6 +2,7 @@ import { mkdir, readDir, copyFile, readTextFile, readFile, exists, remove } from
 import { tauriFileSystem } from "./fs";
 import { isValidNoteId } from "./noteId";
 import { normalizeSep } from "./pathUtils";
+import { keepManualTitle } from "./documentTitle";
 import {
   ensureMetaDir,
   metaDirFor,
@@ -382,9 +383,11 @@ function mergeMetaForMigration(source: NoteMeta, dest: NoteMeta | undefined): No
       ? dest
       : (dest.groupId ? dest : source);
 
+  const title = keepManualTitle(other, bodyWinner);
   return {
     ...bodyWinner,
-    customName: bodyWinner.customName || undefined,
+    fileName: title.fileName,
+    customName: title.customName || undefined,
     createdAt: Math.min(source.createdAt, dest.createdAt),
     // pinned/color use independent clocks from body/title updates.
     pinned: source.pinned === true || dest.pinned === true,

@@ -29,7 +29,7 @@ import { isValidNoteId } from "../utils/noteId";
 import { NotenError } from "../utils/notenError";
 import { logNotenError } from "../utils/crashLog";
 import type { Locale, NotesSortOrder } from "./useSettings";
-import { getDefaultDocumentTitle } from "../utils/documentTitle";
+import { getDefaultDocumentTitle, keepManualTitle } from "../utils/documentTitle";
 import type { NoteColorId } from "../utils/noteColors";
 import type { NoteDoc, NoteGroup, TrashedNote } from "../utils/noteTypes";
 import {
@@ -314,15 +314,15 @@ export function mergeHydratedLibrary(
       docs.push(doc);
       continue;
     }
-    if (
-      epoch.projectionIds.has(doc.id)
+    const diskBodyWins = epoch.projectionIds.has(doc.id)
       || live.content === doc.content
-      || live.updatedAt <= doc.updatedAt
-    ) {
-      docs.push(doc);
-      continue;
-    }
-    docs.push({ ...doc, content: live.content, updatedAt: live.updatedAt });
+      || live.updatedAt <= doc.updatedAt;
+    // The sidecar this read can predate a rename, whether it landed during the
+    // load or is still queued in a peer; the manual pair survives the rebase.
+    docs.push(keepManualTitle(
+      live,
+      diskBodyWins ? doc : { ...doc, content: live.content, updatedAt: live.updatedAt },
+    ));
   }
   const hydratedIds = new Set(hydrated.docs.map((doc) => doc.id));
   for (const live of current.docs) {
@@ -1180,13 +1180,14 @@ export function runPersistenceTransaction<T>(
             pinned: baseline.clock.pinned > baseline.acknowledgedClock.pinned,
             color: baseline.clock.color > baseline.acknowledgedClock.color,
           };
+          // A rename applied from doc-renamed does not bump this window's title
+          // clock, so the disk pair can still predate it here.
+          const title = preferCanonical.title || !disk ? canonical : keepManualTitle(canonical, disk);
           return {
             ...canonical,
             ...(disk ?? {}),
-            fileName: preferCanonical.title ? canonical.fileName : (disk?.fileName ?? canonical.fileName),
-            customName: preferCanonical.title
-              ? canonical.customName
-              : (disk ? disk.customName : canonical.customName),
+            fileName: title.fileName,
+            customName: title.customName,
             createdAt: disk?.createdAt ?? canonical.createdAt,
             updatedAt: Math.max(canonical.updatedAt, disk?.updatedAt ?? 0),
             pinned: preferCanonical.pinned ? canonical.pinned : (disk ? disk.pinned : canonical.pinned),

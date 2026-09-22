@@ -1981,6 +1981,47 @@ describe("useFileSystem — renameNote partial-failure", () => {
     expect(saveFailed).toBeDefined();
   });
 
+  it("inserts a title containing $ patterns literally, without rewriting the body", async () => {
+    // String.replace interprets $&, $', $` and $$ in a STRING replacement.
+    // `Budget $' 2026` spliced the entire remainder of the note into the link;
+    // `Rock $$ Roll` collapsed to a single $ and resolved to no note. The
+    // corrupted body is written fail-closed and then seeded as the conflict
+    // baseline, so there is no .conflicts copy to recover it from.
+    const body = "see [[Old]] here.\nA long tail of the note follows.";
+    for (const title of ["Budget $' 2026", "Rock $$ Roll", "Q1 $& Q2", "Total $` sum"]) {
+      const target = makeDoc("target", { fileName: "Old", customName: true });
+      const linker = makeDoc("linker", { content: body });
+      readMock.mockImplementation(async (path: string) => (
+        path === "/notes/linker.md" ? body : ""
+      ));
+      const { result } = renderFs({ docs: [target, linker] });
+
+      await act(async () => {
+        await result.current.renameNote(0, title);
+      });
+
+      const rewritten = [...libraryStore.getSnapshot().docs]
+        .find((d) => d.id === "linker")!;
+      expect(rewritten.content).toBe(`see [[${title}]] here.\nA long tail of the note follows.`);
+    }
+  });
+
+  it("tells peers the new title is a manual one", async () => {
+    // A peer that takes the title without customName still sees an empty,
+    // unnamed note, and its next switch prunes it permanently.
+    const emitDocRenamedMock = windowSyncModule.emitDocRenamed as ReturnType<typeof vi.fn>;
+    emitDocRenamedMock.mockClear();
+    const { result } = renderFs({ docs: [makeDoc("target", { fileName: "Old" })] });
+
+    await act(async () => {
+      await result.current.renameNote(0, "Named");
+    });
+
+    expect(emitDocRenamedMock).toHaveBeenCalledWith(
+      "target", "/notes/target.md", "/notes/target.md", "Named", true,
+    );
+  });
+
   it("when the active doc's rewrite fails, isDirty stays true and openDocument is NOT called", async () => {
     const target = makeDoc("target", { fileName: "Old", customName: true });
     const activeWithLink = makeDoc("active", { content: "see [[Old]]" });

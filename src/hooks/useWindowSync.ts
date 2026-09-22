@@ -37,6 +37,10 @@ interface DocRenamedPayload {
   oldFilePath: string;
   newFilePath: string;
   newFileName: string;
+  /** Whether the new title is a manual one. The empty-note prunes read
+   *  `customName` and delete permanently, so a receiver without it would
+   *  prune a just-named empty note. */
+  customName: boolean;
 }
 
 interface DocDeletedPayload {
@@ -156,9 +160,15 @@ function isStaleBodyEvent(docId: string, updatedAt: number): boolean {
   return seen != null && updatedAt < seen;
 }
 
-export function emitDocRenamed(docId: string, oldFilePath: string, newFilePath: string, newFileName: string) {
+export function emitDocRenamed(
+  docId: string,
+  oldFilePath: string,
+  newFilePath: string,
+  newFileName: string,
+  customName: boolean,
+) {
   emit("doc-renamed", {
-    sourceWindow: WINDOW_LABEL, docId, oldFilePath, newFilePath, newFileName,
+    sourceWindow: WINDOW_LABEL, docId, oldFilePath, newFilePath, newFileName, customName,
   } satisfies DocRenamedPayload).catch(() => {});
 }
 
@@ -326,14 +336,20 @@ export function useWindowSync(
       }),
 
       listen<DocRenamedPayload>("doc-renamed", (event) => {
-        const { sourceWindow, docId, newFilePath, newFileName } = event.payload;
+        const { sourceWindow, docId, newFilePath, newFileName, customName } = event.payload;
         if (sourceWindow === WINDOW_LABEL) return;
 
         commitRemote((current) => {
           const idx = current.docs.findIndex((d) => d.id === docId);
           if (idx < 0) return null;
           const docs = [...current.docs];
-          docs[idx] = { ...docs[idx], filePath: newFilePath, fileName: newFileName };
+          // OR, not assign: customName only ever turns on (keepManualTitle).
+          docs[idx] = {
+            ...docs[idx],
+            filePath: newFilePath,
+            fileName: newFileName,
+            customName: customName || docs[idx].customName || undefined,
+          };
           return { docs };
         });
       }),

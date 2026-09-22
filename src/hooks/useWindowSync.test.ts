@@ -127,6 +127,39 @@ beforeEach(() => {
   resetGroupSyncClocks();
 });
 
+describe("useWindowSync — doc-renamed carries customName", () => {
+  // customName is what the three empty-note prunes read as "the user named
+  // this, never auto-delete it", and those prunes delete permanently. Taking
+  // only the title from a peer's rename left a just-named empty note looking
+  // auto-titled here until its sidecar arrived — and switching notes before
+  // that deleted it on every synced machine.
+  it("adopts the peer's manual-title flag along with the title", async () => {
+    const { result } = renderWindowSync(async () => true, [
+      { ...makeDoc("a"), content: "", isDirty: false },
+      makeDoc("b"),
+    ]);
+    await waitFor(() => expect(refs.handlers.has("doc-renamed")).toBe(true));
+
+    act(() => {
+      refs.handlers.get("doc-renamed")?.({
+        payload: {
+          sourceWindow: "window-b",
+          docId: "a",
+          oldFilePath: "/notes/a.md",
+          newFilePath: "/notes/a.md",
+          newFileName: "Shopping list",
+          customName: true,
+        },
+      });
+    });
+
+    expect(result.current.docs.find((doc) => doc.id === "a")).toMatchObject({
+      fileName: "Shopping list",
+      customName: true,
+    });
+  });
+});
+
 describe("useWindowSync — remote body update", () => {
   it("updates content without letting a delayed body event overwrite the title", async () => {
     const newerMetadata = {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { resolve, join, relative } from "node:path";
 
 // Project-specific contract tests. These are NOT exhaustive — they enforce a
 // handful of invariants from recent regressions that ESLint cannot easily
@@ -493,5 +493,39 @@ describe("contract: recovery repoints the editor at what it restored", () => {
     expect(applyBody).toContain("activeNoteId === record.docId");
     expect(applyBody).toContain("openDocument");
     expect(applyBody).toContain("primeMarkdown");
+  });
+});
+
+describe("contract: customName only ever turns on", () => {
+  // The three empty-note prunes (pruneEmptyCurrentDoc, newNote's willReplace,
+  // restoreNote's pruneLeavingDoc) read customName as "the user named this"
+  // and delete permanently, bypassing .trash and .conflicts. Because no user
+  // action clears it, a copy of the title pair that has it off can never be
+  // newer than one that has it on; keepManualTitle is that rule, and every
+  // site that merges two copies must go through it.
+  it("no code writes it off literally except the legacy trashed-note decomposition", () => {
+    // Pins the premise against a new literal clear. A clear through a
+    // variable is what the call-site test below guards against.
+    const clears: string[] = [];
+    for (const file of walk(SRC_ROOT)) {
+      const rel = relative(SRC_ROOT, file).replace(/\\/g, "/");
+      for (const _hit of read(file).match(/customName\s*:\s*(false|undefined)\b/g) ?? []) clears.push(rel);
+    }
+    // Both write sidecars for notes already in the legacy trash.
+    expect(clears.sort()).toEqual(["hooks/useNotesLoader.ts", "utils/migrateNotesDir.ts"]);
+  });
+
+  it.each([
+    // mergeHydratedLibrary and the lifecycle mergeNoteMeta.
+    ["hooks/useNotesLoader.ts", 2],
+    // applyMetaChange.
+    ["hooks/useFileWatcher.ts", 1],
+    // persistDecomposedState, for live and trashed notes through one helper.
+    ["utils/decomposedState.ts", 1],
+    // mergeMetaForMigration.
+    ["utils/migrateNotesDir.ts", 1],
+  ])("%s merges title pairs through keepManualTitle", (file, sites) => {
+    const calls = read(resolve(SRC_ROOT, file)).match(/\bkeepManualTitle\(/g) ?? [];
+    expect(calls.length).toBeGreaterThanOrEqual(sites);
   });
 });

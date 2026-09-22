@@ -249,6 +249,18 @@ describe("migrateNotesDir — merge meta clocks", () => {
     expect(merged.groupUpdatedAt).toBe(5000);
   });
 
+  it("a newer unnamed copy does not take the title from an older manual one", async () => {
+    refs.fs!.seedTextFile("/from/a.md", "body");
+    pinMtime("/from/a.md", 5000);
+    seedMeta("/from", { id: "a", fileName: "Named", customName: true, updatedAt: 2000 });
+    seedMeta("/to", { id: "a", fileName: "Auto title", updatedAt: 3000 });
+
+    expect(await migrateNotesDir("/from", "/to", "merge")).toEqual({ success: true });
+
+    const merged = await readMetaRaw("/to", "a");
+    expect(merged).toMatchObject({ fileName: "Named", customName: true, updatedAt: 3000 });
+  });
+
   it("leaves destination-only meta untouched", async () => {
     refs.fs!.seedTextFile("/from/a.md", "body");
     pinMtime("/from/a.md", 5000);
