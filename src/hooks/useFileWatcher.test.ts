@@ -1014,3 +1014,33 @@ describe("useFileWatcher — convergence flows drop the readAllMeta cache first"
       .toBeLessThan(readDiskGroupsSnapshotMock.mock.invocationCallOrder[0]);
   });
 });
+
+describe("useFileWatcher — applyMetaChange keeps a manual title a stale sidecar lacks", () => {
+  // doc-renamed reaches this window before the peer's sidecar write does, so
+  // the watcher can read the pre-rename sidecar (e.g. an event from the peer's
+  // earlier pin write). Adopting it cleared customName on a named note, and
+  // the empty-note prunes read customName and delete permanently.
+  const applyDocUpdaters = (setDocs: ReturnType<typeof vi.fn>, seed: NoteDoc[]) =>
+    setDocs.mock.calls
+      .map((c) => c[0])
+      .filter((u): u is (prev: NoteDoc[]) => NoteDoc[] => typeof u === "function")
+      .reduce<NoteDoc[]>((acc, u) => u(acc), seed);
+
+  it("does not let a sidecar without customName clear it", async () => {
+    const live = makeDoc("a", { fileName: "Named", customName: true });
+    refs.metaById.set("a", makeMeta("a", { fileName: "Note a", pinned: true, updatedAt: 2000 }));
+    const { setDocs } = renderWatcher({ docs: [live] });
+    await waitForMetaHandler();
+
+    await act(async () => {
+      await refs.metaHandler!({
+        type: { modify: { kind: "data", mode: "any" } },
+        paths: ["/notes/.meta/a.json"],
+        attrs: {},
+      } as unknown as WatchEvent);
+    });
+
+    const [after] = applyDocUpdaters(setDocs, [live]);
+    expect(after).toMatchObject({ fileName: "Named", customName: true, pinned: true, updatedAt: 2000 });
+  });
+});

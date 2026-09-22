@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { resolve, join, relative } from "node:path";
 
 // Project-specific contract tests. These are NOT exhaustive — they enforce a
 // handful of invariants from recent regressions that ESLint cannot easily
@@ -496,39 +496,34 @@ describe("contract: recovery repoints the editor at what it restored", () => {
   });
 });
 
-describe("contract: a field the permanent prunes read travels on every event that changes it", () => {
-  // Regression class, hit three times in one review cycle: a destructive path
-  // reads a field, and some channel that changes that field does not carry it,
-  // so a peer window acts on a stale value. `customName` is the one that
-  // deletes: the three empty-note prunes (pruneEmptyCurrentDoc, newNote's
-  // willReplace, restoreNote's pruneLeavingDoc) read it as "the user named
-  // this, never auto-delete it", and they bypass .trash and .conflicts. A
-  // rename changes it, so doc-renamed must carry it and its receiver must
-  // commit it.
-  const SYNC = resolve(SRC_ROOT, "hooks/useWindowSync.ts");
-  const FS = resolve(SRC_ROOT, "hooks/useFileSystem.ts");
-
-  it("the prunes still gate on customName (the premise of this test)", () => {
-    const src = read(FS);
-    const prune = src.slice(src.indexOf("const pruneEmptyCurrentDoc"), src.indexOf("const pruneEmptyCurrentDoc") + 1500);
-    expect(prune).toContain("leaving.customName");
+describe("contract: customName only ever turns on for a live note", () => {
+  // The three empty-note prunes (pruneEmptyCurrentDoc, newNote's willReplace,
+  // restoreNote's pruneLeavingDoc) read customName as "the user named this"
+  // and delete permanently, bypassing .trash and .conflicts. A stale read that
+  // turned it off re-armed them on a just-named note — through doc-renamed,
+  // hydration and the .meta watcher in turn. Because no user action clears it,
+  // a read that has it off while the live doc has it on is simply older, and
+  // keepManualTitle rebases on that. The first test pins the premise against a
+  // new literal clear; the second pins the two sites that copy a disk title
+  // onto a live doc. A new such site must route through keepManualTitle too.
+  it("nothing clears it except the legacy trashed-note decomposition", () => {
+    const clears: string[] = [];
+    for (const file of walk(SRC_ROOT)) {
+      const rel = relative(SRC_ROOT, file).replace(/\\/g, "/");
+      for (const _hit of read(file).match(/customName\s*:\s*(false|undefined)\b/g) ?? []) clears.push(rel);
+    }
+    // Both write sidecars for notes that were already in the legacy trash;
+    // neither touches a live doc.
+    expect(clears.sort()).toEqual(["hooks/useNotesLoader.ts", "utils/migrateNotesDir.ts"]);
   });
 
-  it("doc-renamed declares customName and its receiver commits it", () => {
-    const src = read(SYNC);
-    const payload = src.match(/interface DocRenamedPayload \{[\s\S]*?\n\}/)?.[0];
-    expect(payload, "DocRenamedPayload not found").toBeDefined();
-    expect(payload).toMatch(/\bcustomName\s*:/);
+  it("every site folding a disk title into a live doc goes through keepManualTitle", () => {
+    const loader = read(resolve(SRC_ROOT, "hooks/useNotesLoader.ts"));
+    const merge = loader.slice(loader.indexOf("export function mergeHydratedLibrary"));
+    expect(merge.slice(0, merge.indexOf("\n}\n"))).toContain("keepManualTitle(");
 
-    const start = src.indexOf('listen<DocRenamedPayload>("doc-renamed"');
-    expect(start).toBeGreaterThan(-1);
-    const receiver = src.slice(start, start + 1400);
-    expect(receiver).toMatch(/\{[^}]*\bcustomName\b[^}]*\}\s*=\s*event\.payload/);
-    expect(receiver).toMatch(/customName:\s*customName/);
-  });
-
-  it("renameNote tells peers the new title is a manual one", () => {
-    const src = read(FS);
-    expect(src).toMatch(/emitDocRenamed\([^)]*,\s*true\)/);
+    const watcher = read(resolve(SRC_ROOT, "hooks/useFileWatcher.ts"));
+    const apply = watcher.slice(watcher.indexOf("const applyMetaChange"));
+    expect(apply.slice(0, apply.indexOf("}, ["))).toContain("keepManualTitle(");
   });
 });

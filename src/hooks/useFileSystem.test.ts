@@ -2006,6 +2006,22 @@ describe("useFileSystem — renameNote partial-failure", () => {
     }
   });
 
+  it("tells peers the new title is a manual one", async () => {
+    // A peer that takes the title without customName still sees an empty,
+    // unnamed note, and its next switch prunes it permanently.
+    const emitDocRenamedMock = windowSyncModule.emitDocRenamed as ReturnType<typeof vi.fn>;
+    emitDocRenamedMock.mockClear();
+    const { result } = renderFs({ docs: [makeDoc("target", { fileName: "Old" })] });
+
+    await act(async () => {
+      await result.current.renameNote(0, "Named");
+    });
+
+    expect(emitDocRenamedMock).toHaveBeenCalledWith(
+      "target", "/notes/target.md", "/notes/target.md", "Named", true,
+    );
+  });
+
   it("when the active doc's rewrite fails, isDirty stays true and openDocument is NOT called", async () => {
     const target = makeDoc("target", { fileName: "Old", customName: true });
     const activeWithLink = makeDoc("active", { content: "see [[Old]]" });

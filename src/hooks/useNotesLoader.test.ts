@@ -138,12 +138,12 @@ vi.mock("../utils/reconcileFolder", async (importOriginal) => {
 });
 
 // Loader is imported AFTER all mocks. Tests then drive it with renderHook.
-import { useNotesLoader, resetNotesDir, restoreNotesDir, setNotesDir, getDefaultNotesDir, saveManifest, saveNoteMetadata, flushPersistence, runPersistenceTransaction, markGroupAsDeleted, markGroupMembershipChanged, markNotesPinnedChanged, purgeExpiredTrash } from "./useNotesLoader";
+import { useNotesLoader, resetNotesDir, restoreNotesDir, setNotesDir, getDefaultNotesDir, saveManifest, saveNoteMetadata, flushPersistence, runPersistenceTransaction, markGroupAsDeleted, markGroupMembershipChanged, markNotesPinnedChanged, purgeExpiredTrash, mergeHydratedLibrary, type HydrationEpochState } from "./useNotesLoader";
 import * as reconcileFolderModule from "../utils/reconcileFolder";
 import * as decomposedStateModule from "../utils/decomposedState";
 import * as crashLogModule from "../utils/crashLog";
 import { readMeta, writeMeta, type NoteMeta } from "../utils/metadataIO";
-import { libraryStore } from "../utils/libraryStore";
+import { libraryStore, type LibrarySnapshot } from "../utils/libraryStore";
 import { useAutoSave } from "./useAutoSave";
 import type { MarkdownState } from "./useMarkdownState";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
@@ -2255,5 +2255,65 @@ describe("useNotesLoader + useAutoSave — autosave re-sort keeps active identit
     expect(await refs.fs!.readTextFile("/test-appdata/notes/b.md")).toBe("body-b edited again");
     expect(await refs.fs!.readTextFile("/test-appdata/notes/a.md")).toBe("body-a");
     expect(libraryStore.getSnapshot().activeNoteId).toBe("b");
+  });
+});
+
+describe("mergeHydratedLibrary — a rename during the load survives the rebase", () => {
+  // The disk read can predate a rename that commits while it is in flight
+  // (locally, or from a peer's doc-renamed). Taking the read's title pair
+  // reverted the title AND cleared customName, and customName is what keeps
+  // the empty-note prunes, which delete permanently, off a named note.
+  const epoch: HydrationEpochState = {
+    seededIds: new Set(["a"]),
+    projectionIds: new Set(),
+    deletedIds: new Set(),
+    seededGroupIds: new Set(),
+    touchedGroupIds: new Set(),
+    removedGroupIds: new Set(),
+    seededTrashIds: new Set(),
+    trashRemovals: new Map(),
+  };
+  const doc = (overrides: Partial<NoteDoc>): NoteDoc => ({
+    id: "a",
+    filePath: "/notes/a.md",
+    fileName: "Untitled",
+    isDirty: false,
+    content: "",
+    createdAt: 1000,
+    updatedAt: 1000,
+    ...overrides,
+  });
+  const current = (live: NoteDoc): LibrarySnapshot => ({
+    docs: [live],
+    groups: [],
+    trashedNotes: [],
+    activeNoteId: "a",
+    revision: 1,
+    directoryGeneration: 1,
+    notesDirectory: "/notes",
+    origin: "local",
+  });
+  const hydrated = (disk: NoteDoc) => ({ docs: [disk], groups: [], trashedNotes: [], activeNoteId: "a" });
+
+  it("keeps a live manual title when the disk read has none", () => {
+    const merged = mergeHydratedLibrary(
+      current(doc({ fileName: "Named", customName: true })),
+      hydrated(doc({ updatedAt: 2000 })),
+      epoch,
+      "updated-desc",
+      "en",
+    );
+    expect(merged.docs?.[0]).toMatchObject({ fileName: "Named", customName: true, updatedAt: 2000 });
+  });
+
+  it("still takes a manual title the disk read carries", () => {
+    const merged = mergeHydratedLibrary(
+      current(doc({ fileName: "Named", customName: true })),
+      hydrated(doc({ fileName: "Renamed elsewhere", customName: true, updatedAt: 2000 })),
+      epoch,
+      "updated-desc",
+      "en",
+    );
+    expect(merged.docs?.[0]).toMatchObject({ fileName: "Renamed elsewhere", customName: true });
   });
 });

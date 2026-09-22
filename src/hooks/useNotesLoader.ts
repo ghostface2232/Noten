@@ -29,7 +29,7 @@ import { isValidNoteId } from "../utils/noteId";
 import { NotenError } from "../utils/notenError";
 import { logNotenError } from "../utils/crashLog";
 import type { Locale, NotesSortOrder } from "./useSettings";
-import { getDefaultDocumentTitle } from "../utils/documentTitle";
+import { getDefaultDocumentTitle, keepManualTitle } from "../utils/documentTitle";
 import type { NoteColorId } from "../utils/noteColors";
 import type { NoteDoc, NoteGroup, TrashedNote } from "../utils/noteTypes";
 import {
@@ -314,15 +314,15 @@ export function mergeHydratedLibrary(
       docs.push(doc);
       continue;
     }
-    if (
-      epoch.projectionIds.has(doc.id)
+    const diskBodyWins = epoch.projectionIds.has(doc.id)
       || live.content === doc.content
-      || live.updatedAt <= doc.updatedAt
-    ) {
-      docs.push(doc);
-      continue;
-    }
-    docs.push({ ...doc, content: live.content, updatedAt: live.updatedAt });
+      || live.updatedAt <= doc.updatedAt;
+    // A rename that landed while the disk read was in flight is newer than the
+    // sidecar it read; its title and customName must survive the rebase.
+    docs.push(keepManualTitle(
+      live,
+      diskBodyWins ? doc : { ...doc, content: live.content, updatedAt: live.updatedAt },
+    ));
   }
   const hydratedIds = new Set(hydrated.docs.map((doc) => doc.id));
   for (const live of current.docs) {
