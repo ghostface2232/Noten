@@ -24,7 +24,7 @@ import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { normalizeNoteTitle } from "../utils/noteText";
-import { duplicateNoteAssets, removeNoteAssetDir } from "../utils/imageAssetUtils";
+import { duplicateNoteAssets } from "../utils/imageAssetUtils";
 import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsDelta, emitNoteColorUpdated, emitNotePinnedUpdated, emitTrashUpdated } from "./useWindowSync";
 import { diffGroupsDelta, type GroupsDelta } from "../utils/groupsDelta";
 import type { NoteColorId } from "../utils/noteColors";
@@ -36,6 +36,7 @@ import { NotenError } from "../utils/notenError";
 import { t } from "../i18n";
 import { libraryStore, type LibrarySnapshot, type LibraryUpdater } from "../utils/libraryStore";
 import { blockNoteLifecycle } from "./noteLifecycleGate";
+import { purgeTrashedNoteFiles } from "../utils/trashPurge";
 import { flushLeftDocClean, type FlushResult } from "./useAutoSave";
 
 export type { NoteDoc } from "./useNotesLoader";
@@ -1786,12 +1787,11 @@ export function useFileSystem(
     const trashed = trashedNotesRef.current?.find((n) => n.id === trashedNoteId);
     if (!trashed) return;
 
-    try { await remove(trashed.trashFilePath); } catch { /* already gone */ }
-    try {
-      const notesDir = await getNotesDir();
-      await removeNoteAssetDir(notesDir, trashed.id);
-      await removeMetaFile(tauriFileSystem, notesDir, trashed.id);
-    } catch { /* ignore */ }
+    let notesDir: string | null = null;
+    try { notesDir = await getNotesDir(); } catch { /* body removal still works */ }
+    // A body still on disk keeps its entry, so the user sees it stay in trash
+    // and can retry instead of the file being orphaned in .trash.
+    if (!await purgeTrashedNoteFiles(tauriFileSystem, notesDir, trashed)) return;
 
     if (setTrashedNotes) {
       setTrashedNotes((prev) => prev.filter((n) => n.id !== trashedNoteId));
@@ -1806,21 +1806,21 @@ export function useFileSystem(
     const trashedSnapshot = trashedNotesRef.current ?? [];
     let notesDir: string | null = null;
     try { notesDir = await getNotesDir(); } catch { /* ignore */ }
+    // Only entries whose body actually left disk are dropped; a locked or
+    // cloud-held file keeps its entry for a later retry.
+    const purged: TrashedNote[] = [];
     for (const trashed of trashedSnapshot) {
-      try { await remove(trashed.trashFilePath); } catch { /* ignore */ }
-      if (notesDir) {
-        await removeNoteAssetDir(notesDir, trashed.id);
-        await removeMetaFile(tauriFileSystem, notesDir, trashed.id);
-      }
+      if (await purgeTrashedNoteFiles(tauriFileSystem, notesDir, trashed)) purged.push(trashed);
     }
+    if (purged.length === 0) return;
 
     if (setTrashedNotes) {
-      // Functional, filtered by the snapshot's { id, trashedAt } incarnations
+      // Functional, filtered by the purged { id, trashedAt } incarnations
       // (the same rule the trash-updated receiver applies): a peer entry added
       // during the file-removal awaits, or a newer re-trash of a purged id,
       // must survive this commit — wiping to [] erased them from the local
       // store while their files still sat in .trash.
-      const purgedAt = new Map(trashedSnapshot.map((note) => [note.id, note.trashedAt]));
+      const purgedAt = new Map(purged.map((note) => [note.id, note.trashedAt]));
       setTrashedNotes((prev) => prev.filter((note) => {
         const at = purgedAt.get(note.id);
         return at === undefined || note.trashedAt > at;
@@ -1829,7 +1829,7 @@ export function useFileSystem(
       // trashed while we were deleting files is still in .trash on disk, so
       // broadcasting an empty list would wrongly drop it there.
       emitTrashUpdated({
-        removed: trashedSnapshot.map((note) => ({ id: note.id, trashedAt: note.trashedAt })),
+        removed: purged.map((note) => ({ id: note.id, trashedAt: note.trashedAt })),
       });
     }
 

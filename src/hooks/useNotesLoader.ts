@@ -43,7 +43,7 @@ import {
 export type { NoteDoc, NoteGroup, TrashedNote } from "../utils/noteTypes";
 export { deriveTitle, getFileBaseName, stripInlineMarkdown, stripMarkdownContent } from "../utils/noteText";
 import { migrateDataUrlImagesToAssets } from "../utils/migrateImageAssets";
-import { removeNoteAssetDir } from "../utils/imageAssetUtils";
+import { purgeTrashedNoteFiles } from "../utils/trashPurge";
 import {
   metaPathFor,
   metaDirFor,
@@ -511,13 +511,12 @@ export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<Tr
       kept.push(note);
       continue;
     }
-    if (now - note.trashedAt > TRASH_RETENTION_MS) {
-      try { await tauriFileSystem.remove(note.trashFilePath); } catch { /* file may already be gone */ }
-      if (notesDir) {
-        await removeNoteAssetDir(notesDir, note.id);
-        await removeMetaFile(tauriFileSystem, notesDir, note.id);
-      }
-    } else {
+    // A body that could not be removed stays listed, so the next launch
+    // retries instead of the file lingering in .trash with no sidecar.
+    if (
+      now - note.trashedAt <= TRASH_RETENTION_MS
+      || !await purgeTrashedNoteFiles(tauriFileSystem, notesDir, note)
+    ) {
       kept.push(note);
     }
   }
