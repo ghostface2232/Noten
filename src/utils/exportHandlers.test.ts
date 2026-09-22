@@ -1,15 +1,12 @@
-import { describe, it, expect, vi } from "vitest";
-import { cloneEditorContentForExport, inlineAssetImages } from "./exportHandlers";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { cloneEditorContentForExport, pointAssetImagesAtFiles } from "./exportHandlers";
 
+const invokeMock = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string, protocol = "asset") => `http://${protocol}.localhost/${encodeURIComponent(path)}`,
-  invoke: vi.fn(),
+  invoke: (cmd: string, args: unknown) => invokeMock(cmd, args),
 }));
 vi.mock("@tauri-apps/plugin-fs", () => ({
-  readFile: vi.fn(async (path: string) => {
-    if (path.endsWith("missing.png")) throw new Error("not found");
-    return new Uint8Array([1, 2, 3]);
-  }),
   writeTextFile: vi.fn(),
 }));
 
@@ -62,24 +59,51 @@ describe("cloneEditorContentForExport", () => {
   });
 });
 
-describe("inlineAssetImages", () => {
+describe("pointAssetImagesAtFiles", () => {
   const assetUrl = (path: string) => `http://noten-asset.localhost/${encodeURIComponent(path)}`;
 
-  it("replaces asset-protocol sources with data URLs of the files", async () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    // The Rust gate: the canonical (`\\?\`) path of a file it would serve, else null.
+    invokeMock.mockImplementation(async (_cmd: string, { paths }: { paths: string[] }) =>
+      paths.map((p) => (p.includes("/.assets/") && !p.includes("refused") ? "\\\\?\\" + p.replace(/\//g, "\\") : null)),
+    );
+  });
+
+  it("points asset-protocol sources at the files the image gate allows", async () => {
     const el = editorWith(
-      `<p><img src="${assetUrl("/notes/.assets/n/a.jpg")}"><img src="data:image/gif;base64,R0lG"><img src="${assetUrl("/notes/.assets/n/missing.png")}"><img src="${assetUrl("/notes/x.png")}"></p>`,
+      `<p><img src="${assetUrl("C:/notes/.assets/n/사진 1.jpg")}"><img src="data:image/gif;base64,R0lG"><img src="${assetUrl("C:/notes/.assets/n/refused.png")}"><img src="${assetUrl("C:/notes/x.png")}"></p>`,
     );
 
-    expect(await inlineAssetImages(el)).toBe(2);
+    expect(await pointAssetImagesAtFiles(el)).toBe(2);
 
+    // One batched call; a URL that maps to no `.assets` path is asked as "",
+    // which the gate refuses.
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("note_image_files", {
+      paths: ["C:/notes/.assets/n/사진 1.jpg", "C:/notes/.assets/n/refused.png", ""],
+    });
     const imgs = el.querySelectorAll("img");
-    expect(imgs[0].getAttribute("src")).toBe("data:image/jpeg;base64,AQID");
+    expect(imgs[0].getAttribute("src")).toBe("file:///C:/notes/.assets/n/%EC%82%AC%EC%A7%84%201.jpg");
     expect(imgs[1].getAttribute("src")).toBe("data:image/gif;base64,R0lG");
-    // A file that cannot be read is dropped rather than left as a URL the
-    // PDF renderer cannot resolve.
+    // Refused or unmapped images are dropped, never left as a URL for the
+    // PDF renderer to request.
     expect(imgs[2].hasAttribute("src")).toBe(false);
-    // A noten-asset URL outside `.assets` is not read, and not left behind
-    // for the PDF renderer to request either.
     expect(imgs[3].hasAttribute("src")).toBe(false);
+  });
+
+  it("drops the asset images but keeps inline ones when the gate cannot be asked", async () => {
+    invokeMock.mockRejectedValue(new Error("ipc down"));
+    const el = editorWith(`<p><img src="${assetUrl("C:/notes/.assets/n/a.png")}"><img src="data:image/gif;base64,R0lG"></p>`);
+
+    expect(await pointAssetImagesAtFiles(el)).toBe(1);
+    expect(el.querySelectorAll("img")[0].hasAttribute("src")).toBe(false);
+    expect(el.querySelectorAll("img")[1].getAttribute("src")).toBe("data:image/gif;base64,R0lG");
+  });
+
+  it("does not call the gate for a note without asset images", async () => {
+    const el = editorWith('<p><img src="data:image/gif;base64,R0lG"></p>');
+    expect(await pointAssetImagesAtFiles(el)).toBe(0);
+    expect(invokeMock).not.toHaveBeenCalled();
   });
 });

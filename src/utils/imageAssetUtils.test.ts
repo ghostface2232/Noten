@@ -25,6 +25,7 @@ vi.mock("./crashLog", () => ({
 
 import {
   assetPathForRenderedUrl,
+  fileUrlForPath,
   duplicateNoteAssets,
   removeNoteAssetDir,
   resolveRenderableImageSource,
@@ -87,6 +88,33 @@ describe("resolveRenderableImageSource", () => {
     expect(assetPathForRenderedUrl(outside)).toBeNull();
     const climbing = `http://noten-asset.localhost/${encodeURIComponent("C:/n/.assets/../secret.png")}`;
     expect(assetPathForRenderedUrl(climbing)).toBeNull();
+  });
+});
+
+describe("fileUrlForPath", () => {
+  it("encodes every segment and keeps the drive letter", () => {
+    expect(fileUrlForPath("C:/Users/u/노트 #1 100%/.assets/n/it's (1).png")).toBe(
+      "file:///C:/Users/u/%EB%85%B8%ED%8A%B8%20%231%20100%25/.assets/n/it's%20(1).png",
+    );
+    expect(fileUrlForPath("C:\\Users\\u\\n\\.assets\\a b.png")).toBe("file:///C:/Users/u/n/.assets/a%20b.png");
+  });
+
+  it("maps UNC, canonical (\\\\?\\) and POSIX paths", () => {
+    expect(fileUrlForPath("\\\\host\\share\\.assets\\a.png")).toBe("file://host/share/.assets/a.png");
+    expect(fileUrlForPath("\\\\?\\C:\\n\\.assets\\a b.png")).toBe("file:///C:/n/.assets/a%20b.png");
+    expect(fileUrlForPath("\\\\?\\UNC\\host\\share\\.assets\\a.png")).toBe("file://host/share/.assets/a.png");
+    expect(fileUrlForPath("/notes/.assets/n/한.png")).toBe("file:///notes/.assets/n/%ED%95%9C.png");
+  });
+
+  it("round-trips through URL parsing", () => {
+    const path = "C:/Users/u/노트 #1 100%/.assets/n/a?b.png";
+    const url = new URL(fileUrlForPath(path));
+    expect(url.hash).toBe("");
+    expect(url.search).toBe("");
+    expect(decodeURIComponent(url.pathname)).toBe(`/${path}`);
+    const unc = new URL(fileUrlForPath("\\\\host\\share\\노트 #1\\a.png"));
+    expect(unc.host).toBe("host");
+    expect(decodeURIComponent(unc.pathname)).toBe("/share/노트 #1/a.png");
   });
 });
 
