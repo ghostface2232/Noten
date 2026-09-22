@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import { closeHistory } from "@tiptap/pm/history";
 import { common, createLowlight } from "lowlight";
 import MermaidCodeBlock from "./MermaidCodeBlock";
 
@@ -88,6 +89,48 @@ describe("leaving a code block", () => {
     expect(e.state.doc.child(1).textContent).toBe("");
     expect(e.state.doc.child(2).textContent).toBe("after");
     expect(cursorBlock(e)).toBe(e.state.doc.child(1));
+  });
+
+  it("steps into an empty paragraph mid-note too, not only the trailing one", () => {
+    const e = make("<pre><code>x</code></pre><p></p><p>after</p>");
+    e.commands.setTextSelection(2);
+
+    press(e, "Enter", { shiftKey: true });
+
+    expect(types(e)).toEqual(["codeBlock", "paragraph", "paragraph"]);
+    expect(cursorBlock(e)).toBe(e.state.doc.child(1));
+    expect(e.state.doc.child(2).textContent).toBe("after");
+  });
+
+  it("stays inside a list item when the block is the item's last child", () => {
+    const e = make("<ul><li><p>item</p><pre><code>code</code></pre></li></ul><p></p>");
+    let codeEnd = -1;
+    e.state.doc.descendants((node, pos) => {
+      if (node.type.name === "codeBlock") codeEnd = pos + 1 + node.content.size;
+    });
+    e.commands.setTextSelection(codeEnd);
+
+    press(e, "Enter", { shiftKey: true });
+
+    const item = e.state.doc.child(0).child(0);
+    expect(item.childCount).toBe(3);
+    expect(item.child(2).type.name).toBe("paragraph");
+    expect(cursorBlock(e)).toBe(item.child(2));
+  });
+
+  it("undoes a third-Enter exit in one step, restoring the blank lines", () => {
+    const e = lastCodeBlock("x");
+    press(e, "Enter");
+    press(e, "Enter");
+    // Separate the exit from the typing so undo covers just the exit.
+    e.view.dispatch(closeHistory(e.state.tr));
+    press(e, "Enter");
+    expect(e.state.doc.child(0).textContent).toBe("x");
+
+    e.commands.undo();
+
+    expect(e.state.doc.child(0).textContent).toBe("x\n\n");
+    expect(cursorBlock(e)).toBe(e.state.doc.child(0));
   });
 
   it("does not step into an empty heading below", () => {
