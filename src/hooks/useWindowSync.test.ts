@@ -307,7 +307,7 @@ describe("useWindowSync — remote body seeds the conflict baseline", () => {
     expect(getKnownDiskContent("/notes/a.md")).toBe("a");
   });
 
-  it("does not seed the new path after a rename moved the note", async () => {
+  it("does not seed when this window binds the note to a different path", async () => {
     const renamed = { ...makeDoc("b"), filePath: "/notes/renamed.md" };
     renderWindowSync(async () => true, [makeDoc("a"), renamed]);
     await waitFor(() => expect(refs.handlers.has("doc-updated")).toBe(true));

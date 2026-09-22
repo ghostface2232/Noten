@@ -303,8 +303,8 @@ export function useWindowSync(
     // from disk, so an ADOPTED body is what the file holds. Seeding only after
     // the commit accepted it matches the watcher: a declined (dirty) body must
     // not become the baseline, or the next save would overwrite the peer's
-    // version with no .conflicts copy. A peer rename since the write moved the
-    // file elsewhere, so only the path the body was written to is seeded.
+    // version with no .conflicts copy. The seed is keyed by the path the peer
+    // wrote and applied only while this window binds the note to that path.
     if (updated && updated.filePath === filePath) setKnownDiskContent(filePath, content);
     if (updated && docId === getRoutedActiveDocId()) showInEditor(updated);
   }, [commitRemote, getRoutedActiveDocId, showInEditor]);
