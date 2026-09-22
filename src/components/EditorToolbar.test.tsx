@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Profiler } from "react";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
-import { TextSelection } from "@tiptap/pm/state";
+import { EditorState, TextSelection } from "@tiptap/pm/state";
 import type { Editor as ReactEditor } from "@tiptap/react";
 import { EditorToolbar } from "./EditorToolbar";
 
@@ -29,7 +29,7 @@ function setup(content: string) {
   const editor = new Editor({ extensions: [StarterKit], content });
   active = editor;
   const commits = { n: 0 };
-  render(
+  const ui = (outlineOpen: boolean) => (
     <FluentProvider theme={webLightTheme}>
       <Profiler id="toolbar" onRender={() => { commits.n++; }}>
         <EditorToolbar
@@ -39,13 +39,14 @@ function setup(content: string) {
           locale="en"
           onOpenSearch={noop}
           onOpenGoToLine={noop}
-          outlineOpen={false}
+          outlineOpen={outlineOpen}
           onToggleOutline={noop}
         />
       </Profiler>
-    </FluentProvider>,
+    </FluentProvider>
   );
-  return { editor, commits };
+  const view = render(ui(false));
+  return { editor, commits, rerender: (outlineOpen: boolean) => view.rerender(ui(outlineOpen)) };
 }
 
 // One transaction, then the frame the toolbar's subscription waits for.
@@ -93,5 +94,25 @@ describe("EditorToolbar re-renders", () => {
     expect(editor.isActive("heading")).toBe(true);
     expect(editor.isActive("heading", { level: 1 })).toBe(false);
     expect(commits.n).toBeGreaterThan(before);
+  });
+
+  it("compares against what is on screen after a render the subscription did not cause", async () => {
+    const { editor, rerender } = setup("<p>alpha</p>");
+    const undo = () => screen.getByRole("button", { name: /undo/i }) as HTMLButtonElement;
+    await transact(() => editor.view.dispatch(editor.state.tr.insertText("x", 3)));
+    expect(undo().disabled).toBe(false);
+
+    // A note switch: a fresh state without history and without a transaction,
+    // then a prop change re-renders the toolbar with undo unavailable.
+    act(() => {
+      editor.view.updateState(EditorState.create({ doc: editor.state.doc, plugins: editor.state.plugins }));
+    });
+    rerender(true);
+    expect(undo().disabled).toBe(true);
+
+    // Typing makes undo available again: the same state the subscription saw
+    // before the switch, but not what the toolbar shows.
+    await transact(() => editor.view.dispatch(editor.state.tr.insertText("y", 3)));
+    expect(undo().disabled).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, useCallback } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import {
   Button,
   Tooltip,
@@ -332,6 +332,11 @@ function EditorToolbarImpl({
   const [barHeight, setBarHeight] = useState(0);
 
   const [, setTick] = useState(0);
+  // What the last committed render showed. The toolbar also re-renders for
+  // its props and its measured height, and a note switch replaces the editor
+  // state without a transaction, so the value the subscription read last can
+  // differ from what is on screen; compare against the screen.
+  const shownRef = useRef<ToolbarState | null>(null);
   useEffect(() => {
     if (!editor || hidden) return;
     // rAF-coalesce: reading the state calls 10+ editor.isActive(...) plus
@@ -343,16 +348,12 @@ function EditorToolbarImpl({
     // focused walks the entire editor DOM (React's selection bookkeeping) —
     // ~7 ms per frame in a 1 MB note while typing plain text.
     let frame: number | null = null;
-    // Unknown until the first transaction, which therefore always renders:
-    // the state may have moved between this component's render and now.
-    let last: ToolbarState | null = null;
     const bump = () => {
       if (frame !== null) return;
       frame = requestAnimationFrame(() => {
         frame = null;
-        const next = readToolbarState(editor);
-        if (last && sameToolbarState(last, next)) return;
-        last = next;
+        const shown = shownRef.current;
+        if (shown && sameToolbarState(shown, readToolbarState(editor))) return;
         setTick((n) => n + 1);
       });
     };
@@ -429,6 +430,9 @@ function EditorToolbarImpl({
   }, [measure]);
 
   const state = readToolbarState(editor);
+  useLayoutEffect(() => {
+    shownRef.current = state;
+  });
   const { canUndo, canRedo } = state;
   const isHeading = state.heading;
   const headingLabel = state.headingLevel ? `H${state.headingLevel}` : i("heading.body");
