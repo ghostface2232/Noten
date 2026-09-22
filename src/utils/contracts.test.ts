@@ -394,3 +394,39 @@ describe("contract: shared metadata reads fail closed", () => {
     expect(body.indexOf("fs.exists(path)")).toBeLessThan(body.indexOf("fs.readTextFile(path)"));
   });
 });
+
+describe("contract: the close gate always has an escape", () => {
+  // Regression: the undrained-save branch of onCloseRequested only ever called
+  // preventDefault and showed an informational dialog. When the cause was not
+  // fixable from the running app — a sidecar that stays unreadable, a notes
+  // folder that is gone — the window could never be closed at all, and the app
+  // could only be killed from Task Manager. The branch must keep offering a
+  // confirm() the user can accept, not just a message().
+  const APP = resolve(SRC_ROOT, "App.tsx");
+
+  it("the unsaved-close branch reaches a confirm, not only a message", () => {
+    const src = read(APP);
+    const start = src.indexOf("onCloseRequested");
+    expect(start).toBeGreaterThan(-1);
+    // The handler body ends where the next top-level useEffect begins.
+    const end = src.indexOf("useEffect(() => {", src.indexOf("}).then((fn)", start));
+    const handler = src.slice(start, end > start ? end : undefined);
+
+    expect(handler).toContain("close.unsavedBlocked");
+    // The escape: a second attempt must offer to discard rather than refuse.
+    expect(handler).toContain("close.unsavedDiscard");
+    expect(handler).toMatch(/confirm\(\s*t\("close\.unsavedDiscard"/);
+  });
+});
+
+describe("contract: fatal errors reach the user, not just crash.log", () => {
+  // Regression: registerFatalHandler was defined in notenError.ts and never
+  // called from anywhere, so every fatal NotenError went to crash.log and was
+  // invisible in the running app. logNotenError already routes fatals through
+  // notifyFatal, so the only missing piece was a registered handler.
+  it("some non-test source registers a fatal handler", () => {
+    const files = walk(SRC_ROOT).filter((f) => !f.endsWith("notenError.ts"));
+    const registrars = files.filter((f) => /registerFatalHandler\s*\(/.test(read(f)));
+    expect(registrars.length).toBeGreaterThan(0);
+  });
+});

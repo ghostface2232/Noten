@@ -46,12 +46,38 @@ const OUTLINE_JUMP_SCROLL_MS = 280;
 // How long a transient editor notice (focus-mode toggle, broken anchor link)
 // stays on screen.
 const EDITOR_NOTICE_MS = 1100;
+// Fatal errors get longer, because they have to be read rather than merely
+// noticed, and are throttled per code so an autosave failing once a second
+// cannot flood the notice.
+const FATAL_NOTICE_MS = 6000;
+const FATAL_NOTICE_THROTTLE_MS = 30_000;
+
+/** Which notice a fatal error shows. Grouped by what the user can act on —
+ *  the code and the cause go to crash.log, not to a transient notice. */
+function fatalNoticeKey(code: NotenErrorCode): I18nKey {
+  switch (code) {
+    case "SAVE_FAILED":
+    case "PERSIST_FAILED":
+    case "META_WRITE_FAILED":
+    case "BACKUP_FAILED":
+    case "MIGRATION_FAILED":
+      return "error.saveFailed";
+    case "RECONCILE_FAILED":
+    case "META_READ_FAILED":
+    case "BODY_READ_FAILED":
+    case "CONFLICT_SCAN_FAILED":
+      return "error.readFailed";
+    default:
+      return "error.generic";
+  }
+}
 import { SettingsModal } from "./components/SettingsModal";
 import { NO_FOCUS_REQUEST, SearchBar, type DocSearchFocusRequest } from "./components/SearchBar";
 import { GoToLineBar } from "./components/GoToLineBar";
 import { searchPluginKey, type SearchPluginState } from "./extensions/SearchHighlight";
 import { refreshWikiLinkDecorations } from "./extensions/WikiLink";
-import { t } from "./i18n";
+import { t, type I18nKey } from "./i18n";
+import { registerFatalHandler, type NotenErrorCode } from "./utils/notenError";
 import { exportAsMarkdown, exportAsPdf } from "./utils/exportHandlers";
 import { clearManagedNotesData, clearMigratedSource, hasExistingNotenData, migrateNotesDir } from "./utils/migrateNotesDir";
 import { writeMigrationJournal, type MigrationCleanupMode } from "./utils/migrationJournal";
@@ -406,6 +432,10 @@ function App() {
   // Fresh-locale ref for effects/handlers registered once (empty deps) that
   // still need to localize a late message — e.g. the close-blocked dialog.
   const localeRef = useRef(locale);
+  // Whether a close attempt has already been refused for an undrained save.
+  // See the close handler: the first refusal explains, the second lets the
+  // user out rather than wedging the window forever.
+  const closeBlockedOnceRef = useRef(false);
   localeRef.current = locale;
   const wikiDocIndexSignature = useMemo(
     () => docs.map((doc) => `${doc.id}\u0000${doc.fileName}`).join("\u0001"),
@@ -1065,7 +1095,7 @@ function App() {
     }
   }, []);
 
-  const showEditorNotice = useCallback((text: string) => {
+  const showEditorNotice = useCallback((text: string, durationMs: number = EDITOR_NOTICE_MS) => {
     setEditorNoticeText(text);
     setEditorNoticeVisible(true);
     if (editorNoticeTimerRef.current !== null) {
@@ -1074,8 +1104,25 @@ function App() {
     editorNoticeTimerRef.current = window.setTimeout(() => {
       setEditorNoticeVisible(false);
       editorNoticeTimerRef.current = null;
-    }, EDITOR_NOTICE_MS);
+    }, durationMs);
   }, []);
+
+  // registerFatalHandler existed but nothing ever called it, so every fatal
+  // error went to crash.log and nowhere else: a notes folder gone read-only or
+  // a cloud drive that stopped responding looked exactly like a healthy app,
+  // right up until the close gate refused to quit for reasons the user had
+  // never been shown.
+  useEffect(() => {
+    const lastShownAtByCode = new Map<NotenErrorCode, number>();
+    registerFatalHandler((error) => {
+      const now = Date.now();
+      const lastShownAt = lastShownAtByCode.get(error.code);
+      if (lastShownAt != null && now - lastShownAt < FATAL_NOTICE_THROTTLE_MS) return;
+      lastShownAtByCode.set(error.code, now);
+      showEditorNotice(t(fatalNoticeKey(error.code), localeRef.current), FATAL_NOTICE_MS);
+    });
+    return () => registerFatalHandler(null);
+  }, [showEditorNotice]);
 
   const handleToggleFocusMode = useCallback(() => {
     const next = !focusModeEnabled;
@@ -1249,9 +1296,27 @@ function App() {
       // onCloseRequested awaits this handler, so preventDefault still cancels
       // the close.
       if (hasUnsavedChangesRef.current?.() || !manifestOk) {
-        event.preventDefault();
-        await message(t("close.unsavedBlocked", localeRef.current), { kind: "error" });
-      } else if (hasUnsaveableChangesRef.current?.()) {
+        // The first refusal explains the cause and keeps the window open, so a
+        // recoverable condition (a cloud folder still coming online, a drive
+        // reconnecting, a lock clearing) can be fixed and the close retried
+        // with every edit intact. A gate that ONLY ever refuses is a trap
+        // though: when the cause cannot be fixed from here — a sidecar that
+        // stays unreadable, a folder that is gone — the window can never be
+        // closed at all. So a second attempt offers the override and says
+        // plainly what it discards.
+        if (!closeBlockedOnceRef.current) {
+          closeBlockedOnceRef.current = true;
+          event.preventDefault();
+          await message(t("close.unsavedBlocked", localeRef.current), { kind: "error" });
+          return;
+        }
+        const discard = await confirm(t("close.unsavedDiscard", localeRef.current), { kind: "warning" });
+        if (!discard) event.preventDefault();
+        return;
+      }
+      // The drain succeeded, so a later failure starts the two-step gate over.
+      closeBlockedOnceRef.current = false;
+      if (hasUnsaveableChangesRef.current?.()) {
         // A dirty doc with no filePath (loader-failure stub whose provisioning
         // keeps failing) can never drain, so blocking would wedge the window
         // forever. Ask instead of silently discarding the edits.
