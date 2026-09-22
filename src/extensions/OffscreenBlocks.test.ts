@@ -329,28 +329,31 @@ describe("OffscreenBlocks", () => {
         return { top, bottom: top + 50, left: 0, right: 100, width: 100, height: 50, x: 0, y: top, toJSON() {} } as DOMRect;
       });
       document.body.append(editor.view.dom);
-      const end = insideBlock(editor, 1) + editor.state.doc.child(1).nodeSize - 1;
-      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, end)));
+      try {
+        const end = insideBlock(editor, 1) + editor.state.doc.child(1).nodeSize - 1;
+        editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, end)));
 
-      // Unfocused, ProseMirror will not scroll, so the new block counts.
-      editor.view.dispatch(editor.state.tr.split(end).scrollIntoView());
-      expect(skipping(editor)).toBe(false);
-      flushFrames();
-      expect(skipping(editor)).toBe(true);
-      editor.commands.undo();
+        // Unfocused, ProseMirror will not scroll, so the new block counts.
+        editor.view.dispatch(editor.state.tr.split(end).scrollIntoView());
+        expect(skipping(editor)).toBe(false);
+        flushFrames();
+        expect(skipping(editor)).toBe(true);
+        editor.commands.undo();
 
-      editor.view.focus();
-      expect(editor.view.hasFocus()).toBe(true);
-      editor.view.dispatch(editor.state.tr.split(end).scrollIntoView());
-      expect(editor.state.doc.childCount).toBe(3);
-      expect(skipping(editor)).toBe(true);
+        editor.view.focus();
+        expect(editor.view.hasFocus()).toBe(true);
+        editor.view.dispatch(editor.state.tr.split(end).scrollIntoView());
+        expect(editor.state.doc.childCount).toBe(3);
+        expect(skipping(editor)).toBe(true);
 
-      // Without the scroll, a change off screen is still re-measured.
-      const far = insideBlock(editor, 2) + 1;
-      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, far)));
-      editor.view.dispatch(editor.state.tr.insertText("x", far));
-      expect(skipping(editor)).toBe(false);
-      editor.view.dom.remove();
+        // Without the scroll, a change off screen is still re-measured.
+        const far = insideBlock(editor, 2) + 1;
+        editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, far)));
+        editor.view.dispatch(editor.state.tr.insertText("x", far));
+        expect(skipping(editor)).toBe(false);
+      } finally {
+        editor.view.dom.remove();
+      }
     });
   });
 

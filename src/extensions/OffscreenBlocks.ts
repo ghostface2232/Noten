@@ -174,9 +174,11 @@ class OffscreenMeasure {
     let pos = 0;
     for (let i = 0; i < first; i++) pos += doc.child(i).nodeSize;
     const head = view.state.selection.head;
-    // ProseMirror scrolls to the selection only while it has focus (the
-    // page's selection is in the editor); otherwise nothing brings the
-    // caret's block on screen.
+    // ProseMirror scrolls to the selection only when the page's selection is
+    // in the editor, which it puts there only while it has focus; otherwise
+    // nothing brings the caret's block on screen. (Focus lost with the page
+    // selection still inside costs one needless re-measure, never a stale
+    // size.)
     const scrolls = offscreenBlocksPluginKey.getState(view.state) === true && view.hasFocus();
     for (let i = first; i < end; i++) {
       const start = pos;
