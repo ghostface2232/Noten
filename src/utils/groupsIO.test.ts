@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { genOrderKeyAfter, genOrderKeyBefore, genOrderKeyBetween } from "./groupsIO";
+import { genOrderKeyAfter, genOrderKeyBefore, genOrderKeyBetween, genSpreadOrderKeys, isOrderKeyBetween } from "./groupsIO";
 
 const ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
 
@@ -45,6 +45,25 @@ describe("fractional order keys", () => {
       if (!(a < mid && mid < b)) failures.push([a, mid, b]);
     }
     expect(failures).toEqual([]);
+  });
+
+  it("spreads fixed-width ascending keys, none a prefix of another", () => {
+    for (const count of [0, 1, 2, 17, 36, 1295, 1296, 3000]) {
+      const keys = genSpreadOrderKeys(count);
+      expect(keys).toHaveLength(count);
+      for (let i = 1; i < keys.length; i++) expect(keys[i - 1] < keys[i]).toBe(true);
+      expect(new Set(keys.map((k) => k.length)).size).toBeLessThanOrEqual(1);
+      // Room before the first key, so the next drag to the top is representable.
+      if (count > 0) expect(isOrderKeyBetween(genOrderKeyBefore(keys[0]), undefined, { orderKey: keys[0] })).toBe(true);
+    }
+  });
+
+  it("isOrderKeyBetween compares like the group comparator", () => {
+    expect(isOrderKeyBetween("0i", undefined, { orderKey: "0" })).toBe(false);
+    expect(isOrderKeyBetween("b", { orderKey: "a" }, { orderKey: "c" })).toBe(true);
+    expect(isOrderKeyBetween("a", { orderKey: "a" }, undefined)).toBe(false);
+    expect(isOrderKeyBetween("a", undefined, { orderKey: undefined })).toBe(false);
+    expect(isOrderKeyBetween("a", { orderKey: undefined }, undefined)).toBe(true);
   });
 
   it("genOrderKeyAfter and genOrderKeyBefore stay on their side of the input", () => {
