@@ -12,6 +12,7 @@ import {
   readMeta,
   ensureMetaDir,
   metaPathFor,
+  invalidateReadAllMetaCache,
   type NoteMeta,
 } from "./metadataIO";
 import { NotenError } from "./notenError";
@@ -767,5 +768,58 @@ describe("reconcileFolder — unwritten local membership moves", () => {
     );
 
     expect(result.groups.find((g) => g.id === "g2")!.noteIds).toEqual([noteId]);
+  });
+});
+
+describe("reconcileFolder — a body whose sidecar is unreadable is left alone", () => {
+  // The other half of the readAllMeta quarantine. Once one unreadable sidecar
+  // stops failing the whole aggregate, its note drops out of the metadata map
+  // — and a body with no metadata is exactly what reconcile ingests as a fresh
+  // unmanaged note. Doing that here would write a new sidecar over the real
+  // one and surface the note with a derived title and no group: the same
+  // "deleted note reappeared outside its group" failure, reached from the
+  // opposite direction. Skip it and retry on the next pass.
+  it("does not re-ingest the note or overwrite its sidecar", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    await seedMeta(fs, makeMeta(id, { fileName: "Real Title", groupId: "g1" }));
+    fs.seedTextFile(`${DIR}/${id}.md`, "# Real body\n");
+    const sidecarBefore = await fs.readTextFile(`${DIR}/.meta/${id}.json`);
+
+    const faultFs = wrapWithFaults(fs);
+    faultFs.injectFault({
+      op: "readTextFile",
+      path: new RegExp(`${id}\\.json$`),
+      throwError: new Error("EBUSY: cloud-sync hydration"),
+    });
+
+    // The note is not in the live docs — exactly the state after a load that
+    // could not read its sidecar either.
+    const result = await reconcileFolder(faultFs, state, DIR, [], [], LOCALE);
+
+    expect(result.docs.map((d) => d.id)).not.toContain(id);
+    // Its files must be untouched: the body still there, the sidecar still
+    // holding the real title and group rather than a reconstructed default.
+    expect(await fs.readTextFile(`${DIR}/${id}.md`)).toBe("# Real body\n");
+    expect(await fs.readTextFile(`${DIR}/.meta/${id}.json`)).toBe(sidecarBefore);
+  });
+
+  it("picks the note up on the next pass once the sidecar reads again", async () => {
+    const id = "22222222-2222-4222-8222-222222222222";
+    await seedMeta(fs, makeMeta(id, { fileName: "Real Title" }));
+    fs.seedTextFile(`${DIR}/${id}.md`, "# Real body\n");
+
+    const faultFs = wrapWithFaults(fs);
+    faultFs.injectFault({
+      op: "readTextFile",
+      path: new RegExp(`${id}\\.json$`),
+      times: 1,
+      throwError: new Error("EBUSY: cloud-sync hydration"),
+    });
+    await reconcileFolder(faultFs, state, DIR, [], [], LOCALE);
+
+    invalidateReadAllMetaCache(faultFs, DIR);
+    const second = await reconcileFolder(faultFs, state, DIR, [], [], LOCALE);
+
+    expect(second.docs.find((d) => d.id === id)?.fileName).toBe("Real Title");
   });
 });

@@ -29,7 +29,7 @@ import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsDelta, emitNo
 import { diffGroupsDelta, type GroupsDelta } from "../utils/groupsDelta";
 import type { NoteColorId } from "../utils/noteColors";
 import { markOwnWrite } from "./ownWriteTracker";
-import { setKnownDiskContent } from "../utils/conflictBackup";
+import { hasUnknownDiskBody, setKnownDiskContent } from "../utils/conflictBackup";
 import { removeMeta as removeMetaFile, type NoteMeta } from "../utils/metadataIO";
 import { logNotenError } from "../utils/crashLog";
 import { NotenError } from "../utils/notenError";
@@ -148,6 +148,12 @@ export async function provisionNoteFile(
     filePath = `${notesDir}/${id}.md`;
     markOwnWrite(filePath, content);
     await atomicWriteText(tauriFileSystem, filePath, content, { failClosed: true });
+    // Seed the conflict-backup baseline for the same reason rewriteNoteFile
+    // does, plus one this path alone carries: an ABSENT baseline is the signal
+    // that this session has never seen the file's body, which pruneEmptyCurrentDoc
+    // reads as "do not delete". A freshly provisioned note must not look like
+    // an unread one, or its empty body could never be pruned.
+    setKnownDiskContent(filePath, content);
     return { filePath, ok: true };
   } catch (error) {
     void logNotenError(new NotenError(
@@ -333,6 +339,17 @@ export function useFileSystem(
     if (!leaving) return { docs: baseDocs, groups: currentGroups };
     const currentContent = leaving.content.trim();
     if (currentContent || leaving.customName || baseDocs.length <= 1) {
+      return { docs: baseDocs, groups: currentGroups };
+    }
+    // An empty in-memory body is not proof the FILE is empty. A manifest-cache
+    // projection carries `content: ""` with a real filePath, and a load that
+    // fails after the projection is committed (one unreadable sidecar, an
+    // unreadable .groups.json) leaves that projection as the canonical library.
+    // Pruning then deletes a real note's body and sidecar outright — no trash,
+    // no conflict backup. The conflict-backup baseline is this session's record
+    // of every body it has read or written, so its absence means we have never
+    // seen this file and must not delete it.
+    if (hasUnknownDiskBody(leaving.filePath)) {
       return { docs: baseDocs, groups: currentGroups };
     }
     // The docs list can lag the live editor: autosave just committed (isDirty
@@ -617,7 +634,15 @@ export function useFileSystem(
       // autosave). Otherwise the stored .content already tells us non-empty,
       // and we can skip the serialization.
       let willReplace = false;
-      if (currentDoc && !currentDoc.customName && currentDoc.content.trim() === "") {
+      if (
+        currentDoc
+        && !currentDoc.customName
+        && currentDoc.content.trim() === ""
+        // Same guard as pruneEmptyCurrentDoc: willReplace deletes the leaving
+        // doc's body and sidecar outright, so it must not act on a body this
+        // session has never seen.
+        && !hasUnknownDiskBody(currentDoc.filePath)
+      ) {
         const liveContent = state.isDirty ? getCurrentMarkdown(tiptapRef).trim() : "";
         willReplace = liveContent === "";
       }
@@ -1557,6 +1582,9 @@ export function useFileSystem(
             if (!pruneCandidateId || snapshot.activeNoteId !== pruneCandidateId) return null;
             const leaving = snapshot.docs.find((doc) => doc.id === pruneCandidateId);
             if (!leaving || leaving.customName || snapshot.docs.length <= 1) return null;
+            // Same guard as pruneEmptyCurrentDoc — this deletes the body and
+            // sidecar permanently, so an unread body is never prunable.
+            if (hasUnknownDiskBody(leaving.filePath)) return null;
             // The editor can hold input newer than the canonical content.
             if (leaving.content.trim() !== "" || getCurrentMarkdown(tiptapRef).trim() !== "") return null;
             cancelDocSaveRef?.current?.(leaving.id);
@@ -1666,6 +1694,11 @@ export function useFileSystem(
             assertCurrent();
             content = await readTextFile(restoredPath);
             assertCurrent();
+            // We have just read this body from disk, so record it as the
+            // conflict baseline. An absent baseline means "never seen", which
+            // now makes the first save back it up to .conflicts and makes the
+            // empty-note prunes refuse — both wrong for a note we just read.
+            setKnownDiskContent(restoredPath, content);
           } catch (error) {
             await rollbackMeta();
             markOwnWrite(restoredPath);

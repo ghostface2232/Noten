@@ -169,7 +169,10 @@ export async function seedWriteSnapshots(
 ): Promise<void> {
   clearPersistState(state);
 
-  const allMeta = await readAllMeta(fs, dir);
+  // A quarantined sidecar gets no write snapshot, which is exactly right: the
+  // next persist must not believe it knows what is on disk for that note. It
+  // skips those ids outright (see persistDecomposedState).
+  const { byId: allMeta } = await readAllMeta(fs, dir);
   for (const m of allMeta.values()) {
     state.writtenMeta.set(m.id, {
       fileName: m.fileName,
@@ -230,7 +233,11 @@ export async function loadDecomposedState(
   const base = normalizeSep(dir);
   const trashBase = `${base}.trash/`;
 
-  const allMeta = await readAllMeta(fs, dir);
+  // Quarantined sidecars are simply not listed: we cannot describe a note
+  // whose metadata we could not read, and inventing one would put a wrong
+  // title and no group on a real note. Its files stay untouched, and
+  // reconcileFolder skips the matching body rather than re-ingesting it.
+  const { byId: allMeta } = await readAllMeta(fs, dir);
   const sharedGroupsFile = await readGroupsFile(fs, dir);
 
   const metaByGroup = new Map<string, string[]>();
@@ -298,6 +305,15 @@ export async function loadDecomposedState(
   return { docs, groups, trashedNotes: trashed, activeNoteId: activeId };
 }
 
+/** What a persist actually committed, for callers that gate durable-intent
+ *  bookkeeping on it. */
+export interface PersistResult {
+  /** Notes whose sidecar was deliberately not written this pass because their
+   *  on-disk metadata could not be read (see readAllMeta's quarantine). Their
+   *  metadata clocks must NOT be acknowledged — nothing durable happened. */
+  skippedMetaIds: Set<string>;
+}
+
 export interface PersistOptions {
   trashedNotes: TrashedNote[];
   machineId: string;
@@ -324,7 +340,7 @@ export async function persistDecomposedState(
   activeId: string | null,
   groups: NoteGroup[] | undefined,
   options: PersistOptions,
-): Promise<void> {
+): Promise<PersistResult> {
   const { trashedNotes, machineId, cachePath, imageAssetMigrationCompletedAt, setActiveNoteId } = options;
   const snapshotSeq = options.groupsSnapshotSeq ?? Number.POSITIVE_INFINITY;
 
@@ -333,7 +349,7 @@ export async function persistDecomposedState(
     if (!g.id) continue;
     for (const nid of g.noteIds) noteIdToGroupId.set(nid, g.id);
   }
-  const diskMeta = await readAllMeta(fs, dir);
+  const { byId: diskMeta, unreadableIds: unreadableMetaIds } = await readAllMeta(fs, dir);
 
   const resolveGroupSnapshot = (
     noteId: string,
@@ -354,7 +370,20 @@ export async function persistDecomposedState(
   };
 
   const metaWrites: Promise<unknown>[] = [];
+  // A note whose sidecar exists but could not be read this pass is skipped
+  // entirely, docs and trash alike. Writing it would resolve its group through
+  // the `stateGroupId` fallback above and stamp a FRESH groupUpdatedAt, so a
+  // stale in-memory group would win last-write-wins over the truth we just
+  // failed to read — precisely the loss the fail-closed read exists to
+  // prevent. The intent stays pending and the next pass retries.
+  const skippedMeta = new Set<string>();
+  const skipUnreadable = (noteId: string): boolean => {
+    if (!unreadableMetaIds.has(noteId)) return false;
+    skippedMeta.add(noteId);
+    return true;
+  };
   for (const doc of docs) {
+    if (skipUnreadable(doc.id)) continue;
     const pendingGroup = state.pendingGroupMembership.get(doc.id);
     const groupSnap = resolveGroupSnapshot(doc.id, noteIdToGroupId.get(doc.id) ?? null);
     const snap: MetaSnapshot = {
@@ -399,6 +428,7 @@ export async function persistDecomposedState(
   }
 
   for (const t of trashedNotes) {
+    if (skipUnreadable(t.id)) continue;
     const pendingGroup = state.pendingGroupMembership.get(t.id);
     const groupSnap = resolveGroupSnapshot(t.id, t.groupId ?? null);
     const snap: MetaSnapshot = {
@@ -590,4 +620,12 @@ export async function persistDecomposedState(
   if (groupsError !== undefined) {
     throw groupsError instanceof Error ? groupsError : new Error(String(groupsError));
   }
+
+  // Report the notes whose sidecar was NOT written. A resolved persist used to
+  // mean "every note's metadata is durable", and the caller acknowledges each
+  // note's metadata clock on that basis. Quarantining an unreadable sidecar
+  // instead of throwing broke that: a rename, pin or colour made while the
+  // sidecar was unreadable would be acked as durable, never written, and then
+  // reverted to the disk value by the next save.
+  return { skippedMetaIds: skippedMeta };
 }

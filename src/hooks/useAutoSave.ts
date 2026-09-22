@@ -9,7 +9,10 @@ import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { emitDocUpdated } from "./useWindowSync";
 import { markOwnWrite } from "./ownWriteTracker";
-import { backupIfRemoteWroteFirst, backupLocalDeletionVersion, setKnownDiskContent } from "../utils/conflictBackup";
+import { backupIfRemoteWroteFirst, backupLocalDeletionVersion, getKnownDiskContent, setKnownDiskContent } from "../utils/conflictBackup";
+import { clearRecoveryRecord, writeRecoveryRecord } from "../utils/recoveryJournal";
+import { appDataDir } from "@tauri-apps/api/path";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { atomicWriteText } from "../utils/atomicWrite";
 import { NotenError } from "../utils/notenError";
 import { logNotenError } from "../utils/crashLog";
@@ -43,6 +46,31 @@ export type FlushResult =
 /** True when the caller's pre-flush docs snapshot may be marked clean. */
 export function flushLeftDocClean(result: FlushResult): boolean {
   return result.status === "saved" || result.status === "clean";
+}
+
+// The recovery journal mirrors pendingSnapshotsRef — the app's own record of
+// edits that are not yet durable in the notes folder. Records are written at
+// the points where the process may be about to end rather than before every
+// save; see recoveryJournal.ts for why that is enough.
+// Both resolved lazily: touching Tauri at module scope would make this file
+// unimportable anywhere the window API is not mocked, which is every test that
+// only wants the save logic.
+let windowLabel: string | null = null;
+function getWindowLabel(): string {
+  if (windowLabel === null) windowLabel = getCurrentWindow().label;
+  return windowLabel;
+}
+let appDataDirPromise: Promise<string> | null = null;
+function getAppDataDir(): Promise<string> {
+  // Drop a rejected promise rather than memoizing it: caching one transient
+  // failure would disable journalling for the rest of the window's life.
+  if (!appDataDirPromise) {
+    appDataDirPromise = appDataDir().catch((err) => {
+      appDataDirPromise = null;
+      throw err;
+    });
+  }
+  return appDataDirPromise;
 }
 
 interface SaveSnapshot {
@@ -226,12 +254,93 @@ export function useAutoSave(
     const current = pendingSnapshotsRef.current.get(snapshot.docId);
     if (current?.revision !== snapshot.revision) return;
     pendingSnapshotsRef.current.delete(snapshot.docId);
+    // The edit is durable, so drop any recovery record for it. Fire and
+    // forget: a record left behind costs one extra check at the next startup,
+    // where recovery finds the disk body already equal to the record and
+    // deletes it. Blocking the save path on this I/O would buy nothing.
+    forgetRecoveryRecord(snapshot.docId);
     const pendingTarget = pendingTargetsRef.current.get(snapshot.docId);
     if (pendingTarget && pendingTarget.editSerial <= snapshot.editSerial) {
       pendingTargetsRef.current.delete(snapshot.docId);
     }
     refreshHasPendingChanges();
   }, [refreshHasPendingChanges]);
+
+  /**
+   * Record every edit that is not yet durable, so it survives the process.
+   *
+   * Called where the process may be about to end — a failed save, focus loss,
+   * the close drain, an update install — rather than before every save. The
+   * body write is fail-closed temp+rename, so a crash mid-write leaves the
+   * previous body intact and costs at most the last debounce window of typing;
+   * what actually went missing before this existed was an edit that stayed in
+   * memory after its save failed.
+   *
+   * Returns whether every pending edit is now recorded. A caller that is about
+   * to let the process die (the close gate) must treat false as "these edits
+   * still live only in memory".
+   */
+  /** Record one snapshot. Used by the failure path, which must not rewrite
+   *  every other pending doc's body on each individual failure — during a
+   *  folder outage that is a full atomic write per pending note per second. */
+  const journalSnapshot = useCallback(async (snapshot: SaveSnapshot): Promise<boolean> => {
+    try {
+      await writeRecoveryRecord(tauriFileSystem, await getAppDataDir(), getWindowLabel(), {
+        version: 1,
+        docId: snapshot.docId,
+        filePath: snapshot.filePath,
+        content: snapshot.content,
+        baseContent: getKnownDiskContent(snapshot.filePath) ?? null,
+        editSerial: snapshot.editSerial,
+        updatedAt: Date.now(),
+      });
+      return true;
+    } catch (err) {
+      void logNotenError(new NotenError(
+        "SAVE_FAILED",
+        "fatal",
+        "journalSnapshot: could not record an unsaved edit for recovery",
+        { context: { noteId: snapshot.docId, filePath: snapshot.filePath }, cause: err },
+      ));
+      return false;
+    }
+  }, []);
+
+  /** Drop a note's recovery record. Every path that abandons a pending edit
+   *  must call this, not just a successful save: a record outlives the note it
+   *  describes otherwise, and recovery then writes a deleted note's body into
+   *  the shared folder — which the cloud client syncs to every device. */
+  const forgetRecoveryRecord = useCallback((docId: string) => {
+    void (async () => {
+      try {
+        await clearRecoveryRecord(tauriFileSystem, await getAppDataDir(), getWindowLabel(), docId);
+      } catch { /* best-effort: a stale record costs one extra recovery check */ }
+    })();
+  }, []);
+
+  const journalPendingEdits = useCallback(async (): Promise<boolean> => {
+    const pending = Array.from(pendingSnapshotsRef.current.values());
+    // A pending TARGET newer than its snapshot has content this function
+    // cannot see — its text is still only in the editor. Callers flush first,
+    // which converts the active doc's target into a snapshot; anything still
+    // ahead of its snapshot here is an edit we cannot protect, and saying
+    // otherwise would let the close gate wave it through. Comparing by id
+    // alone missed the common case: typing during the awaited close drain
+    // leaves a target newer than the snapshot the drain already captured.
+    const uncovered = () => Array.from(pendingTargetsRef.current.values()).some((target) => {
+      const snapshot = pendingSnapshotsRef.current.get(target.docId);
+      return !snapshot || target.editSerial > snapshot.editSerial;
+    });
+    let allRecorded = true;
+    for (const snapshot of pending) {
+      if (!(await journalSnapshot(snapshot))) allRecorded = false;
+    }
+    // Evaluated AFTER the writes, not before them: each record is an mkdir
+    // plus an atomic write, and a keystroke landing during those leaves a
+    // target newer than its snapshot. Answering from a pre-await reading is
+    // the same claim-too-much bug, one step later in the function.
+    return allRecorded && !uncovered();
+  }, [journalSnapshot]);
 
   const discardPendingTarget = useCallback((docId: string) => {
     pendingTargetsRef.current.delete(docId);
@@ -582,11 +691,18 @@ export function useAutoSave(
     hasPendingChangesRef.current = true;
     const save = doSave(snapshot).then((saved) => {
       if (saved) clearPendingSnapshotIfCurrent(snapshot);
-      else refreshHasPendingChanges();
+      else {
+        refreshHasPendingChanges();
+        // The edit is still only in memory. Record it now rather than at the
+        // next lifecycle point, so a crash between here and then does not take
+        // it with it. Only THIS doc: a folder outage fails every pending save,
+        // and rewriting them all on each failure is quadratic.
+        void journalSnapshot(snapshot);
+      }
       return saved;
     });
     return trackInFlight(snapshot, save);
-  }, [clearPendingSnapshotIfCurrent, doSave, refreshHasPendingChanges, trackInFlight]);
+  }, [clearPendingSnapshotIfCurrent, doSave, journalSnapshot, refreshHasPendingChanges, trackInFlight]);
 
   // A doc without a filePath (the loader-failure fallback stub, or a
   // replacement doc whose provisioning failed in deleteNotes) is invisible to
@@ -827,9 +943,12 @@ export function useAutoSave(
 
     const saved = await trackInFlight(snapshot, doSave(snapshot));
     if (saved) clearPendingSnapshotIfCurrent(snapshot);
-    else refreshHasPendingChanges();
+    else {
+      refreshHasPendingChanges();
+      void journalSnapshot(snapshot);
+    }
     return saved;
-  }, [awaitDocSave, clearPendingSnapshotIfCurrent, doSave, refreshHasPendingChanges, snapshotIsCurrent, trackInFlight]);
+  }, [awaitDocSave, clearPendingSnapshotIfCurrent, doSave, journalSnapshot, refreshHasPendingChanges, snapshotIsCurrent, trackInFlight]);
 
   // Retry any snapshots whose background save settled with failure (returned
   // false → still in pendingSnapshotsRef, no timer scheduled). Background
@@ -837,6 +956,35 @@ export function useAutoSave(
   // a transient backup/write failure during a fire-and-forget switch would
   // silently strand the leaving doc's unsaved content. flushAutoSave alone
   // would not catch it because it only re-captures the *current* active doc.
+  /**
+   * Run `write` as the only body write in flight for `docId`, on the same
+   * per-doc tail `doSave` uses, and refuse while that doc has input this
+   * window has not persisted.
+   *
+   * Recovery needs both halves. It decided what to do from a disk read taken
+   * before several awaits, and the editor goes live on the same `isLoading`
+   * flip that starts it, so by the time it writes, an autosave for that note
+   * may have already landed — and writing directly would clobber it with no
+   * backup and race the same `${path}.tmp`, which the tail exists to prevent.
+   * `write` must re-establish its own preconditions once inside.
+   */
+  const runExclusiveBodyWrite = useCallback(async (
+    docId: string,
+    write: () => Promise<boolean>,
+  ): Promise<boolean> => {
+    if (hasPendingForDoc(docId)) return false;
+    if (activeDocRef.current?.id === docId && stateRef.current.state.isDirty) return false;
+    if (inFlightSavesByDocRef.current.has(docId)) return false;
+    const prior = saveTailByDocRef.current.get(docId) ?? Promise.resolve();
+    const run = prior.then(write, write);
+    saveTailByDocRef.current.set(docId, run);
+    const cleanup = () => {
+      if (saveTailByDocRef.current.get(docId) === run) saveTailByDocRef.current.delete(docId);
+    };
+    void run.then(cleanup, cleanup);
+    return run;
+  }, [hasPendingForDoc]);
+
   const flushPendingSnapshots = useCallback(async (): Promise<void> => {
     const stranded = Array.from(pendingSnapshotsRef.current.values());
     for (const snapshot of stranded) {
@@ -946,11 +1094,16 @@ export function useAutoSave(
     timersRef.current.delete(docId);
     pendingTargetsRef.current.delete(docId);
     pendingSnapshotsRef.current.delete(docId);
+    // The pending edit is being abandoned, so its record has to go with it.
+    // Callers are delete and remote-deletion paths; leaving the record behind
+    // makes the next start write the deleted note's body back into the shared
+    // folder as a .conflicts copy, and tell the user it was kept for them.
+    forgetRecoveryRecord(docId);
     // saveTailByDocRef is intentionally left alone: a write already in flight
     // for this doc must finish, and its cleanupTail self-removes the entry on
     // settle. Clearing it here could let a concurrent write skip the chain.
     refreshHasPendingChanges();
-  }, [refreshHasPendingChanges]);
+  }, [forgetRecoveryRecord, refreshHasPendingChanges]);
 
   const settleRemoteDeletedDoc = useCallback((docId: string): Promise<boolean> => {
     const live = stateRef.current;
@@ -997,6 +1150,11 @@ export function useAutoSave(
     timersRef.current.delete(docId);
     pendingTargetsRef.current.delete(docId);
     pendingSnapshotsRef.current.delete(docId);
+    // The body is about to be folded into .trash by the settlement below, so
+    // the record has done its job. Left behind, recovery would later find the
+    // root file gone, decide `missing-file`, and write the deleted body into
+    // .conflicts for the cloud client to sync everywhere.
+    forgetRecoveryRecord(docId);
     refreshHasPendingChanges();
 
     const settlement = (async (): Promise<boolean> => {
@@ -1067,7 +1225,7 @@ export function useAutoSave(
     const cleanup = () => remoteDeletionSettlementsRef.current.delete(settlement);
     void settlement.then(cleanup, cleanup);
     return settlement;
-  }, [awaitDocSave, hasPendingForDoc, refreshHasPendingChanges]);
+  }, [awaitDocSave, forgetRecoveryRecord, hasPendingForDoc, refreshHasPendingChanges]);
 
-  return { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, awaitDocSave, flushDocSave, flushPendingSnapshots, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc };
+  return { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, awaitDocSave, flushDocSave, flushPendingSnapshots, journalPendingEdits, forgetRecoveryRecord, runExclusiveBodyWrite, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc };
 }

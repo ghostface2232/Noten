@@ -46,12 +46,48 @@ const OUTLINE_JUMP_SCROLL_MS = 280;
 // How long a transient editor notice (focus-mode toggle, broken anchor link)
 // stays on screen.
 const EDITOR_NOTICE_MS = 1100;
+// Fatal errors get longer, because they have to be read rather than merely
+// noticed, and are throttled per code so an autosave failing once a second
+// cannot flood the notice.
+const FATAL_NOTICE_MS = 6000;
+const FATAL_NOTICE_THROTTLE_MS = 30_000;
+
+/** Which notice a fatal error shows. Grouped by what the user can act on —
+ *  the code and the cause go to crash.log, not to a transient notice. */
+function fatalNoticeKey(code: NotenErrorCode): I18nKey {
+  switch (code) {
+    case "SAVE_FAILED":
+    case "PERSIST_FAILED":
+    case "META_WRITE_FAILED":
+    case "BACKUP_FAILED":
+    case "MIGRATION_FAILED":
+      return "error.saveFailed";
+    case "RECONCILE_FAILED":
+    case "META_READ_FAILED":
+    case "BODY_READ_FAILED":
+    case "CONFLICT_SCAN_FAILED":
+      return "error.readFailed";
+    default:
+      return "error.generic";
+  }
+}
 import { SettingsModal } from "./components/SettingsModal";
 import { NO_FOCUS_REQUEST, SearchBar, type DocSearchFocusRequest } from "./components/SearchBar";
 import { GoToLineBar } from "./components/GoToLineBar";
 import { searchPluginKey, type SearchPluginState } from "./extensions/SearchHighlight";
 import { refreshWikiLinkDecorations } from "./extensions/WikiLink";
-import { t } from "./i18n";
+import { t, type I18nKey } from "./i18n";
+import { registerFatalHandler, type NotenErrorCode } from "./utils/notenError";
+import { recoverJournalledEdits } from "./hooks/editRecovery";
+import type { RecoveryRecord } from "./utils/recoveryJournal";
+import { tauriFileSystem } from "./utils/fs";
+import { atomicWriteText } from "./utils/atomicWrite";
+import { markOwnWrite } from "./hooks/ownWriteTracker";
+import { setKnownDiskContent } from "./utils/conflictBackup";
+import { markdownEqual } from "./utils/markdownEqual";
+import { readTextFile } from "@tauri-apps/plugin-fs";
+import { libraryStore } from "./utils/libraryStore";
+import { emitDocUpdated } from "./hooks/useWindowSync";
 import { exportAsMarkdown, exportAsPdf } from "./utils/exportHandlers";
 import { clearManagedNotesData, clearMigratedSource, hasExistingNotenData, migrateNotesDir } from "./utils/migrateNotesDir";
 import { writeMigrationJournal, type MigrationCleanupMode } from "./utils/migrationJournal";
@@ -248,7 +284,11 @@ function App() {
   const [sidebarSearchOpen, setSidebarSearchOpen] = useState(false);
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   const [notesDirConflict, setNotesDirConflict] = useState<NotesDirConflictDialogState | null>(null);
-  const updater = useUpdater();
+  // Filled in below, once useAutoSave exists. The updater's quiet install
+  // ends the process without a close event, so this is the last chance to get
+  // unsaved edits onto disk or into the recovery journal.
+  const beforeUpdateInstallRef = useRef<(() => Promise<void>) | null>(null);
+  const updater = useUpdater(beforeUpdateInstallRef);
   const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDarkFromMatchMedia);
   const isDarkMode = settings.themeMode === "system"
     ? systemPrefersDark
@@ -406,6 +446,10 @@ function App() {
   // Fresh-locale ref for effects/handlers registered once (empty deps) that
   // still need to localize a late message — e.g. the close-blocked dialog.
   const localeRef = useRef(locale);
+  // Whether a close attempt has already been refused for an undrained save.
+  // See the close handler: the first refusal explains, the second lets the
+  // user out rather than wedging the window forever.
+  const closeBlockedOnceRef = useRef(false);
   localeRef.current = locale;
   const wikiDocIndexSignature = useMemo(
     () => docs.map((doc) => `${doc.id}\u0000${doc.fileName}`).join("\u0001"),
@@ -456,6 +500,11 @@ function App() {
   const awaitInFlightSavesRef = useRef<(() => Promise<void>) | null>(null);
   const flushDocSaveRef = useRef<((docId: string) => Promise<boolean>) | null>(null);
   const flushPendingSnapshotsRef = useRef<(() => Promise<void>) | null>(null);
+  const journalPendingEditsRef = useRef<(() => Promise<boolean>) | null>(null);
+  const discardJournalledEditsRef = useRef<(() => void) | null>(null);
+  const runExclusiveBodyWriteRef = useRef<
+    ((docId: string, write: () => Promise<boolean>) => Promise<boolean>) | null
+  >(null);
   const notifyActiveDocRef = useRef<((id: string, filePath: string) => void) | null>(null);
   const cancelDocSaveRef = useRef<((docId: string) => void) | null>(null);
 
@@ -481,7 +530,7 @@ function App() {
     commitLibraryForGeneration,
   );
 
-  const { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc } = useAutoSave(
+  const { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, journalPendingEdits, forgetRecoveryRecord, runExclusiveBodyWrite, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc } = useAutoSave(
     state,
     tiptapRef,
     docs,
@@ -494,11 +543,26 @@ function App() {
   flushAutoSaveRef.current = flushAutoSave;
   hasUnsavedChangesRef.current = hasUnsavedChanges;
   hasUnsaveableChangesRef.current = hasUnsaveableChanges;
-  flushManifestRef.current = () => flushPersistence().then(() => true).catch(() => false);
+  flushManifestRef.current = () => flushPersistence().catch(() => false);
   captureAndQueueSaveRef.current = captureAndQueueSave;
   awaitInFlightSavesRef.current = awaitInFlightSaves;
   flushDocSaveRef.current = flushDocSave;
   flushPendingSnapshotsRef.current = flushPendingSnapshots;
+  journalPendingEditsRef.current = journalPendingEdits;
+  discardJournalledEditsRef.current = () => {
+    for (const doc of libraryStore.getSnapshot().docs) forgetRecoveryRecord(doc.id);
+  };
+  runExclusiveBodyWriteRef.current = runExclusiveBodyWrite;
+  beforeUpdateInstallRef.current = async () => {
+    // The same four-step drain the close handler runs, for the same reason:
+    // metadata-only writes (pin, colour, group, rename) are fire-and-forget,
+    // so nothing else awaits them, and the journal does not cover them either.
+    await flushAutoSave().catch(() => {});
+    await awaitInFlightSaves().catch(() => {});
+    await flushPendingSnapshots().catch(() => {});
+    await flushManifestRef.current?.().catch(() => {});
+    await journalPendingEdits();
+  };
   notifyActiveDocRef.current = notifyActiveDoc;
   cancelDocSaveRef.current = cancelDocSave;
 
@@ -1065,7 +1129,7 @@ function App() {
     }
   }, []);
 
-  const showEditorNotice = useCallback((text: string) => {
+  const showEditorNotice = useCallback((text: string, durationMs: number = EDITOR_NOTICE_MS) => {
     setEditorNoticeText(text);
     setEditorNoticeVisible(true);
     if (editorNoticeTimerRef.current !== null) {
@@ -1074,8 +1138,102 @@ function App() {
     editorNoticeTimerRef.current = window.setTimeout(() => {
       setEditorNoticeVisible(false);
       editorNoticeTimerRef.current = null;
-    }, EDITOR_NOTICE_MS);
+    }, durationMs);
   }, []);
+
+  // registerFatalHandler existed but nothing ever called it, so every fatal
+  // error went to crash.log and nowhere else: a notes folder gone read-only or
+  // a cloud drive that stopped responding looked exactly like a healthy app,
+  // right up until the close gate refused to quit for reasons the user had
+  // never been shown.
+  useEffect(() => {
+    const lastShownAtByCode = new Map<NotenErrorCode, number>();
+    registerFatalHandler((error) => {
+      const now = Date.now();
+      const lastShownAt = lastShownAtByCode.get(error.code);
+      if (lastShownAt != null && now - lastShownAt < FATAL_NOTICE_THROTTLE_MS) return;
+      lastShownAtByCode.set(error.code, now);
+      showEditorNotice(t(fatalNoticeKey(error.code), localeRef.current), FATAL_NOTICE_MS);
+    });
+    return () => registerFatalHandler(null);
+  }, [showEditorNotice]);
+
+  // Replay edits a previous run could not get onto disk. Runs once the initial
+  // load settled, because deciding whether a record is safe to apply needs the
+  // note's current disk body — which is exactly what the load just read.
+  const editRecoveryDone = useRef(false);
+  useEffect(() => {
+    if (editRecoveryDone.current || isLoading) return;
+    editRecoveryDone.current = true;
+    void (async () => {
+      const outcome = await recoverJournalledEdits(async (record: RecoveryRecord) => {
+        // recoverEdits chose `apply` from a disk read taken several awaits ago,
+        // and the editor went live on the same isLoading flip that started
+        // recovery — so an autosave for this note may have landed in between.
+        // Take the per-doc write lock (which also refuses while the doc holds
+        // unsaved input) and re-prove the precondition inside it: the disk must
+        // still hold exactly what this edit was made against. Anything else and
+        // the record goes back for the next run rather than overwriting work
+        // that was never journalled.
+        const wrote = await runExclusiveBodyWriteRef.current?.(record.docId, async () => {
+          if (record.baseContent === null) return false;
+          let current: string;
+          try {
+            current = await readTextFile(record.filePath);
+          } catch {
+            return false;
+          }
+          if (!markdownEqual(current, record.baseContent)) return false;
+          try {
+            markOwnWrite(record.filePath, record.content);
+            await atomicWriteText(tauriFileSystem, record.filePath, record.content, { failClosed: true });
+            setKnownDiskContent(record.filePath, record.content);
+          } catch {
+            return false;
+          }
+          return true;
+        });
+        if (!wrote) return false;
+        const restoredAt = Date.now();
+        setDocs((prev) => prev.map((doc) => (
+          doc.id === record.docId
+            ? { ...doc, content: record.content, updatedAt: restoredAt, isDirty: false }
+            : doc
+        )));
+        // The editor is still showing the pre-recovery body for the open note,
+        // and its next keystroke would serialize THAT back over what we just
+        // restored. Repoint it before anyone can type.
+        if (libraryStore.getSnapshot().activeNoteId === record.docId) {
+          tiptapRef.current?.openDocument?.({
+            noteId: record.docId,
+            filePath: record.filePath,
+            markdown: record.content,
+            reason: "window-sync",
+          });
+          state.primeMarkdown(record.content);
+          state.setIsDirty(false);
+        }
+        emitDocUpdated(record.docId, record.filePath, record.content, restoredAt);
+        return true;
+      }).catch(() => null);
+      if (!outcome) return;
+      // One notice, not three. showEditorNotice is a single slot with a single
+      // timer, so three calls in a tick leave only the last text — and the one
+      // that explains why the open note's content changed under the user is
+      // the one that was being dropped. A record that could not be resolved
+      // stays journalled, and saying nothing about it would leave the close
+      // dialog's promise of restoration hanging, so it is reported too.
+      const notices = [
+        outcome.applied > 0 ? t("recovery.applied", localeRef.current) : null,
+        outcome.preserved > 0 ? t("recovery.preserved", localeRef.current) : null,
+        outcome.deferred > 0 ? t("recovery.deferred", localeRef.current) : null,
+      ].filter((line): line is string => line !== null);
+      if (notices.length > 0) {
+        showEditorNotice(notices.join(" "), FATAL_NOTICE_MS * notices.length);
+      }
+    })();
+  }, [isLoading, setDocs, showEditorNotice, state]);
+
 
   const handleToggleFocusMode = useCallback(() => {
     const next = !focusModeEnabled;
@@ -1249,9 +1407,53 @@ function App() {
       // onCloseRequested awaits this handler, so preventDefault still cancels
       // the close.
       if (hasUnsavedChangesRef.current?.() || !manifestOk) {
-        event.preventDefault();
-        await message(t("close.unsavedBlocked", localeRef.current), { kind: "error" });
-      } else if (hasUnsaveableChangesRef.current?.()) {
+        // The notes folder would not take these edits, so keep them on this
+        // machine instead. Closing is then free, because recovery replays them
+        // at the next start.
+        //
+        // The journal answers a NARROWER question than this gate asks, so all
+        // three conditions have to hold. It records body snapshots only: a
+        // metadata write that failed (rename, pin, colour, group — what
+        // manifestOk reports) has no journal at all, and a dirty doc with no
+        // filePath is refused by createSnapshot, so neither is protected by a
+        // `true` here. Treating the journal's answer as the whole answer closed
+        // the window on both while promising they would come back.
+        const bodiesRecorded = (await journalPendingEditsRef.current?.()) ?? false;
+        if (bodiesRecorded && manifestOk && !hasUnsaveableChangesRef.current?.()) {
+          closeBlockedOnceRef.current = false;
+          await message(t("close.unsavedJournalled", localeRef.current), { kind: "info" });
+          return;
+        }
+        // The first refusal explains the cause and keeps the window open, so a
+        // recoverable condition (a cloud folder still coming online, a drive
+        // reconnecting, a lock clearing) can be fixed and the close retried
+        // with every edit intact. A gate that ONLY ever refuses is a trap
+        // though: when the cause cannot be fixed from here — a sidecar that
+        // stays unreadable, a folder that is gone — the window can never be
+        // closed at all. So a second attempt offers the override and says
+        // plainly what it discards.
+        if (!closeBlockedOnceRef.current) {
+          closeBlockedOnceRef.current = true;
+          event.preventDefault();
+          await message(t("close.unsavedBlocked", localeRef.current), { kind: "error" });
+          return;
+        }
+        const discard = await confirm(t("close.unsavedDiscard", localeRef.current), { kind: "warning" });
+        if (!discard) {
+          event.preventDefault();
+          return;
+        }
+        // "Discards them" has to mean it. journalPendingEdits writes a record
+        // for every pending snapshot before deciding its verdict, so by the
+        // time this branch is reached some edits may already be recorded — and
+        // the next start would restore exactly what the user just chose to
+        // throw away, with a notice saying so.
+        discardJournalledEditsRef.current?.();
+        return;
+      }
+      // The drain succeeded, so a later failure starts the two-step gate over.
+      closeBlockedOnceRef.current = false;
+      if (hasUnsaveableChangesRef.current?.()) {
         // A dirty doc with no filePath (loader-failure stub whose provisioning
         // keeps failing) can never drain, so blocking would wedge the window
         // forever. Ask instead of silently discarding the edits.
@@ -1268,7 +1470,15 @@ function App() {
     // last debounce window unsaved until the window is closed. Flushing when
     // the window loses focus or the page is hidden closes that gap.
     // flushAutoSave is a cheap no-op when nothing is pending.
-    const flush = () => { void flushAutoSaveRef.current?.(); };
+    // Flush, then record whatever the flush could not make durable. Losing
+    // focus is the last moment this window is reliably alive before an update
+    // installer, a shutdown, or a kill takes the process.
+    const flush = () => {
+      void (async () => {
+        await flushAutoSaveRef.current?.();
+        await journalPendingEditsRef.current?.();
+      })();
+    };
     const onVisibility = () => { if (document.hidden) flush(); };
     document.addEventListener("visibilitychange", onVisibility);
 

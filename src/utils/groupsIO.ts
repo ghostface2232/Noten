@@ -118,12 +118,26 @@ export async function writeGroupsWithMerge(
   const serialized = JSON.stringify(file, null, 2);
   const path = groupsPathFor(notesDir);
   markOwnWrite(path, serialized);
-  await atomicWriteText(fs, path, serialized);
+  // Fail closed like a note body. This file is the ONLY index of every group
+  // and every deletion tombstone, so the relaxed mode's direct overwrite is
+  // the worst possible trade here: an interrupted non-atomic write leaves
+  // truncated JSON, and readGroupsFile rejects the whole library rather than
+  // one note. The caller in persistDecomposedState already treats a rejection
+  // as retryable and keeps the in-memory snapshot and tombstone intent pending.
+  await atomicWriteText(fs, path, serialized, { failClosed: true });
   return merged;
 }
 
 // Fractional group ordering over a 36-char alphabet. Pathological keys fall
 // back to a fresh time key instead of growing without bound.
+//
+// Each generator returns a key strictly on the requested side of its inputs,
+// with two inherent exceptions the alphabet cannot express: nothing sorts
+// before a bare "0", and nothing fits between a key and that same key plus
+// "0". Both need the caller to renormalize the list rather than a cleverer
+// key; `genOrderKeyBefore` reaching "0" is what leads there, and only a list
+// dragged repeatedly to its minimum gets that far. `groupsIO.test.ts` fuzzes
+// the invariant and pins these two as known-unsatisfiable.
 
 const FI_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
 const FI_BASE = FI_ALPHABET.length;
@@ -166,6 +180,12 @@ export function genOrderKeyBefore(before?: string): string {
   if (prev >= 0) {
     return clampKey(before.slice(0, -1) + digitToChar(prev));
   }
+  // The last digit is already the minimum, so it cannot be decremented.
+  // Dropping it yields a shorter key that sorts BEFORE the input ("4l0" ->
+  // "4l"); appending, as this used to do, returned a key after it.
+  const trimmed = before.slice(0, -1);
+  if (trimmed) return clampKey(trimmed);
+  // A bare minimum digit has nothing before it in this alphabet.
   return clampKey(`${before}${FI_MID}`);
 }
 
@@ -178,7 +198,13 @@ export function genOrderKeyBetween(a?: string, b?: string): string {
   let i = 0;
   while (i < a.length && i < b.length && a[i] === b[i]) i++;
 
-  const aDigit = i < a.length ? charToDigit(a[i]) : -1;
+  // a is a prefix of b (a = "o", b = "o0sm"): every key between them is a
+  // followed by something strictly inside b's remaining suffix. Treating a's
+  // missing digit as -1 and falling through sent this down the adjacent-digit
+  // branch, which appended to a and overshot b.
+  if (i >= a.length) return clampKey(a + genOrderKeyBefore(b.slice(i)));
+
+  const aDigit = charToDigit(a[i]);
   const bDigit = i < b.length ? charToDigit(b[i]) : FI_BASE;
 
   if (bDigit - aDigit > 1) {
@@ -186,9 +212,14 @@ export function genOrderKeyBetween(a?: string, b?: string): string {
     return clampKey(a.slice(0, i) + digitToChar(mid));
   }
 
-  // Adjacent keys: extend and clamp rather than growing without bound.
-  const prefix = a.slice(0, i) + (aDigit >= 0 ? digitToChar(aDigit) : "");
-  return clampKey(`${prefix}${FI_MID}`);
+  // Adjacent digits at position i: every key between a and b must reuse a's
+  // digits through i, because anything lower sorts at or below a and anything
+  // higher reaches b's digit. Sharing that prefix already puts the result
+  // below b (it differs at i with the lower digit), so all that remains is to
+  // clear a's REMAINING suffix — appending FI_MID ignored it and returned a
+  // key below a whenever a had one (genOrderKeyBetween("hz", "i") gave "hi").
+  const prefix = a.slice(0, i) + digitToChar(aDigit);
+  return clampKey(`${prefix}${genOrderKeyAfter(a.slice(i + 1))}`);
 }
 
 export { TOMBSTONE_TTL_MS };

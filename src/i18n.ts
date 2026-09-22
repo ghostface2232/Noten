@@ -282,6 +282,38 @@ const dict = {
     en: "Some changes could not be saved, so the window stayed open. Check your storage location and permissions, then try again.",
     ko: "일부 변경 사항을 저장하지 못해 창을 닫지 않았습니다. 저장 위치와 권한을 확인한 뒤 다시 시도해 주세요.",
   },
+  "close.unsavedJournalled": {
+    en: "Some changes could not be saved to the notes folder, so they were kept here and will be restored the next time Noten starts.",
+    ko: "일부 변경 사항을 노트 폴더에 저장하지 못해 이 PC에 따로 보관했습니다. 다음에 Noten을 실행할 때 복구합니다.",
+  },
+  "close.unsavedDiscard": {
+    en: "Some changes still could not be saved. Closing now discards them. Close anyway?",
+    ko: "일부 변경 사항을 여전히 저장하지 못했습니다. 지금 닫으면 해당 변경 사항이 사라집니다. 그래도 닫으시겠습니까?",
+  },
+  "recovery.applied": {
+    en: "Restored edits that could not be saved last time.",
+    ko: "지난번에 저장하지 못한 편집을 복구했습니다.",
+  },
+  "recovery.preserved": {
+    en: "Edits that could not be saved were kept in the .conflicts folder — the note itself was left unchanged.",
+    ko: "저장하지 못한 편집을 .conflicts 폴더에 보관했습니다. 노트 자체는 그대로 두었습니다.",
+  },
+  "recovery.deferred": {
+    en: "Some unsaved edits could not be restored yet and are still being kept. They will be retried the next time Noten starts.",
+    ko: "복구하지 못한 편집이 남아 있어 계속 보관 중입니다. 다음에 Noten을 실행할 때 다시 시도합니다.",
+  },
+  "error.saveFailed": {
+    en: "Could not save to the notes folder. Your changes are still open here.",
+    ko: "노트 폴더에 저장하지 못했습니다. 변경 사항은 아직 창에 남아 있습니다.",
+  },
+  "error.readFailed": {
+    en: "Could not read the notes folder. Some notes may be missing until it responds.",
+    ko: "노트 폴더를 읽지 못했습니다. 폴더가 응답할 때까지 일부 노트가 보이지 않을 수 있습니다.",
+  },
+  "error.generic": {
+    en: "Something went wrong. Details were written to the crash log.",
+    ko: "문제가 발생했습니다. 자세한 내용은 크래시 로그에 기록했습니다.",
+  },
   "close.unsaveableDiscard": {
     en: "Changes to this note could not be saved because the notes folder is unavailable. Close anyway and discard them?",
     ko: "노트 폴더를 사용할 수 없어 이 노트의 변경 사항을 저장하지 못했습니다. 그래도 창을 닫고 변경 사항을 버리시겠습니까?",

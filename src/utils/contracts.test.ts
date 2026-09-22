@@ -236,7 +236,9 @@ describe("contract: hydration is generation-bound and pauses full persistence", 
     const persist = text.match(/async function persistLatestLibrarySnapshot[\s\S]*?\n\}/)?.[0];
     expect(flush).toBeDefined();
     expect(persist).toBeDefined();
-    expect(flush).toContain("if (hydrationInProgress) return;");
+    // Returns true, not undefined: the flush now reports whether everything
+    // is durable, and a paused hydration is not an incomplete drain.
+    expect(flush).toContain("if (hydrationInProgress) return true;");
     expect(persist).toContain("if (hydrationInProgress) return false;");
   });
 });
@@ -379,7 +381,17 @@ describe("contract: shared metadata reads fail closed", () => {
     expect(readMetaMatch, "readMeta not found").not.toBeNull();
     expect(listMetaMatch, "listMetaFiles not found").not.toBeNull();
     expect(readMetaMatch![0]).toMatch(/fs\.exists\(path\)/);
-    expect(readMetaMatch![0]).not.toMatch(/\bcatch\b/);
+    // readMeta may CLASSIFY a failure but never swallow one: a transiently
+    // unreadable sidecar must not return null the way a missing one does, or
+    // reconcile writes default metadata over it. A catch is allowed only when
+    // it rethrows — readMeta distinguishes corrupt bytes (CorruptMetaError,
+    // permanent) from an I/O failure (transient) for readAllMeta's quarantine.
+    const catchBlocks = readMetaMatch![0].match(/catch\s*\([^)]*\)\s*\{[^{}]*\}/g) ?? [];
+    const catchKeywords = readMetaMatch![0].match(/\bcatch\b/g) ?? [];
+    // A nested or multi-block catch escapes the regex above, so require the
+    // two counts to agree rather than silently checking fewer blocks.
+    expect(catchBlocks.length).toBe(catchKeywords.length);
+    for (const block of catchBlocks) expect(block).toMatch(/\bthrow\b/);
     expect(listMetaMatch![0]).toMatch(/fs\.exists\(dir\)/);
     expect(listMetaMatch![0]).not.toMatch(/\bcatch\b/);
   });
@@ -392,5 +404,94 @@ describe("contract: shared metadata reads fail closed", () => {
     expect(body).toMatch(/fs\.exists\(path\)/);
     expect(body).not.toMatch(/\bcatch\b/);
     expect(body.indexOf("fs.exists(path)")).toBeLessThan(body.indexOf("fs.readTextFile(path)"));
+  });
+});
+
+describe("contract: the close gate always has an escape", () => {
+  // Regression: the undrained-save branch of onCloseRequested only ever called
+  // preventDefault and showed an informational dialog. When the cause was not
+  // fixable from the running app — a sidecar that stays unreadable, a notes
+  // folder that is gone — the window could never be closed at all, and the app
+  // could only be killed from Task Manager. The branch must keep offering a
+  // confirm() the user can accept, not just a message().
+  const APP = resolve(SRC_ROOT, "App.tsx");
+
+  it("the unsaved-close branch reaches a confirm, not only a message", () => {
+    const src = read(APP);
+    const start = src.indexOf("onCloseRequested");
+    expect(start).toBeGreaterThan(-1);
+    // The handler body ends where the next top-level useEffect begins.
+    const end = src.indexOf("useEffect(() => {", src.indexOf("}).then((fn)", start));
+    const handler = src.slice(start, end > start ? end : undefined);
+
+    expect(handler).toContain("close.unsavedBlocked");
+    // The escape: a second attempt must offer to discard rather than refuse.
+    expect(handler).toContain("close.unsavedDiscard");
+    expect(handler).toMatch(/confirm\(\s*t\("close\.unsavedDiscard"/);
+  });
+});
+
+describe("contract: fatal errors reach the user, not just crash.log", () => {
+  // Regression: registerFatalHandler was defined in notenError.ts and never
+  // called from anywhere, so every fatal NotenError went to crash.log and was
+  // invisible in the running app. logNotenError already routes fatals through
+  // notifyFatal, so the only missing piece was a registered handler.
+  it("some non-test source registers a fatal handler", () => {
+    const files = walk(SRC_ROOT).filter((f) => !f.endsWith("notenError.ts"));
+    const registrars = files.filter((f) => /registerFatalHandler\s*\(/.test(read(f)));
+    expect(registrars.length).toBeGreaterThan(0);
+  });
+});
+
+describe("contract: unsaved edits get a last chance before the process ends", () => {
+  // Tauri's quiet install ends the process from inside downloadAndInstall, so
+  // the window never receives its close event and the drain that guards it
+  // never runs — an unsaved edit simply went with the process. The hook must
+  // await something before the installer, and App must supply it.
+  it("useUpdater awaits a beforeInstall hook before downloadAndInstall", () => {
+    const src = read(resolve(SRC_ROOT, "hooks/useUpdater.ts"));
+    const beforeIdx = src.indexOf("beforeInstallRef?.current?.()");
+    // The call, not the JSDoc above it that also names the method.
+    const installIdx = src.indexOf("update.downloadAndInstall(");
+    expect(beforeIdx).toBeGreaterThan(-1);
+    expect(installIdx).toBeGreaterThan(-1);
+    expect(beforeIdx).toBeLessThan(installIdx);
+  });
+
+  it("App supplies that hook and it journals, not just flushes", () => {
+    const src = read(resolve(SRC_ROOT, "App.tsx"));
+    const assignIdx = src.indexOf("beforeUpdateInstallRef.current =");
+    expect(assignIdx).toBeGreaterThan(-1);
+    const body = src.slice(assignIdx, assignIdx + 800);
+    expect(body).toContain("flushAutoSave");
+    // Flushing bodies alone is what failed before, twice over: if the folder
+    // will not take the write the edit has to go somewhere this machine keeps,
+    // and metadata-only writes (pin, colour, group, rename) are
+    // fire-and-forget, so nothing else awaits them and the journal does not
+    // cover them either.
+    expect(body).toContain("flushManifestRef");
+    expect(body).toContain("journalPendingEdits");
+  });
+});
+
+describe("contract: recovery repoints the editor at what it restored", () => {
+  // Applying a recovered body writes the file and commits the doc, but the
+  // open note's editor still holds the PRE-recovery text. Its next keystroke
+  // serializes that back over the restoration, so the recovery has to reload
+  // the editor before anyone can type.
+  it("the apply path reloads the editor for the active note", () => {
+    const src = read(resolve(SRC_ROOT, "App.tsx"));
+    const start = src.indexOf("recoverJournalledEdits(");
+    expect(start).toBeGreaterThan(-1);
+    const applyBody = src.slice(start, start + 3200);
+    expect(applyBody).toContain("atomicWriteText");
+    // The write runs under the per-doc lock and re-proves that the disk still
+    // holds what the edit was made against: recovery decided from a read taken
+    // several awaits earlier, and the editor is live by then.
+    expect(applyBody).toContain("runExclusiveBodyWriteRef");
+    expect(applyBody).toContain("markdownEqual(current, record.baseContent)");
+    expect(applyBody).toContain("activeNoteId === record.docId");
+    expect(applyBody).toContain("openDocument");
+    expect(applyBody).toContain("primeMarkdown");
   });
 });

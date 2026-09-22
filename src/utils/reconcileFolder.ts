@@ -17,6 +17,7 @@ import { markOwnWrite } from "../hooks/ownWriteTracker";
 import { isValidNoteId } from "./noteId";
 import { normalizeSep } from "./pathUtils";
 import { NotenError } from "./notenError";
+import { setKnownDiskContent } from "./conflictBackup";
 import { logNotenError } from "./crashLog";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -205,7 +206,7 @@ export async function reconcileFolder(
 
   const mdEntries = entries.filter((e) => e.name?.endsWith(".md") && e.isFile);
   const folderFileNames = new Set(mdEntries.map((e) => e.name!));
-  const allMeta = await readAllMeta(fs, dir);
+  const { byId: allMeta, unreadableIds: unreadableMetaIds } = await readAllMeta(fs, dir);
   // Membership resolves at the END of this pass but against THESE sidecars, so
   // it needs the intents as of this moment too — see hydrateGroupMembershipFromMeta.
   const pendingAtRead: PendingMembership = new Map(pendingMembership);
@@ -233,9 +234,21 @@ export async function reconcileFolder(
     }
     if (docById.has(id)) continue;
     if (trashedIds.has(id)) continue; // handled in mismatch branch below
+    // This body HAS a sidecar; we just could not read it this pass. Ingesting
+    // it as an unmanaged file would write a fresh sidecar over the real one
+    // and surface the note with a derived title and no group — the "deleted
+    // note reappeared outside its group" failure, arrived at from the other
+    // side. The orphan-meta sweep below cannot touch it either, since it
+    // walks only the sidecars that were read. Next pass retries.
+    if (unreadableMetaIds.has(id)) continue;
 
     const filePath = `${base}${name}`;
     const content = await readFileContent(fs, filePath);
+    // Ingesting means this session has now read the body, so it becomes the
+    // conflict baseline. Leaving it unseeded would make the note's first save
+    // write a spurious .conflicts copy and make the empty-note prunes refuse
+    // to ever clean it up.
+    if (content !== null) setKnownDiskContent(filePath, content);
     // Body unreadable (transient cloud-sync / placeholder failure). Skip this
     // file for now; do not create a meta or in-memory doc that would later be
     // saved back with empty content. Next reconcile retries.

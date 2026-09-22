@@ -9,6 +9,7 @@ import type { LibrarySnapshot, LibraryUpdater } from "../utils/libraryStore";
 import type { Locale, NotesSortOrder } from "./useSettings";
 import type { NoteColorId } from "../utils/noteColors";
 import type { GroupMembershipOp, GroupUpsert, GroupsDelta } from "../utils/groupsDelta";
+import { setKnownDiskContent } from "../utils/conflictBackup";
 
 /**
  * A body save. Small bodies ride along in `content`; larger ones are left off
@@ -395,6 +396,12 @@ export function useWindowSync(
           const docs = [...current.docs, { ...doc, isDirty: false }];
           return shouldActivate ? { docs, activeNoteId: doc.id } : { docs };
         });
+        // The peer emits this only after provisionNoteFile's fail-closed write
+        // succeeded, so `doc.content` is what is on disk. Recording it as the
+        // conflict baseline keeps a peer-created note behaving like a locally
+        // created one: no spurious .conflicts copy on its first save here, and
+        // the empty-note prunes can still clean it up.
+        if (committed && doc.filePath) setKnownDiskContent(doc.filePath, doc.content);
         if (committed && shouldActivate) showInEditor({ ...doc, isDirty: false });
       }),
 

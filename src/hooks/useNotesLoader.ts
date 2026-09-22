@@ -14,6 +14,7 @@ import {
   createPersistState,
   clearPersistState,
   persistDecomposedState as persistDecomposedStateImpl,
+  type PersistResult,
   loadDecomposedState as loadDecomposedStateImpl,
   seedWriteSnapshots as seedWriteSnapshotsImpl,
   syncGroupsSnapshotFromDisk as syncGroupsSnapshotFromDiskImpl,
@@ -577,7 +578,10 @@ export async function readDiskGroupsSnapshot(dir: string): Promise<{
 }> {
   await loadUiState();
   const file = await readGroupsFile(tauriFileSystem, dir);
-  const metaById = await readAllMeta(tauriFileSystem, dir);
+  // Quarantined sidecars are left out of the map, which mergeDiskGroups
+  // already reads conservatively: a live note with no disk meta keeps the
+  // group it currently has rather than being ungrouped.
+  const { byId: metaById } = await readAllMeta(tauriFileSystem, dir);
   return {
     entries: file.groups,
     metaById,
@@ -769,11 +773,11 @@ async function persistDecomposedState(
   snapshotSeq?: number,
   targetDir?: string,
   trashedNotes: TrashedNote[] = trashedNotesCache,
-): Promise<void> {
+): Promise<PersistResult> {
   const dir = targetDir ?? await getNotesDir();
   const cachePath = await getLocalCachePath();
   try {
-    await persistDecomposedStateImpl(tauriFileSystem, dir, persistState, docs, activeId, groups, {
+    return await persistDecomposedStateImpl(tauriFileSystem, dir, persistState, docs, activeId, groups, {
       trashedNotes,
       machineId: getMachineIdCached(),
       cachePath,
@@ -927,6 +931,13 @@ interface LibraryPersistenceRequest {
   source?: string;
 }
 
+// Notes whose sidecar the most recent persist deliberately did not write
+// (readAllMeta's quarantine). The revision is still marked persisted, because
+// flushPersistence loops until it is and an unreadable sidecar may never
+// become readable — but the flush must not then report the library as fully
+// durable, or the close gate and the migration ack accept work never done.
+let lastPersistSkippedMeta = new Set<string>();
+
 async function persistLatestLibrarySnapshot(
   request: LibraryPersistenceRequest,
   options?: { force?: boolean },
@@ -955,7 +966,7 @@ async function persistLatestLibrarySnapshot(
   // Group tombstones are module-level durable intents rather than library
   // entities. Capture their clock beside the execution-time group snapshot.
   const latestGroupMutationSeq = groupMutationSeq;
-  await persistDecomposedState(
+  const { skippedMetaIds } = await persistDecomposedState(
     docs,
     latest.activeNoteId,
     groups,
@@ -973,7 +984,14 @@ async function persistLatestLibrarySnapshot(
   persistedLibraryGeneration = latest.directoryGeneration;
   persistedLibraryRevision = latest.revision;
   persistedGroupMutationSeq = latestGroupMutationSeq;
-  for (const [noteId, clock] of noteClocks) acknowledgeNoteMetadataClock(noteId, clock);
+  lastPersistSkippedMeta = skippedMetaIds;
+  // A note whose sidecar the persist skipped had nothing written, so its
+  // metadata clock stays unacknowledged and the intent remains retryable —
+  // the same rule a thrown persist used to enforce for the whole batch.
+  for (const [noteId, clock] of noteClocks) {
+    if (skippedMetaIds.has(noteId)) continue;
+    acknowledgeNoteMetadataClock(noteId, clock);
+  }
   return true;
 }
 
@@ -1003,12 +1021,17 @@ export async function saveManifest(
 }
 
 /** Drain all metadata work through a stable canonical library revision. */
-export async function flushPersistence(source = "flushPersistence"): Promise<void> {
+/** Resolves true when every intent in the store is durable. False means the
+ *  drain finished but some note's metadata was skipped — its sidecar could not
+ *  be read, so writing would have clobbered it. Callers that gate on a
+ *  completed drain (the close gate, the migration ack) must treat false as
+ *  "not everything landed". */
+export async function flushPersistence(source = "flushPersistence"): Promise<boolean> {
   while (true) {
     // A projection mid-hydration is not user state; the loader persists the
     // hydrated library itself once it lands. Waiting here would tie a window
     // close to cloud-folder I/O, and writing would clobber peer sidecars.
-    if (hydrationInProgress) return;
+    if (hydrationInProgress) return true;
     const requested = libraryStore.getSnapshot();
     if (requested.notesDirectory == null) {
       // An empty, unbound store has nothing durable to flush. Never turn a
@@ -1027,7 +1050,7 @@ export async function flushPersistence(source = "flushPersistence"): Promise<voi
       ) {
         throw new Error("Cannot flush library state without an active notes directory");
       }
-      return;
+      return true;
     }
     await enqueueLatestLibraryPersistence({
       revision: requested.revision,
@@ -1035,13 +1058,13 @@ export async function flushPersistence(source = "flushPersistence"): Promise<voi
       source,
     });
     // A reload that started while the barrier was queued skipped the write.
-    if (hydrationInProgress) return;
+    if (hydrationInProgress) return true;
     const after = libraryStore.getSnapshot();
     if (
       after.directoryGeneration === persistedLibraryGeneration
       && after.revision <= persistedLibraryRevision
       && groupMutationSeq <= persistedGroupMutationSeq
-    ) return;
+    ) return lastPersistSkippedMeta.size === 0;
   }
 }
 

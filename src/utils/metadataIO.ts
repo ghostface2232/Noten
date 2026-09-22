@@ -6,6 +6,7 @@ import { isValidNoteId } from "./noteId";
 import { normalizeSep } from "./pathUtils";
 import { NotenError } from "./notenError";
 import { logNotenError } from "./crashLog";
+import { mapWithConcurrency } from "./concurrency";
 
 export interface NoteMeta {
   version: 2;
@@ -58,10 +59,14 @@ export async function ensureMetaDir(fs: FileSystem, notesDir: string): Promise<s
 // Keyed by FileSystem instance via WeakMap so tests using fresh in-memory fs
 // instances get isolated cache automatically (no manual reset in beforeEach).
 interface ReadAllMetaCacheEntry {
-  result: Map<string, NoteMeta>;
+  result: AllMeta;
   expiresAt: number;
 }
 const READ_ALL_META_TTL_MS = 500;
+// Matches the loader's body-read window: one sidecar read per note through
+// the IPC bridge, bounded so a cloud folder is not asked to hydrate every
+// placeholder at once.
+const META_READ_CONCURRENCY = 8;
 const readAllMetaCache = new WeakMap<FileSystem, Map<string, ReadAllMetaCacheEntry>>();
 
 function getCacheBucket(fs: FileSystem): Map<string, ReadAllMetaCacheEntry> {
@@ -73,7 +78,7 @@ function getCacheBucket(fs: FileSystem): Map<string, ReadAllMetaCacheEntry> {
   return bucket;
 }
 
-function lookupReadAllMetaCache(fs: FileSystem, notesDir: string): Map<string, NoteMeta> | null {
+function lookupReadAllMetaCache(fs: FileSystem, notesDir: string): AllMeta | null {
   const bucket = readAllMetaCache.get(fs);
   if (!bucket) return null;
   const entry = bucket.get(notesDir);
@@ -85,7 +90,7 @@ function lookupReadAllMetaCache(fs: FileSystem, notesDir: string): Map<string, N
   return entry.result;
 }
 
-function setReadAllMetaCache(fs: FileSystem, notesDir: string, result: Map<string, NoteMeta>): void {
+function setReadAllMetaCache(fs: FileSystem, notesDir: string, result: AllMeta): void {
   const bucket = getCacheBucket(fs);
   bucket.set(notesDir, { result, expiresAt: Date.now() + READ_ALL_META_TTL_MS });
 }
@@ -93,13 +98,18 @@ function setReadAllMetaCache(fs: FileSystem, notesDir: string, result: Map<strin
 function patchCachedMeta(fs: FileSystem, notesDir: string, meta: NoteMeta): void {
   const bucket = readAllMetaCache.get(fs);
   const entry = bucket?.get(notesDir);
-  if (entry) entry.result.set(meta.id, meta);
+  if (!entry) return;
+  entry.result.byId.set(meta.id, meta);
+  // We just wrote it, so it is readable again whatever an earlier pass saw.
+  entry.result.unreadableIds.delete(meta.id);
 }
 
 function dropCachedMeta(fs: FileSystem, notesDir: string, noteId: string): void {
   const bucket = readAllMetaCache.get(fs);
   const entry = bucket?.get(notesDir);
-  if (entry) entry.result.delete(noteId);
+  if (!entry) return;
+  entry.result.byId.delete(noteId);
+  entry.result.unreadableIds.delete(noteId);
 }
 
 /** Drop the readAllMeta cache for this fs (or this dir if provided). */
@@ -122,14 +132,34 @@ function isValidMeta(obj: unknown): obj is NoteMeta {
     && (m.groupId === null || typeof m.groupId === "string");
 }
 
+/**
+ * A sidecar that was read but does not parse as note metadata. Distinct from
+ * an I/O failure, and the difference decides whether waiting helps: a cloud
+ * placeholder or an AV lock clears on its own, while corrupt bytes are corrupt
+ * on every future pass. Both quarantine the note — we never overwrite metadata
+ * we could not read — but only this one is worth telling the user about,
+ * because nothing in the app will ever resolve it.
+ */
+export class CorruptMetaError extends Error {
+  constructor(path: string, cause?: unknown) {
+    super(`Invalid note metadata: ${path}`, cause !== undefined ? { cause } : undefined);
+    this.name = "CorruptMetaError";
+  }
+}
+
 export async function readMeta(fs: FileSystem, notesDir: string, noteId: string): Promise<NoteMeta | null> {
   const path = metaPathFor(notesDir, noteId);
   if (!(await fs.exists(path))) return null;
 
   const raw = await fs.readTextFile(path);
-  const parsed = JSON.parse(raw) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch (err) {
+    throw new CorruptMetaError(path, err);
+  }
   if (!isValidMeta(parsed)) {
-    throw new Error(`Invalid note metadata: ${path}`);
+    throw new CorruptMetaError(path);
   }
   const m = parsed as NoteMeta;
   return {
@@ -139,6 +169,26 @@ export async function readMeta(fs: FileSystem, notesDir: string, noteId: string)
     color: isNoteColorId(m.color) ? m.color : undefined,
     trashedAt: typeof m.trashedAt === "number" ? m.trashedAt : null,
   };
+}
+
+/**
+ * `readAllMeta` for callers that cannot proceed on partial metadata — today
+ * only the notes-directory migration, which is about to MOVE the files and so
+ * cannot leave a sidecar behind to be retried next pass. Everywhere else,
+ * quarantine and retry is the correct response; do not reach for this to avoid
+ * handling `unreadableIds`.
+ */
+export async function readAllMetaStrict(fs: FileSystem, notesDir: string): Promise<Map<string, NoteMeta>> {
+  const { byId, unreadableIds } = await readAllMeta(fs, notesDir);
+  if (unreadableIds.size > 0) {
+    throw new NotenError(
+      "META_READ_FAILED",
+      "fatal",
+      "readAllMetaStrict: some sidecars exist but could not be read",
+      { context: { notesDir, unreadableIds: Array.from(unreadableIds) } },
+    );
+  }
+  return byId;
 }
 
 export async function writeMeta(fs: FileSystem, notesDir: string, meta: NoteMeta, machineId: string): Promise<string> {
@@ -209,32 +259,59 @@ export async function listMetaFiles(fs: FileSystem, notesDir: string): Promise<s
     .map((e) => e.name!);
 }
 
-/** Read all metadata files from {notesDir}/.meta. Returns entries keyed by id. */
-export async function readAllMeta(fs: FileSystem, notesDir: string): Promise<Map<string, NoteMeta>> {
+/**
+ * Every sidecar under {notesDir}/.meta that could be read this pass, plus the
+ * ids of the ones that could not.
+ *
+ * An unreadable sidecar is NOT absent, and the difference is load-bearing:
+ * treating it as absent makes reconcile re-ingest its body as a fresh
+ * unmanaged note (losing groupId) and makes persist write default meta over
+ * it. Callers must skip a quarantined id entirely — neither describe the note
+ * nor write its metadata — and let the next pass pick it up once the file
+ * responds. What they must NOT do is fail the whole library for it: one
+ * OneDrive placeholder that has not hydrated is enough to hit this, and
+ * failing the aggregate took loading, saving and folder resync down with it.
+ */
+export interface AllMeta {
+  byId: Map<string, NoteMeta>;
+  unreadableIds: Set<string>;
+}
+
+function cloneAllMeta(meta: AllMeta): AllMeta {
+  return { byId: new Map(meta.byId), unreadableIds: new Set(meta.unreadableIds) };
+}
+
+/** Read all metadata files from {notesDir}/.meta. */
+export async function readAllMeta(fs: FileSystem, notesDir: string): Promise<AllMeta> {
   // Short-TTL cache: keyed by (fs, notesDir). Callers get a clone so they can
   // mutate freely without poisoning the cache; writeMeta / removeMeta patch
   // the cached map in place so the cache stays consistent with our own writes
   // through the TTL window (instead of being invalidated and refilled).
   const cached = lookupReadAllMetaCache(fs, notesDir);
-  if (cached) return new Map(cached);
+  if (cached) return cloneAllMeta(cached);
 
   const names = await listMetaFiles(fs, notesDir);
   const out = new Map<string, NoteMeta>();
+  const unreadableIds = new Set<string>();
+  // Bounded fan-out, not Promise.all: this is one read per note through the
+  // IPC bridge, and on a cloud folder each can trigger placeholder hydration
+  // (see mapWithConcurrency's own comment). It runs on every reconcile — the
+  // 60s interval and every focus return — so the stampede was recurring, not
+  // just a cold-start cost.
+  //
   // Per-id read with TOCTOU defense. listMetaFiles snapshots a directory
   // listing; readMeta then runs exists() + readTextFile() for each name. A
   // concurrent removeMeta (own pruneEmptyCurrentDoc / newNote.willReplace, or
   // a sibling window) can land between the listing and the read, or between
-  // exists and readTextFile — surfacing as "os error 2" inside Promise.all and
-  // failing the whole aggregate (PERSIST_FAILED / RECONCILE_FAILED).
+  // exists and readTextFile.
   //
   // readMeta itself is contractually forbidden from catching (contract:
   // shared metadata reads fail closed — transient unreadable must not look
-  // like absent state, or reconcile will write default meta over a locked
-  // sidecar and lose groupId). We can still distinguish *here*: on error,
-  // re-check existence. File gone = deletion raced this read, drop silently.
-  // File still present = real unreadable, propagate so the aggregate still
-  // fails closed for that case.
-  await Promise.all(names.map(async (name) => {
+  // like absent state). We distinguish *here*: on error, re-check existence.
+  // File gone = deletion raced this read, drop silently. File still present =
+  // real unreadable, so quarantine that ONE id rather than rejecting the
+  // aggregate.
+  await mapWithConcurrency(names, META_READ_CONCURRENCY, async (name) => {
     const id = name.replace(/\.json$/, "");
     // A sidecar whose filename stem is not a path-safe id (e.g. `...json` →
     // `..`) is corrupt or hostile. Never surface it as a note: its id is later
@@ -251,16 +328,50 @@ export async function readAllMeta(fs: FileSystem, notesDir: string): Promise<Map
     }
     try {
       const meta = await readMeta(fs, notesDir, id);
-      if (meta && meta.id === id) out.set(id, meta);
+      if (meta && meta.id === id) {
+        out.set(id, meta);
+      } else if (meta) {
+        // Parsed, but its `id` field disagrees with its filename (a hand-copied
+        // sidecar, a cloud client's conflict copy). Dropping it into NEITHER map
+        // would report the note as having no metadata, and reconcile would then
+        // ingest its body as unmanaged and write a fresh sidecar over the real
+        // one. We could not establish what this file is, which is exactly what
+        // quarantine is for.
+        unreadableIds.add(id);
+        void logNotenError(new NotenError(
+          "META_READ_FAILED",
+          "fatal",
+          "readAllMeta: sidecar id does not match its filename; quarantining rather than treating the note as unmanaged",
+          { context: { notesDir, noteId: id, declaredId: meta.id } },
+        ));
+      }
     } catch (err) {
-      let stillExists = false;
-      try { stillExists = await fs.exists(metaPathFor(notesDir, id)); } catch { stillExists = false; }
-      if (stillExists) throw err;
+      let stillExists = true;
+      // A failed existence re-check leaves us unable to tell a deletion that
+      // raced this read from a file we simply cannot reach. Only a definite
+      // "not there" may drop the id; anything else quarantines.
+      try { stillExists = await fs.exists(metaPathFor(notesDir, id)); } catch { stillExists = true; }
+      if (!stillExists) return;
+      unreadableIds.add(id);
+      const corrupt = err instanceof CorruptMetaError;
+      void logNotenError(new NotenError(
+        "META_READ_FAILED",
+        // Corrupt bytes will not fix themselves, so the note stays invisible
+        // until someone looks at the file. That has to reach the user rather
+        // than repeat quietly once a minute. A transient read failure stays
+        // recoverable: the next pass picks it up.
+        corrupt ? "fatal" : "recoverable",
+        corrupt
+          ? "readAllMeta: sidecar does not parse as note metadata; this note stays quarantined until the file is repaired"
+          : "readAllMeta: sidecar exists but could not be read; quarantining this note for this pass",
+        { context: { notesDir, noteId: id, corrupt }, cause: err },
+      ));
     }
-  }));
+  });
 
-  // Cache the canonical map (the one we own); return a clone so callers
+  // Cache the canonical result (the one we own); return a clone so callers
   // can't mutate our cache view.
-  setReadAllMetaCache(fs, notesDir, out);
-  return new Map(out);
+  const result: AllMeta = { byId: out, unreadableIds };
+  setReadAllMetaCache(fs, notesDir, result);
+  return cloneAllMeta(result);
 }

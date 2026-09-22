@@ -107,12 +107,43 @@ describe("backupIfRemoteWroteFirst", () => {
     });
   });
 
-  it("seeds the baseline and returns false on the first save when read succeeds", async () => {
-    inner.seedTextFile(FILE_PATH, "current body");
+  it("seeds the baseline and returns false on a first save that destroys nothing", async () => {
+    // No baseline AND nothing on disk to lose: the ordinary first save of a
+    // freshly provisioned note. Seed silently, no speculative backup.
+    inner.seedTextFile(FILE_PATH, "");
 
     const result = await backupIfRemoteWroteFirst(fs, DIR, FILE_PATH, NOTE_ID, "anything");
 
     expect(result).toBe(false);
+  });
+
+  it("seeds the baseline and returns false when the first save matches the disk", async () => {
+    inner.seedTextFile(FILE_PATH, "current body");
+
+    const result = await backupIfRemoteWroteFirst(fs, DIR, FILE_PATH, NOTE_ID, "current body");
+
+    expect(result).toBe(false);
+  });
+
+  it("backs up on a first save that would destroy a body this session never read", async () => {
+    // The projection case: a load that failed after the manifest-cache
+    // projection was committed leaves `content: ""` in memory against a real
+    // filePath. Typing one character then makes autosave write that empty
+    // body over the real note. There is no baseline precisely BECAUSE the body
+    // was never read, so the old "first save, seed and skip" branch handed the
+    // save a free pass to destroy it.
+    inner.seedTextFile(FILE_PATH, "the real note body still on disk");
+
+    const result = await backupIfRemoteWroteFirst(fs, DIR, FILE_PATH, NOTE_ID, "x");
+
+    expect(result).toBe(true);
+    const entries = await fs.readDir(`${DIR}/.conflicts`);
+    const backup = entries.find((e) => e.name?.startsWith(NOTE_ID));
+    expect(backup).toBeDefined();
+    // The backup must hold the body that was about to be destroyed, not the
+    // empty projection the save intended to write.
+    expect(await fs.readTextFile(`${DIR}/.conflicts/${backup!.name}`))
+      .toBe("the real note body still on disk");
   });
 
   it("returns false when disk matches the intended content (no remote drift)", async () => {
