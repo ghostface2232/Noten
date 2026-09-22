@@ -24,9 +24,8 @@ async function ensureReadme(fs: FileSystem, notesDir: string, conflictsDir: stri
 //
 // The ABSENCE of an entry is load-bearing: it means this session has neither
 // read nor written that path's body, so the bytes on disk are unknown to us.
-// Every path that learns a body seeds it — the loader's attachDocContents
-// (read), provisionNoteFile and rewriteNoteFile (write), autosave after a
-// durable write, and the watcher after an external change. A doc that reached
+// Every path that learns a body seeds it; src/hooks/AGENTS.md keeps the list
+// of those paths and the rules on when each may seed. A doc that reached
 // the store as a manifest-cache projection (`content: ""` with a real
 // filePath, the state a failed load leaves behind) therefore has NO entry,
 // and the two destructive consumers below and in pruneEmptyCurrentDoc key off

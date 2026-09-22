@@ -121,9 +121,8 @@ async function clearDirContents(dir: string, protectedPath?: string, strict = fa
     if (!entry.name) continue;
     // `.conflicts` is deliberately not managed: it holds bodies the app already
     // decided to preserve, often the only copy left, and its README tells the
-    // user it is theirs to delete. Both overwrite paths used to wipe the
-    // destination's archive, and every copy of the source's is best-effort,
-    // so a source clear could destroy one that never arrived.
+    // user it is theirs to delete. Every copy of it is best-effort, so a
+    // source clear could also destroy an archive that never arrived.
     const isManagedRootEntry = entry.name === "manifest.json"
       || entry.name === "manifest.legacy.json"
       || entry.name === ".groups.json"

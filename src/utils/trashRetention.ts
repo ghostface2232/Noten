@@ -8,10 +8,10 @@ export const TRASH_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
  * When THIS machine first saw a given trash incarnation, on its own clock.
  *
  * `trashedAt` is stamped by whichever machine deleted the note. A machine
- * whose clock ran 14+ days slow (dead CMOS battery, a VM restored from a
- * snapshot, a boot before NTP) stamped a time that every healthy machine reads
- * as already expired, and the next launch permanently deleted a note the user
- * could still expect to restore. A local first-seen time bounds the real
+ * whose clock runs 14+ days slow (dead CMOS battery, a VM restored from a
+ * snapshot, a boot before NTP) stamps a time every healthy machine reads as
+ * already expired, so trusting it alone deletes, on the next launch, a note
+ * the user still expects to restore. A local first-seen time bounds the real
  * elapsed time from below no matter whose clock stamped the deletion.
  */
 export interface TrashObservation {

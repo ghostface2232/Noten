@@ -435,9 +435,9 @@ export function setNotesDir(dir: string, reconcileState?: ReconcileState) {
  *
  * `baselines` must be captured alongside `preserved`. The settings effect has
  * usually already switched to the new directory and cleared the map, and no
- * hydration follows this rollback, so without them every note's first save
- * wrote a spurious .conflicts copy, the empty-note prunes refused for the rest
- * of the session, and recovery records carried no base to apply against.
+ * hydration follows this rollback. An empty map would make every note's first
+ * save write a spurious .conflicts copy, refuse the empty-note prunes for the
+ * rest of the session, and journal recovery records with no base to apply.
  */
 export function restoreNotesDir(
   dir: string,

@@ -159,6 +159,19 @@ describe("contract: notes directory setting commits after copy, before source cl
     expect(body.slice(migrateAt, persistAt)).toContain("clearSource: false");
   });
 
+  it("use-selected-only captures the conflict baselines before its setting commit", () => {
+    // The commit's settings effect clears the baseline map; a capture after it
+    // would hand the rollback an empty map.
+    const text = read(APP);
+    const body = text.match(/const handleChangeNotesDir[\s\S]*?\n  const handleResetNotesDir/)?.[0];
+    expect(body, "handleChangeNotesDir not found").toBeDefined();
+    const captureAt = body!.indexOf("snapshotKnownDiskContent()");
+    const persistAt = body!.lastIndexOf("persistNotesDirectorySetting(newDir)");
+    expect(captureAt).toBeGreaterThanOrEqual(0);
+    expect(captureAt).toBeLessThan(persistAt);
+    expect(body).toMatch(/revertNotesDirChange\([^)]*preservedBaselines\)/);
+  });
+
   it("reset-notes-dir probes the default dir before any overwrite", () => {
     // An unconditional overwrite wiped a library left in the default folder by
     // an earlier migration's deferred or failed source clear, with no backup.

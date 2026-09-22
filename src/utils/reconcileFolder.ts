@@ -361,8 +361,8 @@ export async function reconcileFolder(
     // An identical root is a leftover of the very body that was trashed, and
     // with no trash body yet there is nothing to order against: in both cases
     // the deletion stands (the absent case moves the root into .trash, so the
-    // note stays restorable). Letting a clock that ran ahead decide them
-    // undid a peer's deletion and propagated the restore to every machine.
+    // note stays restorable). A peer clock running ahead would otherwise undo
+    // the deletion, and the restore would propagate to every machine.
     const rootEditedAfterTrash = trashState === "readable"
       && trashBody !== rootBody
       && rootMtime != null

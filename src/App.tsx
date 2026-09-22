@@ -1022,10 +1022,10 @@ function App() {
     const defaultDir = await getDefaultNotesDir();
 
     // The default folder is usually empty, but an earlier migration's deferred
-    // or failed source clear leaves a library there. An unconditional
-    // overwrite wiped it with no backup, so ask exactly as a folder change
-    // would. Keeping only the default folder's notes is not offered here; it
-    // needs the no-copy branch of handleChangeNotesDir.
+    // or failed source clear leaves a library there, which an overwrite would
+    // delete with no backup, so ask exactly as a folder change would. Keeping
+    // only the default folder's notes is not offered here; it needs the
+    // no-copy branch of handleChangeNotesDir.
     const normalize = (p: string) => p.replace(/[\\/]+$/, "").replace(/\\/g, "/");
     let mergeStrategy: "merge" | "overwrite" = "overwrite";
     if (normalize(oldDir) !== normalize(defaultDir) && await hasExistingNotenData(defaultDir)) {
