@@ -2,6 +2,7 @@ import type { FileSystem } from "./fs";
 import { backupRemoteVersion } from "./conflictBackup";
 import { logNotenError } from "./crashLog";
 import { NotenError } from "./notenError";
+import { normalizeSep } from "./pathUtils";
 import {
   clearRecoveryRecord,
   listRecoveryLabels,
@@ -58,9 +59,40 @@ async function readDiskBody(fs: FileSystem, filePath: string): Promise<string | 
   }
 }
 
+/** Whether a record's note file belongs to the notes directory in use now. */
+function isInsideNotesDir(filePath: string, notesDir: string): boolean {
+  if (!filePath) return false;
+  const base = normalizeSep(notesDir).replace(/\/$/, "").toLowerCase();
+  return normalizeSep(filePath).toLowerCase().startsWith(`${base}/`);
+}
+
 export async function recoverEdits(deps: RecoverEditsDeps): Promise<RecoveryOutcome> {
   const { fs, appDataDir, notesDir, windowLabel, applyBody } = deps;
   const outcome: RecoveryOutcome = { applied: 0, preserved: 0, dropped: 0, deferred: 0 };
+
+  const preserve = async (record: RecoveryRecord, reason: string): Promise<boolean> => {
+    try {
+      // An empty body has nothing to preserve, so it only costs a stray file.
+      if (record.content.trim()) {
+        await backupRemoteVersion(fs, notesDir, record.docId, record.content);
+      }
+    } catch (err) {
+      void logNotenError(new NotenError(
+        "BACKUP_FAILED",
+        "fatal",
+        "recoverEdits: could not keep an unsaved edit; leaving it journalled for the next run",
+        { context: { noteId: record.docId, filePath: record.filePath, reason }, cause: err },
+      ));
+      return false;
+    }
+    void logNotenError(new NotenError(
+      "BACKUP_FAILED",
+      "recoverable",
+      `recoverEdits: kept an unsaved edit under .conflicts (${reason})`,
+      { context: { noteId: record.docId, filePath: record.filePath, reason } },
+    ));
+    return true;
+  };
 
   const labels = new Set<string>([windowLabel]);
   for (const label of deps.adoptLabels ?? []) labels.add(label);
@@ -73,6 +105,19 @@ export async function recoverEdits(deps: RecoverEditsDeps): Promise<RecoveryOutc
       continue;
     }
     for (const record of records) {
+      // A record written before a notes-directory change points into the old
+      // folder. Applying it would write the body there while the commit marks
+      // the live note clean, so the edit would vanish from the library it was
+      // made in. Keep it instead, under the CURRENT folder's .conflicts.
+      if (!isInsideNotesDir(record.filePath, notesDir)) {
+        if (await preserve(record, "foreign-path")) {
+          outcome.preserved += 1;
+          await clearRecoveryRecord(fs, appDataDir, label, record.docId);
+        } else {
+          outcome.deferred += 1;
+        }
+        continue;
+      }
       const diskContent = await readDiskBody(fs, record.filePath);
       if (diskContent === undefined) {
         outcome.deferred += 1;
@@ -87,18 +132,12 @@ export async function recoverEdits(deps: RecoverEditsDeps): Promise<RecoveryOutc
           }
           outcome.applied += 1;
         } else if (plan.action === "preserve") {
-          // Keep the work and leave the note alone. An empty body has nothing
-          // to preserve, so it only costs a stray file.
-          if (record.content.trim()) {
-            await backupRemoteVersion(fs, notesDir, record.docId, record.content);
+          // Keep the work and leave the note alone.
+          if (!(await preserve(record, plan.reason))) {
+            outcome.deferred += 1;
+            continue;
           }
           outcome.preserved += 1;
-          void logNotenError(new NotenError(
-            "BACKUP_FAILED",
-            "recoverable",
-            `recoverEdits: kept an unsaved edit under .conflicts (${plan.reason})`,
-            { context: { noteId: record.docId, filePath: record.filePath, reason: plan.reason } },
-          ));
         } else {
           outcome.dropped += 1;
         }

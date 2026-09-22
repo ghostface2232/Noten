@@ -298,6 +298,10 @@ const dict = {
     en: "Edits that could not be saved were kept in the .conflicts folder — the note itself was left unchanged.",
     ko: "저장하지 못한 편집을 .conflicts 폴더에 보관했습니다. 노트 자체는 그대로 두었습니다.",
   },
+  "recovery.deferred": {
+    en: "Some unsaved edits could not be restored yet and are still being kept. They will be retried the next time Noten starts.",
+    ko: "복구하지 못한 편집이 남아 있어 계속 보관 중입니다. 다음에 Noten을 실행할 때 다시 시도합니다.",
+  },
   "error.saveFailed": {
     en: "Could not save to the notes folder. Your changes are still open here.",
     ko: "노트 폴더에 저장하지 못했습니다. 변경 사항은 아직 창에 남아 있습니다.",

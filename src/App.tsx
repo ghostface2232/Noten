@@ -544,7 +544,13 @@ function App() {
   flushPendingSnapshotsRef.current = flushPendingSnapshots;
   journalPendingEditsRef.current = journalPendingEdits;
   beforeUpdateInstallRef.current = async () => {
-    await flushAutoSave();
+    // The same four-step drain the close handler runs, for the same reason:
+    // metadata-only writes (pin, colour, group, rename) are fire-and-forget,
+    // so nothing else awaits them, and the journal does not cover them either.
+    await flushAutoSave().catch(() => {});
+    await awaitInFlightSaves().catch(() => {});
+    await flushPendingSnapshots().catch(() => {});
+    await flushManifestRef.current?.().catch(() => {});
     await journalPendingEdits();
   };
   notifyActiveDocRef.current = notifyActiveDoc;
@@ -1187,6 +1193,11 @@ function App() {
       if (outcome.preserved > 0) {
         showEditorNotice(t("recovery.preserved", localeRef.current), FATAL_NOTICE_MS);
       }
+      // A record that could not be resolved this run stays journalled. Saying
+      // nothing would leave the close dialog's promise of restoration hanging.
+      if (outcome.deferred > 0) {
+        showEditorNotice(t("recovery.deferred", localeRef.current), FATAL_NOTICE_MS);
+      }
     })();
   }, [isLoading, setDocs, showEditorNotice, state]);
 
@@ -1364,11 +1375,18 @@ function App() {
       // the close.
       if (hasUnsavedChangesRef.current?.() || !manifestOk) {
         // The notes folder would not take these edits, so keep them on this
-        // machine instead. Once they are recorded, closing costs nothing —
-        // recovery replays them at the next start — so say so and let the
-        // window go. Only an edit the journal could NOT cover falls through to
-        // the refuse-then-discard gate below.
-        if (await journalPendingEditsRef.current?.()) {
+        // machine instead. Closing is then free, because recovery replays them
+        // at the next start.
+        //
+        // The journal answers a NARROWER question than this gate asks, so all
+        // three conditions have to hold. It records body snapshots only: a
+        // metadata write that failed (rename, pin, colour, group — what
+        // manifestOk reports) has no journal at all, and a dirty doc with no
+        // filePath is refused by createSnapshot, so neither is protected by a
+        // `true` here. Treating the journal's answer as the whole answer closed
+        // the window on both while promising they would come back.
+        const bodiesRecorded = (await journalPendingEditsRef.current?.()) ?? false;
+        if (bodiesRecorded && manifestOk && !hasUnsaveableChangesRef.current?.()) {
           closeBlockedOnceRef.current = false;
           await message(t("close.unsavedJournalled", localeRef.current), { kind: "info" });
           return;

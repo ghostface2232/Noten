@@ -20,7 +20,13 @@ export async function recoverJournalledEdits(
   const [appData, notesDir] = await Promise.all([appDataDir(), getNotesDir()]);
   const liveLabels = (await getAllWindows()).map((w) => w.label);
   const windowLabel = getCurrentWindow().label;
-  const adoptLabels = await findOrphanedLabels(tauriFileSystem, appData, liveLabels);
+  // Exactly one window sweeps the orphans, or two starting together replay the
+  // same records and each writes its own .conflicts copy. The first live label
+  // in sort order is a stable choice that needs no coordination between them.
+  const sweeper = [...liveLabels].sort()[0] ?? windowLabel;
+  const adoptLabels = sweeper === windowLabel
+    ? await findOrphanedLabels(tauriFileSystem, appData, liveLabels)
+    : [];
   return recoverEdits({
     fs: tauriFileSystem,
     appDataDir: appData,

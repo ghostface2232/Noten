@@ -217,3 +217,32 @@ describe("recoverEdits — adopting a window that never reopened", () => {
     expect(afterClose).toEqual(["window-2"]);
   });
 });
+
+describe("recoverEdits — a record from a different notes directory", () => {
+  it("keeps the edit instead of writing into the old folder", async () => {
+    // Written before a notes-directory change. Applying would put the body in
+    // the OLD folder while the commit marks the live note clean, so the edit
+    // would vanish from the library it was made in.
+    fs.seedDir("/old-notes");
+    await writeRecoveryRecord(fs, APP_DATA, LABEL, record({
+      filePath: `/old-notes/${NOTE_ID}.md`,
+      baseContent: "what was there",
+    }));
+    const d = deps();
+
+    const outcome = await recoverEdits(d);
+
+    expect(d.applyBody).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({ preserved: 1, applied: 0 });
+    // Kept under the CURRENT folder, where the user is working.
+    expect(await conflictFiles()).toHaveLength(1);
+    expect(await fs.exists(`/old-notes/${NOTE_ID}.md`)).toBe(false);
+  });
+
+  it("still applies a record whose path is the current folder", async () => {
+    fs.seedTextFile(NOTE_PATH, "what was on disk");
+    await writeRecoveryRecord(fs, APP_DATA, LABEL, record());
+
+    expect(await recoverEdits(deps())).toMatchObject({ applied: 1 });
+  });
+});

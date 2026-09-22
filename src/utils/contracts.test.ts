@@ -460,10 +460,14 @@ describe("contract: unsaved edits get a last chance before the process ends", ()
     const src = read(resolve(SRC_ROOT, "App.tsx"));
     const assignIdx = src.indexOf("beforeUpdateInstallRef.current =");
     expect(assignIdx).toBeGreaterThan(-1);
-    const body = src.slice(assignIdx, assignIdx + 300);
+    const body = src.slice(assignIdx, assignIdx + 800);
     expect(body).toContain("flushAutoSave");
-    // Flushing alone is what failed before: if the folder will not take the
-    // write, the edit has to go somewhere this machine keeps.
+    // Flushing bodies alone is what failed before, twice over: if the folder
+    // will not take the write the edit has to go somewhere this machine keeps,
+    // and metadata-only writes (pin, colour, group, rename) are
+    // fire-and-forget, so nothing else awaits them and the journal does not
+    // cover them either.
+    expect(body).toContain("flushManifestRef");
     expect(body).toContain("journalPendingEdits");
   });
 });

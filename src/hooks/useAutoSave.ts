@@ -62,7 +62,14 @@ function getWindowLabel(): string {
 }
 let appDataDirPromise: Promise<string> | null = null;
 function getAppDataDir(): Promise<string> {
-  if (!appDataDirPromise) appDataDirPromise = appDataDir();
+  // Drop a rejected promise rather than memoizing it: caching one transient
+  // failure would disable journalling for the rest of the window's life.
+  if (!appDataDirPromise) {
+    appDataDirPromise = appDataDir().catch((err) => {
+      appDataDirPromise = null;
+      throw err;
+    });
+  }
   return appDataDirPromise;
 }
 
@@ -277,53 +284,51 @@ export function useAutoSave(
    * to let the process die (the close gate) must treat false as "these edits
    * still live only in memory".
    */
-  const journalPendingEdits = useCallback(async (): Promise<boolean> => {
-    const pending = Array.from(pendingSnapshotsRef.current.values());
-    // A bare pending TARGET has no captured content, so there is nothing to
-    // record for it — its text is still only in the editor. Callers flush
-    // first, which converts the active doc's target into a snapshot; anything
-    // left here is an edit this function cannot protect, and saying otherwise
-    // would let the close gate wave it through.
-    const uncovered = Array.from(pendingTargetsRef.current.keys())
-      .some((docId) => !pendingSnapshotsRef.current.has(docId));
-    if (pending.length === 0) return !uncovered;
-    let appData: string;
-    let label: string;
+  /** Record one snapshot. Used by the failure path, which must not rewrite
+   *  every other pending doc's body on each individual failure — during a
+   *  folder outage that is a full atomic write per pending note per second. */
+  const journalSnapshot = useCallback(async (snapshot: SaveSnapshot): Promise<boolean> => {
     try {
-      appData = await getAppDataDir();
-      label = getWindowLabel();
-    } catch {
+      await writeRecoveryRecord(tauriFileSystem, await getAppDataDir(), getWindowLabel(), {
+        version: 1,
+        docId: snapshot.docId,
+        filePath: snapshot.filePath,
+        content: snapshot.content,
+        baseContent: getKnownDiskContent(snapshot.filePath) ?? null,
+        editSerial: snapshot.editSerial,
+        updatedAt: Date.now(),
+      });
+      return true;
+    } catch (err) {
+      void logNotenError(new NotenError(
+        "SAVE_FAILED",
+        "fatal",
+        "journalSnapshot: could not record an unsaved edit for recovery",
+        { context: { noteId: snapshot.docId, filePath: snapshot.filePath }, cause: err },
+      ));
       return false;
     }
+  }, []);
+
+  const journalPendingEdits = useCallback(async (): Promise<boolean> => {
+    const pending = Array.from(pendingSnapshotsRef.current.values());
+    // A pending TARGET newer than its snapshot has content this function
+    // cannot see — its text is still only in the editor. Callers flush first,
+    // which converts the active doc's target into a snapshot; anything still
+    // ahead of its snapshot here is an edit we cannot protect, and saying
+    // otherwise would let the close gate wave it through. Comparing by id
+    // alone missed the common case: typing during the awaited close drain
+    // leaves a target newer than the snapshot the drain already captured.
+    const uncovered = Array.from(pendingTargetsRef.current.values()).some((target) => {
+      const snapshot = pendingSnapshotsRef.current.get(target.docId);
+      return !snapshot || target.editSerial > snapshot.editSerial;
+    });
     let allRecorded = true;
     for (const snapshot of pending) {
-      try {
-        await writeRecoveryRecord(tauriFileSystem, appData, label, {
-          version: 1,
-          docId: snapshot.docId,
-          filePath: snapshot.filePath,
-          content: snapshot.content,
-          // What this edit was made against. Absent means this session never
-          // read or wrote that file, which recovery treats the way every other
-          // destructive path treats it: never apply over a body we have not
-          // seen. A pathless doc (provisioning kept failing) has no disk body
-          // at all, and recovery creates a note for it.
-          baseContent: snapshot.filePath ? getKnownDiskContent(snapshot.filePath) ?? null : null,
-          editSerial: snapshot.editSerial,
-          updatedAt: Date.now(),
-        });
-      } catch (err) {
-        allRecorded = false;
-        void logNotenError(new NotenError(
-          "SAVE_FAILED",
-          "fatal",
-          "journalPendingEdits: could not record an unsaved edit for recovery",
-          { context: { noteId: snapshot.docId, filePath: snapshot.filePath }, cause: err },
-        ));
-      }
+      if (!(await journalSnapshot(snapshot))) allRecorded = false;
     }
     return allRecorded && !uncovered;
-  }, []);
+  }, [journalSnapshot]);
 
   const discardPendingTarget = useCallback((docId: string) => {
     pendingTargetsRef.current.delete(docId);
@@ -678,13 +683,14 @@ export function useAutoSave(
         refreshHasPendingChanges();
         // The edit is still only in memory. Record it now rather than at the
         // next lifecycle point, so a crash between here and then does not take
-        // it with it.
-        void journalPendingEdits();
+        // it with it. Only THIS doc: a folder outage fails every pending save,
+        // and rewriting them all on each failure is quadratic.
+        void journalSnapshot(snapshot);
       }
       return saved;
     });
     return trackInFlight(snapshot, save);
-  }, [clearPendingSnapshotIfCurrent, doSave, journalPendingEdits, refreshHasPendingChanges, trackInFlight]);
+  }, [clearPendingSnapshotIfCurrent, doSave, journalSnapshot, refreshHasPendingChanges, trackInFlight]);
 
   // A doc without a filePath (the loader-failure fallback stub, or a
   // replacement doc whose provisioning failed in deleteNotes) is invisible to
@@ -927,10 +933,10 @@ export function useAutoSave(
     if (saved) clearPendingSnapshotIfCurrent(snapshot);
     else {
       refreshHasPendingChanges();
-      void journalPendingEdits();
+      void journalSnapshot(snapshot);
     }
     return saved;
-  }, [awaitDocSave, clearPendingSnapshotIfCurrent, doSave, journalPendingEdits, refreshHasPendingChanges, snapshotIsCurrent, trackInFlight]);
+  }, [awaitDocSave, clearPendingSnapshotIfCurrent, doSave, journalSnapshot, refreshHasPendingChanges, snapshotIsCurrent, trackInFlight]);
 
   // Retry any snapshots whose background save settled with failure (returned
   // false → still in pendingSnapshotsRef, no timer scheduled). Background

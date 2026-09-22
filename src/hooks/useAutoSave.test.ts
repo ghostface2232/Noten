@@ -16,10 +16,26 @@ const refs = vi.hoisted(() => ({
   provisionShouldFail: false,
   editorContent: "",
   files: new Map<string, string>(),
+  journalled: [] as { docId: string; content: string }[],
+  journalShouldThrow: null as Error | null,
 }));
 
 vi.mock("@tauri-apps/api/path", () => ({
   appDataDir: vi.fn(async () => "/test-appdata"),
+}));
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: vi.fn(() => ({ label: "main" })),
+}));
+
+// The journal's storage is covered by recoveryJournal.test.ts; here we only
+// need to see WHICH edits the hook decides to record.
+vi.mock("../utils/recoveryJournal", () => ({
+  writeRecoveryRecord: vi.fn(async (_fs: unknown, _dir: string, _label: string, rec: unknown) => {
+    if (refs.journalShouldThrow) throw refs.journalShouldThrow;
+    refs.journalled.push(rec as { docId: string; content: string });
+  }),
+  clearRecoveryRecord: vi.fn(async () => {}),
 }));
 
 vi.mock("@tauri-apps/plugin-fs", () => ({
@@ -91,6 +107,7 @@ vi.mock("../utils/conflictBackup", () => ({
     return "/notes/.conflicts/a-1.md";
   }),
   setKnownDiskContent: vi.fn(),
+  getKnownDiskContent: vi.fn(() => "disk baseline"),
 }));
 
 vi.mock("../utils/fs", () => ({
@@ -230,6 +247,8 @@ function renderAutoSave(opts: {
 
 beforeEach(() => {
   refs.migrationInProgress = false;
+  refs.journalled = [];
+  refs.journalShouldThrow = null;
   refs.backupShouldThrow = null;
   refs.remoteBackupShouldThrow = null;
   refs.writeShouldThrow = null;
@@ -1793,5 +1812,69 @@ describe("useAutoSave — per-doc save serialization", () => {
     });
 
     expect(maxConcurrent).toBe(2);
+  });
+});
+
+describe("useAutoSave — what the recovery journal is allowed to claim", () => {
+  // journalPendingEdits is read by the close gate as "is this edit safe to
+  // lose the process over". It has to answer only for what it can actually
+  // record, or the gate closes the window on work that was never written.
+  it("records a failed save's body, and only that doc's", async () => {
+    vi.useFakeTimers();
+    refs.writeShouldThrow = new Error("EPERM: folder offline");
+    refs.editorContent = "typed while the folder was gone";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "old" })],
+      state: makeState({ isDirty: true }),
+    });
+
+    act(() => result.current.scheduleAutoSave());
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(refs.journalled.map((r) => r.docId)).toEqual(["a"]);
+    expect(refs.journalled[0].content).toBe("typed while the folder was gone");
+  });
+
+  it("refuses to claim coverage for keystrokes newer than the snapshot it holds", async () => {
+    vi.useFakeTimers();
+    refs.writeShouldThrow = new Error("EPERM: folder offline");
+    refs.editorContent = "first";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "old" })],
+      state: makeState({ isDirty: true }),
+    });
+
+    act(() => result.current.scheduleAutoSave());
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await Promise.resolve(); });
+
+    // The user keeps typing while the close drain is awaiting. That text is
+    // still only in the editor, so nothing can record it — and comparing
+    // pending targets to snapshots by id alone reported it as covered.
+    refs.editorContent = "second";
+    act(() => result.current.scheduleAutoSave());
+
+    await act(async () => {
+      expect(await result.current.journalPendingEdits()).toBe(false);
+    });
+  });
+
+  it("reports failure when the record itself cannot be written", async () => {
+    vi.useFakeTimers();
+    refs.writeShouldThrow = new Error("EPERM: folder offline");
+    refs.journalShouldThrow = new Error("EPERM: app data offline too");
+    refs.editorContent = "nowhere to put this";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "old" })],
+      state: makeState({ isDirty: true }),
+    });
+
+    act(() => result.current.scheduleAutoSave());
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+    await act(async () => {
+      expect(await result.current.journalPendingEdits()).toBe(false);
+    });
   });
 });

@@ -178,7 +178,7 @@ export type RecoveryPlan =
   | { action: "apply" }
   /** Disk moved, is unknown to this session, or the file is gone. Keep the
    *  record's body under .conflicts and leave the note as it is. */
-  | { action: "preserve"; reason: "diverged" | "unknown-base" | "missing-file" };
+  | { action: "preserve"; reason: "diverged" | "unknown-base" | "missing-file" | "foreign-path" };
 
 /**
  * @param diskContent The note body now, or null when the file does not exist
