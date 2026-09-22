@@ -282,6 +282,10 @@ const dict = {
     en: "Some changes could not be saved, so the window stayed open. Check your storage location and permissions, then try again.",
     ko: "일부 변경 사항을 저장하지 못해 창을 닫지 않았습니다. 저장 위치와 권한을 확인한 뒤 다시 시도해 주세요.",
   },
+  "close.unsavedJournalled": {
+    en: "Some changes could not be saved to the notes folder, so they were kept here and will be restored the next time Noten starts.",
+    ko: "일부 변경 사항을 노트 폴더에 저장하지 못해 이 PC에 따로 보관했습니다. 다음에 Noten을 실행할 때 복구합니다.",
+  },
   "close.unsavedDiscard": {
     en: "Some changes still could not be saved. Closing now discards them. Close anyway?",
     ko: "일부 변경 사항을 여전히 저장하지 못했습니다. 지금 닫으면 해당 변경 사항이 사라집니다. 그래도 닫으시겠습니까?",

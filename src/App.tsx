@@ -274,7 +274,11 @@ function App() {
   const [sidebarSearchOpen, setSidebarSearchOpen] = useState(false);
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   const [notesDirConflict, setNotesDirConflict] = useState<NotesDirConflictDialogState | null>(null);
-  const updater = useUpdater();
+  // Filled in below, once useAutoSave exists. The updater's quiet install
+  // ends the process without a close event, so this is the last chance to get
+  // unsaved edits onto disk or into the recovery journal.
+  const beforeUpdateInstallRef = useRef<(() => Promise<void>) | null>(null);
+  const updater = useUpdater(beforeUpdateInstallRef);
   const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDarkFromMatchMedia);
   const isDarkMode = settings.themeMode === "system"
     ? systemPrefersDark
@@ -486,6 +490,7 @@ function App() {
   const awaitInFlightSavesRef = useRef<(() => Promise<void>) | null>(null);
   const flushDocSaveRef = useRef<((docId: string) => Promise<boolean>) | null>(null);
   const flushPendingSnapshotsRef = useRef<(() => Promise<void>) | null>(null);
+  const journalPendingEditsRef = useRef<(() => Promise<boolean>) | null>(null);
   const notifyActiveDocRef = useRef<((id: string, filePath: string) => void) | null>(null);
   const cancelDocSaveRef = useRef<((docId: string) => void) | null>(null);
 
@@ -511,7 +516,7 @@ function App() {
     commitLibraryForGeneration,
   );
 
-  const { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc } = useAutoSave(
+  const { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, journalPendingEdits, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc } = useAutoSave(
     state,
     tiptapRef,
     docs,
@@ -529,6 +534,11 @@ function App() {
   awaitInFlightSavesRef.current = awaitInFlightSaves;
   flushDocSaveRef.current = flushDocSave;
   flushPendingSnapshotsRef.current = flushPendingSnapshots;
+  journalPendingEditsRef.current = journalPendingEdits;
+  beforeUpdateInstallRef.current = async () => {
+    await flushAutoSave();
+    await journalPendingEdits();
+  };
   notifyActiveDocRef.current = notifyActiveDoc;
   cancelDocSaveRef.current = cancelDocSave;
 
@@ -1296,6 +1306,16 @@ function App() {
       // onCloseRequested awaits this handler, so preventDefault still cancels
       // the close.
       if (hasUnsavedChangesRef.current?.() || !manifestOk) {
+        // The notes folder would not take these edits, so keep them on this
+        // machine instead. Once they are recorded, closing costs nothing —
+        // recovery replays them at the next start — so say so and let the
+        // window go. Only an edit the journal could NOT cover falls through to
+        // the refuse-then-discard gate below.
+        if (await journalPendingEditsRef.current?.()) {
+          closeBlockedOnceRef.current = false;
+          await message(t("close.unsavedJournalled", localeRef.current), { kind: "info" });
+          return;
+        }
         // The first refusal explains the cause and keeps the window open, so a
         // recoverable condition (a cloud folder still coming online, a drive
         // reconnecting, a lock clearing) can be fixed and the close retried
@@ -1333,7 +1353,15 @@ function App() {
     // last debounce window unsaved until the window is closed. Flushing when
     // the window loses focus or the page is hidden closes that gap.
     // flushAutoSave is a cheap no-op when nothing is pending.
-    const flush = () => { void flushAutoSaveRef.current?.(); };
+    // Flush, then record whatever the flush could not make durable. Losing
+    // focus is the last moment this window is reliably alive before an update
+    // installer, a shutdown, or a kill takes the process.
+    const flush = () => {
+      void (async () => {
+        await flushAutoSaveRef.current?.();
+        await journalPendingEditsRef.current?.();
+      })();
+    };
     const onVisibility = () => { if (document.hidden) flush(); };
     document.addEventListener("visibilitychange", onVisibility);
 

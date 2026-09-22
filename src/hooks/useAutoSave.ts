@@ -9,7 +9,10 @@ import type { Locale, NotesSortOrder } from "./useSettings";
 import { getDefaultDocumentTitle } from "../utils/documentTitle";
 import { emitDocUpdated } from "./useWindowSync";
 import { markOwnWrite } from "./ownWriteTracker";
-import { backupIfRemoteWroteFirst, backupLocalDeletionVersion, setKnownDiskContent } from "../utils/conflictBackup";
+import { backupIfRemoteWroteFirst, backupLocalDeletionVersion, getKnownDiskContent, setKnownDiskContent } from "../utils/conflictBackup";
+import { clearRecoveryRecord, writeRecoveryRecord } from "../utils/recoveryJournal";
+import { appDataDir } from "@tauri-apps/api/path";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { atomicWriteText } from "../utils/atomicWrite";
 import { NotenError } from "../utils/notenError";
 import { logNotenError } from "../utils/crashLog";
@@ -43,6 +46,24 @@ export type FlushResult =
 /** True when the caller's pre-flush docs snapshot may be marked clean. */
 export function flushLeftDocClean(result: FlushResult): boolean {
   return result.status === "saved" || result.status === "clean";
+}
+
+// The recovery journal mirrors pendingSnapshotsRef — the app's own record of
+// edits that are not yet durable in the notes folder. Records are written at
+// the points where the process may be about to end rather than before every
+// save; see recoveryJournal.ts for why that is enough.
+// Both resolved lazily: touching Tauri at module scope would make this file
+// unimportable anywhere the window API is not mocked, which is every test that
+// only wants the save logic.
+let windowLabel: string | null = null;
+function getWindowLabel(): string {
+  if (windowLabel === null) windowLabel = getCurrentWindow().label;
+  return windowLabel;
+}
+let appDataDirPromise: Promise<string> | null = null;
+function getAppDataDir(): Promise<string> {
+  if (!appDataDirPromise) appDataDirPromise = appDataDir();
+  return appDataDirPromise;
 }
 
 interface SaveSnapshot {
@@ -226,12 +247,83 @@ export function useAutoSave(
     const current = pendingSnapshotsRef.current.get(snapshot.docId);
     if (current?.revision !== snapshot.revision) return;
     pendingSnapshotsRef.current.delete(snapshot.docId);
+    // The edit is durable, so drop any recovery record for it. Fire and
+    // forget: a record left behind costs one extra check at the next startup,
+    // where recovery finds the disk body already equal to the record and
+    // deletes it. Blocking the save path on this I/O would buy nothing.
+    void (async () => {
+      try {
+        await clearRecoveryRecord(tauriFileSystem, await getAppDataDir(), getWindowLabel(), snapshot.docId);
+      } catch { /* best-effort */ }
+    })();
     const pendingTarget = pendingTargetsRef.current.get(snapshot.docId);
     if (pendingTarget && pendingTarget.editSerial <= snapshot.editSerial) {
       pendingTargetsRef.current.delete(snapshot.docId);
     }
     refreshHasPendingChanges();
   }, [refreshHasPendingChanges]);
+
+  /**
+   * Record every edit that is not yet durable, so it survives the process.
+   *
+   * Called where the process may be about to end — a failed save, focus loss,
+   * the close drain, an update install — rather than before every save. The
+   * body write is fail-closed temp+rename, so a crash mid-write leaves the
+   * previous body intact and costs at most the last debounce window of typing;
+   * what actually went missing before this existed was an edit that stayed in
+   * memory after its save failed.
+   *
+   * Returns whether every pending edit is now recorded. A caller that is about
+   * to let the process die (the close gate) must treat false as "these edits
+   * still live only in memory".
+   */
+  const journalPendingEdits = useCallback(async (): Promise<boolean> => {
+    const pending = Array.from(pendingSnapshotsRef.current.values());
+    // A bare pending TARGET has no captured content, so there is nothing to
+    // record for it — its text is still only in the editor. Callers flush
+    // first, which converts the active doc's target into a snapshot; anything
+    // left here is an edit this function cannot protect, and saying otherwise
+    // would let the close gate wave it through.
+    const uncovered = Array.from(pendingTargetsRef.current.keys())
+      .some((docId) => !pendingSnapshotsRef.current.has(docId));
+    if (pending.length === 0) return !uncovered;
+    let appData: string;
+    let label: string;
+    try {
+      appData = await getAppDataDir();
+      label = getWindowLabel();
+    } catch {
+      return false;
+    }
+    let allRecorded = true;
+    for (const snapshot of pending) {
+      try {
+        await writeRecoveryRecord(tauriFileSystem, appData, label, {
+          version: 1,
+          docId: snapshot.docId,
+          filePath: snapshot.filePath,
+          content: snapshot.content,
+          // What this edit was made against. Absent means this session never
+          // read or wrote that file, which recovery treats the way every other
+          // destructive path treats it: never apply over a body we have not
+          // seen. A pathless doc (provisioning kept failing) has no disk body
+          // at all, and recovery creates a note for it.
+          baseContent: snapshot.filePath ? getKnownDiskContent(snapshot.filePath) ?? null : null,
+          editSerial: snapshot.editSerial,
+          updatedAt: Date.now(),
+        });
+      } catch (err) {
+        allRecorded = false;
+        void logNotenError(new NotenError(
+          "SAVE_FAILED",
+          "fatal",
+          "journalPendingEdits: could not record an unsaved edit for recovery",
+          { context: { noteId: snapshot.docId, filePath: snapshot.filePath }, cause: err },
+        ));
+      }
+    }
+    return allRecorded && !uncovered;
+  }, []);
 
   const discardPendingTarget = useCallback((docId: string) => {
     pendingTargetsRef.current.delete(docId);
@@ -582,11 +674,17 @@ export function useAutoSave(
     hasPendingChangesRef.current = true;
     const save = doSave(snapshot).then((saved) => {
       if (saved) clearPendingSnapshotIfCurrent(snapshot);
-      else refreshHasPendingChanges();
+      else {
+        refreshHasPendingChanges();
+        // The edit is still only in memory. Record it now rather than at the
+        // next lifecycle point, so a crash between here and then does not take
+        // it with it.
+        void journalPendingEdits();
+      }
       return saved;
     });
     return trackInFlight(snapshot, save);
-  }, [clearPendingSnapshotIfCurrent, doSave, refreshHasPendingChanges, trackInFlight]);
+  }, [clearPendingSnapshotIfCurrent, doSave, journalPendingEdits, refreshHasPendingChanges, trackInFlight]);
 
   // A doc without a filePath (the loader-failure fallback stub, or a
   // replacement doc whose provisioning failed in deleteNotes) is invisible to
@@ -827,9 +925,12 @@ export function useAutoSave(
 
     const saved = await trackInFlight(snapshot, doSave(snapshot));
     if (saved) clearPendingSnapshotIfCurrent(snapshot);
-    else refreshHasPendingChanges();
+    else {
+      refreshHasPendingChanges();
+      void journalPendingEdits();
+    }
     return saved;
-  }, [awaitDocSave, clearPendingSnapshotIfCurrent, doSave, refreshHasPendingChanges, snapshotIsCurrent, trackInFlight]);
+  }, [awaitDocSave, clearPendingSnapshotIfCurrent, doSave, journalPendingEdits, refreshHasPendingChanges, snapshotIsCurrent, trackInFlight]);
 
   // Retry any snapshots whose background save settled with failure (returned
   // false → still in pendingSnapshotsRef, no timer scheduled). Background
@@ -1069,5 +1170,5 @@ export function useAutoSave(
     return settlement;
   }, [awaitDocSave, hasPendingForDoc, refreshHasPendingChanges]);
 
-  return { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, awaitDocSave, flushDocSave, flushPendingSnapshots, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc };
+  return { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, awaitDocSave, flushDocSave, flushPendingSnapshots, journalPendingEdits, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc };
 }
