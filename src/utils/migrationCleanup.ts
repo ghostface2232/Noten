@@ -1,6 +1,6 @@
 import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { exists } from "@tauri-apps/plugin-fs";
-import { migrateNotesDir, clearManagedNotesData } from "./migrateNotesDir";
+import { migrateNotesDir, clearManagedNotesData, isSameDirectory } from "./migrateNotesDir";
 import { readMigrationJournal, clearMigrationJournal, type MigrationJournal } from "./migrationJournal";
 
 /**
@@ -18,8 +18,20 @@ import { readMigrationJournal, clearMigrationJournal, type MigrationJournal } fr
  *
  * Returns true when the cleanup completed (journal cleared), false when it was
  * deferred or failed (journal kept).
+ *
+ * The journal is a single slot that only a retained-source migration writes,
+ * so a later fully drained migration back INTO the journalled old dir leaves
+ * it in place. Its old dir is then the live library, and running it would
+ * merge that library into the abandoned folder and clear it. Such a journal
+ * is obsolete, not pending: the old dir is in use again, so nothing is left to
+ * clean, and it is dropped without touching either folder.
  */
-export async function runDeferredCleanup(journal: MigrationJournal): Promise<boolean> {
+export async function runDeferredCleanup(journal: MigrationJournal, currentNotesDir: string): Promise<boolean> {
+  if (isSameDirectory(journal.oldDir, currentNotesDir)) {
+    await clearMigrationJournal();
+    return true;
+  }
+
   let windowCount: number;
   try {
     windowCount = (await getAllWebviewWindows()).length;
@@ -53,11 +65,11 @@ export async function runDeferredCleanup(journal: MigrationJournal): Promise<boo
  * so a later launch retries. Safe to call at startup and again right after a
  * deferred migration (the single-window guard prevents racing other windows).
  */
-export async function recoverPendingMigration(): Promise<void> {
+export async function recoverPendingMigration(currentNotesDir: string): Promise<void> {
   const journal = await readMigrationJournal();
   if (!journal) return;
   try {
-    await runDeferredCleanup(journal);
+    await runDeferredCleanup(journal, currentNotesDir);
   } catch {
     /* leave the journal; next launch retries */
   }

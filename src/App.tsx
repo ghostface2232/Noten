@@ -588,7 +588,7 @@ function App() {
   useEffect(() => {
     if (migrationRecoveryDone.current || isLoading) return;
     migrationRecoveryDone.current = true;
-    void recoverPendingMigration();
+    void getNotesDir().then(recoverPendingMigration).catch(() => {});
   }, [isLoading]);
 
   const fileParamHandled = useRef(false);
@@ -1008,7 +1008,7 @@ function App() {
     broadcastMigrationFinished(migrationId, true, newDir, sourceRetained);
     // If we turned out to be the only window after all, finish the deferred
     // cleanup now instead of waiting for the next launch.
-    if (sourceRetained) void recoverPendingMigration();
+    if (sourceRetained) void recoverPendingMigration(newDir);
     // Reload owns releasing migrationInProgress.
   }, [locale, persistNotesDirectorySetting, requestNotesDirConflictChoice, revertNotesDirChange, settings.notesDirectory]);
 
@@ -1107,7 +1107,7 @@ function App() {
     setCurrentNotesDir(defaultDir);
     setReloadKey((k) => k + 1);
     broadcastMigrationFinished(migrationId, true, "", sourceRetained);
-    if (sourceRetained) void recoverPendingMigration();
+    if (sourceRetained) void recoverPendingMigration(defaultDir);
     // Reload owns releasing migrationInProgress.
   }, [locale, persistNotesDirectorySetting, requestNotesDirConflictChoice, settings.notesDirectory]);
 

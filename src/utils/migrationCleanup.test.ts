@@ -23,6 +23,7 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
 vi.mock("./migrateNotesDir", () => ({
   migrateNotesDir: vi.fn(async () => refs.migrateResult),
   clearManagedNotesData: vi.fn(async () => refs.clearManagedResult),
+  isSameDirectory: (a: string, b: string) => a.replace(/[\\/]+$/, "").toLowerCase() === b.replace(/[\\/]+$/, "").toLowerCase(),
 }));
 
 vi.mock("./migrationJournal", () => ({
@@ -58,7 +59,7 @@ beforeEach(() => {
 describe("runDeferredCleanup", () => {
   it("defers (no destructive call) when more than one window is open", async () => {
     refs.windowLabels = ["main", "second"];
-    const done = await runDeferredCleanup(mergeJournal);
+    const done = await runDeferredCleanup(mergeJournal, "/new");
     expect(done).toBe(false);
     expect(migrateMock).not.toHaveBeenCalled();
     expect(clearManagedMock).not.toHaveBeenCalled();
@@ -67,7 +68,7 @@ describe("runDeferredCleanup", () => {
 
   it("defers when window enumeration fails", async () => {
     refs.enumerateThrows = true;
-    const done = await runDeferredCleanup(mergeJournal);
+    const done = await runDeferredCleanup(mergeJournal, "/new");
     expect(done).toBe(false);
     expect(migrateMock).not.toHaveBeenCalled();
     expect(clearJournalMock).not.toHaveBeenCalled();
@@ -75,7 +76,7 @@ describe("runDeferredCleanup", () => {
 
   it("clears the journal without merging when the old dir is already gone", async () => {
     refs.oldDirExists = false;
-    const done = await runDeferredCleanup(mergeJournal);
+    const done = await runDeferredCleanup(mergeJournal, "/new");
     expect(done).toBe(true);
     expect(migrateMock).not.toHaveBeenCalled();
     expect(clearManagedMock).not.toHaveBeenCalled();
@@ -83,7 +84,7 @@ describe("runDeferredCleanup", () => {
   });
 
   it("merge mode: final newer-wins merge then clears the journal", async () => {
-    const done = await runDeferredCleanup(mergeJournal);
+    const done = await runDeferredCleanup(mergeJournal, "/new");
     expect(done).toBe(true);
     expect(migrateMock).toHaveBeenCalledWith("/old", "/new", "merge", { clearSource: true });
     expect(clearManagedMock).not.toHaveBeenCalled();
@@ -92,14 +93,14 @@ describe("runDeferredCleanup", () => {
 
   it("merge mode: keeps the journal when the final merge fails", async () => {
     refs.migrateResult = { success: false, error: "read error" };
-    const done = await runDeferredCleanup(mergeJournal);
+    const done = await runDeferredCleanup(mergeJournal, "/new");
     expect(done).toBe(false);
     expect(migrateMock).toHaveBeenCalled();
     expect(clearJournalMock).not.toHaveBeenCalled();
   });
 
   it("backup-only mode: deletes managed data without merging, then clears journal", async () => {
-    const done = await runDeferredCleanup(backupJournal);
+    const done = await runDeferredCleanup(backupJournal, "/new");
     expect(done).toBe(true);
     expect(clearManagedMock).toHaveBeenCalledWith("/old", "/new");
     expect(migrateMock).not.toHaveBeenCalled();
@@ -108,23 +109,45 @@ describe("runDeferredCleanup", () => {
 
   it("backup-only mode: keeps the journal when deletion fails", async () => {
     refs.clearManagedResult = { success: false, error: "locked" };
-    const done = await runDeferredCleanup(backupJournal);
+    const done = await runDeferredCleanup(backupJournal, "/new");
     expect(done).toBe(false);
     expect(clearJournalMock).not.toHaveBeenCalled();
+  });
+});
+
+// The journal is one slot that only retained-source migrations write, so a
+// later fully drained move back into its old dir left it pending. The next
+// launch then merged the live library into the abandoned folder and cleared it.
+describe("runDeferredCleanup — the journalled old dir is live again", () => {
+  it.each([mergeJournal, backupJournal])("drops the $cleanupMode journal without touching either folder", async (journal) => {
+    const done = await runDeferredCleanup(journal, "/OLD/");
+    expect(done).toBe(true);
+    expect(migrateMock).not.toHaveBeenCalled();
+    expect(clearManagedMock).not.toHaveBeenCalled();
+    expect(clearJournalMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops it even while other windows are open", async () => {
+    refs.windowLabels = ["main", "second"];
+    refs.journal = mergeJournal;
+    await recoverPendingMigration("/old");
+    expect(migrateMock).not.toHaveBeenCalled();
+    expect(clearManagedMock).not.toHaveBeenCalled();
+    expect(clearJournalMock).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("recoverPendingMigration", () => {
   it("does nothing when there is no journal", async () => {
     refs.journal = null;
-    await recoverPendingMigration();
+    await recoverPendingMigration("/new");
     expect(migrateMock).not.toHaveBeenCalled();
     expect(clearManagedMock).not.toHaveBeenCalled();
   });
 
   it("runs the pending cleanup when a journal exists", async () => {
     refs.journal = mergeJournal;
-    await recoverPendingMigration();
+    await recoverPendingMigration("/new");
     expect(migrateMock).toHaveBeenCalledWith("/old", "/new", "merge", { clearSource: true });
     expect(clearJournalMock).toHaveBeenCalledTimes(1);
   });

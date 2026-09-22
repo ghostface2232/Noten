@@ -76,6 +76,10 @@ function normalizePathForCompare(path: string): string {
   return normalizeSep(path).replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 
+export function isSameDirectory(a: string, b: string): boolean {
+  return normalizePathForCompare(a) === normalizePathForCompare(b);
+}
+
 function isSameOrChildPath(parentPath: string, candidatePath: string): boolean {
   const parent = normalizePathForCompare(parentPath);
   const candidate = normalizePathForCompare(candidatePath);
