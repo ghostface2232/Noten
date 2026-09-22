@@ -277,7 +277,7 @@ export function useWindowSync(
     onActiveDocChangedRef.current?.({ filePath: doc.filePath, content: doc.content });
   }, [tiptapRef]);
 
-  const applyRemoteBody = useCallback((docId: string, content: string, updatedAt: number) => {
+  const applyRemoteBody = useCallback((docId: string, filePath: string, content: string, updatedAt: number) => {
     const committed = commitRemote((current) => {
       const idx = current.docs.findIndex((d) => d.id === docId);
       if (idx < 0) return null;
@@ -297,9 +297,16 @@ export function useWindowSync(
       };
       return { docs };
     });
-    if (!committed || docId !== getRoutedActiveDocId()) return;
+    if (!committed) return;
     const updated = committed.docs.find((d) => d.id === docId);
-    if (updated) showInEditor(updated);
+    // The peer emits only after its durable write, and the fallback read comes
+    // from disk, so an ADOPTED body is what the file holds. Seeding only after
+    // the commit accepted it matches the watcher: a declined (dirty) body must
+    // not become the baseline, or the next save would overwrite the peer's
+    // version with no .conflicts copy. A peer rename since the write moved the
+    // file elsewhere, so only the path the body was written to is seeded.
+    if (updated && updated.filePath === filePath) setKnownDiskContent(filePath, content);
+    if (updated && docId === getRoutedActiveDocId()) showInEditor(updated);
   }, [commitRemote, getRoutedActiveDocId, showInEditor]);
 
   useEffect(() => {
@@ -320,7 +327,7 @@ export function useWindowSync(
         noteBodyRevision(docId, updatedAt);
 
         if (content != null) {
-          applyRemoteBody(docId, content, updatedAt);
+          applyRemoteBody(docId, filePath, content, updatedAt);
           return;
         }
         void (async () => {
@@ -331,7 +338,7 @@ export function useWindowSync(
           // A newer body may have been applied (or saved here) while the read
           // was in flight, and this read may predate that write.
           if (!mounted || isStaleBodyEvent(docId, updatedAt)) return;
-          applyRemoteBody(docId, body, updatedAt);
+          applyRemoteBody(docId, filePath, body, updatedAt);
         })();
       }),
 

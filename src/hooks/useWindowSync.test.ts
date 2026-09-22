@@ -40,6 +40,7 @@ vi.mock("./useNotesLoader", () => ({
 import { useWindowSync, emitDocUpdated, resetDocBodyClocks, resetGroupSyncClocks, emitGroupsDelta, INLINE_BODY_MAX_CHARS } from "./useWindowSync";
 import { emit } from "@tauri-apps/api/event";
 import { readTextFile } from "@tauri-apps/plugin-fs";
+import { getKnownDiskContent, resetKnownDiskContent, setKnownDiskContent } from "../utils/conflictBackup";
 import type { NoteGroup } from "../utils/noteTypes";
 
 function makeDoc(id: string): NoteDoc {
@@ -125,6 +126,7 @@ beforeEach(() => {
   vi.mocked(readTextFile).mockClear();
   resetDocBodyClocks();
   resetGroupSyncClocks();
+  resetKnownDiskContent();
 });
 
 describe("useWindowSync — doc-renamed carries customName", () => {
@@ -251,6 +253,73 @@ describe("useWindowSync — remote body update", () => {
       content: "second",
       updatedAt: 5000,
     });
+  });
+});
+
+// The peer emits only after its durable write, so an adopted body is what the
+// file holds. Without a seed, this window's next save of that note compared the
+// disk against the pre-handoff baseline and wrote a spurious .conflicts copy of
+// the body it already had in memory.
+describe("useWindowSync — remote body seeds the conflict baseline", () => {
+  it("seeds an adopted inline body", async () => {
+    setKnownDiskContent("/notes/b.md", "b");
+    renderWindowSync(async () => true, [makeDoc("a"), makeDoc("b")]);
+    await waitFor(() => expect(refs.handlers.has("doc-updated")).toBe(true));
+
+    act(() => {
+      refs.handlers.get("doc-updated")?.({
+        payload: { sourceWindow: "window-b", docId: "b", filePath: "/notes/b.md", content: "peer body", updatedAt: 4000 },
+      });
+    });
+
+    expect(getKnownDiskContent("/notes/b.md")).toBe("peer body");
+  });
+
+  it("seeds an adopted body read from disk", async () => {
+    const large = "y".repeat(INLINE_BODY_MAX_CHARS + 1);
+    renderWindowSync(async () => true, [makeDoc("a"), makeDoc("b")]);
+    await waitFor(() => expect(refs.handlers.has("doc-updated")).toBe(true));
+    refs.diskBodies.set("/notes/b.md", large);
+
+    act(() => {
+      refs.handlers.get("doc-updated")?.({
+        payload: { sourceWindow: "window-b", docId: "b", filePath: "/notes/b.md", updatedAt: 4000 },
+      });
+    });
+
+    await waitFor(() => expect(getKnownDiskContent("/notes/b.md")).toBe(large));
+  });
+
+  it("does not seed a body the dirty doc declined", async () => {
+    // makeDoc("a") is dirty. Seeding the declined body would tell the next
+    // save that disk and baseline agree, and the peer's version would be
+    // overwritten with no .conflicts copy.
+    setKnownDiskContent("/notes/a.md", "a");
+    renderWindowSync(async () => true, [makeDoc("a"), makeDoc("b")]);
+    await waitFor(() => expect(refs.handlers.has("doc-updated")).toBe(true));
+
+    act(() => {
+      refs.handlers.get("doc-updated")?.({
+        payload: { sourceWindow: "window-b", docId: "a", filePath: "/notes/a.md", content: "peer body", updatedAt: 4000 },
+      });
+    });
+
+    expect(getKnownDiskContent("/notes/a.md")).toBe("a");
+  });
+
+  it("does not seed the new path after a rename moved the note", async () => {
+    const renamed = { ...makeDoc("b"), filePath: "/notes/renamed.md" };
+    renderWindowSync(async () => true, [makeDoc("a"), renamed]);
+    await waitFor(() => expect(refs.handlers.has("doc-updated")).toBe(true));
+
+    act(() => {
+      refs.handlers.get("doc-updated")?.({
+        payload: { sourceWindow: "window-b", docId: "b", filePath: "/notes/b.md", content: "peer body", updatedAt: 4000 },
+      });
+    });
+
+    expect(getKnownDiskContent("/notes/renamed.md")).toBeUndefined();
+    expect(getKnownDiskContent("/notes/b.md")).toBeUndefined();
   });
 });
 
