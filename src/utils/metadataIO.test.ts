@@ -43,7 +43,7 @@ describe("readAllMeta — unsafe id quarantine", () => {
     // A legitimate note alongside it must still load.
     await writeMeta(fs, DIR, meta("good-id"), "m1");
 
-    const all = await readAllMeta(fs, DIR);
+    const { byId: all } = await readAllMeta(fs, DIR);
 
     expect(all.has("..")).toBe(false);
     expect(all.has("good-id")).toBe(true);
@@ -52,7 +52,7 @@ describe("readAllMeta — unsafe id quarantine", () => {
 
   it("skips sidecars whose stem contains separators", async () => {
     fs.seedTextFile(`${DIR}/.meta/a:b.json`, JSON.stringify(meta("a:b")));
-    const all = await readAllMeta(fs, DIR);
+    const { byId: all } = await readAllMeta(fs, DIR);
     expect(all.size).toBe(0);
   });
 });
@@ -83,5 +83,49 @@ describe("readMeta / writeMeta / removeMeta — content id validation", () => {
 
     await expect(removeMeta(faultFs, DIR, "safe", { strict: true })).rejects.toThrow(/EPERM/);
     expect(await fs.exists(`${DIR}/.meta/safe.json`)).toBe(true);
+  });
+});
+
+describe("readAllMeta — one unreadable sidecar does not fail the library", () => {
+  // Regression: readAllMeta rethrew whenever a sidecar existed but could not
+  // be read, which failed the whole aggregate. One OneDrive placeholder that
+  // had not hydrated was enough, and it took loading, saving and folder
+  // resync down together — the close gate then refused to quit, with no way
+  // out. Fail-closed is right for that ONE note; the blast radius was not.
+  it("returns the readable notes and quarantines the unreadable one", async () => {
+    await writeMeta(fs, DIR, meta("good-1"), "m1");
+    await writeMeta(fs, DIR, meta("good-2"), "m1");
+    await writeMeta(fs, DIR, meta("locked"), "m1");
+    const faultFs = wrapWithFaults(fs);
+    faultFs.injectFault({
+      op: "readTextFile",
+      path: /locked\.json$/,
+      throwError: new Error("EBUSY: cloud-sync hydration"),
+    });
+
+    const { byId, unreadableIds } = await readAllMeta(faultFs, DIR);
+
+    expect([...byId.keys()].sort()).toEqual(["good-1", "good-2"]);
+    expect([...unreadableIds]).toEqual(["locked"]);
+  });
+
+  it("does not quarantine a sidecar that was deleted mid-read", async () => {
+    // The TOCTOU case: listMetaFiles snapshotted the name, then a sibling
+    // window's removeMeta landed before the read. Gone is not unreadable —
+    // quarantining it would pin a note that no longer exists.
+    await writeMeta(fs, DIR, meta("good-1"), "m1");
+    await writeMeta(fs, DIR, meta("racing"), "m1");
+    const faultFs = wrapWithFaults(fs);
+    faultFs.injectFault({
+      op: "readTextFile",
+      path: /racing\.json$/,
+      throwError: new Error("os error 2"),
+    });
+    await fs.remove(`${DIR}/.meta/racing.json`);
+
+    const { byId, unreadableIds } = await readAllMeta(faultFs, DIR);
+
+    expect([...byId.keys()]).toEqual(["good-1"]);
+    expect(unreadableIds.size).toBe(0);
   });
 });

@@ -169,7 +169,7 @@ export function createSmokeWindow(sharedFs: FileSystem, label: string): SmokeWin
       // written — the silent, durable half of the old bug.
       await syncGroupsSnapshotFromDisk(fs, DIR, persistState);
       const file = await readGroupsFile(fs, DIR);
-      const metaById = await readAllMeta(fs, DIR);
+      const { byId: metaById } = await readAllMeta(fs, DIR);
       // Pending intents and live ids are read AFTER the awaits, in the same
       // tick as the commit — exactly as the watcher does.
       // Production also unions useWindowSync's session `retiredGroupIds` here;

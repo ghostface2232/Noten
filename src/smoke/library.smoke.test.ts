@@ -208,7 +208,7 @@ describe("smoke: deletions survive the passes that could undo them", () => {
     winA.commitGroups((prev) => prev.map((g) => ({ ...g, noteIds: [] })));
     await winA.persist();
 
-    const metaById = await readAllMeta(fs, DIR);
+    const { byId: metaById } = await readAllMeta(fs, DIR);
     expect(metaById.get(doc.id)!.trashedAt).toBe(5000);
 
     // A reconcile must not resurrect it into the live set from a stale view.
@@ -379,7 +379,7 @@ describe("smoke: unwritten local moves outrank the sidecars that lag them", () =
 
     await winA.persist();
 
-    const metaById = await readAllMeta(fs, DIR);
+    const { byId: metaById } = await readAllMeta(fs, DIR);
     expect(metaById.get(NOTE_A)!.groupId).toBe("g2");
     // Only membership is asserted here. Title/pin/colour LWW is decided by the
     // metadata mutation clocks in useNotesLoader, which is Tauri-bound and

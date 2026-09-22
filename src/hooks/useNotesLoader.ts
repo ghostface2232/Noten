@@ -577,7 +577,10 @@ export async function readDiskGroupsSnapshot(dir: string): Promise<{
 }> {
   await loadUiState();
   const file = await readGroupsFile(tauriFileSystem, dir);
-  const metaById = await readAllMeta(tauriFileSystem, dir);
+  // Quarantined sidecars are left out of the map, which mergeDiskGroups
+  // already reads conservatively: a live note with no disk meta keeps the
+  // group it currently has rather than being ungrouped.
+  const { byId: metaById } = await readAllMeta(tauriFileSystem, dir);
   return {
     entries: file.groups,
     metaById,

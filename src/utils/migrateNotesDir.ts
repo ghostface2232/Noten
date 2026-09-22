@@ -6,7 +6,7 @@ import {
   ensureMetaDir,
   metaDirFor,
   metaPathFor,
-  readAllMeta,
+  readAllMetaStrict,
   readMeta,
   writeMeta,
   type NoteMeta,
@@ -489,8 +489,15 @@ export async function migrateNotesDir(
     await assertReadableFileIfExists(`${fromBase}.groups.json`);
     await assertReadableFileIfExists(`${toBase}.groups.json`);
 
-    const sourceMeta = await readAllMeta(tauriFileSystem, fromDir);
-    const destMetaBefore = await readAllMeta(tauriFileSystem, toDir);
+    // Migration keeps the strict posture the preflight assertions above set.
+    // Everywhere else a quarantined sidecar is skipped and retried next pass,
+    // because the library stays put and nothing is lost by waiting. Here the
+    // files are about to MOVE, and a sidecar we cannot read is one we cannot
+    // merge — proceeding would carry the body across while its metadata is
+    // silently left behind or overwritten by the destination's. Fail, and let
+    // the user retry once the folder responds.
+    const sourceMeta = await readAllMetaStrict(tauriFileSystem, fromDir);
+    const destMetaBefore = await readAllMetaStrict(tauriFileSystem, toDir);
 
     const sourceMdMtimes = await readMdMtimes(fromDir, true);
     const destMdMtimes = await readMdMtimes(toDir, true);

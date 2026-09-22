@@ -205,7 +205,7 @@ export async function reconcileFolder(
 
   const mdEntries = entries.filter((e) => e.name?.endsWith(".md") && e.isFile);
   const folderFileNames = new Set(mdEntries.map((e) => e.name!));
-  const allMeta = await readAllMeta(fs, dir);
+  const { byId: allMeta, unreadableIds: unreadableMetaIds } = await readAllMeta(fs, dir);
   // Membership resolves at the END of this pass but against THESE sidecars, so
   // it needs the intents as of this moment too — see hydrateGroupMembershipFromMeta.
   const pendingAtRead: PendingMembership = new Map(pendingMembership);
@@ -233,6 +233,13 @@ export async function reconcileFolder(
     }
     if (docById.has(id)) continue;
     if (trashedIds.has(id)) continue; // handled in mismatch branch below
+    // This body HAS a sidecar; we just could not read it this pass. Ingesting
+    // it as an unmanaged file would write a fresh sidecar over the real one
+    // and surface the note with a derived title and no group — the "deleted
+    // note reappeared outside its group" failure, arrived at from the other
+    // side. The orphan-meta sweep below cannot touch it either, since it
+    // walks only the sidecars that were read. Next pass retries.
+    if (unreadableMetaIds.has(id)) continue;
 
     const filePath = `${base}${name}`;
     const content = await readFileContent(fs, filePath);
