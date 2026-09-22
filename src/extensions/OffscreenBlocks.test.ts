@@ -2,8 +2,17 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import CodeBlock from "@tiptap/extension-code-block";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { TextSelection } from "@tiptap/pm/state";
-import OffscreenBlocks, { MAX_TEXT_SKIP_BLOCKS, SKIP_OFFSCREEN_CLASS, SKIP_TEXT_CLASS } from "./OffscreenBlocks";
+import OffscreenBlocks, {
+  MAX_TEXT_SKIP_BLOCKS,
+  SKIPPABLE_BLOCK,
+  SKIPPABLE_TEXT,
+  SKIP_OFFSCREEN_CLASS,
+  SKIP_TEXT_CLASS,
+  TEXT_SKIP_HYSTERESIS,
+} from "./OffscreenBlocks";
 
 // jsdom has no layout, ResizeObserver or frames: fake all three so the tests
 // drive width changes, frame boundaries and on/off-screen positions directly.
@@ -283,7 +292,7 @@ describe("OffscreenBlocks", () => {
       expect(skipping(editor)).toBe(true);
     });
 
-    it("switches prose skipping with the block count and re-measures", () => {
+    it("switches prose skipping with the block count, with hysteresis, and re-measures", () => {
       const editor = readyEditor(paragraphs(MAX_TEXT_SKIP_BLOCKS));
       expect(skipsText(editor)).toBe(true);
 
@@ -294,8 +303,18 @@ describe("OffscreenBlocks", () => {
       flushFrames();
       expect(skipping(editor)).toBe(true);
 
-      // A deletion brings it back under.
-      editor.commands.deleteRange({ from: 0, to: editor.state.doc.child(0).nodeSize });
+      // Back at the limit: no toggle, no re-measure.
+      const removeFirst = (n: number) => {
+        let to = 0;
+        for (let i = 0; i < n; i++) to += editor.state.doc.child(i).nodeSize;
+        editor.commands.deleteRange({ from: 0, to });
+      };
+      removeFirst(1);
+      expect(skipsText(editor)).toBe(false);
+      expect(skipping(editor)).toBe(true);
+
+      // Far enough below it, skipping returns.
+      removeFirst(TEXT_SKIP_HYSTERESIS);
       expect(skipsText(editor)).toBe(true);
       expect(skipping(editor)).toBe(false);
     });
@@ -323,4 +342,10 @@ describe("OffscreenBlocks", () => {
     });
   });
 
+  it("uses the same selectors as the stylesheet", () => {
+    const css = readFileSync(join(process.cwd(), "src", "styles", "tiptap-editor.css"), "utf8").replace(/\r\n?/g, "\n");
+    expect(css).toContain(`.ProseMirror.${SKIP_OFFSCREEN_CLASS} > ${SKIPPABLE_BLOCK} {`);
+    expect(css).toContain(`.ProseMirror.${SKIP_OFFSCREEN_CLASS}.${SKIP_TEXT_CLASS} > ${SKIPPABLE_TEXT} {`);
+    expect(css).toContain(`.ProseMirror.${SKIP_TEXT_CLASS} > ${SKIPPABLE_TEXT} {`);
+  });
 });

@@ -54,6 +54,9 @@ export const SKIPPABLE_TEXT = ":is(p, h1, h2, h3, h4, h5, h6)";
 export const SKIP_OFFSCREEN_CLASS = "noten-skip-offscreen";
 export const SKIP_TEXT_CLASS = "noten-skip-offscreen-text";
 export const MAX_TEXT_SKIP_BLOCKS = 3500;
+// Once past the limit, prose skipping comes back only this far below it, so
+// Enter and Backspace at the limit do not re-measure the note on every key.
+export const TEXT_SKIP_HYSTERESIS = 200;
 
 // More changed top-level blocks than this in one update is a document swap or
 // a bulk edit: re-measure without inspecting each one.
@@ -94,16 +97,18 @@ class OffscreenMeasure {
     this.remeasure();
   }
 
-  private skipsText = false;
+  private skipsText: boolean | null = null;
 
   // Returns whether the class changed. Its containment is layout-neutral, but
   // prose skipped from now on needs remembered sizes.
   private syncTextSkipping(): boolean {
-    const skips = this.view.state.doc.childCount <= MAX_TEXT_SKIP_BLOCKS;
+    const count = this.view.state.doc.childCount;
+    const skips = count <= MAX_TEXT_SKIP_BLOCKS - (this.skipsText === false ? TEXT_SKIP_HYSTERESIS : 0);
     if (skips === this.skipsText) return false;
+    const first = this.skipsText === null;
     this.skipsText = skips;
     this.view.dom.classList.toggle(SKIP_TEXT_CLASS, skips);
-    return true;
+    return !first;
   }
 
   // Moving the window to a monitor with another scale can rewrap text at the
