@@ -9,6 +9,7 @@ import {
   recoveryRecordPathFor,
   recoveryLabelDirFor,
   isValidWindowLabel,
+  planRecovery,
   type RecoveryRecord,
 } from "./recoveryJournal";
 
@@ -161,5 +162,75 @@ describe("recoveryJournal — label sweep", () => {
 
   it("returns nothing before any record exists", async () => {
     expect(await listRecoveryLabels(fs, APP_DATA)).toEqual([]);
+  });
+});
+
+describe("planRecovery — nothing uncertain is ever applied", () => {
+  it("drops a record the disk already holds", async () => {
+    // The save landed after all, or a later one did. Also what makes a stale
+    // record harmless: clearing on success is fire-and-forget.
+    expect(planRecovery(record({ content: "same" }), "same")).toEqual({ action: "drop" });
+  });
+
+  it("drops a record the disk holds modulo line endings", () => {
+    expect(planRecovery(record({ content: "a\nb\n" }), "a\r\nb")).toEqual({ action: "drop" });
+  });
+
+  it("applies when the disk still holds exactly what the edit was made against", () => {
+    const plan = planRecovery(
+      record({ content: "my unsaved work", baseContent: "what was there" }),
+      "what was there",
+    );
+    expect(plan).toEqual({ action: "apply" });
+  });
+
+  it("preserves rather than applies when the disk moved underneath", () => {
+    // Another device wrote while this machine was gone. Its version stays.
+    const plan = planRecovery(
+      record({ content: "my unsaved work", baseContent: "what was there" }),
+      "what the other device wrote",
+    );
+    expect(plan).toEqual({ action: "preserve", reason: "diverged" });
+  });
+
+  it("preserves when the record has no base", () => {
+    // The projection case, reached through the journal: a load that failed
+    // leaves every note looking empty against a real filePath, and an edit
+    // made there would record an empty body with no base. Applying it would
+    // be the C1 deletion by another route.
+    const plan = planRecovery(
+      record({ content: "", baseContent: null }),
+      "the real note body",
+    );
+    expect(plan).toEqual({ action: "preserve", reason: "unknown-base" });
+  });
+
+  it("preserves when the file no longer exists", () => {
+    // Deleted on another device. Writing the body back would resurrect it.
+    const plan = planRecovery(record({ baseContent: "what was there" }), null);
+    expect(plan).toEqual({ action: "preserve", reason: "missing-file" });
+  });
+
+  it("preserves an edit that never had a file at all", () => {
+    // A doc whose provisioning kept failing: the text exists nowhere else, so
+    // it has to be kept, but there is no note to apply it to.
+    const plan = planRecovery(record({ filePath: "", baseContent: null }), null);
+    expect(plan).toEqual({ action: "preserve", reason: "missing-file" });
+  });
+
+  it("never applies over a body it cannot account for", () => {
+    // The whole point, stated as a property: apply requires that the disk
+    // equals the recorded base.
+    const disks = ["what was there", "something else", ""];
+    const bases = ["what was there", null];
+    for (const diskContent of disks) {
+      for (const baseContent of bases) {
+        const plan = planRecovery(record({ content: "edit", baseContent }), diskContent);
+        if (plan.action === "apply") {
+          expect(baseContent).not.toBeNull();
+          expect(diskContent).toBe(baseContent);
+        }
+      }
+    }
   });
 });

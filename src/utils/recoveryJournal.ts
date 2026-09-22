@@ -2,6 +2,7 @@ import type { FileSystem } from "./fs";
 import { atomicWriteText } from "./atomicWrite";
 import { isValidNoteId } from "./noteId";
 import { normalizeSep } from "./pathUtils";
+import { markdownEqual } from "./markdownEqual";
 
 // Per-machine record of edits that are NOT yet durable in the notes folder, so
 // they survive the process rather than living only in memory.
@@ -158,4 +159,47 @@ export async function listRecoveryLabels(
   return entries
     .filter((e) => e.name && e.isDirectory && isValidWindowLabel(e.name))
     .map((e) => e.name!);
+}
+
+/**
+ * What to do with one record, given what is on disk now.
+ *
+ * Only two outcomes touch anything, and neither can destroy: `apply` writes
+ * the record over a body we can prove nothing else has moved, and `preserve`
+ * leaves disk alone and copies the record into `.conflicts/` so the work is
+ * recoverable by hand. Everything uncertain resolves to `preserve`.
+ */
+export type RecoveryPlan =
+  /** Disk already holds this body — the save landed after all, or a later one
+   *  did. Nothing to do but drop the record. */
+  | { action: "drop" }
+  /** Disk still holds exactly what the edit was made against, so replaying it
+   *  loses nothing. */
+  | { action: "apply" }
+  /** Disk moved, is unknown to this session, or the file is gone. Keep the
+   *  record's body under .conflicts and leave the note as it is. */
+  | { action: "preserve"; reason: "diverged" | "unknown-base" | "missing-file" };
+
+/**
+ * @param diskContent The note body now, or null when the file does not exist
+ *   (deleted elsewhere, or never provisioned).
+ */
+export function planRecovery(record: RecoveryRecord, diskContent: string | null): RecoveryPlan {
+  if (diskContent !== null && markdownEqual(diskContent, record.content)) {
+    return { action: "drop" };
+  }
+  // No file to compare against. It may have been deleted on another device, or
+  // never provisioned at all; either way writing the body back would resurrect
+  // or invent a note rather than recover one.
+  if (!record.filePath || diskContent === null) {
+    return { action: "preserve", reason: "missing-file" };
+  }
+  // The same rule every destructive path follows since the projection fix: a
+  // body this session never read is one we cannot reason about. A record whose
+  // base is absent may itself hold a manifest-cache projection's empty body.
+  if (record.baseContent === null) {
+    return { action: "preserve", reason: "unknown-base" };
+  }
+  if (markdownEqual(diskContent, record.baseContent)) return { action: "apply" };
+  return { action: "preserve", reason: "diverged" };
 }
