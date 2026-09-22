@@ -91,7 +91,9 @@ async function replaceHtmlImageDataUrls(
     const end = start + full.length;
     const src = await buildAssetSource(dataUrl, noteId, noteFilePath, cache);
     if (src === dataUrl) continue;
-    const replacement = full.replace(dataUrl, src);
+    // A function, not a string: String.replace expands `$&`, `$'` and `$$` in
+    // a string replacement, and `src` embeds the note id, which may hold them.
+    const replacement = full.replace(dataUrl, () => src);
     replacements.push({ start, end, replacement });
     converted += 1;
   }
