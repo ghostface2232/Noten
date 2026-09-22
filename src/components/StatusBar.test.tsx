@@ -5,7 +5,7 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { TextSelection } from "@tiptap/pm/state";
 import type { Editor as ReactEditor } from "@tiptap/react";
-import { STATS_SETTLE_MS, StatusBar } from "./StatusBar";
+import { STATS_MAX_WAIT_MS, STATS_SETTLE_MS, StatusBar } from "./StatusBar";
 
 let active: Editor | null = null;
 
@@ -81,7 +81,7 @@ describe("StatusBar subscriptions and document work", () => {
   });
 
   it("waits for a pause in typing, then updates counts and caret row together", () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame", "Date"] });
     const editor = makeEditor();
     render(status(editor));
     expect(screen.getByText(/9/)).toBeTruthy();
@@ -103,5 +103,22 @@ describe("StatusBar subscriptions and document work", () => {
     advance(200);
     expect(screen.getByText(/11/)).toBeTruthy();
     expect(screen.getByText(/Line 2/)).toBeTruthy();
+  });
+
+  it("updates at least once per STATS_MAX_WAIT_MS while typing never pauses", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame", "Date"] });
+    const editor = makeEditor();
+    render(status(editor));
+    expect(screen.getByText(/9/)).toBeTruthy();
+
+    // One key every 100 ms, faster than the pause the counts wait for.
+    let typed = 0;
+    for (let t = 0; t < STATS_MAX_WAIT_MS + 100; t += 100) {
+      act(() => { editor.view.dispatch(editor.state.tr.insertText("!", 6)); });
+      typed++;
+      act(() => { vi.advanceTimersByTime(100); });
+    }
+    expect(screen.queryByText(/^9/)).toBeNull();
+    expect(typed).toBeGreaterThan(STATS_MAX_WAIT_MS / STATS_SETTLE_MS);
   });
 });

@@ -48,11 +48,14 @@ const useStyles = makeStyles({
   },
 });
 
-// While the document keeps changing (typing, IME), the counts wait until
-// the user pauses this long. Each update is a React commit, and any commit
-// that touches the DOM while the editor is focused walks the entire editor
-// DOM (React's selection bookkeeping): ~7 ms per frame in a 1 MB note.
+// While the document keeps changing (typing, IME, but also paste, undo or a
+// reload), the counts wait until no edit has arrived for STATS_SETTLE_MS,
+// and never longer than STATS_MAX_WAIT_MS. Each update is a React commit,
+// and any commit that touches the DOM while the editor is focused walks the
+// entire editor DOM (React's selection bookkeeping): ~7 ms per frame in a
+// 1 MB note.
 export const STATS_SETTLE_MS = 300;
+export const STATS_MAX_WAIT_MS = 1000;
 
 function useEditorStats(editor: Editor | null, enabled: boolean) {
   const [stats, setStats] = useState({ charCount: 0, wordCount: 0, lineCount: 0, cursorRow: 1 });
@@ -99,15 +102,18 @@ function useEditorStats(editor: Editor | null, enabled: boolean) {
     // The caret row waits with the counts: it is resolved against the line
     // index, which must be rebuilt for the new document first.
     let settle: ReturnType<typeof setTimeout> | null = null;
+    let deadline = 0;
     const schedule = ({ transaction }: { transaction: Transaction }) => {
       if (transaction.docChanged) {
-        if (settle !== null) clearTimeout(settle);
-        if (frame !== null) cancelAnimationFrame(frame);
-        frame = null;
+        // An update already due reads the newest document anyway.
+        if (frame !== null) return;
+        const now = Date.now();
+        if (settle === null) deadline = now + STATS_MAX_WAIT_MS;
+        else clearTimeout(settle);
         settle = setTimeout(() => {
           settle = null;
           frame = requestAnimationFrame(compute);
-        }, STATS_SETTLE_MS);
+        }, Math.min(STATS_SETTLE_MS, deadline - now));
         return;
       }
       if (frame !== null || settle !== null) return;
