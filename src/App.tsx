@@ -83,7 +83,7 @@ import type { RecoveryRecord } from "./utils/recoveryJournal";
 import { tauriFileSystem } from "./utils/fs";
 import { atomicWriteText } from "./utils/atomicWrite";
 import { markOwnWrite } from "./hooks/ownWriteTracker";
-import { setKnownDiskContent } from "./utils/conflictBackup";
+import { setKnownDiskContent, snapshotKnownDiskContent, type KnownDiskContentSnapshot } from "./utils/conflictBackup";
 import { markdownEqual } from "./utils/markdownEqual";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { libraryStore } from "./utils/libraryStore";
@@ -856,8 +856,9 @@ function App() {
     oldDir: string,
     previousNotesDirectory: string,
     preservedLibrary: LibraryData,
+    preservedBaselines: KnownDiskContentSnapshot,
   ) => {
-    restoreNotesDir(oldDir, preservedLibrary, reconcileStateRef.current);
+    restoreNotesDir(oldDir, preservedLibrary, preservedBaselines, reconcileStateRef.current);
     await persistNotesDirectorySetting(previousNotesDirectory);
     setMigrationInProgress(false);
   }, [persistNotesDirectorySetting]);
@@ -979,6 +980,8 @@ function App() {
         trashedNotes: trashedNotesRef.current,
         activeNoteId: docsRef.current[activeIndexRef.current]?.id ?? null,
       };
+      // Captured before the setting commit: its settings effect clears the map.
+      const preservedBaselines = snapshotKnownDiskContent();
       if (!(await persistNotesDirectorySetting(newDir))) {
         await abortMigration("settings.notesDirectory.settingsFailed");
         return;
@@ -990,7 +993,7 @@ function App() {
       } else {
         const result = await clearManagedNotesData(oldDir, newDir);
         if (!result.success) {
-          await revertNotesDirChange(oldDir, previousNotesDirectory, preservedLibrary);
+          await revertNotesDirChange(oldDir, previousNotesDirectory, preservedLibrary, preservedBaselines);
           broadcastMigrationFinished(migrationId, false, "");
           await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
           return;

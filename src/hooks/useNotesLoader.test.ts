@@ -143,6 +143,7 @@ import * as reconcileFolderModule from "../utils/reconcileFolder";
 import * as decomposedStateModule from "../utils/decomposedState";
 import * as crashLogModule from "../utils/crashLog";
 import { readMeta, writeMeta, type NoteMeta } from "../utils/metadataIO";
+import { getKnownDiskContent, setKnownDiskContent, snapshotKnownDiskContent } from "../utils/conflictBackup";
 import { libraryStore, type LibrarySnapshot } from "../utils/libraryStore";
 import { useAutoSave } from "./useAutoSave";
 import type { MarkdownState } from "./useMarkdownState";
@@ -817,7 +818,7 @@ describe("useNotesLoader — canonical library store adapter", () => {
     const preserved = libraryStore.getSnapshot();
 
     libraryStore.clearDirectory("hydrate");
-    act(() => restoreNotesDir("/test-appdata/notes", preserved, reconcileState));
+    act(() => restoreNotesDir("/test-appdata/notes", preserved, new Map(), reconcileState));
     // Persisting the old setting triggers the settings effect afterwards.
     // Its equivalent-directory call must not clear the restored snapshot.
     act(() => setNotesDir("/test-appdata/notes/", reconcileState));
@@ -827,6 +828,31 @@ describe("useNotesLoader — canonical library store adapter", () => {
     act(() => result.current.setDocs((prev) => [...prev, makeDoc("b")]));
     expect(result.current.docs.map((doc) => doc.id)).toEqual(["a", "b"]);
     expect(libraryStore.getSnapshot().docs.map((doc) => doc.id)).toEqual(["a", "b"]);
+  });
+
+  it("puts the captured conflict baselines back when a directory migration rolls back", async () => {
+    // The settings effect for the new directory clears the baseline map and no
+    // hydration follows the rollback. Without the captured baselines every
+    // note's first save wrote a .conflicts copy and the empty-note prunes
+    // refused for the rest of the session.
+    const a = makeDoc("a");
+    refs.fs!.seedTextFile(a.filePath, "body-a");
+    refs.decomposedDocs = [a];
+    const reconcileState = createReconcileState();
+    const { result } = renderHook(() => useNotesLoader("en", "updated-desc", true, 0, reconcileState));
+    await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 2000 });
+    expect(getKnownDiskContent(a.filePath)).toBe("body-a");
+    const preserved = libraryStore.getSnapshot();
+    const baselines = snapshotKnownDiskContent();
+
+    act(() => setNotesDir("/elsewhere/notes", reconcileState));
+    expect(getKnownDiskContent(a.filePath)).toBeUndefined();
+    setKnownDiskContent("/elsewhere/notes/x.md", "new dir body");
+    act(() => restoreNotesDir("/test-appdata/notes", preserved, baselines, reconcileState));
+
+    expect(getKnownDiskContent(a.filePath)).toBe("body-a");
+    // Nothing learned under the abandoned directory survives the rollback.
+    expect(getKnownDiskContent("/elsewhere/notes/x.md")).toBeUndefined();
   });
 
   it("does not clear a library restored under the default directory when the setting reverts to ''", async () => {
@@ -846,7 +872,7 @@ describe("useNotesLoader — canonical library store adapter", () => {
     // then the failed clear reverts by re-seeding under the old default dir and
     // persisting "" — which runs the effect's resetNotesDir branch.
     act(() => setNotesDir("/elsewhere/notes", reconcileState));
-    act(() => restoreNotesDir(defaultDir, preserved, reconcileState));
+    act(() => restoreNotesDir(defaultDir, preserved, new Map(), reconcileState));
     const restoredGeneration = libraryStore.getSnapshot().directoryGeneration;
     act(() => resetNotesDir(reconcileState));
 

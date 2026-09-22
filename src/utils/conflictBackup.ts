@@ -67,6 +67,23 @@ export function resetKnownDiskContent(): void {
   lastKnownDiskContent.clear();
 }
 
+export type KnownDiskContentSnapshot = ReadonlyMap<string, string>;
+
+/**
+ * Capture the baselines so a rolled-back directory change can put them back.
+ * Re-deriving them from the preserved library instead would be wrong: a doc
+ * that is still a manifest-cache projection holds `content: ""` it never read,
+ * and seeding that would arm the empty-note prunes against a real body.
+ */
+export function snapshotKnownDiskContent(): KnownDiskContentSnapshot {
+  return new Map(lastKnownDiskContent);
+}
+
+export function restoreKnownDiskContent(snapshot: KnownDiskContentSnapshot): void {
+  lastKnownDiskContent.clear();
+  for (const [key, content] of snapshot) lastKnownDiskContent.set(key, content);
+}
+
 async function writeConflictVersion(
   fs: FileSystem,
   notesDir: string,

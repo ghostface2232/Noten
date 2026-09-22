@@ -71,6 +71,8 @@ import {
 import {
   setKnownDiskContent,
   resetKnownDiskContent,
+  restoreKnownDiskContent,
+  type KnownDiskContentSnapshot,
 } from "../utils/conflictBackup";
 import {
   getUiStateCached,
@@ -421,17 +423,26 @@ export function setNotesDir(dir: string, reconcileState?: ReconcileState) {
   if (reconcileState) clearReconcileState(reconcileState);
 }
 
-/** Rebind a failed directory migration without discarding the still-live UI state. */
+/**
+ * Rebind a failed directory migration without discarding the still-live UI state.
+ *
+ * `baselines` must be captured alongside `preserved`. The settings effect has
+ * usually already switched to the new directory and cleared the map, and no
+ * hydration follows this rollback, so without them every note's first save
+ * wrote a spurious .conflicts copy, the empty-note prunes refused for the rest
+ * of the session, and recovery records carried no base to apply against.
+ */
 export function restoreNotesDir(
   dir: string,
   preserved: LibraryData,
+  baselines: KnownDiskContentSnapshot,
   reconcileState?: ReconcileState,
 ) {
   libraryStore.seedDirectory(dir, preserved, "hydrate");
   notesDirCache = dir;
   imageAssetMigrationV1CompletedAtCache = null;
   resetWriteSnapshots();
-  resetKnownDiskContent();
+  restoreKnownDiskContent(baselines);
   invalidateReadAllMetaCache(tauriFileSystem);
   if (reconcileState) clearReconcileState(reconcileState);
 }
