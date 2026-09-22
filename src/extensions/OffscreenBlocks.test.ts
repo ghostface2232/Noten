@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import CodeBlock from "@tiptap/extension-code-block";
+import { TextSelection } from "@tiptap/pm/state";
 import OffscreenBlocks, { MAX_TEXT_SKIP_BLOCKS, SKIP_OFFSCREEN_CLASS, SKIP_TEXT_CLASS } from "./OffscreenBlocks";
 
 // jsdom has no layout, ResizeObserver or frames: fake all three so the tests
@@ -298,5 +299,28 @@ describe("OffscreenBlocks", () => {
       expect(skipsText(editor)).toBe(true);
       expect(skipping(editor)).toBe(false);
     });
+
+    it("does not count the caret's block as off screen when the update scrolls to it", () => {
+      // Enter on the last visible line: the new paragraph is below the
+      // viewport until ProseMirror scrolls, which it does after plugin views.
+      const editor = readyEditor("<p>top</p><p>bottom line</p>");
+      vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+        const index = Array.prototype.indexOf.call(this.parentElement?.children ?? [], this);
+        const top = index >= 2 ? 5000 : 100;
+        return { top, bottom: top + 50, left: 0, right: 100, width: 100, height: 50, x: 0, y: top, toJSON() {} } as DOMRect;
+      });
+      const end = insideBlock(editor, 1) + editor.state.doc.child(1).nodeSize - 1;
+      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, end)));
+      editor.view.dispatch(editor.state.tr.split(end).scrollIntoView());
+      expect(editor.state.doc.childCount).toBe(3);
+      expect(skipping(editor)).toBe(true);
+
+      // Without the scroll, a change off screen is still re-measured.
+      const far = insideBlock(editor, 2) + 1;
+      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, far)));
+      editor.view.dispatch(editor.state.tr.insertText("x", far));
+      expect(skipping(editor)).toBe(false);
+    });
   });
+
 });

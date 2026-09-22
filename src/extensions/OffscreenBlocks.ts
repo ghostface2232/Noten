@@ -27,7 +27,11 @@ import type { EditorView } from "@tiptap/pm/view";
 // - a typography setting changed (callers invoke `remeasure()`).
 //
 // Everything else keeps its exact size: a block the user edits is on screen
-// and is re-measured by the browser as it renders.
+// and is re-measured by the browser as it renders. That includes the block
+// holding the caret after a transaction that scrolls to it: plugin views run
+// before ProseMirror scrolls, so Enter on the last visible line creates its
+// paragraph below the viewport, but the scroll brings it on screen at once.
+// Counting it as off screen re-measured the whole note on such an Enter.
 //
 // Paragraphs and headings are skipped too, but only in notes of at most
 // MAX_TEXT_SKIP_BLOCKS top-level blocks. For IME the cost that matters is the
@@ -164,9 +168,13 @@ class OffscreenMeasure {
     }
     let pos = 0;
     for (let i = 0; i < first; i++) pos += doc.child(i).nodeSize;
+    const head = view.state.selection.head;
+    const scrolls = offscreenBlocksPluginKey.getState(view.state) === true;
     for (let i = first; i < end; i++) {
+      const start = pos;
       const dom = view.nodeDOM(pos);
       pos += doc.child(i).nodeSize;
+      if (scrolls && head > start && head < pos) continue;
       // Cheapest test first: the full selector's :has() walks the block's
       // subtree, and the block being edited is almost always on screen.
       if (!(dom instanceof HTMLElement)) continue;
@@ -223,6 +231,13 @@ export const OffscreenBlocks = Extension.create<Record<string, never>, Offscreen
     return [
       new Plugin({
         key: offscreenBlocksPluginKey,
+        // Whether the latest update scrolls to the selection (appended
+        // transactions belong to the update of the one they follow).
+        state: {
+          init: () => false,
+          apply: (tr, scrolls: boolean) =>
+            tr.scrolledIntoView || (tr.getMeta("appendedTransaction") !== undefined && scrolls),
+        },
         view: (view) => {
           const measure = new OffscreenMeasure(view);
           storage.remeasure = measure.remeasure;
