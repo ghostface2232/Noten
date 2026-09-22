@@ -1,6 +1,6 @@
 # Noten Source Layout and Architecture
 
-This document is the high-level map of the current repository. Keep it concise: detailed implementation invariants belong in [`AGENTS.md`](../AGENTS.md), while user-facing behavior belongs in [`README.md`](../README.md).
+This document is the high-level map of the current repository. Keep it concise: detailed implementation invariants belong beside the code they govern, in the per-directory `AGENTS.md` files that [`AGENTS.md`](../AGENTS.md) maps, while user-facing behavior belongs in [`README.md`](../README.md).
 
 ## Repository layout
 
@@ -95,6 +95,7 @@ The root Cargo workspace builds `bootstrapper`, `maintenance-helper`, and `noten
 When a change adds, removes, or moves a meaningful source path, or changes any boundary or data flow described above:
 
 1. Update this document in the same change.
-2. Update `AGENTS.md` when an implementation invariant or contributor rule changed.
+2. Update the `AGENTS.md` that owns the rule when an implementation invariant changed — the one in the
+   directory the rule governs, or the root file for a cross-cutting principle, workflow or gate.
 3. Update `README.md` when users, installers, prerequisites, or public features are affected.
 4. Keep generated/build output out of the source layout and run `npm run check` before handing off the change.

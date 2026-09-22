@@ -141,7 +141,7 @@ export function createSmokeWindow(sharedFs: FileSystem, label: string): SmokeWin
 
     async persist() {
       // Production's persistence job reads the store when it EXECUTES, never a
-      // captured array (see AGENTS.md's manifest-queue rule), so read here.
+      // captured array (see src/hooks/AGENTS.md's manifest-queue rule), so read here.
       const snapshot = store.getSnapshot();
       await persistDecomposedState(
         fs,

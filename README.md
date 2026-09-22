@@ -110,7 +110,8 @@ Treat `.\scripts\build-release.ps1` as a local smoke test only. Real release ins
 ## Documentation
 
 - [Source layout and architecture](docs/architecture.md)
-- [`AGENTS.md`](AGENTS.md) - contributor invariants, data-safety rules, and release workflow
+- [`AGENTS.md`](AGENTS.md) - contributor principles, dev workflow, quality gates and release workflow,
+  plus a map to the per-directory `AGENTS.md` files that hold the implementation invariants
 
 ## License
 MIT
