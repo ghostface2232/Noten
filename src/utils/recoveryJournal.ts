@@ -150,9 +150,9 @@ export async function clearRecoveryRecord(
   } catch { /* best-effort: a stale record costs one extra recovery check */ }
 }
 
-/** Window labels that currently hold records. Labels are reused across app
- *  runs, so a window normally finds its own previous run's records; this also
- *  lets one window adopt a label that never reopened. */
+/** Window labels that have a recovery directory. Only `main` reopens under the
+ *  same label; a secondary window's label is new every time it opens, so its
+ *  records come back through the orphan sweep on the next start. */
 export async function listRecoveryLabels(
   fs: FileSystem,
   appDataDir: string,
@@ -163,6 +163,25 @@ export async function listRecoveryLabels(
   return entries
     .filter((e) => e.name && e.isDirectory && isValidWindowLabel(e.name))
     .map((e) => e.name!);
+}
+
+/**
+ * Remove an orphaned label's directory once nothing is left in it. Secondary
+ * labels are never reused, so without this every secondary window ever opened
+ * left an empty directory behind that each start then listed and read.
+ * Non-recursive: a record that lands meanwhile makes the remove fail.
+ */
+export async function removeRecoveryLabelIfEmpty(
+  fs: FileSystem,
+  appDataDir: string,
+  windowLabel: string,
+): Promise<void> {
+  if (!isValidWindowLabel(windowLabel)) return;
+  const dir = recoveryLabelDirFor(appDataDir, windowLabel);
+  try {
+    if ((await fs.readDir(dir)).length > 0) return;
+    await fs.remove(dir);
+  } catch { /* best-effort: an empty directory costs one readDir next start */ }
 }
 
 /**
