@@ -1481,6 +1481,18 @@ describe("useNotesLoader — saveManifest persistChain", () => {
     });
   });
 
+  it("reports an incomplete drain when a sidecar was quarantined", async () => {
+    // A persist that skipped a note's sidecar still marks the revision
+    // persisted — flushPersistence loops until it is, and an unreadable
+    // sidecar may never become readable. But the drain must not then claim the
+    // library is durable: the close gate and the migration ack both treat a
+    // resolved flush as "everything landed", so the window would quit with the
+    // rename never written and nothing re-enqueuing it.
+    persistMock.mockResolvedValueOnce({ skippedMetaIds: new Set(["quarantined"]) });
+
+    await expect(flushPersistence("quarantined-sidecar")).resolves.toBe(false);
+  });
+
   it("reports follow-up persistence debt without undoing a committed lifecycle", async () => {
     const doc = makeDoc("a");
     libraryStore.seedDirectory("/test-appdata/notes", {
@@ -1502,7 +1514,9 @@ describe("useNotesLoader — saveManifest persistChain", () => {
     expect(libraryStore.getSnapshot().docs).toEqual([]);
 
     persistMock.mockResolvedValueOnce(NO_SKIPS);
-    await expect(flushPersistence("retry-followup")).resolves.toBeUndefined();
+    // flushPersistence now reports whether everything is durable; NO_SKIPS
+    // means nothing was quarantined, so the drain is complete.
+    await expect(flushPersistence("retry-followup")).resolves.toBe(true);
     expect(persistMock).toHaveBeenCalledTimes(2);
   });
 

@@ -84,6 +84,8 @@ import { tauriFileSystem } from "./utils/fs";
 import { atomicWriteText } from "./utils/atomicWrite";
 import { markOwnWrite } from "./hooks/ownWriteTracker";
 import { setKnownDiskContent } from "./utils/conflictBackup";
+import { markdownEqual } from "./utils/markdownEqual";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 import { libraryStore } from "./utils/libraryStore";
 import { emitDocUpdated } from "./hooks/useWindowSync";
 import { exportAsMarkdown, exportAsPdf } from "./utils/exportHandlers";
@@ -499,6 +501,9 @@ function App() {
   const flushDocSaveRef = useRef<((docId: string) => Promise<boolean>) | null>(null);
   const flushPendingSnapshotsRef = useRef<(() => Promise<void>) | null>(null);
   const journalPendingEditsRef = useRef<(() => Promise<boolean>) | null>(null);
+  const runExclusiveBodyWriteRef = useRef<
+    ((docId: string, write: () => Promise<boolean>) => Promise<boolean>) | null
+  >(null);
   const notifyActiveDocRef = useRef<((id: string, filePath: string) => void) | null>(null);
   const cancelDocSaveRef = useRef<((docId: string) => void) | null>(null);
 
@@ -524,7 +529,7 @@ function App() {
     commitLibraryForGeneration,
   );
 
-  const { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, journalPendingEdits, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc } = useAutoSave(
+  const { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, journalPendingEdits, runExclusiveBodyWrite, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc } = useAutoSave(
     state,
     tiptapRef,
     docs,
@@ -537,12 +542,13 @@ function App() {
   flushAutoSaveRef.current = flushAutoSave;
   hasUnsavedChangesRef.current = hasUnsavedChanges;
   hasUnsaveableChangesRef.current = hasUnsaveableChanges;
-  flushManifestRef.current = () => flushPersistence().then(() => true).catch(() => false);
+  flushManifestRef.current = () => flushPersistence().catch(() => false);
   captureAndQueueSaveRef.current = captureAndQueueSave;
   awaitInFlightSavesRef.current = awaitInFlightSaves;
   flushDocSaveRef.current = flushDocSave;
   flushPendingSnapshotsRef.current = flushPendingSnapshots;
   journalPendingEditsRef.current = journalPendingEdits;
+  runExclusiveBodyWriteRef.current = runExclusiveBodyWrite;
   beforeUpdateInstallRef.current = async () => {
     // The same four-step drain the close handler runs, for the same reason:
     // metadata-only writes (pin, colour, group, rename) are fire-and-forget,
@@ -1157,13 +1163,33 @@ function App() {
     editRecoveryDone.current = true;
     void (async () => {
       const outcome = await recoverJournalledEdits(async (record: RecoveryRecord) => {
-        try {
-          markOwnWrite(record.filePath, record.content);
-          await atomicWriteText(tauriFileSystem, record.filePath, record.content, { failClosed: true });
-          setKnownDiskContent(record.filePath, record.content);
-        } catch {
-          return false;
-        }
+        // recoverEdits chose `apply` from a disk read taken several awaits ago,
+        // and the editor went live on the same isLoading flip that started
+        // recovery — so an autosave for this note may have landed in between.
+        // Take the per-doc write lock (which also refuses while the doc holds
+        // unsaved input) and re-prove the precondition inside it: the disk must
+        // still hold exactly what this edit was made against. Anything else and
+        // the record goes back for the next run rather than overwriting work
+        // that was never journalled.
+        const wrote = await runExclusiveBodyWriteRef.current?.(record.docId, async () => {
+          if (record.baseContent === null) return false;
+          let current: string;
+          try {
+            current = await readTextFile(record.filePath);
+          } catch {
+            return false;
+          }
+          if (!markdownEqual(current, record.baseContent)) return false;
+          try {
+            markOwnWrite(record.filePath, record.content);
+            await atomicWriteText(tauriFileSystem, record.filePath, record.content, { failClosed: true });
+            setKnownDiskContent(record.filePath, record.content);
+          } catch {
+            return false;
+          }
+          return true;
+        });
+        if (!wrote) return false;
         const restoredAt = Date.now();
         setDocs((prev) => prev.map((doc) => (
           doc.id === record.docId

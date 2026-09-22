@@ -28,8 +28,10 @@ dist-ssr
 
 # Claude Code
 .claude/
-AGENTS.md
 UPDATE.md
+# AGENTS.md is NOT ignored. A bare `AGENTS.md` pattern matches at every depth,
+# so it silently kept the per-directory rule files out of the repository while
+# the tracked root file (added before the pattern) went on looking fine.
 
 # Tauri build output
 src-tauri/target/

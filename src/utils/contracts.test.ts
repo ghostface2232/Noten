@@ -236,7 +236,9 @@ describe("contract: hydration is generation-bound and pauses full persistence", 
     const persist = text.match(/async function persistLatestLibrarySnapshot[\s\S]*?\n\}/)?.[0];
     expect(flush).toBeDefined();
     expect(persist).toBeDefined();
-    expect(flush).toContain("if (hydrationInProgress) return;");
+    // Returns true, not undefined: the flush now reports whether everything
+    // is durable, and a paused hydration is not an incomplete drain.
+    expect(flush).toContain("if (hydrationInProgress) return true;");
     expect(persist).toContain("if (hydrationInProgress) return false;");
   });
 });
@@ -481,8 +483,13 @@ describe("contract: recovery repoints the editor at what it restored", () => {
     const src = read(resolve(SRC_ROOT, "App.tsx"));
     const start = src.indexOf("recoverJournalledEdits(");
     expect(start).toBeGreaterThan(-1);
-    const applyBody = src.slice(start, start + 2000);
+    const applyBody = src.slice(start, start + 3200);
     expect(applyBody).toContain("atomicWriteText");
+    // The write runs under the per-doc lock and re-proves that the disk still
+    // holds what the edit was made against: recovery decided from a read taken
+    // several awaits earlier, and the editor is live by then.
+    expect(applyBody).toContain("runExclusiveBodyWriteRef");
+    expect(applyBody).toContain("markdownEqual(current, record.baseContent)");
     expect(applyBody).toContain("activeNoteId === record.docId");
     expect(applyBody).toContain("openDocument");
     expect(applyBody).toContain("primeMarkdown");

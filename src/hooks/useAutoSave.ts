@@ -944,6 +944,35 @@ export function useAutoSave(
   // a transient backup/write failure during a fire-and-forget switch would
   // silently strand the leaving doc's unsaved content. flushAutoSave alone
   // would not catch it because it only re-captures the *current* active doc.
+  /**
+   * Run `write` as the only body write in flight for `docId`, on the same
+   * per-doc tail `doSave` uses, and refuse while that doc has input this
+   * window has not persisted.
+   *
+   * Recovery needs both halves. It decided what to do from a disk read taken
+   * before several awaits, and the editor goes live on the same `isLoading`
+   * flip that starts it, so by the time it writes, an autosave for that note
+   * may have already landed — and writing directly would clobber it with no
+   * backup and race the same `${path}.tmp`, which the tail exists to prevent.
+   * `write` must re-establish its own preconditions once inside.
+   */
+  const runExclusiveBodyWrite = useCallback(async (
+    docId: string,
+    write: () => Promise<boolean>,
+  ): Promise<boolean> => {
+    if (hasPendingForDoc(docId)) return false;
+    if (activeDocRef.current?.id === docId && stateRef.current.state.isDirty) return false;
+    if (inFlightSavesByDocRef.current.has(docId)) return false;
+    const prior = saveTailByDocRef.current.get(docId) ?? Promise.resolve();
+    const run = prior.then(write, write);
+    saveTailByDocRef.current.set(docId, run);
+    const cleanup = () => {
+      if (saveTailByDocRef.current.get(docId) === run) saveTailByDocRef.current.delete(docId);
+    };
+    void run.then(cleanup, cleanup);
+    return run;
+  }, [hasPendingForDoc]);
+
   const flushPendingSnapshots = useCallback(async (): Promise<void> => {
     const stranded = Array.from(pendingSnapshotsRef.current.values());
     for (const snapshot of stranded) {
@@ -1176,5 +1205,5 @@ export function useAutoSave(
     return settlement;
   }, [awaitDocSave, hasPendingForDoc, refreshHasPendingChanges]);
 
-  return { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, awaitDocSave, flushDocSave, flushPendingSnapshots, journalPendingEdits, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc };
+  return { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, awaitDocSave, flushDocSave, flushPendingSnapshots, journalPendingEdits, runExclusiveBodyWrite, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc };
 }

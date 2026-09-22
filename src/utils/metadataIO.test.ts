@@ -129,3 +129,43 @@ describe("readAllMeta — one unreadable sidecar does not fail the library", () 
     expect(unreadableIds.size).toBe(0);
   });
 });
+
+describe("readAllMeta — an existing sidecar is never reported as absent", () => {
+  it("quarantines a sidecar whose id disagrees with its filename", async () => {
+    // A hand-copied sidecar or a cloud client's conflict copy. Reporting it as
+    // absent makes reconcile ingest the body as unmanaged and write a fresh
+    // sidecar over the real one — the loss the quarantine exists to prevent.
+    await writeMeta(fs, DIR, meta("good-1"), "m1");
+    fs.seedTextFile(
+      `${DIR}/.meta/mismatched.json`,
+      JSON.stringify(meta("some-other-id")),
+    );
+
+    const { byId, unreadableIds } = await readAllMeta(fs, DIR);
+
+    expect([...byId.keys()]).toEqual(["good-1"]);
+    expect([...unreadableIds]).toEqual(["mismatched"]);
+  });
+
+  it("quarantines when the existence re-check itself fails", async () => {
+    // Read failed and we cannot even stat the file, so we cannot tell a
+    // deletion that raced the read from a file we simply cannot reach.
+    await writeMeta(fs, DIR, meta("unreachable"), "m1");
+    const faultFs = wrapWithFaults(fs);
+    faultFs.injectFault({
+      op: "readTextFile",
+      path: /unreachable\.json$/,
+      throwError: new Error("EBUSY"),
+    });
+    faultFs.injectFault({
+      op: "exists",
+      path: /unreachable\.json$/,
+      throwError: new Error("EBUSY"),
+    });
+
+    const { byId, unreadableIds } = await readAllMeta(faultFs, DIR);
+
+    expect(byId.size).toBe(0);
+    expect([...unreadableIds]).toEqual(["unreachable"]);
+  });
+});

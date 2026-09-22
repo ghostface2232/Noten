@@ -328,10 +328,29 @@ export async function readAllMeta(fs: FileSystem, notesDir: string): Promise<All
     }
     try {
       const meta = await readMeta(fs, notesDir, id);
-      if (meta && meta.id === id) out.set(id, meta);
+      if (meta && meta.id === id) {
+        out.set(id, meta);
+      } else if (meta) {
+        // Parsed, but its `id` field disagrees with its filename (a hand-copied
+        // sidecar, a cloud client's conflict copy). Dropping it into NEITHER map
+        // would report the note as having no metadata, and reconcile would then
+        // ingest its body as unmanaged and write a fresh sidecar over the real
+        // one. We could not establish what this file is, which is exactly what
+        // quarantine is for.
+        unreadableIds.add(id);
+        void logNotenError(new NotenError(
+          "META_READ_FAILED",
+          "fatal",
+          "readAllMeta: sidecar id does not match its filename; quarantining rather than treating the note as unmanaged",
+          { context: { notesDir, noteId: id, declaredId: meta.id } },
+        ));
+      }
     } catch (err) {
-      let stillExists = false;
-      try { stillExists = await fs.exists(metaPathFor(notesDir, id)); } catch { stillExists = false; }
+      let stillExists = true;
+      // A failed existence re-check leaves us unable to tell a deletion that
+      // raced this read from a file we simply cannot reach. Only a definite
+      // "not there" may drop the id; anything else quarantines.
+      try { stillExists = await fs.exists(metaPathFor(notesDir, id)); } catch { stillExists = true; }
       if (!stillExists) return;
       unreadableIds.add(id);
       const corrupt = err instanceof CorruptMetaError;
