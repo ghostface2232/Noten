@@ -501,6 +501,7 @@ function App() {
   const flushDocSaveRef = useRef<((docId: string) => Promise<boolean>) | null>(null);
   const flushPendingSnapshotsRef = useRef<(() => Promise<void>) | null>(null);
   const journalPendingEditsRef = useRef<(() => Promise<boolean>) | null>(null);
+  const discardJournalledEditsRef = useRef<(() => void) | null>(null);
   const runExclusiveBodyWriteRef = useRef<
     ((docId: string, write: () => Promise<boolean>) => Promise<boolean>) | null
   >(null);
@@ -529,7 +530,7 @@ function App() {
     commitLibraryForGeneration,
   );
 
-  const { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, journalPendingEdits, runExclusiveBodyWrite, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc } = useAutoSave(
+  const { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, journalPendingEdits, forgetRecoveryRecord, runExclusiveBodyWrite, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc } = useAutoSave(
     state,
     tiptapRef,
     docs,
@@ -548,6 +549,9 @@ function App() {
   flushDocSaveRef.current = flushDocSave;
   flushPendingSnapshotsRef.current = flushPendingSnapshots;
   journalPendingEditsRef.current = journalPendingEdits;
+  discardJournalledEditsRef.current = () => {
+    for (const doc of libraryStore.getSnapshot().docs) forgetRecoveryRecord(doc.id);
+  };
   runExclusiveBodyWriteRef.current = runExclusiveBodyWrite;
   beforeUpdateInstallRef.current = async () => {
     // The same four-step drain the close handler runs, for the same reason:
@@ -1213,16 +1217,19 @@ function App() {
         return true;
       }).catch(() => null);
       if (!outcome) return;
-      if (outcome.applied > 0) {
-        showEditorNotice(t("recovery.applied", localeRef.current), FATAL_NOTICE_MS);
-      }
-      if (outcome.preserved > 0) {
-        showEditorNotice(t("recovery.preserved", localeRef.current), FATAL_NOTICE_MS);
-      }
-      // A record that could not be resolved this run stays journalled. Saying
-      // nothing would leave the close dialog's promise of restoration hanging.
-      if (outcome.deferred > 0) {
-        showEditorNotice(t("recovery.deferred", localeRef.current), FATAL_NOTICE_MS);
+      // One notice, not three. showEditorNotice is a single slot with a single
+      // timer, so three calls in a tick leave only the last text — and the one
+      // that explains why the open note's content changed under the user is
+      // the one that was being dropped. A record that could not be resolved
+      // stays journalled, and saying nothing about it would leave the close
+      // dialog's promise of restoration hanging, so it is reported too.
+      const notices = [
+        outcome.applied > 0 ? t("recovery.applied", localeRef.current) : null,
+        outcome.preserved > 0 ? t("recovery.preserved", localeRef.current) : null,
+        outcome.deferred > 0 ? t("recovery.deferred", localeRef.current) : null,
+      ].filter((line): line is string => line !== null);
+      if (notices.length > 0) {
+        showEditorNotice(notices.join(" "), FATAL_NOTICE_MS * notices.length);
       }
     })();
   }, [isLoading, setDocs, showEditorNotice, state]);
@@ -1432,7 +1439,16 @@ function App() {
           return;
         }
         const discard = await confirm(t("close.unsavedDiscard", localeRef.current), { kind: "warning" });
-        if (!discard) event.preventDefault();
+        if (!discard) {
+          event.preventDefault();
+          return;
+        }
+        // "Discards them" has to mean it. journalPendingEdits writes a record
+        // for every pending snapshot before deciding its verdict, so by the
+        // time this branch is reached some edits may already be recorded — and
+        // the next start would restore exactly what the user just chose to
+        // throw away, with a notice saying so.
+        discardJournalledEditsRef.current?.();
         return;
       }
       // The drain succeeded, so a later failure starts the two-step gate over.

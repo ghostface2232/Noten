@@ -74,7 +74,7 @@ The active notes directory contains shared, syncable data:
 - Soft deletion and trash restore run on that same queue as lifecycle transactions: deletion writes the tombstone before moving the body, restore writes the live sidecar before copying the body back (and rolls it back to the tombstone if the copy or read-back fails), and both publish docs/groups/trash/active as one generation-bound canonical commit, then force the latest projection before the next queued job. Local autosave is quarantined for the target ids while the transition is in flight.
 - Per-note metadata carries title, timestamps, trash state, group membership clocks, pinned state, and color. Shared group definitions live in `.groups.json`.
 - `useNotesLoader` loads and persists decomposed note state; `useFileSystem` implements note lifecycle operations; `useAutoSave` owns body snapshots and save draining.
-- The app-data directory holds per-machine state such as `settings.json`, `ui-state.json`, `manifest-cache.json`, `machine-id`, the migration journal, and `crash.log`. Sidebar open state and width are kept in localStorage.
+- The app-data directory holds per-machine state such as `settings.json`, `ui-state.json`, `manifest-cache.json`, `machine-id`, the migration journal, `crash.log`, and `recovery/` — the per-note records of edits the notes folder would not accept, replayed after hydration by `recoverEdits.ts` (`recoveryJournal.ts` stores them, `hooks/editRecovery.ts` binds it to Tauri). Sidebar open state and width are kept in localStorage.
 - A legacy monolithic `manifest.json` is decomposed when encountered during load or folder migration and retired as `manifest.legacy.json`.
 
 ### Folder sync, windows, and migration

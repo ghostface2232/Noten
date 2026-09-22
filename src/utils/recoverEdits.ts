@@ -2,7 +2,7 @@ import type { FileSystem } from "./fs";
 import { backupRemoteVersion } from "./conflictBackup";
 import { logNotenError } from "./crashLog";
 import { NotenError } from "./notenError";
-import { normalizeSep } from "./pathUtils";
+import { isStrictSubpath } from "./pathUtils";
 import {
   clearRecoveryRecord,
   listRecoveryLabels,
@@ -59,23 +59,34 @@ async function readDiskBody(fs: FileSystem, filePath: string): Promise<string | 
   }
 }
 
-/** Whether a record's note file belongs to the notes directory in use now. */
+/**
+ * Whether a record's note file belongs to the notes directory in use now.
+ *
+ * Through `isStrictSubpath`, which unifies both separators and resolves `.`,
+ * `..` and empty segments. A raw prefix compare got this wrong twice over: it
+ * never converted `\` to `/`, so a notes directory stored with a trailing
+ * separator classified EVERY record as foreign and recovery could never apply
+ * anything; and `filePath` comes out of a JSON file, so a traversal segment
+ * would have passed a prefix check straight into `atomicWriteText`.
+ */
 function isInsideNotesDir(filePath: string, notesDir: string): boolean {
   if (!filePath) return false;
-  const base = normalizeSep(notesDir).replace(/\/$/, "").toLowerCase();
-  return normalizeSep(filePath).toLowerCase().startsWith(`${base}/`);
+  return isStrictSubpath(notesDir, filePath);
 }
 
 export async function recoverEdits(deps: RecoverEditsDeps): Promise<RecoveryOutcome> {
   const { fs, appDataDir, notesDir, windowLabel, applyBody } = deps;
   const outcome: RecoveryOutcome = { applied: 0, preserved: 0, dropped: 0, deferred: 0 };
 
-  const preserve = async (record: RecoveryRecord, reason: string): Promise<boolean> => {
+  const preserve = async (record: RecoveryRecord, reason: string): Promise<"kept" | "nothing" | "failed"> => {
+    // An emptied note is a real edit — it is why backupLocalDeletionVersion
+    // exists — but backupRemoteVersion refuses an empty body, so there is no
+    // file to point the user at. Report that honestly instead of counting it
+    // as preserved and showing a notice about a .conflicts copy that is not
+    // there.
+    if (!record.content.trim()) return "nothing";
     try {
-      // An empty body has nothing to preserve, so it only costs a stray file.
-      if (record.content.trim()) {
-        await backupRemoteVersion(fs, notesDir, record.docId, record.content);
-      }
+      await backupRemoteVersion(fs, notesDir, record.docId, record.content);
     } catch (err) {
       void logNotenError(new NotenError(
         "BACKUP_FAILED",
@@ -83,7 +94,7 @@ export async function recoverEdits(deps: RecoverEditsDeps): Promise<RecoveryOutc
         "recoverEdits: could not keep an unsaved edit; leaving it journalled for the next run",
         { context: { noteId: record.docId, filePath: record.filePath, reason }, cause: err },
       ));
-      return false;
+      return "failed";
     }
     void logNotenError(new NotenError(
       "BACKUP_FAILED",
@@ -91,7 +102,7 @@ export async function recoverEdits(deps: RecoverEditsDeps): Promise<RecoveryOutc
       `recoverEdits: kept an unsaved edit under .conflicts (${reason})`,
       { context: { noteId: record.docId, filePath: record.filePath, reason } },
     ));
-    return true;
+    return "kept";
   };
 
   const labels = new Set<string>([windowLabel]);
@@ -110,12 +121,14 @@ export async function recoverEdits(deps: RecoverEditsDeps): Promise<RecoveryOutc
       // the live note clean, so the edit would vanish from the library it was
       // made in. Keep it instead, under the CURRENT folder's .conflicts.
       if (!isInsideNotesDir(record.filePath, notesDir)) {
-        if (await preserve(record, "foreign-path")) {
-          outcome.preserved += 1;
-          await clearRecoveryRecord(fs, appDataDir, label, record.docId);
-        } else {
+        const kept = await preserve(record, "foreign-path");
+        if (kept === "failed") {
           outcome.deferred += 1;
+          continue;
         }
+        if (kept === "kept") outcome.preserved += 1;
+        else outcome.dropped += 1;
+        await clearRecoveryRecord(fs, appDataDir, label, record.docId);
         continue;
       }
       const diskContent = await readDiskBody(fs, record.filePath);
@@ -133,11 +146,13 @@ export async function recoverEdits(deps: RecoverEditsDeps): Promise<RecoveryOutc
           outcome.applied += 1;
         } else if (plan.action === "preserve") {
           // Keep the work and leave the note alone.
-          if (!(await preserve(record, plan.reason))) {
+          const kept = await preserve(record, plan.reason);
+          if (kept === "failed") {
             outcome.deferred += 1;
             continue;
           }
-          outcome.preserved += 1;
+          if (kept === "kept") outcome.preserved += 1;
+          else outcome.dropped += 1;
         } else {
           outcome.dropped += 1;
         }

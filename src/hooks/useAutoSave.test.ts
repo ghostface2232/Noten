@@ -16,8 +16,9 @@ const refs = vi.hoisted(() => ({
   provisionShouldFail: false,
   editorContent: "",
   files: new Map<string, string>(),
-  journalled: [] as { docId: string; content: string }[],
+  journalled: [] as { docId: string; content: string; baseContent: string | null }[],
   journalShouldThrow: null as Error | null,
+  knownDiskContent: new Map<string, string>(),
 }));
 
 vi.mock("@tauri-apps/api/path", () => ({
@@ -33,7 +34,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 vi.mock("../utils/recoveryJournal", () => ({
   writeRecoveryRecord: vi.fn(async (_fs: unknown, _dir: string, _label: string, rec: unknown) => {
     if (refs.journalShouldThrow) throw refs.journalShouldThrow;
-    refs.journalled.push(rec as { docId: string; content: string });
+    refs.journalled.push(rec as { docId: string; content: string; baseContent: string | null });
   }),
   clearRecoveryRecord: vi.fn(async () => {}),
 }));
@@ -107,7 +108,7 @@ vi.mock("../utils/conflictBackup", () => ({
     return "/notes/.conflicts/a-1.md";
   }),
   setKnownDiskContent: vi.fn(),
-  getKnownDiskContent: vi.fn(() => "disk baseline"),
+  getKnownDiskContent: vi.fn((filePath: string) => refs.knownDiskContent.get(filePath)),
 }));
 
 vi.mock("../utils/fs", () => ({
@@ -249,6 +250,7 @@ beforeEach(() => {
   refs.migrationInProgress = false;
   refs.journalled = [];
   refs.journalShouldThrow = null;
+  refs.knownDiskContent = new Map();
   refs.backupShouldThrow = null;
   refs.remoteBackupShouldThrow = null;
   refs.writeShouldThrow = null;
@@ -1876,5 +1878,51 @@ describe("useAutoSave — what the recovery journal is allowed to claim", () => 
     await act(async () => {
       expect(await result.current.journalPendingEdits()).toBe(false);
     });
+  });
+});
+
+describe("useAutoSave — a record carries the body the edit was made against", () => {
+  // baseContent is the single field planRecovery decides on: a record is
+  // applied only when the disk still equals it, and a null one is never
+  // applied at all. Recording the wrong value there reinstates the loss the
+  // whole recovery design exists to prevent, so assert it directly rather
+  // than only the docId and content.
+  it("records the known disk body as the base, not the edit itself", async () => {
+    vi.useFakeTimers();
+    refs.knownDiskContent.set("/notes/a.md", "what was on disk");
+    refs.writeShouldThrow = new Error("EPERM: folder offline");
+    refs.editorContent = "the unsaved edit";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "what was on disk" })],
+      state: makeState({ isDirty: true }),
+    });
+
+    act(() => result.current.scheduleAutoSave());
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(refs.journalled).toHaveLength(1);
+    expect(refs.journalled[0].content).toBe("the unsaved edit");
+    expect(refs.journalled[0].baseContent).toBe("what was on disk");
+  });
+
+  it("records a null base when this session never saw the file", async () => {
+    // The projection case. A record with no base must never be applied, and
+    // that depends entirely on this value being null rather than the body the
+    // empty editor happened to hold.
+    vi.useFakeTimers();
+    refs.writeShouldThrow = new Error("EPERM: folder offline");
+    refs.editorContent = "typed into a projection";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "" })],
+      state: makeState({ isDirty: true }),
+    });
+
+    act(() => result.current.scheduleAutoSave());
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(refs.journalled).toHaveLength(1);
+    expect(refs.journalled[0].baseContent).toBeNull();
   });
 });

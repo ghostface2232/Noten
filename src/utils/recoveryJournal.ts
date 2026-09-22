@@ -122,7 +122,11 @@ export async function readRecoveryRecords(
   const out: RecoveryRecord[] = [];
   for (const entry of entries) {
     const name = entry.name;
-    if (!name || !name.endsWith(".json") || name.endsWith(".tmp.json")) continue;
+    // atomicWriteText writes `<name>.json.tmp`, which the .json test already
+    // excludes. A `.tmp.json` test excluded nothing and quietly skipped the
+    // records of any note whose id ends in `.tmp` — ids are not UUID-only, a
+    // `draft.tmp.md` in the notes folder is ingested with id `draft.tmp`.
+    if (!name || !name.endsWith(".json")) continue;
     try {
       const parsed = JSON.parse(await fs.readTextFile(`${dir}/${name}`)) as unknown;
       // The filename is the id recovery will act on, so refuse a record whose

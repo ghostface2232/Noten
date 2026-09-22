@@ -1,4 +1,4 @@
-Invariants for shared utilities that carry their own rule: logical lines (the status bar's line count and Go to Line) and the export path. The persistence modules in this directory (`libraryStore`, `decomposedState`, `metadataIO`, `groupsIO`, `conflictBackup`, `reconcileFolder`, `recoveryJournal`) are governed by `src/hooks/AGENTS.md`, and the context-menu registry by `src/components/AGENTS.md`.
+Invariants for shared utilities that carry their own rule: logical lines (the status bar's line count and Go to Line) and the export path. The persistence modules in this directory (`libraryStore`, `decomposedState`, `metadataIO`, `groupsIO`, `conflictBackup`, `reconcileFolder`, `recoveryJournal`, `recoverEdits`, `atomicWrite`, `conflictFileDetector`, `migrateNotesDir`, `migrationJournal`, `noteId`) are governed by `src/hooks/AGENTS.md`, as is `src/App.tsx`'s close drain, fatal-error handler and recovery replay, and the context-menu registry by `src/components/AGENTS.md`.
 
 ## Logical Lines
 

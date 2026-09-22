@@ -90,7 +90,10 @@ describe("recoverEdits — replaying a journal left by a crash", () => {
     // The projection case reaching recovery: applying would write an empty
     // body over a real note, which is the C1 loss by another route.
     fs.seedTextFile(NOTE_PATH, "the real note body");
-    await writeRecoveryRecord(fs, APP_DATA, LABEL, record({ content: "", baseContent: null }));
+    // Typed into a projection doc: the session never read the file, so the
+    // record has no base and its content is whatever the empty editor held
+    // plus the keystrokes.
+    await writeRecoveryRecord(fs, APP_DATA, LABEL, record({ content: "typed", baseContent: null }));
     const d = deps();
 
     const outcome = await recoverEdits(d);
@@ -244,5 +247,59 @@ describe("recoverEdits — a record from a different notes directory", () => {
     await writeRecoveryRecord(fs, APP_DATA, LABEL, record());
 
     expect(await recoverEdits(deps())).toMatchObject({ applied: 1 });
+  });
+});
+
+describe("recoverEdits — Windows paths and traversal", () => {
+  it("applies a record when the notes directory is stored with a trailing separator", async () => {
+    // The real shape on Windows. A raw prefix compare classified every record
+    // as foreign here, so recovery silently never applied anything — on the
+    // only platform the app ships to.
+    const winDir = "D:\\Notes\\";
+    const winPath = `D:\\Notes\\${NOTE_ID}.md`;
+    fs.seedDir("D:\\Notes");
+    fs.seedTextFile(winPath, "what was on disk");
+    await writeRecoveryRecord(fs, APP_DATA, LABEL, record({ filePath: winPath }));
+    const d = deps({ notesDir: winDir });
+
+    expect(await recoverEdits(d)).toMatchObject({ applied: 1, preserved: 0 });
+    expect(d.applyBody).toHaveBeenCalled();
+  });
+
+  it("matches a backslash record path against a forward-slash notes dir", async () => {
+    const winPath = `${DIR}\\${NOTE_ID}.md`;
+    fs.seedTextFile(winPath, "what was on disk");
+    await writeRecoveryRecord(fs, APP_DATA, LABEL, record({ filePath: winPath }));
+
+    expect(await recoverEdits(deps())).toMatchObject({ applied: 1 });
+  });
+
+  it("refuses a record whose path climbs out of the notes directory", async () => {
+    // filePath comes out of a JSON file and is handed to atomicWriteText.
+    await writeRecoveryRecord(fs, APP_DATA, LABEL, record({
+      filePath: `${DIR}/../escaped.md`,
+    }));
+    const d = deps();
+
+    expect(await recoverEdits(d)).toMatchObject({ preserved: 1, applied: 0 });
+    expect(d.applyBody).not.toHaveBeenCalled();
+    expect(await fs.exists("/escaped.md")).toBe(false);
+  });
+});
+
+describe("recoverEdits — the outcome has to match what actually happened", () => {
+  it("does not count an emptied note as preserved, because nothing was written", async () => {
+    // backupRemoteVersion refuses an empty body, so there is no .conflicts
+    // file to point the user at. Counting it as preserved made the notice
+    // name a file that does not exist.
+    fs.seedTextFile(NOTE_PATH, "what the other device wrote");
+    await writeRecoveryRecord(fs, APP_DATA, LABEL, record({ content: "   " }));
+
+    const outcome = await recoverEdits(deps());
+
+    expect(outcome).toMatchObject({ preserved: 0, dropped: 1, deferred: 0 });
+    expect(await conflictFiles()).toEqual([]);
+    // Still consumed — leaving it would retry the same nothing every start.
+    expect(await readRecoveryRecords(fs, APP_DATA, LABEL)).toEqual([]);
   });
 });
