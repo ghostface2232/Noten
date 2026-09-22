@@ -64,6 +64,10 @@ function selection(input: HTMLElement) {
   return [el.selectionStart, el.selectionEnd];
 }
 
+function caseToggle() {
+  return screen.getByRole("button", { name: "Match case" });
+}
+
 function counter() {
   // The visible counter is aria-hidden, so it is addressed by its text.
   return screen.getByText(/^\d+\/\d+$/);
@@ -235,8 +239,22 @@ describe("controls", () => {
 
     fireEvent.keyDown(findInput, { key: "c", code: "KeyC", altKey: true });
 
-    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");
+    expect(caseToggle().getAttribute("aria-pressed")).toBe("true");
     expect(counter().textContent).toBe("1/1");
+  });
+
+  it("toggles match case from its button and shows the pressed state", () => {
+    const { findInput } = renderBar("<p>Foo foo</p>");
+    fireEvent.change(findInput, { target: { value: "foo" } });
+    expect(caseToggle().getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(caseToggle());
+    expect(caseToggle().getAttribute("aria-pressed")).toBe("true");
+    expect(counter().textContent).toBe("1/1");
+
+    fireEvent.click(caseToggle());
+    expect(caseToggle().getAttribute("aria-pressed")).toBe("false");
+    expect(counter().textContent).toBe("1/2");
   });
 
   it("recognizes Alt+C by physical key while an IME rewrites e.key", () => {
@@ -245,6 +263,6 @@ describe("controls", () => {
 
     fireEvent.keyDown(findInput, { key: "Process", code: "KeyC", altKey: true });
 
-    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");
+    expect(caseToggle().getAttribute("aria-pressed")).toBe("true");
   });
 });
