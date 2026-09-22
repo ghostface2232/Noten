@@ -1339,15 +1339,8 @@ export function useFileSystem(
       `\\[\\[${escapeRegexForRename(oldName)}\\]\\]`,
       "gi",
     );
-    // A FUNCTION replacement, not a string one. `String.replace` interprets
-    // `$&`, `$'`, `` $` ``, `$$` and `$n` in a string replacement, so a title
-    // containing any of them rewrote the surrounding body instead of being
-    // inserted: `Budget $' 2026` spliced the whole remainder of the note into
-    // the link, and `Rock $$ Roll` produced `[[Rock $ Roll]]`, which resolves
-    // to no note at all. The rewritten body is written fail-closed and then
-    // seeded as the conflict baseline, so there was no `.conflicts` copy to
-    // recover from either. A function's return value is used verbatim, which
-    // removes the class rather than escaping each case.
+    // A function, not a string: String.replace expands `$&`, `$'` and `$$` in
+    // a string replacement, and the rewritten body leaves no .conflicts copy.
     const replacement = () => `[[${trimmed}]]`;
     const now = Date.now();
 

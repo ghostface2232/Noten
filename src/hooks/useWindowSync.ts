@@ -37,13 +37,9 @@ interface DocRenamedPayload {
   oldFilePath: string;
   newFilePath: string;
   newFileName: string;
-  /**
-   * Whether the new title is a manual one. This is not cosmetic: `customName`
-   * is what the three empty-note prunes read as "the user named this, never
-   * auto-delete it", and those prunes bypass both `.trash` and `.conflicts`.
-   * Omitting it left the receiving window believing a just-renamed note was
-   * still auto-titled, so switching notes there deleted it outright.
-   */
+  /** Whether the new title is a manual one. The empty-note prunes read
+   *  `customName` and delete permanently, so a receiver without it would
+   *  prune a just-named empty note. */
   customName: boolean;
 }
 
@@ -347,11 +343,7 @@ export function useWindowSync(
           const idx = current.docs.findIndex((d) => d.id === docId);
           if (idx < 0) return null;
           const docs = [...current.docs];
-          // customName travels with the title. Taking the title alone left a
-          // manually named note looking auto-titled here until the sidecar
-          // arrived and the .meta watcher repaired it — and the empty-note
-          // prunes, which read it and delete permanently, run long before
-          // that on a cloud folder.
+          // OR, not assign: customName only ever turns on (keepManualTitle).
           docs[idx] = {
             ...docs[idx],
             filePath: newFilePath,
