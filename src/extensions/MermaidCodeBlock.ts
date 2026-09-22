@@ -2,6 +2,7 @@ import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { createIncrementalLowlightPlugin, isStockLowlightPlugin } from "./incrementalLowlight";
 import type { NodeViewRendererProps } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { TextSelection } from "@tiptap/pm/state";
 import type { NodeView, ViewMutationRecord } from "@tiptap/pm/view";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
@@ -630,6 +631,46 @@ export const MermaidCodeBlock = CodeBlockLowlight.extend({
         defaultLanguage: this.options.defaultLanguage,
       }),
     ];
+  },
+
+  // Every way out of a block (a third Enter at its end, and HardBreak's
+  // Shift-Enter and Mod-Enter, which run exitCode) adds a paragraph below it.
+  // A block that ends the note already has TrailingNode's empty paragraph
+  // there, so that left two blank lines. When an empty paragraph follows,
+  // step into it instead; otherwise fall through to the stock handlers. This
+  // keymap runs before HardBreak's because the block is registered after
+  // StarterKit, and later extensions of equal priority handle keys first.
+  addKeyboardShortcuts() {
+    const parent = this.parent?.() ?? {};
+    const editor = this.editor;
+    const leave = (trimTrailingBlankLines: boolean) => {
+      const { state, view } = editor;
+      const { $head, $anchor } = state.selection;
+      if ($head.parent.type !== this.type || !$head.sameParent($anchor)) return false;
+      const after = $head.after();
+      const next = state.doc.resolve(after).nodeAfter;
+      if (next?.type.name !== "paragraph" || next.content.size > 0) return false;
+      const tr = state.tr;
+      if (trimTrailingBlankLines) tr.delete($head.pos - 2, $head.pos);
+      tr.setSelection(TextSelection.create(tr.doc, tr.mapping.map(after) + 1));
+      view.dispatch(tr.scrollIntoView());
+      return true;
+    };
+    // Mirrors the stock Enter's condition for leaving on a third Enter.
+    const isThirdEnterAtEnd = () => {
+      const { empty, $from } = editor.state.selection;
+      return this.options.exitOnTripleEnter
+        && empty
+        && $from.parent.type === this.type
+        && $from.parentOffset === $from.parent.content.size
+        && $from.parent.textContent.endsWith("\n\n");
+    };
+    return {
+      ...parent,
+      Enter: (props) => (isThirdEnterAtEnd() && leave(true)) || (parent.Enter?.(props) ?? false),
+      "Shift-Enter": () => leave(false),
+      "Mod-Enter": () => leave(false),
+    };
   },
 
   addNodeView() {
