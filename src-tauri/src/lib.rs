@@ -64,6 +64,9 @@ async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
     // while we poll for exit, so a chatty child could fill the buffer, block,
     // and be killed by the timeout below.
     let temp_err = temp_dir.join(format!("{stem}.log"));
+    // Edge prints to a fresh temp path so the file's appearance means this run
+    // wrote it; the user's file is replaced only once the PDF is complete.
+    let temp_pdf = temp_dir.join(format!("{stem}.pdf"));
 
     fs::write(&temp_html, &html).map_err(|e| format!("Failed to write temp HTML: {e}"))?;
 
@@ -72,6 +75,7 @@ async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
     let cleanup = || {
         let _ = fs::remove_file(&temp_html);
         let _ = fs::remove_file(&temp_err);
+        let _ = fs::remove_file(&temp_pdf);
     };
 
     let edge_paths = [
@@ -88,7 +92,7 @@ async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
     };
 
     let temp_html_url = format!("file:///{}", temp_html.to_string_lossy().replace('\\', "/"));
-    let print_arg = format!("--print-to-pdf={}", output_path);
+    let print_arg = format!("--print-to-pdf={}", temp_pdf.to_string_lossy());
 
     let stderr_sink = match fs::File::create(&temp_err) {
         Ok(file) => Stdio::from(file),
@@ -140,14 +144,53 @@ async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
         }
     };
 
-    let stderr = fs::read_to_string(&temp_err).unwrap_or_default();
-    cleanup();
-
     if !status.success() {
+        let stderr = fs::read_to_string(&temp_err).unwrap_or_default();
+        cleanup();
         return Err(format!("Edge PDF generation failed: {stderr}"));
     }
 
-    Ok(())
+    // A successful exit does not mean the PDF exists: the launched msedge.exe
+    // can hand the job to another Edge process and exit at once (seen while an
+    // Edge update was pending), and that process renders later. Deleting the
+    // HTML now made it print its "file not found" page instead of the note, so
+    // keep everything until the PDF has been written and closed.
+    if !wait_for_written_file(&temp_pdf, deadline, PDF_POLL_INTERVAL) {
+        let stderr = fs::read_to_string(&temp_err).unwrap_or_default();
+        cleanup();
+        return Err(format!("Edge exited without writing the PDF: {stderr}"));
+    }
+
+    // Copy rather than rename: a renamed file would keep %TEMP%'s owner-only
+    // permissions instead of inheriting the target folder's, as Edge's own
+    // file did when it printed there directly.
+    let saved = fs::copy(&temp_pdf, &output_path);
+    cleanup();
+    saved
+        .map(|_| ())
+        .map_err(|e| format!("Failed to save the PDF: {e}"))
+}
+
+/// Waits until `path` exists, is non-empty and no process holds it open (an
+/// exclusive open succeeds only after the writer closes its handle), or until
+/// `deadline`. Returns whether the file is complete.
+fn wait_for_written_file(path: &Path, deadline: Instant, poll: Duration) -> bool {
+    use std::os::windows::fs::OpenOptionsExt;
+    loop {
+        let complete = fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false)
+            && fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(path)
+                .is_ok();
+        if complete {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(poll);
+    }
 }
 
 fn reg_add_value(reg_key: &str, value_name: &str, value_data: &str) -> Result<(), String> {
@@ -413,8 +456,51 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_servable_note_image, note_image_mime, print_temp_stem, wide_null};
+    use super::{
+        is_servable_note_image, note_image_mime, print_temp_stem, wait_for_written_file, wide_null,
+    };
+    use std::io::Write;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn waits_for_a_pdf_written_after_the_launcher_exits() {
+        // Stands in for the Edge process that keeps rendering after the one we
+        // launched has exited: the file appears late and stays open a while.
+        let path = std::env::temp_dir().join(format!("{}.pdf", print_temp_stem()));
+        let closed = Arc::new(AtomicBool::new(false));
+        let writer = {
+            let (path, closed) = (path.clone(), closed.clone());
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(200));
+                let mut file = std::fs::File::create(&path).unwrap();
+                file.write_all(b"%PDF-1.4 partial").unwrap();
+                std::thread::sleep(Duration::from_millis(300));
+                file.write_all(b" rest").unwrap();
+                closed.store(true, Ordering::SeqCst);
+            })
+        };
+        let poll = Duration::from_millis(10);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        assert!(wait_for_written_file(&path, deadline, poll));
+        // Returned only once the writer let go of the file, never mid-write.
+        assert!(closed.load(Ordering::SeqCst));
+        writer.join().unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"%PDF-1.4 partial rest");
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn gives_up_on_a_pdf_that_never_appears() {
+        let path = std::env::temp_dir().join(format!("{}.pdf", print_temp_stem()));
+        let start = Instant::now();
+        let poll = Duration::from_millis(10);
+        let deadline = start + Duration::from_millis(150);
+        assert!(!wait_for_written_file(&path, deadline, poll));
+        assert!(start.elapsed() >= Duration::from_millis(150));
+    }
 
     #[test]
     fn serves_only_images_inside_assets_under_a_root() {
