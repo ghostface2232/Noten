@@ -286,12 +286,13 @@ describe("reconcileFolder", () => {
     }
   });
 
-  it("restores trashed note when root mtime is newer than trashedAt", async () => {
+  it("restores trashed note when a divergent root is newer than trashedAt", async () => {
     const id = "22222222-2222-2222-2222-222222222222";
     const trashedAt = 5000;
     await seedMeta(fs, makeMeta(id, { trashedAt, trashedFromPath: `${DIR}/${id}.md` }));
-    // Root body present and newer than trashedAt.
+    // Root body edited after trashing, so it differs from the trash body.
     fs.seedTextFile(`${DIR}/${id}.md`, "restored content");
+    fs.seedTextFile(`${DIR}/.trash/${id}.md`, "trashed content");
 
     const result = await reconcileFolder(fs, state, DIR, [], [], LOCALE);
 
@@ -300,6 +301,42 @@ describe("reconcileFolder", () => {
     expect(meta).not.toBeNull();
     expect(meta!.trashedAt).toBeNull();
     expect(await fs.exists(`${DIR}/.trash/${id}.md`)).toBe(false);
+    const backups = (await fs.readDir(`${DIR}/.conflicts`)).filter((e) => e.name?.startsWith(`${id}-`));
+    expect(backups).toHaveLength(1);
+  });
+
+  // The root mtime is a file time (usually the editing machine's clock) and
+  // trashedAt is the deleting machine's. A peer whose clock ran ahead made its
+  // leftover root look newer than the deletion, and the note came back on
+  // every machine.
+  it("keeps a peer's deletion when the leftover root is identical, whatever the clocks say", async () => {
+    const id = "22222222-2222-2222-2222-2222222222bb";
+    await seedMeta(fs, makeMeta(id, { trashedAt: 5000, trashedFromPath: `${DIR}/${id}.md` }));
+    fs.seedTextFile(`${DIR}/${id}.md`, "same body");
+    fs.seedTextFile(`${DIR}/.trash/${id}.md`, "same body");
+
+    const result = await reconcileFolder(fs, state, DIR, [makeDoc(id)], [], LOCALE);
+
+    expect(result.docs.find((d) => d.id === id)).toBeUndefined();
+    expect((await readMeta(fs, DIR, id))!.trashedAt).toBe(5000);
+    expect(await fs.exists(`${DIR}/${id}.md`)).toBe(false);
+    expect(await fs.readTextFile(`${DIR}/.trash/${id}.md`)).toBe("same body");
+    expect(await fs.exists(`${DIR}/.conflicts`)).toBe(false);
+  });
+
+  it("keeps a peer's deletion when the trash body has not arrived yet, whatever the clocks say", async () => {
+    // The sidecar is small and often syncs before the moved body.
+    const id = "22222222-2222-2222-2222-2222222222cc";
+    await seedMeta(fs, makeMeta(id, { trashedAt: 5000, trashedFromPath: `${DIR}/${id}.md` }));
+    fs.seedTextFile(`${DIR}/${id}.md`, "only copy");
+
+    const result = await reconcileFolder(fs, state, DIR, [makeDoc(id)], [], LOCALE);
+
+    expect(result.docs.find((d) => d.id === id)).toBeUndefined();
+    expect((await readMeta(fs, DIR, id))!.trashedAt).toBe(5000);
+    expect(await fs.exists(`${DIR}/${id}.md`)).toBe(false);
+    // Still restorable from the trash.
+    expect(await fs.readTextFile(`${DIR}/.trash/${id}.md`)).toBe("only copy");
   });
 
   it("keeps note trashed when stat fails on the root body (cloud-sync placeholder)", async () => {

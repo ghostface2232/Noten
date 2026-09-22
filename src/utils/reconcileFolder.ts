@@ -355,8 +355,20 @@ export async function reconcileFolder(
       continue;
     }
 
-    if (rootMtime != null && rootMtime > meta.trashedAt) {
-      if (trashState === "readable" && trashBody !== null && trashBody !== rootBody && trashBody.length > 0) {
+    // rootMtime is a file time (often the editing machine's clock, carried by
+    // the sync client) and trashedAt is the deleting machine's clock, so the
+    // comparison is only consulted when an order genuinely has to be chosen.
+    // An identical root is a leftover of the very body that was trashed, and
+    // with no trash body yet there is nothing to order against: in both cases
+    // the deletion stands (the absent case moves the root into .trash, so the
+    // note stays restorable). Letting a clock that ran ahead decide them
+    // undid a peer's deletion and propagated the restore to every machine.
+    const rootEditedAfterTrash = trashState === "readable"
+      && trashBody !== rootBody
+      && rootMtime != null
+      && rootMtime > meta.trashedAt;
+    if (rootEditedAfterTrash) {
+      if (trashBody !== null && trashBody.length > 0) {
         try {
           await backupRemoteVersion(fs, dir, meta.id, trashBody);
         } catch {
@@ -366,9 +378,7 @@ export async function reconcileFolder(
           continue;
         }
       }
-      if (trashState === "readable") {
-        try { markOwnWrite(trashPath); await fs.remove(trashPath); } catch { /* ignore */ }
-      }
+      try { markOwnWrite(trashPath); await fs.remove(trashPath); } catch { /* ignore */ }
       try {
         const restored = { ...meta, trashedAt: null, trashedFromPath: null };
         await writeMetaFile(fs, dir, restored, machineId);
