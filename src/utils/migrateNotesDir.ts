@@ -115,13 +115,17 @@ async function clearDirContents(dir: string, protectedPath?: string, strict = fa
   const base = normalizeSep(dir);
   for (const entry of entries) {
     if (!entry.name) continue;
+    // `.conflicts` is deliberately not managed: it holds bodies the app already
+    // decided to preserve, often the only copy left, and its README tells the
+    // user it is theirs to delete. Both overwrite paths used to wipe the
+    // destination's archive, and every copy of the source's is best-effort,
+    // so a source clear could destroy one that never arrived.
     const isManagedRootEntry = entry.name === "manifest.json"
       || entry.name === "manifest.legacy.json"
       || entry.name === ".groups.json"
       || entry.name === ".meta"
       || entry.name === ".assets"
       || entry.name === ".trash"
-      || entry.name === ".conflicts"
       || (entry.isFile && entry.name.endsWith(".md"));
     if (!isManagedRootEntry) continue;
     const target = `${base}${entry.name}`;
@@ -606,7 +610,9 @@ export async function hasExistingNotenData(dir: string): Promise<boolean> {
     if (entries.some((e) => e.name === ".meta" && e.isDirectory)) return true;
     if (entries.some((e) => e.name === ".trash" && e.isDirectory)) return true;
     if (entries.some((e) => e.name === ".assets" && e.isDirectory)) return true;
-    if (entries.some((e) => e.name === ".conflicts" && e.isDirectory)) return true;
+    // A lone `.conflicts` is not library data: no clear removes it, so every
+    // folder a library ever moved out of keeps one, and counting it would put
+    // the merge/overwrite prompt in front of moving back.
   } catch {
     return true;
   }

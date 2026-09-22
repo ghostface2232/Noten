@@ -128,6 +128,7 @@ type NotesDirConflictChoice = "replace-with-current" | "use-selected-only" | "me
 
 interface NotesDirConflictDialogState {
   path: string;
+  allowUseSelectedOnly: boolean;
   resolve: (choice: NotesDirConflictChoice) => void;
 }
 
@@ -302,9 +303,9 @@ function App() {
   const startupUpdateCheckStartedRef = useRef(false);
   const [tiptapEditor, setTiptapEditor] = useState<import("@tiptap/react").Editor | null>(null);
 
-  const requestNotesDirConflictChoice = useCallback((path: string) => (
+  const requestNotesDirConflictChoice = useCallback((path: string, allowUseSelectedOnly = true) => (
     new Promise<NotesDirConflictChoice>((resolve) => {
-      setNotesDirConflict({ path, resolve });
+      setNotesDirConflict({ path, allowUseSelectedOnly, resolve });
     })
   ), []);
 
@@ -1014,10 +1015,27 @@ function App() {
   const handleResetNotesDir = useCallback(async () => {
     if (!settings.notesDirectory) return;
 
-    const ok = await confirm(t("settings.notesDirectory.confirmMove", locale));
-    if (!ok) return;
-
     const oldDir = await getNotesDir();
+    // Resolve the default dir without mutating the loader cache — the cache
+    // must keep pointing at the old dir until the copy lands and the setting
+    // commits.
+    const defaultDir = await getDefaultNotesDir();
+
+    // The default folder is usually empty, but an earlier migration's deferred
+    // or failed source clear leaves a library there. An unconditional
+    // overwrite wiped it with no backup, so ask exactly as a folder change
+    // would. Keeping only the default folder's notes is not offered here; it
+    // needs the no-copy branch of handleChangeNotesDir.
+    const normalize = (p: string) => p.replace(/[\\/]+$/, "").replace(/\\/g, "/");
+    let mergeStrategy: "merge" | "overwrite" = "overwrite";
+    if (normalize(oldDir) !== normalize(defaultDir) && await hasExistingNotenData(defaultDir)) {
+      const choice = await requestNotesDirConflictChoice(defaultDir, false);
+      if (choice !== "merge" && choice !== "replace-with-current") return;
+      if (choice === "merge") mergeStrategy = "merge";
+    } else {
+      const ok = await confirm(t("settings.notesDirectory.confirmMove", locale));
+      if (!ok) return;
+    }
 
     // Flush before moving paths.
     await flushAutoSaveRef.current?.().catch(() => {});
@@ -1057,16 +1075,11 @@ function App() {
       await message(t(messageKey, locale), { kind: "error" });
     };
 
-    // Resolve the default dir without mutating the loader cache — the cache
-    // must keep pointing at the old dir until the copy lands and the setting
-    // commits.
-    const defaultDir = await getDefaultNotesDir();
-
     // Same crash-safe ordering as handleChangeNotesDir: copy → persist →
     // clear source (or defer the clear when not all windows drained).
     let result;
     try {
-      result = await migrateNotesDir(oldDir, defaultDir, "overwrite", { clearSource: false });
+      result = await migrateNotesDir(oldDir, defaultDir, mergeStrategy, { clearSource: false });
     } catch (err) {
       setMigrationInProgress(false);
       broadcastMigrationFinished(migrationId, false, "");
@@ -1096,7 +1109,7 @@ function App() {
     broadcastMigrationFinished(migrationId, true, "", sourceRetained);
     if (sourceRetained) void recoverPendingMigration();
     // Reload owns releasing migrationInProgress.
-  }, [locale, persistNotesDirectorySetting, settings.notesDirectory]);
+  }, [locale, persistNotesDirectorySetting, requestNotesDirConflictChoice, settings.notesDirectory]);
 
   const {
     chromeVisible,
@@ -1935,21 +1948,23 @@ function App() {
                 {t("dialog.replaceWithCurrent", locale)}
               </Button>
             </Tooltip>
-            <Tooltip
-              content={t("settings.notesDirectory.useSelectedOnlyHelp", locale)}
-              relationship="description"
-              positioning="above"
-              appearance={isDarkMode ? "inverted" : undefined}
-            >
-              <Button
-                size="medium"
-                appearance="subtle"
-                onClick={() => resolveNotesDirConflictChoice("use-selected-only")}
-                style={{ justifyContent: "flex-start", color: tokens.colorPaletteRedForeground1 }}
+            {notesDirConflict?.allowUseSelectedOnly !== false && (
+              <Tooltip
+                content={t("settings.notesDirectory.useSelectedOnlyHelp", locale)}
+                relationship="description"
+                positioning="above"
+                appearance={isDarkMode ? "inverted" : undefined}
               >
-                {t("dialog.useSelectedOnly", locale)}
-              </Button>
-            </Tooltip>
+                <Button
+                  size="medium"
+                  appearance="subtle"
+                  onClick={() => resolveNotesDirConflictChoice("use-selected-only")}
+                  style={{ justifyContent: "flex-start", color: tokens.colorPaletteRedForeground1 }}
+                >
+                  {t("dialog.useSelectedOnly", locale)}
+                </Button>
+              </Tooltip>
+            )}
             <Tooltip
               content={t("settings.notesDirectory.mergeHelp", locale)}
               relationship="description"

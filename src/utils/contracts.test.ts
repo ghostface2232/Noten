@@ -159,6 +159,19 @@ describe("contract: notes directory setting commits after copy, before source cl
     expect(body.slice(migrateAt, persistAt)).toContain("clearSource: false");
   });
 
+  it("reset-notes-dir probes the default dir before any overwrite", () => {
+    // An unconditional overwrite wiped a library left in the default folder by
+    // an earlier migration's deferred or failed source clear, with no backup.
+    const text = read(APP);
+    const body = text.match(/const handleResetNotesDir[\s\S]*?\n  const \{/)?.[0];
+    expect(body, "handleResetNotesDir not found").toBeDefined();
+    const probeAt = body!.indexOf("hasExistingNotenData(defaultDir)");
+    const drainAt = body!.indexOf("const manifestDrain = flushPersistence(");
+    expect(probeAt).toBeGreaterThanOrEqual(0);
+    expect(probeAt).toBeLessThan(drainAt);
+    expect(body).not.toMatch(/migrateNotesDir\(oldDir, defaultDir, "overwrite"/);
+  });
+
   it("both local migration paths enqueue the metadata barrier before raising the guard", () => {
     const text = read(APP);
     const change = text.match(/const handleChangeNotesDir[\s\S]*?\n  const handleResetNotesDir/)?.[0];
