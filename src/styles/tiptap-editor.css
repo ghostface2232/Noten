@@ -566,6 +566,22 @@
   content-visibility: auto;
 }
 
+/* Prose, in notes small enough for it (the plugin's second root class; see
+   MAX_TEXT_SKIP_BLOCKS). A paragraph or heading holds no block children, so
+   layout containment has no margins to stop from collapsing: its own margins
+   still collapse with its neighbours, and the layout is unchanged. The clip
+   margin keeps italic overhang and selection painting unclipped.
+   The selector must match SKIPPABLE_TEXT. */
+.ProseMirror.noten-skip-offscreen-text > :is(p, h1, h2, h3, h4, h5, h6) {
+  contain: layout style paint;
+  contain-intrinsic-size: auto 1.5em;
+  overflow-clip-margin: 1em;
+}
+
+.ProseMirror.noten-skip-offscreen.noten-skip-offscreen-text > :is(p, h1, h2, h3, h4, h5, h6) {
+  content-visibility: auto;
+}
+
 /* A table wider than the editor (many columns hold their minimum width)
    scrolls inside its own wrapper: paint containment would otherwise clip the
    overflow that used to widen the whole editor. The one inexact size this

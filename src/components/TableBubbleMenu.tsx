@@ -47,9 +47,15 @@ function TableBubbleMenuImpl({ editor, locale }: TableBubbleMenuProps) {
   useEffect(() => {
     if (!editor) return;
     let frame: number | null = null;
+    // The table the last sync saw (undefined before the first). Outside a
+    // table there is nothing to re-anchor or re-check, so staying outside
+    // renders nothing.
+    let lastEl: HTMLTableElement | null | undefined;
     const sync = () => {
       frame = null;
       const nextEl = editor.isActive("table") ? findTableElement(editor) : null;
+      if (nextEl === null && lastEl === null) return;
+      lastEl = nextEl;
       setTableEl((prev) => (prev === nextEl ? prev : nextEl));
       setTick((n) => n + 1);
     };

@@ -2,7 +2,17 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import CodeBlock from "@tiptap/extension-code-block";
-import OffscreenBlocks, { SKIP_OFFSCREEN_CLASS } from "./OffscreenBlocks";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { TextSelection } from "@tiptap/pm/state";
+import OffscreenBlocks, {
+  MAX_TEXT_SKIP_BLOCKS,
+  SKIPPABLE_BLOCK,
+  SKIPPABLE_TEXT,
+  SKIP_OFFSCREEN_CLASS,
+  SKIP_TEXT_CLASS,
+  TEXT_SKIP_HYSTERESIS,
+} from "./OffscreenBlocks";
 
 // jsdom has no layout, ResizeObserver or frames: fake all three so the tests
 // drive width changes, frame boundaries and on/off-screen positions directly.
@@ -96,7 +106,10 @@ function topLevelDom(editor: Editor, index: number) {
   return editor.view.nodeDOM(insideBlock(editor, index)) as HTMLElement;
 }
 
-const LIST_DOC = "<p>intro</p><ul><li><p>one</p></li><li><p>two</p></li></ul><p>middle</p><ul><li><p>far</p></li></ul>";
+const LIST_DOC = "<p>intro</p><ul><li><p>one</p></li><li><p>two</p></li></ul><blockquote><p>middle</p></blockquote><ul><li><p>far</p></li></ul>";
+
+const skipsText = (editor: Editor) => editor.view.dom.classList.contains(SKIP_TEXT_CLASS);
+const paragraphs = (n: number) => Array.from({ length: n }, (_, i) => `<p>p${i}</p>`).join("");
 
 describe("OffscreenBlocks", () => {
   it("turns skipping on only after a measuring frame at a real width", () => {
@@ -242,6 +255,112 @@ describe("OffscreenBlocks", () => {
     editor.destroy();
     active = null;
     expect(dom.classList.contains(SKIP_OFFSCREEN_CLASS)).toBe(false);
+    expect(dom.classList.contains(SKIP_TEXT_CLASS)).toBe(false);
     expect(observers[0].disconnected).toBe(true);
+  });
+
+  describe("prose", () => {
+    it("skips paragraphs and headings in a note within the limit", () => {
+      const editor = readyEditor(LIST_DOC);
+      expect(skipsText(editor)).toBe(true);
+    });
+
+    it("re-measures when an off-screen paragraph or heading changes", () => {
+      const editor = readyEditor("<p>top</p><p>far</p><h2>far heading</h2>");
+      offscreen.add(topLevelDom(editor, 1));
+      editor.commands.insertContentAt(insideBlock(editor, 1) + 1, "x");
+      expect(skipping(editor)).toBe(false);
+      flushFrames();
+      expect(skipping(editor)).toBe(true);
+
+      offscreen.add(topLevelDom(editor, 2));
+      editor.commands.insertContentAt(insideBlock(editor, 2) + 1, "y");
+      expect(skipping(editor)).toBe(false);
+    });
+
+    it("leaves skipping on for edits to an on-screen paragraph", () => {
+      const editor = readyEditor("<p>top</p><p>here</p>");
+      editor.commands.insertContentAt(insideBlock(editor, 1) + 1, "x");
+      expect(skipping(editor)).toBe(true);
+    });
+
+    it("keeps prose unskipped past the block limit, where paragraph edits need no re-measure", () => {
+      const editor = readyEditor(paragraphs(MAX_TEXT_SKIP_BLOCKS + 1));
+      expect(skipsText(editor)).toBe(false);
+      offscreen.add(topLevelDom(editor, 10));
+      editor.commands.insertContentAt(insideBlock(editor, 10) + 1, "x");
+      expect(skipping(editor)).toBe(true);
+    });
+
+    it("switches prose skipping with the block count, with hysteresis, and re-measures", () => {
+      const editor = readyEditor(paragraphs(MAX_TEXT_SKIP_BLOCKS));
+      expect(skipsText(editor)).toBe(true);
+
+      // One more block crosses the limit.
+      editor.commands.insertContentAt(0, "<p>one more</p>");
+      expect(skipsText(editor)).toBe(false);
+      expect(skipping(editor)).toBe(false);
+      flushFrames();
+      expect(skipping(editor)).toBe(true);
+
+      // Back at the limit: no toggle, no re-measure.
+      const removeFirst = (n: number) => {
+        let to = 0;
+        for (let i = 0; i < n; i++) to += editor.state.doc.child(i).nodeSize;
+        editor.commands.deleteRange({ from: 0, to });
+      };
+      removeFirst(1);
+      expect(skipsText(editor)).toBe(false);
+      expect(skipping(editor)).toBe(true);
+
+      // Far enough below it, skipping returns.
+      removeFirst(TEXT_SKIP_HYSTERESIS);
+      expect(skipsText(editor)).toBe(true);
+      expect(skipping(editor)).toBe(false);
+    });
+
+    it("does not count the caret's block as off screen when the update scrolls to it", () => {
+      // Enter on the last visible line: the new paragraph is below the
+      // viewport until ProseMirror scrolls, which it does after plugin views.
+      const editor = readyEditor("<p>top</p><p>bottom line</p>");
+      vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+        const index = Array.prototype.indexOf.call(this.parentElement?.children ?? [], this);
+        const top = index >= 2 ? 5000 : 100;
+        return { top, bottom: top + 50, left: 0, right: 100, width: 100, height: 50, x: 0, y: top, toJSON() {} } as DOMRect;
+      });
+      document.body.append(editor.view.dom);
+      try {
+        const end = insideBlock(editor, 1) + editor.state.doc.child(1).nodeSize - 1;
+        editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, end)));
+
+        // Unfocused, ProseMirror will not scroll, so the new block counts.
+        editor.view.dispatch(editor.state.tr.split(end).scrollIntoView());
+        expect(skipping(editor)).toBe(false);
+        flushFrames();
+        expect(skipping(editor)).toBe(true);
+        editor.commands.undo();
+
+        editor.view.focus();
+        expect(editor.view.hasFocus()).toBe(true);
+        editor.view.dispatch(editor.state.tr.split(end).scrollIntoView());
+        expect(editor.state.doc.childCount).toBe(3);
+        expect(skipping(editor)).toBe(true);
+
+        // Without the scroll, a change off screen is still re-measured.
+        const far = insideBlock(editor, 2) + 1;
+        editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, far)));
+        editor.view.dispatch(editor.state.tr.insertText("x", far));
+        expect(skipping(editor)).toBe(false);
+      } finally {
+        editor.view.dom.remove();
+      }
+    });
+  });
+
+  it("uses the same selectors as the stylesheet", () => {
+    const css = readFileSync(join(process.cwd(), "src", "styles", "tiptap-editor.css"), "utf8").replace(/\r\n?/g, "\n");
+    expect(css).toContain(`.ProseMirror.${SKIP_OFFSCREEN_CLASS} > ${SKIPPABLE_BLOCK} {`);
+    expect(css).toContain(`.ProseMirror.${SKIP_OFFSCREEN_CLASS}.${SKIP_TEXT_CLASS} > ${SKIPPABLE_TEXT} {`);
+    expect(css).toContain(`.ProseMirror.${SKIP_TEXT_CLASS} > ${SKIPPABLE_TEXT} {`);
   });
 });
