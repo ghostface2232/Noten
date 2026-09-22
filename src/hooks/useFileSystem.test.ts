@@ -1448,6 +1448,40 @@ describe("useFileSystem — restoreNote meta-first ordering", () => {
     expect(restoredDocs.find((doc) => doc.id === "t1")?.customName).toBe(true);
   });
 
+  it("keeps the restore when the trash copy cannot be removed, and logs it", async () => {
+    const trashed: TrashedNote = {
+      id: "t1",
+      fileName: "Trashed",
+      originalFilePath: "/notes/t1.md",
+      trashFilePath: "/notes/.trash/t1.md",
+      trashedAt: 2000,
+      groupId: null,
+      createdAt: 1000,
+      updatedAt: 1500,
+      pinned: false,
+    };
+    const removeMock = fsPlugin.remove as ReturnType<typeof vi.fn>;
+    const existsMock = fsPlugin.exists as ReturnType<typeof vi.fn>;
+    removeMock.mockImplementation(async (p: string) => {
+      if (p === "/notes/.trash/t1.md") throw new Error("os error 32");
+    });
+    existsMock.mockImplementation(async (p: string) => p === "/notes/.trash/t1.md");
+    try {
+      const { result } = renderFs({ docs: [makeDoc("a")], trashedNotes: [trashed] });
+      await act(async () => {
+        await result.current.restoreNote("t1");
+      });
+
+      // One attempt, no retry, and the restore still committed.
+      expect(removeMock.mock.calls.filter((c) => c[0] === "/notes/.trash/t1.md")).toHaveLength(1);
+      expect(emitTrashUpdatedMock).toHaveBeenCalledWith({ removed: [{ id: "t1", trashedAt: 2000 }] });
+      expect(logMock).toHaveBeenCalledWith(expect.objectContaining({ code: "TRASH_PURGE_FAILED" }));
+    } finally {
+      removeMock.mockImplementation(async () => {});
+      existsMock.mockImplementation(async () => false);
+    }
+  });
+
   it("fails closed before copying the body when live metadata cannot be written", async () => {
     const trashed: TrashedNote = {
       id: "t1",

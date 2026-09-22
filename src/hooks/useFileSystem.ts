@@ -36,7 +36,7 @@ import { NotenError } from "../utils/notenError";
 import { t } from "../i18n";
 import { libraryStore, type LibrarySnapshot, type LibraryUpdater } from "../utils/libraryStore";
 import { blockNoteLifecycle } from "./noteLifecycleGate";
-import { purgeTrashedNoteFiles } from "../utils/trashPurge";
+import { purgeTrashedNoteFiles, removeRestoredTrashCopy } from "../utils/trashPurge";
 import { flushLeftDocClean, type FlushResult } from "./useAutoSave";
 
 export type { NoteDoc } from "./useNotesLoader";
@@ -1680,8 +1680,8 @@ export function useFileSystem(
           }
           // The restore is durable from here on. The trash copy is only cruft
           // now, and reconcile never sweeps .trash, so it would linger forever.
-          markOwnWrite(trashPath);
-          await remove(trashPath).catch(() => {});
+          // A failure to remove it does not undo the restore.
+          await removeRestoredTrashCopy(tauriFileSystem, trashed.id, trashPath);
 
           return {
             baseSnapshot: snapshot,

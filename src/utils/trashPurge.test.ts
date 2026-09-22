@@ -11,7 +11,7 @@ vi.mock("./imageAssetUtils", () => ({
   removeNoteAssetDir: vi.fn(async () => {}),
 }));
 
-import { purgeTrashedNoteFiles } from "./trashPurge";
+import { purgeTrashedNoteFiles, removeRestoredTrashCopy } from "./trashPurge";
 import { logNotenError } from "./crashLog";
 import { removeNoteAssetDir } from "./imageAssetUtils";
 
@@ -94,5 +94,39 @@ describe("purgeTrashedNoteFiles", () => {
     expect(await purgeTrashedNoteFiles(fs, null, trashed)).toBe(true);
     expect(await fs.exists(BODY)).toBe(false);
     expect(removeAssetsMock).not.toHaveBeenCalled();
+  });
+});
+
+// A restore leaves the .trash copy behind. A failed removal used to be
+// swallowed silently; it must at least be reported.
+describe("removeRestoredTrashCopy", () => {
+  beforeEach(() => {
+    logMock.mockClear();
+  });
+
+  it("removes the copy", async () => {
+    const fs = setup();
+    expect(await removeRestoredTrashCopy(fs, "t1", BODY)).toBe(true);
+    expect(await fs.exists(BODY)).toBe(false);
+  });
+
+  // No retry: a peer delete may have written a fresh copy to this path by
+  // the time a retry ran, and removing that would lose the note.
+  it("logs a held copy once and leaves it", async () => {
+    const fs = setup();
+    fs.injectFault({ op: "remove", path: BODY, throwError: new Error("os error 32") });
+
+    expect(await removeRestoredTrashCopy(fs, "t1", BODY)).toBe(false);
+    expect(fs.callCount("remove", BODY)).toBe(1);
+    expect(await fs.exists(BODY)).toBe(true);
+    expect(logMock).toHaveBeenCalledWith(expect.objectContaining({ code: "TRASH_PURGE_FAILED" }));
+  });
+
+  it("treats a copy that is already gone as removed", async () => {
+    const fs = setup();
+    await fs.remove(BODY);
+
+    expect(await removeRestoredTrashCopy(fs, "t1", BODY)).toBe(true);
+    expect(logMock).not.toHaveBeenCalled();
   });
 });

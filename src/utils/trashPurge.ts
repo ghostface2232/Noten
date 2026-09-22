@@ -4,6 +4,7 @@ import { removeNoteAssetDir } from "./imageAssetUtils";
 import { removeMeta } from "./metadataIO";
 import { logNotenError } from "./crashLog";
 import { NotenError } from "./notenError";
+import { markOwnWrite } from "../hooks/ownWriteTracker";
 
 /**
  * Permanently removes a trashed note's files: the .trash body first, then its
@@ -46,4 +47,37 @@ export async function purgeTrashedNoteFiles(
     await removeMeta(fs, notesDir, note.id);
   }
   return true;
+}
+
+/**
+ * Removes the .trash copy a restore leaves behind once the root body is in
+ * place. A copy that cannot be removed is logged and left alone; the restore
+ * itself stands. The next delete of the note overwrites it.
+ *
+ * There is deliberately no retry or later sweep. A peer window's reconcile
+ * can adopt the restored note from disk before this restore publishes, and a
+ * delete there writes a fresh trash copy to this same path — indistinguishable
+ * from the leftover, so removing it after any delay could lose the note.
+ */
+export async function removeRestoredTrashCopy(
+  fs: FileSystem,
+  noteId: string,
+  trashPath: string,
+): Promise<boolean> {
+  markOwnWrite(trashPath);
+  try {
+    await fs.remove(trashPath);
+    return true;
+  } catch (err) {
+    try {
+      if (!await fs.exists(trashPath)) return true;
+    } catch { /* unknown: report it */ }
+    void logNotenError(new NotenError(
+      "TRASH_PURGE_FAILED",
+      "recoverable",
+      err instanceof Error ? err.message : String(err),
+      { context: { stage: "restoreNote", noteId, filePath: trashPath }, cause: err },
+    ));
+    return false;
+  }
 }
