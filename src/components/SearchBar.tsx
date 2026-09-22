@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { makeStyles, mergeClasses, shorthands, tokens } from "@fluentui/react-components";
+import { makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import {
   ArrowUpRegular,
   ArrowDownRegular,
   ArrowSwapRegular,
   DismissRegular,
+  TextCaseTitleRegular,
 } from "@fluentui/react-icons";
 import type { Editor } from "@tiptap/core";
 import {
@@ -106,60 +107,6 @@ const useStyles = makeStyles({
   },
   btnActive: {
     backgroundColor: tokens.colorNeutralBackground1Pressed,
-  },
-  caseSwitch: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "4px",
-    height: "28px",
-    border: "none",
-    borderRadius: "4px",
-    backgroundColor: "transparent",
-    color: tokens.colorNeutralForeground3,
-    cursor: "pointer",
-    flexShrink: 0,
-    padding: "0 4px",
-    marginRight: "2px",
-    fontSize: "12px",
-    fontFamily: "inherit",
-    lineHeight: 1,
-    ...pressableButton,
-    ":hover": {
-      backgroundColor: tokens.colorNeutralBackground1Hover,
-    },
-  },
-  caseSwitchOn: {
-    color: tokens.colorNeutralForeground1,
-  },
-  caseTrack: {
-    position: "relative",
-    boxSizing: "border-box",
-    width: "22px",
-    height: "12px",
-    borderRadius: "6px",
-    ...shorthands.border("1px", "solid", tokens.colorNeutralStrokeAccessible),
-    backgroundColor: "transparent",
-    ...shorthands.transition([["background-color", "120ms", "ease"], ["border-color", "120ms", "ease"]]),
-    flexShrink: 0,
-  },
-  caseTrackOn: {
-    ...shorthands.borderColor(tokens.colorNeutralForeground2),
-    backgroundColor: tokens.colorNeutralForeground2,
-  },
-  caseKnob: {
-    position: "absolute",
-    top: "50%",
-    left: "2px",
-    marginTop: "-3px",
-    width: "6px",
-    height: "6px",
-    borderRadius: "50%",
-    backgroundColor: tokens.colorNeutralStrokeAccessible,
-    ...shorthands.transition([["transform", "120ms", "ease"], ["background-color", "120ms", "ease"]]),
-  },
-  caseKnobOn: {
-    transform: "translateX(10px)",
-    backgroundColor: tokens.colorNeutralForegroundInverted,
   },
   textBtn: {
     display: "inline-flex",
@@ -418,19 +365,15 @@ export function SearchBar({ editor, onClose, replaceOpen, onToggleReplace, local
           {spokenStatus}
         </span>
         <button
-          className={mergeClasses(styles.caseSwitch, caseSensitive && styles.caseSwitchOn)}
+          className={mergeClasses(styles.btn, caseSensitive && styles.btnActive)}
           onClick={toggleCaseSensitive}
           tabIndex={-1}
           title={`${i("search.caseSensitive")} (Alt+C)`}
           aria-label={i("search.caseSensitive")}
           aria-keyshortcuts="Alt+C"
-          role="switch"
-          aria-checked={caseSensitive}
+          aria-pressed={caseSensitive}
         >
-          <span aria-hidden="true">Aa</span>
-          <span aria-hidden="true" className={mergeClasses(styles.caseTrack, caseSensitive && styles.caseTrackOn)}>
-            <span className={mergeClasses(styles.caseKnob, caseSensitive && styles.caseKnobOn)} />
-          </span>
+          <TextCaseTitleRegular fontSize={16} />
         </button>
         <button
           className={mergeClasses(styles.btn, replaceOpen && styles.btnActive)}
