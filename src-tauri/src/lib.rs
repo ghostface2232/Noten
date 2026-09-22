@@ -40,6 +40,20 @@ fn toggle_devtools<R: Runtime>(window: tauri::WebviewWindow<R>) {
 // UI waits forever, so cap the run and kill the child instead.
 const PDF_RENDER_TIMEOUT: Duration = Duration::from_secs(90);
 const PDF_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const PDF_EXIT_GRACE: Duration = Duration::from_secs(2);
+
+/// Removes `dir`, retrying for up to 2 s: Edge's child processes can still
+/// hold files in its profile briefly after the browser process has gone.
+fn remove_dir_when_released(dir: &Path) {
+    for _ in 0..20 {
+        match fs::remove_dir_all(dir) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => {
+                std::thread::sleep(PDF_POLL_INTERVAL * 2)
+            }
+            _ => return,
+        }
+    }
+}
 
 // Per-invocation temp file stem. A fixed name let two windows exporting at the
 // same time overwrite each other's HTML, so one PDF rendered the other note's
@@ -67,15 +81,21 @@ async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
     // Edge prints to a fresh temp path so the file's appearance means this run
     // wrote it; the user's file is replaced only once the PDF is complete.
     let temp_pdf = temp_dir.join(format!("{stem}.pdf"));
+    // Edge's own profile for this run. Without one, headless Edge made a
+    // %TEMP%\HeadlessEdge<N> folder per export and never removed it (46 of
+    // them, 3 GB, mostly components it had downloaded while printing).
+    let temp_profile = temp_dir.join(format!("{stem}_profile"));
 
     fs::write(&temp_html, &html).map_err(|e| format!("Failed to write temp HTML: {e}"))?;
 
     // Every early return past this point must clear the temp files — they hold
-    // the full note body in plain text.
+    // the full note body in plain text. Edge must have exited by then, or its
+    // profile folder is still in use.
     let cleanup = || {
         let _ = fs::remove_file(&temp_html);
         let _ = fs::remove_file(&temp_err);
         let _ = fs::remove_file(&temp_pdf);
+        remove_dir_when_released(&temp_profile);
     };
 
     let edge_paths = [
@@ -93,6 +113,7 @@ async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
 
     let temp_html_url = format!("file:///{}", temp_html.to_string_lossy().replace('\\', "/"));
     let print_arg = format!("--print-to-pdf={}", temp_pdf.to_string_lossy());
+    let profile_arg = format!("--user-data-dir={}", temp_profile.to_string_lossy());
 
     let stderr_sink = match fs::File::create(&temp_err) {
         Ok(file) => Stdio::from(file),
@@ -105,6 +126,15 @@ async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
             "--disable-gpu",
             "--no-pdf-header-footer",
             "--run-all-compositor-stages-before-draw",
+            &profile_arg,
+            // Printing needs none of Edge's background work; with it Edge
+            // synced the signed-in account and fetched extensions and
+            // components while it printed.
+            "--disable-extensions",
+            "--disable-sync",
+            "--disable-background-networking",
+            "--disable-component-update",
+            "--no-first-run",
             &print_arg,
             &temp_html_url,
         ])
@@ -121,30 +151,47 @@ async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
     };
 
     let deadline = Instant::now() + PDF_RENDER_TIMEOUT;
-    let status = loop {
+    let exit = loop {
         match child.try_wait() {
-            Ok(Some(status)) => break status,
+            Ok(Some(status)) => break Some(status),
+            // Edge can write the whole PDF and then not exit (a 300-image note
+            // was done in ~60 s and still running at 240 s); the timeout below
+            // must not throw that finished file away.
+            Ok(None) if is_written_file(&temp_pdf) => {
+                // It normally exits ~0.2 s after closing the file; a killed
+                // Edge leaves its child processes to wind down on their own.
+                let grace = Instant::now() + PDF_EXIT_GRACE;
+                while Instant::now() < grace && matches!(child.try_wait(), Ok(None)) {
+                    std::thread::sleep(PDF_POLL_INTERVAL);
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
             Ok(None) => {
                 if Instant::now() >= deadline {
                     let _ = child.kill();
                     let _ = child.wait();
+                    let stderr = fs::read_to_string(&temp_err).unwrap_or_default();
                     cleanup();
                     return Err(format!(
-                        "Edge PDF generation timed out after {}s",
-                        PDF_RENDER_TIMEOUT.as_secs()
+                        "Edge PDF generation timed out after {}s{}",
+                        PDF_RENDER_TIMEOUT.as_secs(),
+                        failure_reason(&stderr)
                     ));
                 }
                 std::thread::sleep(PDF_POLL_INTERVAL);
             }
             Err(e) => {
                 let _ = child.kill();
+                let _ = child.wait();
                 cleanup();
                 return Err(format!("Failed to wait for Edge: {e}"));
             }
         }
     };
 
-    if !status.success() {
+    if exit.is_some_and(|status| !status.success()) {
         let stderr = fs::read_to_string(&temp_err).unwrap_or_default();
         cleanup();
         return Err(format!("Edge PDF generation failed: {stderr}"));
@@ -154,7 +201,14 @@ async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
     // can hand the job to another Edge process and exit at once (seen while an
     // Edge update was pending), and that process renders later. Deleting the
     // HTML now made it print its "file not found" page instead of the note, so
-    // keep everything until the PDF has been written and closed.
+    // keep everything until the PDF has been written and closed. An Edge that
+    // exited because its renderer crashed will write nothing, so say why now.
+    let stderr = fs::read_to_string(&temp_err).unwrap_or_default();
+    if !is_written_file(&temp_pdf) && stderr.contains(RENDERER_CRASH) {
+        cleanup();
+        let reason = failure_reason(&stderr);
+        return Err(format!("Edge could not print the note{reason}"));
+    }
     if !wait_for_written_file(&temp_pdf, deadline, PDF_POLL_INTERVAL) {
         let stderr = fs::read_to_string(&temp_err).unwrap_or_default();
         cleanup();
@@ -171,19 +225,38 @@ async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
         .map_err(|e| format!("Failed to save the PDF: {e}"))
 }
 
-/// Waits until `path` exists, is non-empty and no process holds it open (an
-/// exclusive open succeeds only after the writer closes its handle), or until
-/// `deadline`. Returns whether the file is complete.
-fn wait_for_written_file(path: &Path, deadline: Instant, poll: Duration) -> bool {
+/// What Edge 153 logs when a renderer dies, e.g. out of memory: a note with
+/// ~500 MB of images needed ~10 GB. Edge then exits without a PDF or, with the
+/// default profile, hangs until the timeout.
+const RENDERER_CRASH: &str = "Abnormal renderer termination";
+
+/// Why a run failed, when Edge's log says. The message is only a hint, so an
+/// Edge release that rewords its log just loses the explanation.
+fn failure_reason(stderr: &str) -> &'static str {
+    if stderr.contains(RENDERER_CRASH) {
+        ": Edge's renderer crashed, most likely out of memory. The note may have too many or too large images to print at once."
+    } else {
+        ""
+    }
+}
+
+/// Whether `path` exists, is non-empty and no process holds it open: an
+/// exclusive open succeeds only after the writer has closed its handle.
+fn is_written_file(path: &Path) -> bool {
     use std::os::windows::fs::OpenOptionsExt;
+    fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false)
+        && fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(path)
+            .is_ok()
+}
+
+/// Waits until `path` is a written file (`is_written_file`) or `deadline`
+/// passes. Returns whether the file is complete.
+fn wait_for_written_file(path: &Path, deadline: Instant, poll: Duration) -> bool {
     loop {
-        let complete = fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false)
-            && fs::OpenOptions::new()
-                .read(true)
-                .share_mode(0)
-                .open(path)
-                .is_ok();
-        if complete {
+        if is_written_file(path) {
             return true;
         }
         if Instant::now() >= deadline {
@@ -486,8 +559,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_servable_note_image, note_image_mime, print_temp_stem, servable_note_image_file,
-        wait_for_written_file, wide_null,
+        failure_reason, is_servable_note_image, note_image_mime, print_temp_stem,
+        remove_dir_when_released, servable_note_image_file, wait_for_written_file, wide_null,
     };
     use std::io::Write;
     use std::path::{Path, PathBuf};
@@ -546,6 +619,32 @@ mod tests {
         assert_eq!(file(assets.join("missing.png")), None);
         assert_eq!(servable_note_image_file("", &roots), None);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn removes_edges_profile_once_its_files_are_released() {
+        // An Edge child process still holding a file in the profile.
+        let dir = std::env::temp_dir().join(format!("{}_profile", print_temp_stem()));
+        std::fs::create_dir_all(dir.join("Default")).unwrap();
+        let held = std::fs::File::create(dir.join("Default").join("Cookies")).unwrap();
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(held);
+        });
+        remove_dir_when_released(&dir);
+        releaser.join().unwrap();
+        assert!(!dir.exists());
+        // Nothing to remove is not an error, and returns at once.
+        remove_dir_when_released(&dir);
+    }
+
+    #[test]
+    fn explains_a_failure_caused_by_a_renderer_crash() {
+        // The line Edge 153 logged when printing a 627-image note ran it out
+        // of memory and left it hung.
+        let log = "[8028:29440:0922/132140.815:ERROR:components\\headless\\command_handler\\headless_command_handler.cc:395] Abnormal renderer termination.";
+        assert!(failure_reason(log).contains("out of memory"));
+        assert_eq!(failure_reason("unrelated noise"), "");
     }
 
     #[test]
