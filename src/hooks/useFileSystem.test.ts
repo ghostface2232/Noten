@@ -182,6 +182,7 @@ vi.mock("../utils/conflictBackup", () => {
   return {
     setKnownDiskContent: vi.fn((filePath: string, content: string) => { known.set(filePath, content); }),
     getKnownDiskContent: vi.fn((filePath: string) => known.get(filePath)),
+    hasUnknownDiskBody: vi.fn((filePath: string) => !!filePath && !known.has(filePath)),
     __seedKnownDiskContent: (filePath: string, content: string) => { known.set(filePath, content); },
     __forgetKnownDiskContent: (filePath: string) => { known.delete(filePath); },
     __resetKnownDiskContent: () => { known.clear(); },
@@ -601,6 +602,23 @@ describe("useFileSystem — newNote disk-first invariant", () => {
     expect(setDocs).not.toHaveBeenCalled();
     expect(setActiveIndex).not.toHaveBeenCalled();
     expect(notifyActiveDoc).not.toHaveBeenCalled();
+  });
+
+  it("does not replace a leaving doc whose body this session has never read", async () => {
+    // The same C1 deletion as switchDocument's, reached via Ctrl+N: newNote's
+    // willReplace deletes the leaving doc's body and sidecar outright when it
+    // looks empty and auto-titled. A manifest-cache projection looks exactly
+    // like that while holding a real note on disk.
+    const projection = makeProjectionDoc("a");
+    const removeMock2 = fsPlugin.remove as ReturnType<typeof vi.fn>;
+    const { result } = renderFs({ docs: [projection], activeIndex: 0 });
+
+    await act(async () => {
+      await result.current.newNote();
+    });
+
+    expect(removeMock2).not.toHaveBeenCalledWith("/notes/a.md");
+    expect([...libraryStore.getSnapshot().docs].map((d) => d.id)).toContain("a");
   });
 
   it("focuses the editor after creating a new note", async () => {
@@ -1796,6 +1814,36 @@ describe("useFileSystem — restoreNote meta-first ordering", () => {
       });
       removeMock.mockImplementation(async () => {});
     }
+  });
+
+  it("does not prune a leaving doc whose body this session has never read", async () => {
+    // The third prune site (restoreNote's pruneLeavingDoc), same C1 deletion:
+    // restoring from trash while a projection doc is active would delete that
+    // projection's real body and sidecar.
+    const removeMock2 = fsPlugin.remove as ReturnType<typeof vi.fn>;
+    const trashed: TrashedNote = {
+      id: "t1",
+      fileName: "Trashed",
+      originalFilePath: "/notes/t1.md",
+      trashFilePath: "/notes/.trash/t1.md",
+      trashedAt: 2000,
+      groupId: null,
+      createdAt: 1000,
+      updatedAt: 1500,
+      pinned: false,
+    };
+    const { result } = renderFs({
+      docs: [makeProjectionDoc("empty"), makeDoc("b", { content: "real" })],
+      activeIndex: 0,
+      trashedNotes: [trashed],
+    });
+
+    await act(async () => {
+      await result.current.restoreNote("t1");
+    });
+
+    expect(removeMock2).not.toHaveBeenCalledWith("/notes/empty.md");
+    expect([...libraryStore.getSnapshot().docs].map((d) => d.id)).toContain("empty");
   });
 
   it("prunes an empty auto-titled leaving doc in the same commit and tombstones its emptied group", async () => {

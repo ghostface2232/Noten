@@ -109,7 +109,7 @@ vi.mock("../utils/decomposedState", async (importOriginal) => {
       refs.writtenLocalCache = cache;
     }),
     seedWriteSnapshots: vi.fn(async () => {}),
-    persistDecomposedState: vi.fn(async () => {}),
+    persistDecomposedState: vi.fn(async () => ({ skippedMetaIds: new Set<string>() })),
     syncGroupsSnapshotFromDisk: vi.fn(async () => {}),
   };
 });
@@ -150,6 +150,11 @@ import type { TiptapEditorHandle } from "../components/TiptapEditor";
 
 const clearReconcileSpy = reconcileFolderModule.clearReconcileState as unknown as ReturnType<typeof vi.fn>;
 const persistMock = decomposedStateModule.persistDecomposedState as ReturnType<typeof vi.fn>;
+// persistDecomposedState reports the notes whose sidecar it deliberately did
+// not write (readAllMeta's quarantine), and the caller gates metadata-clock
+// acknowledgement on it. These tests only exercise ordering and gating, so
+// every override still has to return the real shape.
+const NO_SKIPS = { skippedMetaIds: new Set<string>() };
 const logNotenErrorMock = crashLogModule.logNotenError as ReturnType<typeof vi.fn>;
 
 function makeDoc(id: string): NoteDoc {
@@ -903,8 +908,8 @@ describe("useNotesLoader — saveManifest persistChain", () => {
     const aGate = new Promise<void>((r) => { resolveA = r; });
     const bGate = new Promise<void>((r) => { resolveB = r; });
 
-    persistMock.mockImplementationOnce(async () => { await aGate; });
-    persistMock.mockImplementationOnce(async () => { bStarted = true; await bGate; });
+    persistMock.mockImplementationOnce(async () => { await aGate; return NO_SKIPS; });
+    persistMock.mockImplementationOnce(async () => { bStarted = true; await bGate; return NO_SKIPS; });
 
     const p1 = saveManifest(docsA, null, undefined, "A");
     p1.catch(() => {});
@@ -952,7 +957,7 @@ describe("useNotesLoader — saveManifest persistChain", () => {
       activeNoteId: "a",
     });
     persistMock.mockRejectedValueOnce(new Error("EPERM: cache locked"));
-    persistMock.mockResolvedValueOnce(undefined);
+    persistMock.mockResolvedValueOnce(NO_SKIPS);
 
     // Attach rejection handlers immediately to avoid unhandled-rejection
     // bookkeeping inside vitest while p1 is still pending. allSettled
@@ -992,8 +997,8 @@ describe("useNotesLoader — saveManifest persistChain", () => {
     });
     let releaseOlder!: () => void;
     const olderGate = new Promise<void>((resolve) => { releaseOlder = resolve; });
-    persistMock.mockImplementationOnce(async () => { await olderGate; });
-    persistMock.mockResolvedValueOnce(undefined);
+    persistMock.mockImplementationOnce(async () => { await olderGate; return NO_SKIPS; });
+    persistMock.mockResolvedValueOnce(NO_SKIPS);
 
     const barrier = flushPersistence("test-barrier");
     barrier.catch(() => {});
@@ -1022,8 +1027,8 @@ describe("useNotesLoader — saveManifest persistChain", () => {
     });
     let releaseOld!: () => void;
     const oldGate = new Promise<void>((resolve) => { releaseOld = resolve; });
-    persistMock.mockImplementationOnce(async () => { await oldGate; });
-    persistMock.mockResolvedValueOnce(undefined);
+    persistMock.mockImplementationOnce(async () => { await oldGate; return NO_SKIPS; });
+    persistMock.mockResolvedValueOnce(NO_SKIPS);
     const oldWrite = saveManifest(docsA, "a", [], "old-directory");
     oldWrite.catch(() => {});
     await flushAll();
@@ -1063,7 +1068,7 @@ describe("useNotesLoader — saveManifest persistChain", () => {
       trashedNotes: [trashed],
       activeNoteId: null,
     });
-    persistMock.mockResolvedValueOnce(undefined);
+    persistMock.mockResolvedValueOnce(NO_SKIPS);
 
     await flushPersistence("trash-source-test");
 
@@ -1072,7 +1077,7 @@ describe("useNotesLoader — saveManifest persistChain", () => {
   });
 
   it("does not dedupe a new group tombstone intent at the same library revision", async () => {
-    persistMock.mockResolvedValue(undefined);
+    persistMock.mockResolvedValue(NO_SKIPS);
     await flushPersistence("group-baseline");
     const callsAfterBaseline = persistMock.mock.calls.length;
 
@@ -1096,7 +1101,7 @@ describe("useNotesLoader — saveManifest persistChain", () => {
     });
     let releaseFull!: () => void;
     const fullGate = new Promise<void>((resolve) => { releaseFull = resolve; });
-    persistMock.mockImplementationOnce(async () => { await fullGate; });
+    persistMock.mockImplementationOnce(async () => { await fullGate; return NO_SKIPS; });
     const full = saveManifest([doc], "a", [], "older-full");
     full.catch(() => {});
     await flushAll();
@@ -1147,7 +1152,7 @@ describe("useNotesLoader — saveManifest persistChain", () => {
     }, () => libraryStore.commit({ docs: [], activeNoteId: null }, "local"));
     transaction.catch(() => {});
     await flushAll();
-    persistMock.mockResolvedValueOnce(undefined);
+    persistMock.mockResolvedValueOnce(NO_SKIPS);
     const full = saveManifest([doc], "a", [], "behind-lifecycle");
     full.catch(() => {});
 
@@ -1244,7 +1249,7 @@ describe("useNotesLoader — saveManifest persistChain", () => {
       activeNoteId: "a",
     });
     const order: string[] = [];
-    persistMock.mockImplementationOnce(async () => { order.push("followup"); });
+    persistMock.mockImplementationOnce(async () => { order.push("followup"); return NO_SKIPS; });
 
     const transaction = runPersistenceTransaction(
       "post-commit-order",
@@ -1496,7 +1501,7 @@ describe("useNotesLoader — saveManifest persistChain", () => {
     });
     expect(libraryStore.getSnapshot().docs).toEqual([]);
 
-    persistMock.mockResolvedValueOnce(undefined);
+    persistMock.mockResolvedValueOnce(NO_SKIPS);
     await expect(flushPersistence("retry-followup")).resolves.toBeUndefined();
     expect(persistMock).toHaveBeenCalledTimes(2);
   });
@@ -1525,7 +1530,7 @@ describe("useNotesLoader — saveManifest persistChain", () => {
     transaction.catch(() => {});
 
     await expect(transaction).rejects.toThrow(/Unsafe note id/);
-    persistMock.mockResolvedValueOnce(undefined);
+    persistMock.mockResolvedValueOnce(NO_SKIPS);
     await expect(saveManifest([doc], "a", [], "after-failed-transaction")).resolves.toBeUndefined();
     expect(persistMock).toHaveBeenCalledTimes(1);
     expect(logNotenErrorMock).toHaveBeenCalledWith(expect.objectContaining({ code: "PERSIST_FAILED" }));
@@ -1717,8 +1722,8 @@ describe("useNotesLoader — targeted autosave metadata", () => {
     });
     let releaseOlder!: () => void;
     const olderGate = new Promise<void>((resolve) => { releaseOlder = resolve; });
-    persistMock.mockImplementationOnce(async () => { await olderGate; });
-    persistMock.mockResolvedValueOnce(undefined);
+    persistMock.mockImplementationOnce(async () => { await olderGate; return NO_SKIPS; });
+    persistMock.mockResolvedValueOnce(NO_SKIPS);
     const older = saveManifest([original], "a", [], "older");
     older.catch(() => {});
     await flushAll();
@@ -1764,7 +1769,7 @@ describe("useNotesLoader — targeted autosave metadata", () => {
     });
     let releaseOlder!: () => void;
     const olderGate = new Promise<void>((resolve) => { releaseOlder = resolve; });
-    persistMock.mockImplementationOnce(async () => { await olderGate; });
+    persistMock.mockImplementationOnce(async () => { await olderGate; return NO_SKIPS; });
     const older = saveManifest([original], "a", [], "older");
     older.catch(() => {});
     await flushAll();
@@ -1882,7 +1887,7 @@ describe("useNotesLoader — targeted autosave metadata", () => {
     }), "local");
     let releaseFull!: () => void;
     const fullGate = new Promise<void>((resolve) => { releaseFull = resolve; });
-    persistMock.mockImplementationOnce(async () => { await fullGate; });
+    persistMock.mockImplementationOnce(async () => { await fullGate; return NO_SKIPS; });
     const full = saveManifest([original], "a", [], "pin-full");
     full.catch(() => {});
     await flushAll();
@@ -1906,7 +1911,7 @@ describe("useNotesLoader — targeted autosave metadata", () => {
   it("publishes effective note metadata before a queued full-library job executes", async () => {
     refs.fs!.seedTextFile("/test-appdata/notes/a.md", "body a");
     await writeMeta(refs.fs!, "/test-appdata/notes", meta("a"), "test-machine");
-    persistMock.mockResolvedValueOnce(undefined);
+    persistMock.mockResolvedValueOnce(NO_SKIPS);
     const saved = {
       ...makeDoc("a"),
       fileName: "Autosaved title",
@@ -1948,7 +1953,7 @@ describe("useNotesLoader — targeted autosave metadata", () => {
 
     let releaseOlderJob: () => void = () => {};
     const olderGate = new Promise<void>((resolve) => { releaseOlderJob = resolve; });
-    persistMock.mockImplementationOnce(async () => { await olderGate; });
+    persistMock.mockImplementationOnce(async () => { await olderGate; return NO_SKIPS; });
 
     const older = saveManifest([makeDoc("a")], "a", [], "older-full-snapshot");
     const staleAutosave = saveNoteMetadata({
@@ -1998,7 +2003,7 @@ describe("useNotesLoader — targeted autosave metadata", () => {
     });
     let releaseOlder!: () => void;
     const olderGate = new Promise<void>((resolve) => { releaseOlder = resolve; });
-    persistMock.mockImplementationOnce(async () => { await olderGate; });
+    persistMock.mockImplementationOnce(async () => { await olderGate; return NO_SKIPS; });
     const older = saveManifest([makeDoc("a")], "a", [], "older-dir-job");
     older.catch(() => {});
     await flushAll();

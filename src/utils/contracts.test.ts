@@ -379,7 +379,17 @@ describe("contract: shared metadata reads fail closed", () => {
     expect(readMetaMatch, "readMeta not found").not.toBeNull();
     expect(listMetaMatch, "listMetaFiles not found").not.toBeNull();
     expect(readMetaMatch![0]).toMatch(/fs\.exists\(path\)/);
-    expect(readMetaMatch![0]).not.toMatch(/\bcatch\b/);
+    // readMeta may CLASSIFY a failure but never swallow one: a transiently
+    // unreadable sidecar must not return null the way a missing one does, or
+    // reconcile writes default metadata over it. A catch is allowed only when
+    // it rethrows — readMeta distinguishes corrupt bytes (CorruptMetaError,
+    // permanent) from an I/O failure (transient) for readAllMeta's quarantine.
+    const catchBlocks = readMetaMatch![0].match(/catch\s*\([^)]*\)\s*\{[^{}]*\}/g) ?? [];
+    const catchKeywords = readMetaMatch![0].match(/\bcatch\b/g) ?? [];
+    // A nested or multi-block catch escapes the regex above, so require the
+    // two counts to agree rather than silently checking fewer blocks.
+    expect(catchBlocks.length).toBe(catchKeywords.length);
+    for (const block of catchBlocks) expect(block).toMatch(/\bthrow\b/);
     expect(listMetaMatch![0]).toMatch(/fs\.exists\(dir\)/);
     expect(listMetaMatch![0]).not.toMatch(/\bcatch\b/);
   });

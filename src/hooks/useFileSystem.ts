@@ -29,7 +29,7 @@ import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsDelta, emitNo
 import { diffGroupsDelta, type GroupsDelta } from "../utils/groupsDelta";
 import type { NoteColorId } from "../utils/noteColors";
 import { markOwnWrite } from "./ownWriteTracker";
-import { getKnownDiskContent, setKnownDiskContent } from "../utils/conflictBackup";
+import { hasUnknownDiskBody, setKnownDiskContent } from "../utils/conflictBackup";
 import { removeMeta as removeMetaFile, type NoteMeta } from "../utils/metadataIO";
 import { logNotenError } from "../utils/crashLog";
 import { NotenError } from "../utils/notenError";
@@ -349,7 +349,7 @@ export function useFileSystem(
     // no conflict backup. The conflict-backup baseline is this session's record
     // of every body it has read or written, so its absence means we have never
     // seen this file and must not delete it.
-    if (leaving.filePath && getKnownDiskContent(leaving.filePath) === undefined) {
+    if (hasUnknownDiskBody(leaving.filePath)) {
       return { docs: baseDocs, groups: currentGroups };
     }
     // The docs list can lag the live editor: autosave just committed (isDirty
@@ -634,7 +634,15 @@ export function useFileSystem(
       // autosave). Otherwise the stored .content already tells us non-empty,
       // and we can skip the serialization.
       let willReplace = false;
-      if (currentDoc && !currentDoc.customName && currentDoc.content.trim() === "") {
+      if (
+        currentDoc
+        && !currentDoc.customName
+        && currentDoc.content.trim() === ""
+        // Same guard as pruneEmptyCurrentDoc: willReplace deletes the leaving
+        // doc's body and sidecar outright, so it must not act on a body this
+        // session has never seen.
+        && !hasUnknownDiskBody(currentDoc.filePath)
+      ) {
         const liveContent = state.isDirty ? getCurrentMarkdown(tiptapRef).trim() : "";
         willReplace = liveContent === "";
       }
@@ -1574,6 +1582,9 @@ export function useFileSystem(
             if (!pruneCandidateId || snapshot.activeNoteId !== pruneCandidateId) return null;
             const leaving = snapshot.docs.find((doc) => doc.id === pruneCandidateId);
             if (!leaving || leaving.customName || snapshot.docs.length <= 1) return null;
+            // Same guard as pruneEmptyCurrentDoc — this deletes the body and
+            // sidecar permanently, so an unread body is never prunable.
+            if (hasUnknownDiskBody(leaving.filePath)) return null;
             // The editor can hold input newer than the canonical content.
             if (leaving.content.trim() !== "" || getCurrentMarkdown(tiptapRef).trim() !== "") return null;
             cancelDocSaveRef?.current?.(leaving.id);
@@ -1683,6 +1694,11 @@ export function useFileSystem(
             assertCurrent();
             content = await readTextFile(restoredPath);
             assertCurrent();
+            // We have just read this body from disk, so record it as the
+            // conflict baseline. An absent baseline means "never seen", which
+            // now makes the first save back it up to .conflicts and makes the
+            // empty-note prunes refuse — both wrong for a note we just read.
+            setKnownDiskContent(restoredPath, content);
           } catch (error) {
             await rollbackMeta();
             markOwnWrite(restoredPath);

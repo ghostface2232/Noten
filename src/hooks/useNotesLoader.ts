@@ -14,6 +14,7 @@ import {
   createPersistState,
   clearPersistState,
   persistDecomposedState as persistDecomposedStateImpl,
+  type PersistResult,
   loadDecomposedState as loadDecomposedStateImpl,
   seedWriteSnapshots as seedWriteSnapshotsImpl,
   syncGroupsSnapshotFromDisk as syncGroupsSnapshotFromDiskImpl,
@@ -772,11 +773,11 @@ async function persistDecomposedState(
   snapshotSeq?: number,
   targetDir?: string,
   trashedNotes: TrashedNote[] = trashedNotesCache,
-): Promise<void> {
+): Promise<PersistResult> {
   const dir = targetDir ?? await getNotesDir();
   const cachePath = await getLocalCachePath();
   try {
-    await persistDecomposedStateImpl(tauriFileSystem, dir, persistState, docs, activeId, groups, {
+    return await persistDecomposedStateImpl(tauriFileSystem, dir, persistState, docs, activeId, groups, {
       trashedNotes,
       machineId: getMachineIdCached(),
       cachePath,
@@ -958,7 +959,7 @@ async function persistLatestLibrarySnapshot(
   // Group tombstones are module-level durable intents rather than library
   // entities. Capture their clock beside the execution-time group snapshot.
   const latestGroupMutationSeq = groupMutationSeq;
-  await persistDecomposedState(
+  const { skippedMetaIds } = await persistDecomposedState(
     docs,
     latest.activeNoteId,
     groups,
@@ -976,7 +977,13 @@ async function persistLatestLibrarySnapshot(
   persistedLibraryGeneration = latest.directoryGeneration;
   persistedLibraryRevision = latest.revision;
   persistedGroupMutationSeq = latestGroupMutationSeq;
-  for (const [noteId, clock] of noteClocks) acknowledgeNoteMetadataClock(noteId, clock);
+  // A note whose sidecar the persist skipped had nothing written, so its
+  // metadata clock stays unacknowledged and the intent remains retryable —
+  // the same rule a thrown persist used to enforce for the whole batch.
+  for (const [noteId, clock] of noteClocks) {
+    if (skippedMetaIds.has(noteId)) continue;
+    acknowledgeNoteMetadataClock(noteId, clock);
+  }
   return true;
 }
 

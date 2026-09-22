@@ -132,14 +132,34 @@ function isValidMeta(obj: unknown): obj is NoteMeta {
     && (m.groupId === null || typeof m.groupId === "string");
 }
 
+/**
+ * A sidecar that was read but does not parse as note metadata. Distinct from
+ * an I/O failure, and the difference decides whether waiting helps: a cloud
+ * placeholder or an AV lock clears on its own, while corrupt bytes are corrupt
+ * on every future pass. Both quarantine the note — we never overwrite metadata
+ * we could not read — but only this one is worth telling the user about,
+ * because nothing in the app will ever resolve it.
+ */
+export class CorruptMetaError extends Error {
+  constructor(path: string, cause?: unknown) {
+    super(`Invalid note metadata: ${path}`, cause !== undefined ? { cause } : undefined);
+    this.name = "CorruptMetaError";
+  }
+}
+
 export async function readMeta(fs: FileSystem, notesDir: string, noteId: string): Promise<NoteMeta | null> {
   const path = metaPathFor(notesDir, noteId);
   if (!(await fs.exists(path))) return null;
 
   const raw = await fs.readTextFile(path);
-  const parsed = JSON.parse(raw) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch (err) {
+    throw new CorruptMetaError(path, err);
+  }
   if (!isValidMeta(parsed)) {
-    throw new Error(`Invalid note metadata: ${path}`);
+    throw new CorruptMetaError(path);
   }
   const m = parsed as NoteMeta;
   return {
@@ -314,11 +334,18 @@ export async function readAllMeta(fs: FileSystem, notesDir: string): Promise<All
       try { stillExists = await fs.exists(metaPathFor(notesDir, id)); } catch { stillExists = false; }
       if (!stillExists) return;
       unreadableIds.add(id);
+      const corrupt = err instanceof CorruptMetaError;
       void logNotenError(new NotenError(
         "META_READ_FAILED",
-        "recoverable",
-        "readAllMeta: sidecar exists but could not be read; quarantining this note for this pass",
-        { context: { notesDir, noteId: id }, cause: err },
+        // Corrupt bytes will not fix themselves, so the note stays invisible
+        // until someone looks at the file. That has to reach the user rather
+        // than repeat quietly once a minute. A transient read failure stays
+        // recoverable: the next pass picks it up.
+        corrupt ? "fatal" : "recoverable",
+        corrupt
+          ? "readAllMeta: sidecar does not parse as note metadata; this note stays quarantined until the file is repaired"
+          : "readAllMeta: sidecar exists but could not be read; quarantining this note for this pass",
+        { context: { notesDir, noteId: id, corrupt }, cause: err },
       ));
     }
   });

@@ -17,6 +17,7 @@ import { markOwnWrite } from "../hooks/ownWriteTracker";
 import { isValidNoteId } from "./noteId";
 import { normalizeSep } from "./pathUtils";
 import { NotenError } from "./notenError";
+import { setKnownDiskContent } from "./conflictBackup";
 import { logNotenError } from "./crashLog";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -243,6 +244,11 @@ export async function reconcileFolder(
 
     const filePath = `${base}${name}`;
     const content = await readFileContent(fs, filePath);
+    // Ingesting means this session has now read the body, so it becomes the
+    // conflict baseline. Leaving it unseeded would make the note's first save
+    // write a spurious .conflicts copy and make the empty-note prunes refuse
+    // to ever clean it up.
+    if (content !== null) setKnownDiskContent(filePath, content);
     // Body unreadable (transient cloud-sync / placeholder failure). Skip this
     // file for now; do not create a meta or in-memory doc that would later be
     // saved back with empty content. Next reconcile retries.

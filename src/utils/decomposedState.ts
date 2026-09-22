@@ -305,6 +305,15 @@ export async function loadDecomposedState(
   return { docs, groups, trashedNotes: trashed, activeNoteId: activeId };
 }
 
+/** What a persist actually committed, for callers that gate durable-intent
+ *  bookkeeping on it. */
+export interface PersistResult {
+  /** Notes whose sidecar was deliberately not written this pass because their
+   *  on-disk metadata could not be read (see readAllMeta's quarantine). Their
+   *  metadata clocks must NOT be acknowledged — nothing durable happened. */
+  skippedMetaIds: Set<string>;
+}
+
 export interface PersistOptions {
   trashedNotes: TrashedNote[];
   machineId: string;
@@ -331,7 +340,7 @@ export async function persistDecomposedState(
   activeId: string | null,
   groups: NoteGroup[] | undefined,
   options: PersistOptions,
-): Promise<void> {
+): Promise<PersistResult> {
   const { trashedNotes, machineId, cachePath, imageAssetMigrationCompletedAt, setActiveNoteId } = options;
   const snapshotSeq = options.groupsSnapshotSeq ?? Number.POSITIVE_INFINITY;
 
@@ -367,7 +376,12 @@ export async function persistDecomposedState(
   // stale in-memory group would win last-write-wins over the truth we just
   // failed to read — precisely the loss the fail-closed read exists to
   // prevent. The intent stays pending and the next pass retries.
-  const skipUnreadable = (noteId: string): boolean => unreadableMetaIds.has(noteId);
+  const skippedMeta = new Set<string>();
+  const skipUnreadable = (noteId: string): boolean => {
+    if (!unreadableMetaIds.has(noteId)) return false;
+    skippedMeta.add(noteId);
+    return true;
+  };
   for (const doc of docs) {
     if (skipUnreadable(doc.id)) continue;
     const pendingGroup = state.pendingGroupMembership.get(doc.id);
@@ -606,4 +620,12 @@ export async function persistDecomposedState(
   if (groupsError !== undefined) {
     throw groupsError instanceof Error ? groupsError : new Error(String(groupsError));
   }
+
+  // Report the notes whose sidecar was NOT written. A resolved persist used to
+  // mean "every note's metadata is durable", and the caller acknowledges each
+  // note's metadata clock on that basis. Quarantining an unreadable sidecar
+  // instead of throwing broke that: a rename, pin or colour made while the
+  // sidecar was unreadable would be acked as durable, never written, and then
+  // reverted to the disk value by the next save.
+  return { skippedMetaIds: skippedMeta };
 }

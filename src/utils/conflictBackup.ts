@@ -45,6 +45,20 @@ export function getKnownDiskContent(filePath: string): string | undefined {
   return lastKnownDiskContent.get(noteIdToDiskKey(filePath));
 }
 
+/**
+ * Whether this session has never read or written the body at `filePath`, so
+ * an empty in-memory body proves nothing about the file.
+ *
+ * Every site that PERMANENTLY deletes a note body — the three empty-note
+ * prunes, which bypass both trash and conflict backup — must refuse when this
+ * is true. A manifest-cache projection carries `content: ""` against a real
+ * filePath, and a load that fails after committing it leaves the whole library
+ * looking like empty notes.
+ */
+export function hasUnknownDiskBody(filePath: string): boolean {
+  return !!filePath && getKnownDiskContent(filePath) === undefined;
+}
+
 export function forgetKnownDiskContent(filePath: string): void {
   lastKnownDiskContent.delete(noteIdToDiskKey(filePath));
 }
