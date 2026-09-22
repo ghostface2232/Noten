@@ -474,18 +474,20 @@ export function useFileWatcher(
       if (await isOwnWriteContentMatch(doc.filePath, content)) continue;
       shouldReconcile = true;
 
-      // Track the actual disk bytes as the conflict baseline regardless of
-      // whether we reload, so backupIfRemoteWroteFirst compares against reality.
-      setKnownDiskContent(doc.filePath, content);
-
       // A purely cosmetic external rewrite (line endings / trailing newline) is
       // not a real edit — accept it silently without reloading the open editor
-      // and jarring the cursor.
-      if (markdownEqual(content, doc.content)) continue;
+      // and jarring the cursor. The bytes still become the baseline: they agree
+      // with the body we already hold, so no later save can destroy anything
+      // by matching them.
+      if (markdownEqual(content, doc.content)) {
+        setKnownDiskContent(doc.filePath, content);
+        continue;
+      }
 
       const { updatedAt: fileUpdatedAt } = await getFileTimestamps(tauriFileSystem, doc.filePath);
 
       let needsSyncMarkdown = false;
+      let adoptedRemoteBody = false;
       flushSync(() => {
         setDocs((prev) => {
           const idx = prev.findIndex((d) => d.id === doc.id);
@@ -494,10 +496,11 @@ export function useFileWatcher(
           // The user may have started typing during readTextFile /
           // getFileTimestamps (a slow OneDrive placeholder hydration can take
           // seconds), so re-check here and refuse to overwrite live keystrokes.
-          // setKnownDiskContent already recorded the disk baseline, so
-          // autosave's last-write-wins plus the remote backup resolves the
-          // conflict. Mirrors useWindowSync's doc-updated guard.
+          // Declining leaves the conflict baseline at the body we last agreed
+          // on, which is what makes the remote version recoverable — see the
+          // seed below. Mirrors useWindowSync's doc-updated guard.
           if (prev[idx].isDirty) return prev;
+          adoptedRemoteBody = true;
           const updated = [...prev];
           const autoTitle = prev[idx].customName
             ? prev[idx].fileName
@@ -515,6 +518,14 @@ export function useFileWatcher(
           return updated;
         });
       });
+
+      // The remote body becomes the baseline only once it is actually in
+      // memory. Recording it before the dirty re-check above destroyed the
+      // protection it exists for: a user who started typing during the awaits
+      // kept their own body, but backupIfRemoteWroteFirst then found
+      // disk === lastKnown, skipped the .conflicts copy, and the next autosave
+      // overwrote the remote version with no backup anywhere.
+      if (adoptedRemoteBody) setKnownDiskContent(doc.filePath, content);
 
       if (needsSyncMarkdown && tiptapRef.current) {
         tiptapRef.current.openDocument?.({

@@ -35,8 +35,10 @@ export interface AtomicWriteOptions {
  * Severity is recoverable: the write completes, only the durability guarantee
  * is forfeit.
  *
- * Fail-closed mode (`{ failClosed: true }`, used for the body): never degrade —
- * log the stage and rethrow so the caller defers the write and retries.
+ * Fail-closed mode (`{ failClosed: true }`, used for note bodies and
+ * `.groups.json`): never degrade — log the stage and rethrow so the caller
+ * defers the write and retries. Use it wherever a torn write loses data that
+ * no later pass can reconstruct.
  */
 export async function atomicWriteText(
   fs: FileSystem,

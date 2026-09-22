@@ -336,12 +336,15 @@ describe("writtenGroups commit semantics — only update on disk-write success",
 
   it("retries the write on the next call after a transient failure", async () => {
     const faultFs = wrapWithFaults(fs);
-    // Two failures = one full atomicWrite attempt (tmp + direct fallback)
-    // gets fully blocked. The next call lands cleanly.
+    // One failure = one full atomicWrite attempt. .groups.json writes fail
+    // closed (it is the only index of every group and tombstone, so a torn
+    // non-atomic write loses data no later pass can reconstruct), which means
+    // a blocked tmp write no longer falls back to a direct overwrite. The
+    // next call lands cleanly.
     faultFs.injectFault({
       op: "writeTextFile",
       path: /\.groups\.json/,
-      times: 2,
+      times: 1,
       throwError: new Error("EBUSY"),
     });
 

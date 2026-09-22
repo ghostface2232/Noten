@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type React from "react";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import type { WatchEvent } from "@tauri-apps/plugin-fs";
 import type { NoteDoc, NoteGroup } from "../utils/noteTypes";
@@ -122,6 +123,7 @@ import { reconcileFolder } from "../utils/reconcileFolder";
 import { invalidateReadAllMetaCache } from "../utils/metadataIO";
 import { readDiskGroupsSnapshot } from "./useNotesLoader";
 import { libraryStore } from "../utils/libraryStore";
+import { setKnownDiskContent } from "../utils/conflictBackup";
 
 const reconcileFolderMock = vi.mocked(reconcileFolder);
 const invalidateReadAllMetaCacheMock = vi.mocked(invalidateReadAllMetaCache);
@@ -179,8 +181,13 @@ function renderWatcher(opts: {
   groups?: NoteGroup[];
   activeIndex?: number;
   activeDocId?: string | null;
+  // Most tests only inspect the queued updaters, so the default setDocs
+  // discards them. Pass one that APPLIES them when the test needs the hook to
+  // observe whether a commit actually landed.
+  setDocs?: React.Dispatch<React.SetStateAction<NoteDoc[]>> & ReturnType<typeof vi.fn>;
 }) {
-  const setDocs = vi.fn();
+  const setDocs = opts.setDocs
+    ?? (vi.fn() as unknown as React.Dispatch<React.SetStateAction<NoteDoc[]>> & ReturnType<typeof vi.fn>);
   const setGroups = vi.fn();
   const setActiveIndex = vi.fn();
   const tiptapRef = makeTiptapRef();
@@ -305,6 +312,65 @@ describe("useFileWatcher — isDirty race protection (dirty during await)", () =
       expect(a?.content).toBe("user-edits");
       expect(a?.isDirty).toBe(true);
     }
+  });
+});
+
+describe("useFileWatcher — conflict baseline follows the commit, not the read", () => {
+  // The conflict baseline is what backupIfRemoteWroteFirst compares the disk
+  // against to decide whether a save would destroy an unseen remote version.
+  // Recording the incoming remote body as the baseline BEFORE the in-updater
+  // dirty re-check meant that when the user started typing during the awaits,
+  // the watcher kept their body (correctly) but still moved the baseline onto
+  // the remote body it had just declined. The next autosave then found
+  // disk === lastKnown, skipped the .conflicts copy, and overwrote the remote
+  // version with nothing kept anywhere.
+  const setKnownDiskContentMock = setKnownDiskContent as ReturnType<typeof vi.fn>;
+
+  /** A setDocs that actually applies updaters against a controlled prev. */
+  function applyingSetDocs(prev: NoteDoc[]) {
+    const state = { docs: prev };
+    const fn = vi.fn((update: React.SetStateAction<NoteDoc[]>) => {
+      state.docs = typeof update === "function" ? update(state.docs) : update;
+    }) as unknown as React.Dispatch<React.SetStateAction<NoteDoc[]>> & ReturnType<typeof vi.fn>;
+    return { fn, state };
+  }
+
+  async function fireModify(path: string) {
+    await act(async () => {
+      await refs.rootHandler!({
+        type: { modify: { kind: "data", mode: "any" } },
+        paths: [path],
+        attrs: {},
+      } as unknown as WatchEvent);
+    });
+  }
+
+  it("does not move the baseline when the doc turned dirty during the await", async () => {
+    const doc = makeDoc("a", { isDirty: false, content: "old-body" });
+    refs.bodyByPath.set(doc.filePath, "genuine-remote-body");
+    // The hook sees a clean doc at the top of the loop; by the time its
+    // updater runs the user has typed, so the store holds a dirty body.
+    const { fn } = applyingSetDocs([makeDoc("a", { isDirty: true, content: "user-edits" })]);
+    setKnownDiskContentMock.mockClear();
+    renderWatcher({ docs: [doc], setDocs: fn });
+    await waitForRootHandler();
+
+    await fireModify(doc.filePath);
+
+    expect(setKnownDiskContentMock).not.toHaveBeenCalledWith(doc.filePath, "genuine-remote-body");
+  });
+
+  it("moves the baseline once the remote body is actually adopted", async () => {
+    const doc = makeDoc("a", { isDirty: false, content: "old-body" });
+    refs.bodyByPath.set(doc.filePath, "genuine-remote-body");
+    const { fn } = applyingSetDocs([makeDoc("a", { isDirty: false, content: "old-body" })]);
+    setKnownDiskContentMock.mockClear();
+    renderWatcher({ docs: [doc], setDocs: fn });
+    await waitForRootHandler();
+
+    await fireModify(doc.filePath);
+
+    expect(setKnownDiskContentMock).toHaveBeenCalledWith(doc.filePath, "genuine-remote-body");
   });
 });
 
