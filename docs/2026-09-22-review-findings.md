@@ -16,6 +16,8 @@
 - **시나리오**: 창 A에서 빈 자동 제목 노트를 F2로 "장보기"라고 이름 붙입니다. A는 `doc-renamed`를 즉시 emit하고 사이드카 쓰기는 큐에 넣습니다. 창 B는 `fileName`만 갱신하고 `customName`은 거짓으로 둡니다. A의 사이드카가 도착하고 B의 `.meta` 워처가 뜨기 전에(`WATCH_DELAY_MS` 1500 ms, 클라우드 폴더에서는 훨씬 김) 사용자가 B에서 다른 노트를 클릭하면, `pruneEmptyCurrentDoc`이 빈 본문 + 거짓 `customName` + 알려진 baseline + `docs.length > 1`을 보고 `.md`와 사이드카를 지웁니다. **휴지통도 `.conflicts`도 거치지 않으며 모든 동기화 기기에서 사라집니다.** Ctrl+N(`willReplace`)도 같은 삭제에 도달합니다.
 - **수정 방향**: 페이로드에 `customName`을 추가하고 수신부에서 커밋. 더 근본적으로는, 세 prune과 `willReplace`가 읽는 모든 필드는 그 필드를 바꿀 수 있는 모든 이벤트에 실려야 한다는 규칙을 contract 테스트로 고정.
 
+- **처리 (브랜치 `c/review-findings-backlog`)**: `6123dc6`이 페이로드와 수신부에 `customName`을 실었습니다. 이후 검토에서 같은 필드가 하이드레이션 병합(`mergeHydratedLibrary`)과 `.meta` 워처(`applyMetaChange`)로도 들어오며, 둘 다 rename보다 오래된 사이드카를 읽으면 같은 삭제에 도달한다는 점이 드러났습니다. `customName`은 살아 있는 노트에서 켜지기만 하므로(사용자 동작으로 끄는 경로가 없음) 읽은 값이 꺼져 있고 메모리가 켜져 있으면 그 읽기가 오래된 것입니다. `31e46a9`이 이 규칙을 `keepManualTitle`(`src/utils/documentTitle.ts`) 하나에 담아 두 지점에 적용했고, contract 테스트가 그 전제(끄는 곳은 레거시 휴지통 분해 두 곳뿐)와 두 호출 지점을 고정합니다.
+
 ### R2. `renameNote`가 이스케이프하지 않은 제목을 치환 문자열로 넘겨 역링크 노트 본문을 손상
 - **위치**: `src/hooks/useFileSystem.ts:1342` (`const replacement = \`[[${trimmed}]]\``), 사용처 `:1386` (`base.replace(rewritePattern, replacement)`). 패턴 쪽은 `escapeRegexForRename`(`:50-52`)으로 이스케이프되지만 치환 문자열은 아닙니다.
 - **확인**: 실제 코드 그대로 재현했습니다.
@@ -24,6 +26,8 @@
   - 새 제목 `Q1 $& Q2` → `[[Q1 [[Budget]] Q2]]`
 - **시나리오**: 손상된 본문은 `rewriteNoteFile` → `atomicWriteText(..., { failClosed: true })`로 디스크에 확정되고 이어서 `setKnownDiskContent`까지 갱신되므로 `.conflicts` 사본이 남지 않습니다(`:1449-1456`). 한 번의 이름 변경으로 그 노트를 링크하던 모든 노트가 영향을 받습니다. `$$`는 LaTeX나 가격 표기로 충분히 현실적입니다.
 - **수정 방향**: 치환 문자열의 `$`를 `$$`로 이스케이프하거나, 치환 함수 형태(`(…) => replacement`)를 쓰면 해석이 일어나지 않습니다. `src/utils/migrateImageAssets.ts:94`의 `full.replace(dataUrl, src)`도 같은 계열이며 도달 가능성은 훨씬 낮습니다.
+
+- **처리 (브랜치 `c/review-findings-backlog`)**: `d0a8abd`이 치환 함수 형태로 바꿨고, `$'` `$$` `$&` `` $` ``를 담은 제목으로 회귀 테스트를 두었습니다. `migrateImageAssets.ts`의 같은 계열은 검토에서 도달 가능하다고 확인되어(레거시 파일명이 id로 남고 `isValidNoteId`가 `$` `&` `'`를 허용) `d245b33`에서 같은 방식으로 고쳤습니다.
 
 ---
 
@@ -91,7 +95,7 @@
 
 ## 구조 관찰 (버그 아님)
 
-- **`customName`은 파괴적 경로가 읽는 필드인데 세 채널을 서로 다른 충실도로 건너갑니다.** 사이드카 병합은 보호하고, `.meta` 워처는 복구하지만 문서가 clean일 때만이며, `doc-renamed`는 아예 떨어뜨립니다(R1). "파괴적 경로가 읽는 필드는 그것을 바꿀 수 있는 모든 이벤트에 실려야 한다"는 규칙이 contract 테스트로 값어치가 있습니다.
+- **`customName`은 파괴적 경로가 읽는 필드인데 세 채널을 서로 다른 충실도로 건너갔습니다.** 사이드카 병합은 보호하고, `.meta` 워처는 복구하지만 문서가 clean일 때만이며, `doc-renamed`는 아예 떨어뜨렸습니다(R1, 처리됨). 채널마다 필드를 싣는 것만으로는 닫히지 않았고, 닫은 것은 필드의 성질(단조성)을 병합 규칙으로 만든 것이었습니다. 파괴적 경로가 읽는 다른 필드가 생기면 같은 질문, 즉 어떤 채널이 그 값을 되돌릴 수 있는지부터 물어야 합니다.
 - **기기 간 순서를 네 개의 서로 다른 시계가 결정합니다.** 사이드카 `updatedAt`/`groupUpdatedAt`, 파일 mtime, `Date.now()` 보존 기간, 이벤트 채널의 `lastBodyAtByDoc`/`lastMembershipAtByNote`. 마지막 것만 창 안에서 단조입니다. 노트당 버전 하나로 모으는 이연 항목이 앞의 둘을 합치고, R3과 R4가 셋째가 실제로 데이터를 파괴하는 지점입니다.
 - **reconcile 비용이 트리거당 O(라이브러리)이고 트리거는 로컬 쓰기가 만듭니다.** R11이 급성 증상이지만, 구조적 문제는 "원격에서 뭔가 바뀌었는가"에 대한 값싼 부정 검사(디렉터리 mtime, `.groups.json`의 세대 카운터, 패스별 목록 해시)가 없다는 점입니다.
 - **모든 노트 본문이 세션 내내 메모리에 상주합니다**(`useNotesLoader.ts:626`의 `attachDocContents`). 사이드바 검색, `renameNote`의 역링크 스캔, `getLiveDocsSnapshot`이 모두 `doc.content`를 직접 읽기 때문입니다. R12가 가능한 이유이자 시작 비용이 라이브러리 총 바이트에 비례하는 이유입니다.
