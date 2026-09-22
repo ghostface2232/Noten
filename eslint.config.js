@@ -73,6 +73,7 @@ export default tseslint.config(
       "src/utils/conflictFileDetector.ts",
       "src/utils/migrateImageAssets.ts",
       "src/utils/recoveryJournal.ts",
+      "src/utils/trashRetention.ts",
     ],
     rules: {
       "no-restricted-syntax": [

@@ -2145,6 +2145,13 @@ describe("useNotesLoader — targeted autosave metadata", () => {
   });
 });
 
+function seedTrashObservation(id: string, trashedAt: number, seenAt: number): void {
+  refs.fs!.seedTextFile("/test-appdata/trash-observed.json", JSON.stringify({
+    version: 1,
+    observations: { [id]: { trashedAt, seenAt } },
+  }));
+}
+
 describe("purgeExpiredTrash — unsafe id defense-in-depth", () => {
   it("retains (never purges) a trashed note whose id is a traversal segment", async () => {
     const unsafe: TrashedNote = {
@@ -2198,9 +2205,34 @@ describe("purgeExpiredTrash — unsafe id defense-in-depth", () => {
       createdAt: 1,
       updatedAt: 1,
     };
+    seedTrashObservation("safe", 1, 1);
     const kept = await purgeExpiredTrash([safe]);
     expect(kept).toHaveLength(0);
     expect(await refs.fs!.exists("/test-appdata/notes/.trash/safe.md")).toBe(false);
+  });
+
+  // A machine whose clock ran weeks slow stamped a trashedAt every healthy
+  // machine read as already expired, and the next launch deleted the note
+  // permanently while the user still expected to restore it.
+  it("keeps an expired-looking stamp this machine has not yet seen for the full period", async () => {
+    refs.fs!.seedTextFile("/test-appdata/notes/.trash/skewed.md", "body");
+    const skewed: TrashedNote = {
+      id: "skewed",
+      fileName: "skewed",
+      originalFilePath: "/test-appdata/notes/skewed.md",
+      trashFilePath: "/test-appdata/notes/.trash/skewed.md",
+      trashedAt: Date.now() - 20 * 24 * 60 * 60 * 1000,
+      groupId: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    expect((await purgeExpiredTrash([skewed])).map((n) => n.id)).toEqual(["skewed"]);
+    expect(await refs.fs!.exists("/test-appdata/notes/.trash/skewed.md")).toBe(true);
+    // The first sighting is recorded, so the local count has started.
+    const recorded = JSON.parse(await refs.fs!.readTextFile("/test-appdata/trash-observed.json"));
+    expect(recorded.observations.skewed.trashedAt).toBe(skewed.trashedAt);
+    expect((await purgeExpiredTrash([skewed])).map((n) => n.id)).toEqual(["skewed"]);
   });
 
   // Dropping an expired entry whose body a cloud client still holds removed
@@ -2226,8 +2258,10 @@ describe("purgeExpiredTrash — unsafe id defense-in-depth", () => {
       createdAt: 1,
       updatedAt: 1,
     };
+    seedTrashObservation("locked", 1, 1);
     try {
       const kept = await purgeExpiredTrash([locked]);
+      expect(removeSpy).toHaveBeenCalledWith(bodyPath, undefined);
       expect(kept.map((n) => n.id)).toEqual(["locked"]);
       expect(await refs.fs!.exists(metaPath)).toBe(true);
     } finally {

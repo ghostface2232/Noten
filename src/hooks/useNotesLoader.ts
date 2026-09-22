@@ -69,6 +69,13 @@ import {
   scanAndAbsorbConflicts,
 } from "../utils/conflictFileDetector";
 import {
+  isTrashExpired,
+  observeTrash,
+  readTrashObservations,
+  writeTrashObservations,
+  type TrashObservations,
+} from "../utils/trashRetention";
+import {
   setKnownDiskContent,
   resetKnownDiskContent,
   restoreKnownDiskContent,
@@ -487,11 +494,23 @@ export async function ensureTrashDir(): Promise<string> {
   return dir;
 }
 
-const TRASH_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+async function getTrashObservationsPath(): Promise<string> {
+  const base = await appDataDir();
+  const sep = base.endsWith("/") || base.endsWith("\\") ? "" : "/";
+  return `${base}${sep}trash-observed.json`;
+}
 
 export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<TrashedNote[]> {
   const now = Date.now();
   const kept: TrashedNote[] = [];
+  // Machine-local (appData, never the synced folder): it records what this
+  // machine's clock saw, which is the point.
+  let observationsPath: string | null = null;
+  let observations: TrashObservations = {};
+  try {
+    observationsPath = await getTrashObservationsPath();
+    observations = await readTrashObservations(tauriFileSystem, observationsPath);
+  } catch { /* nothing observed yet: every entry is kept this launch */ }
   let notesDir: string | null = null;
   try {
     notesDir = await getNotesDir();
@@ -526,13 +545,18 @@ export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<Tr
     // A body that could not be removed stays listed, so the next launch
     // retries instead of the file lingering in .trash with no sidecar.
     if (
-      now - note.trashedAt <= TRASH_RETENTION_MS
+      !isTrashExpired(note, observations[note.id], now)
       || !await purgeTrashedNoteFiles(tauriFileSystem, notesDir, note)
     ) {
       kept.push(note);
     }
   }
 
+  if (observationsPath) {
+    // A failed write only restarts the local count next launch.
+    await writeTrashObservations(tauriFileSystem, observationsPath, observeTrash(observations, kept, now))
+      .catch(() => {});
+  }
   return kept;
 }
 
