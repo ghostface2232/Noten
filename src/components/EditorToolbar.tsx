@@ -263,12 +263,40 @@ function TableInsertButton({ editor, locale, tooltip, buttonClassName, popoverCl
   );
 }
 
-function getHeadingLabel(editor: Editor | null, locale: Locale): string {
-  if (!editor) return t("heading.body", locale);
-  for (let lvl = 1; lvl <= 6; lvl++) {
-    if (editor.isActive("heading", { level: lvl })) return `H${lvl}`;
+// Everything the toolbar shows that comes from the editor. The render reads
+// this and the transaction subscription compares it, so a state the toolbar
+// shows can never be missing from the comparison.
+function readToolbarState(editor: Editor | null) {
+  const active = (name: string, attrs?: Record<string, unknown>) => editor?.isActive(name, attrs) ?? false;
+  let headingLevel = 0;
+  for (let lvl = 1; lvl <= 6 && !headingLevel; lvl++) {
+    if (active("heading", { level: lvl })) headingLevel = lvl;
   }
-  return t("heading.body", locale);
+  return {
+    // Not implied by headingLevel: a selection across an H1 and an H2 is in
+    // headings without being at any one level.
+    heading: active("heading"),
+    headingLevel,
+    canUndo: editor?.can().undo() ?? false,
+    canRedo: editor?.can().redo() ?? false,
+    bold: active("bold"),
+    italic: active("italic"),
+    underline: active("underline"),
+    strike: active("strike"),
+    code: active("code"),
+    bulletList: active("bulletList"),
+    orderedList: active("orderedList"),
+    taskList: active("taskList"),
+    blockquote: active("blockquote"),
+    codeBlock: active("codeBlock"),
+    mermaid: active("codeBlock", { language: "mermaid" }),
+  };
+}
+
+type ToolbarState = ReturnType<typeof readToolbarState>;
+
+function sameToolbarState(a: ToolbarState, b: ToolbarState): boolean {
+  return (Object.keys(a) as Array<keyof ToolbarState>).every((key) => a[key] === b[key]);
 }
 
 interface EditorToolbarProps {
@@ -306,15 +334,25 @@ function EditorToolbarImpl({
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!editor || hidden) return;
-    // rAF-coalesce: each render below calls 10+ editor.isActive(...) plus
+    // rAF-coalesce: reading the state calls 10+ editor.isActive(...) plus
     // can().undo()/can().redo(), so a transaction storm (typing, IME) used to
-    // re-render the whole toolbar per keystroke. One render per frame keeps
+    // re-render the whole toolbar per keystroke. One read per frame keeps
     // active-state feedback responsive without paying the cost N times per ms.
+    // And only a changed state re-renders: every render hands the buttons new
+    // handlers, and any React commit that touches the DOM while the editor is
+    // focused walks the entire editor DOM (React's selection bookkeeping) —
+    // ~7 ms per frame in a 1 MB note while typing plain text.
     let frame: number | null = null;
+    // Unknown until the first transaction, which therefore always renders:
+    // the state may have moved between this component's render and now.
+    let last: ToolbarState | null = null;
     const bump = () => {
       if (frame !== null) return;
       frame = requestAnimationFrame(() => {
         frame = null;
+        const next = readToolbarState(editor);
+        if (last && sameToolbarState(last, next)) return;
+        last = next;
         setTick((n) => n + 1);
       });
     };
@@ -390,10 +428,10 @@ function EditorToolbarImpl({
     requestAnimationFrame(() => requestAnimationFrame(measure));
   }, [measure]);
 
-  const isHeading = editor?.isActive("heading") ?? false;
-  const headingLabel = getHeadingLabel(editor, locale);
-  const canUndo = editor?.can().undo() ?? false;
-  const canRedo = editor?.can().redo() ?? false;
+  const state = readToolbarState(editor);
+  const { canUndo, canRedo } = state;
+  const isHeading = state.heading;
+  const headingLabel = state.headingLevel ? `H${state.headingLevel}` : i("heading.body");
 
   const tb = (
     tooltip: string,
@@ -483,43 +521,43 @@ function EditorToolbarImpl({
 
               {tb(i("tool.bold"), <TextBoldRegular />,
                 () => editor?.chain().focus().toggleBold().run(),
-                editor?.isActive("bold") ?? false)}
+                state.bold)}
               {tb(i("tool.italic"), <TextItalicRegular />,
                 () => editor?.chain().focus().toggleItalic().run(),
-                editor?.isActive("italic") ?? false)}
+                state.italic)}
               {tb(i("tool.underline"), <TextUnderlineRegular />,
                 () => editor?.chain().focus().toggleUnderline().run(),
-                editor?.isActive("underline") ?? false)}
+                state.underline)}
               {tb(i("tool.strike"), <TextStrikethroughRegular />,
                 () => editor?.chain().focus().toggleStrike().run(),
-                editor?.isActive("strike") ?? false)}
+                state.strike)}
               {tb(i("tool.code"), <CodeRegular />,
                 () => editor?.chain().focus().toggleCode().run(),
-                editor?.isActive("code") ?? false)}
+                state.code)}
 
               <Divider vertical className={styles.divider} />
 
               {tb(i("tool.bulletList"), <TextBulletListRegular />,
                 () => editor?.chain().focus().toggleBulletList().run(),
-                editor?.isActive("bulletList") ?? false)}
+                state.bulletList)}
               {tb(i("tool.orderedList"), <TextNumberListLtrRegular />,
                 () => editor?.chain().focus().toggleOrderedList().run(),
-                editor?.isActive("orderedList") ?? false)}
+                state.orderedList)}
               {tb(i("tool.taskList"), <TaskListLtrRegular />,
                 () => editor?.chain().focus().toggleTaskList().run(),
-                editor?.isActive("taskList") ?? false)}
+                state.taskList)}
               {tb(i("tool.blockquote"), <TextQuoteOpeningRegular />,
                 () => editor?.chain().focus().toggleBlockquote().run(),
-                editor?.isActive("blockquote") ?? false)}
+                state.blockquote)}
               {tb(i("tool.hr"), <LineHorizontal1Regular />,
                 () => editor?.chain().focus().setHorizontalRule().run(),
                 false)}
               {tb(i("tool.codeBlock"), <CodeBlockRegular />,
                 () => editor?.chain().focus().toggleCodeBlock().run(),
-                editor?.isActive("codeBlock") ?? false)}
+                state.codeBlock)}
               {tb(i("tool.mermaid"), <FlowchartRegular />,
                 () => { if (editor) insertMermaidCodeBlock(editor); },
-                editor?.isActive("codeBlock", { language: "mermaid" }) ?? false)}
+                state.mermaid)}
 
               <Divider vertical className={styles.divider} />
 
