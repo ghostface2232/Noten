@@ -455,6 +455,18 @@ describe("contract: the close gate always has an escape", () => {
     expect(handler).toContain("close.unsavedDiscard");
     expect(handler).toMatch(/confirm\(\s*t\("close\.unsavedDiscard"/);
   });
+
+  it("the override is armed per close attempt, not per window lifetime", () => {
+    // A boolean set on the first refusal and cleared only by a successful
+    // drain turned a refusal hours earlier, for another cause, into an
+    // immediate "closing discards these" on the next failed close.
+    const src = read(APP);
+    const start = src.indexOf("onCloseRequested");
+    const end = src.indexOf("useEffect(() => {", src.indexOf("}).then((fn)", start));
+    const handler = src.slice(start, end > start ? end : undefined);
+    expect(handler).toMatch(/isCloseOverrideArmed\(/);
+    expect(src).not.toMatch(/closeBlockedOnceRef/);
+  });
 });
 
 describe("contract: fatal errors reach the user, not just crash.log", () => {

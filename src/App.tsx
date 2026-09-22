@@ -92,6 +92,7 @@ import { exportAsMarkdown, exportAsPdf } from "./utils/exportHandlers";
 import { clearManagedNotesData, clearMigratedSource, hasExistingNotenData, migrateNotesDir } from "./utils/migrateNotesDir";
 import { writeMigrationJournal, type MigrationCleanupMode } from "./utils/migrationJournal";
 import { recoverPendingMigration } from "./utils/migrationCleanup";
+import { isCloseOverrideArmed } from "./utils/closeGate";
 import { colorHex } from "./utils/noteColors";
 import { clampMenuToViewport } from "./utils/clampMenuPosition";
 import { sortSignature } from "./utils/docsSignature";
@@ -447,10 +448,10 @@ function App() {
   // Fresh-locale ref for effects/handlers registered once (empty deps) that
   // still need to localize a late message — e.g. the close-blocked dialog.
   const localeRef = useRef(locale);
-  // Whether a close attempt has already been refused for an undrained save.
-  // See the close handler: the first refusal explains, the second lets the
-  // user out rather than wedging the window forever.
-  const closeBlockedOnceRef = useRef(false);
+  // When a close attempt was last refused for an undrained save. See the close
+  // handler: the first refusal explains, the attempt right after it lets the
+  // user out rather than wedging the window forever (isCloseOverrideArmed).
+  const closeRefusedAtRef = useRef<number | null>(null);
   localeRef.current = locale;
   const wikiDocIndexSignature = useMemo(
     () => docs.map((doc) => `${doc.id}\u0000${doc.fileName}`).join("\u0001"),
@@ -1436,7 +1437,7 @@ function App() {
         // the window on both while promising they would come back.
         const bodiesRecorded = (await journalPendingEditsRef.current?.()) ?? false;
         if (bodiesRecorded && manifestOk && !hasUnsaveableChangesRef.current?.()) {
-          closeBlockedOnceRef.current = false;
+          closeRefusedAtRef.current = null;
           await message(t("close.unsavedJournalled", localeRef.current), { kind: "info" });
           return;
         }
@@ -1446,10 +1447,11 @@ function App() {
         // with every edit intact. A gate that ONLY ever refuses is a trap
         // though: when the cause cannot be fixed from here — a sidecar that
         // stays unreadable, a folder that is gone — the window can never be
-        // closed at all. So a second attempt offers the override and says
-        // plainly what it discards.
-        if (!closeBlockedOnceRef.current) {
-          closeBlockedOnceRef.current = true;
+        // closed at all. So the attempt right after a refusal offers the
+        // override and says plainly what it discards.
+        const now = Date.now();
+        if (!isCloseOverrideArmed(closeRefusedAtRef.current, now)) {
+          closeRefusedAtRef.current = now;
           event.preventDefault();
           await message(t("close.unsavedBlocked", localeRef.current), { kind: "error" });
           return;
@@ -1468,7 +1470,7 @@ function App() {
         return;
       }
       // The drain succeeded, so a later failure starts the two-step gate over.
-      closeBlockedOnceRef.current = false;
+      closeRefusedAtRef.current = null;
       if (hasUnsaveableChangesRef.current?.()) {
         // A dirty doc with no filePath (loader-failure stub whose provisioning
         // keeps failing) can never drain, so blocking would wedge the window
