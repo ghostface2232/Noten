@@ -2,8 +2,8 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 
-// Off-screen skipping for DOM-heavy top-level blocks (lists, code blocks,
-// tables).
+// Off-screen skipping for top-level blocks: DOM-heavy ones (lists, code
+// blocks, tables) always, prose (paragraphs, headings) up to a note size.
 //
 // Chromium does work proportional to the whole editable on every keystroke
 // and, much more, on every IME composition update: it lays out, paints and
@@ -29,13 +29,27 @@ import type { EditorView } from "@tiptap/pm/view";
 // Everything else keeps its exact size: a block the user edits is on screen
 // and is re-measured by the browser as it renders.
 //
+// Paragraphs and headings are skipped too, but only in notes of at most
+// MAX_TEXT_SKIP_BLOCKS top-level blocks. For IME the cost that matters is the
+// text before the caret: every composition update counts characters from the
+// start of the editor, and Chromium's text iterator does not enter a skipped
+// block, so skipping prose is what keeps Hangul at the end of a long note as
+// fast as at the start (61 -> 17 ms per update in a 1.1M-character note).
+// Each skipped element costs the browser something every frame, though, and
+// re-enabling skipping after a measuring frame grows steeply with their
+// number: in a note of 20,000 paragraphs typing and scrolling got slower and
+// a re-measure took seconds. Past the limit prose keeps its normal layout.
+//
 // The CSS half lives in tiptap-editor.css ("Off-screen skipping"); the
-// selector below must match it.
+// selectors below must match it.
 
 const SKIPPABLE_KIND = ":is(ul, ol, .noten-code-block:not(.is-mermaid), .tableWrapper)";
 export const SKIPPABLE_BLOCK =
   `${SKIPPABLE_KIND}:not(:has(hr, h1, h2, h3, h4, h5, h6, blockquote, .tiptap-image-node, .is-mermaid))`;
+export const SKIPPABLE_TEXT = ":is(p, h1, h2, h3, h4, h5, h6)";
 export const SKIP_OFFSCREEN_CLASS = "noten-skip-offscreen";
+export const SKIP_TEXT_CLASS = "noten-skip-offscreen-text";
+export const MAX_TEXT_SKIP_BLOCKS = 3500;
 
 // More changed top-level blocks than this in one update is a document swap or
 // a bulk edit: re-measure without inspecting each one.
@@ -72,7 +86,20 @@ class OffscreenMeasure {
     this.resizeObserver?.observe(view.dom);
     document.fonts?.addEventListener("loadingdone", this.remeasure);
     this.watchResolution();
+    this.syncTextSkipping();
     this.remeasure();
+  }
+
+  private skipsText = false;
+
+  // Returns whether the class changed. Its containment is layout-neutral, but
+  // prose skipped from now on needs remembered sizes.
+  private syncTextSkipping(): boolean {
+    const skips = this.view.state.doc.childCount <= MAX_TEXT_SKIP_BLOCKS;
+    if (skips === this.skipsText) return false;
+    this.skipsText = skips;
+    this.view.dom.classList.toggle(SKIP_TEXT_CLASS, skips);
+    return true;
   }
 
   // Moving the window to a monitor with another scale can rewrap text at the
@@ -111,6 +138,10 @@ class OffscreenMeasure {
     const doc = view.state.doc;
     const old = prev.doc;
     if (doc === old) return;
+    if (this.syncTextSkipping()) {
+      this.remeasure();
+      return;
+    }
     // The changed top-level range, by node identity rather than content:
     // ProseMirror redraws only nodes that are new objects, and when a whole
     // document is replaced with equal-looking content (window sync, file
@@ -138,11 +169,12 @@ class OffscreenMeasure {
       pos += doc.child(i).nodeSize;
       // Cheapest test first: the full selector's :has() walks the block's
       // subtree, and the block being edited is almost always on screen.
+      if (!(dom instanceof HTMLElement)) continue;
+      const text = this.skipsText && dom.matches(SKIPPABLE_TEXT);
       if (
-        dom instanceof HTMLElement
-        && dom.matches(SKIPPABLE_KIND)
+        (text || dom.matches(SKIPPABLE_KIND))
         && this.isOffscreen(dom)
-        && dom.matches(SKIPPABLE_BLOCK)
+        && (text || dom.matches(SKIPPABLE_BLOCK))
       ) {
         this.remeasure();
         return;
@@ -155,7 +187,7 @@ class OffscreenMeasure {
     this.resolutionQuery?.removeEventListener("change", this.onResolutionChange);
     document.fonts?.removeEventListener("loadingdone", this.remeasure);
     cancelAnimationFrame(this.frame);
-    this.view.dom.classList.remove(SKIP_OFFSCREEN_CLASS);
+    this.view.dom.classList.remove(SKIP_OFFSCREEN_CLASS, SKIP_TEXT_CLASS);
   }
 
   private isOffscreen(element: HTMLElement): boolean {

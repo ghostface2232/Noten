@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import CodeBlock from "@tiptap/extension-code-block";
-import OffscreenBlocks, { SKIP_OFFSCREEN_CLASS } from "./OffscreenBlocks";
+import OffscreenBlocks, { MAX_TEXT_SKIP_BLOCKS, SKIP_OFFSCREEN_CLASS, SKIP_TEXT_CLASS } from "./OffscreenBlocks";
 
 // jsdom has no layout, ResizeObserver or frames: fake all three so the tests
 // drive width changes, frame boundaries and on/off-screen positions directly.
@@ -96,7 +96,10 @@ function topLevelDom(editor: Editor, index: number) {
   return editor.view.nodeDOM(insideBlock(editor, index)) as HTMLElement;
 }
 
-const LIST_DOC = "<p>intro</p><ul><li><p>one</p></li><li><p>two</p></li></ul><p>middle</p><ul><li><p>far</p></li></ul>";
+const LIST_DOC = "<p>intro</p><ul><li><p>one</p></li><li><p>two</p></li></ul><blockquote><p>middle</p></blockquote><ul><li><p>far</p></li></ul>";
+
+const skipsText = (editor: Editor) => editor.view.dom.classList.contains(SKIP_TEXT_CLASS);
+const paragraphs = (n: number) => Array.from({ length: n }, (_, i) => `<p>p${i}</p>`).join("");
 
 describe("OffscreenBlocks", () => {
   it("turns skipping on only after a measuring frame at a real width", () => {
@@ -242,6 +245,58 @@ describe("OffscreenBlocks", () => {
     editor.destroy();
     active = null;
     expect(dom.classList.contains(SKIP_OFFSCREEN_CLASS)).toBe(false);
+    expect(dom.classList.contains(SKIP_TEXT_CLASS)).toBe(false);
     expect(observers[0].disconnected).toBe(true);
+  });
+
+  describe("prose", () => {
+    it("skips paragraphs and headings in a note within the limit", () => {
+      const editor = readyEditor(LIST_DOC);
+      expect(skipsText(editor)).toBe(true);
+    });
+
+    it("re-measures when an off-screen paragraph or heading changes", () => {
+      const editor = readyEditor("<p>top</p><p>far</p><h2>far heading</h2>");
+      offscreen.add(topLevelDom(editor, 1));
+      editor.commands.insertContentAt(insideBlock(editor, 1) + 1, "x");
+      expect(skipping(editor)).toBe(false);
+      flushFrames();
+      expect(skipping(editor)).toBe(true);
+
+      offscreen.add(topLevelDom(editor, 2));
+      editor.commands.insertContentAt(insideBlock(editor, 2) + 1, "y");
+      expect(skipping(editor)).toBe(false);
+    });
+
+    it("leaves skipping on for edits to an on-screen paragraph", () => {
+      const editor = readyEditor("<p>top</p><p>here</p>");
+      editor.commands.insertContentAt(insideBlock(editor, 1) + 1, "x");
+      expect(skipping(editor)).toBe(true);
+    });
+
+    it("keeps prose unskipped past the block limit, where paragraph edits need no re-measure", () => {
+      const editor = readyEditor(paragraphs(MAX_TEXT_SKIP_BLOCKS + 1));
+      expect(skipsText(editor)).toBe(false);
+      offscreen.add(topLevelDom(editor, 10));
+      editor.commands.insertContentAt(insideBlock(editor, 10) + 1, "x");
+      expect(skipping(editor)).toBe(true);
+    });
+
+    it("switches prose skipping with the block count and re-measures", () => {
+      const editor = readyEditor(paragraphs(MAX_TEXT_SKIP_BLOCKS));
+      expect(skipsText(editor)).toBe(true);
+
+      // One more block crosses the limit.
+      editor.commands.insertContentAt(0, "<p>one more</p>");
+      expect(skipsText(editor)).toBe(false);
+      expect(skipping(editor)).toBe(false);
+      flushFrames();
+      expect(skipping(editor)).toBe(true);
+
+      // A deletion brings it back under.
+      editor.commands.deleteRange({ from: 0, to: editor.state.doc.child(0).nodeSize });
+      expect(skipsText(editor)).toBe(true);
+      expect(skipping(editor)).toBe(false);
+    });
   });
 });
