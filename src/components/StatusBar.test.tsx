@@ -111,14 +111,14 @@ describe("StatusBar subscriptions and document work", () => {
     render(status(editor));
     expect(screen.getByText(/9/)).toBeTruthy();
 
-    // One key every 100 ms, faster than the pause the counts wait for.
-    let typed = 0;
-    for (let t = 0; t < STATS_MAX_WAIT_MS + 100; t += 100) {
+    // One key every 100 ms from t = 0 to t = 900, faster than the pause the
+    // counts wait for: only the cap, at t = 1000, lets them update.
+    for (let t = 0; t < STATS_MAX_WAIT_MS; t += 100) {
       act(() => { editor.view.dispatch(editor.state.tr.insertText("!", 6)); });
-      typed++;
-      act(() => { vi.advanceTimersByTime(100); });
+      act(() => { vi.advanceTimersByTime(t + 100 < STATS_MAX_WAIT_MS ? 100 : 90); });
     }
-    expect(screen.queryByText(/^9/)).toBeNull();
-    expect(typed).toBeGreaterThan(STATS_MAX_WAIT_MS / STATS_SETTLE_MS);
+    expect(screen.getByText(/^9/)).toBeTruthy();
+    act(() => { vi.advanceTimersByTime(40); });
+    expect(screen.getByText(/^19/)).toBeTruthy();
   });
 });
