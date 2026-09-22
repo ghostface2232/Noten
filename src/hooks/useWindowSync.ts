@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen } from "@tauri-apps/api/event";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 import { sortNotes, type NoteDoc, type NoteGroup, type TrashedNote } from "./useNotesLoader";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import { syncGroupsSnapshotFromDisk, getNotesDir } from "./useNotesLoader";
@@ -9,12 +10,25 @@ import type { Locale, NotesSortOrder } from "./useSettings";
 import type { NoteColorId } from "../utils/noteColors";
 import type { GroupMembershipOp, GroupUpsert, GroupsDelta } from "../utils/groupsDelta";
 
+/**
+ * A body save. Small bodies ride along in `content`; larger ones are left off
+ * and receivers read `filePath`, which the sender has already written. Every
+ * autosave of a large note otherwise pushed the whole body through IPC to
+ * every window — the sender's own listener included — once a second while
+ * typing.
+ */
 interface DocUpdatedPayload {
   sourceWindow: string;
   docId: string;
-  content: string;
+  /** Absent when the body exceeds INLINE_BODY_MAX_CHARS. */
+  content?: string;
+  /** The path the sender wrote, for receivers to read when `content` is absent. */
+  filePath: string;
   updatedAt: number;
 }
+
+/** Largest body, in UTF-16 code units, carried inline on doc-updated. */
+export const INLINE_BODY_MAX_CHARS = 64 * 1024;
 
 interface DocRenamedPayload {
   sourceWindow: string;
@@ -121,13 +135,13 @@ export function resetDocBodyClocks() {
   lastBodyAtByDoc.clear();
 }
 
-export function emitDocUpdated(docId: string, content: string, updatedAt: number) {
+export function emitDocUpdated(docId: string, filePath: string, content: string, updatedAt: number) {
   // Our own write is the newest body we know of, so a peer event that predates
   // it is stale even though this window skips its own broadcasts.
   noteBodyRevision(docId, updatedAt);
-  emit("doc-updated", {
-    sourceWindow: WINDOW_LABEL, docId, content, updatedAt,
-  } satisfies DocUpdatedPayload).catch(() => {});
+  const payload: DocUpdatedPayload = { sourceWindow: WINDOW_LABEL, docId, filePath, updatedAt };
+  if (content.length <= INLINE_BODY_MAX_CHARS) payload.content = content;
+  emit("doc-updated", payload).catch(() => {});
 }
 
 function noteBodyRevision(docId: string, updatedAt: number) {
@@ -252,6 +266,31 @@ export function useWindowSync(
     onActiveDocChangedRef.current?.({ filePath: doc.filePath, content: doc.content });
   }, [tiptapRef]);
 
+  const applyRemoteBody = useCallback((docId: string, content: string, updatedAt: number) => {
+    const committed = commitRemote((current) => {
+      const idx = current.docs.findIndex((d) => d.id === docId);
+      if (idx < 0) return null;
+      // Mirror useFileWatcher's guard: a locally-dirty doc means the
+      // user is actively editing here, so refuse to overwrite content
+      // and keep the dirty flag. Last-write-wins on the disk side
+      // (our own autosave) resolves conflicts, not remote events.
+      if (current.docs[idx].isDirty) return null;
+      const docs = [...current.docs];
+      // Titles are sidecar/rename metadata. A delayed body notification
+      // must not roll a newer rename back in the receiving window.
+      docs[idx] = {
+        ...docs[idx],
+        content,
+        updatedAt: Math.max(docs[idx].updatedAt, updatedAt),
+        isDirty: false,
+      };
+      return { docs };
+    });
+    if (!committed || docId !== getRoutedActiveDocId()) return;
+    const updated = committed.docs.find((d) => d.id === docId);
+    if (updated) showInEditor(updated);
+  }, [commitRemote, getRoutedActiveDocId, showInEditor]);
+
   useEffect(() => {
     let mounted = true;
     let unlisteners: (() => void)[] = [];
@@ -259,7 +298,7 @@ export function useWindowSync(
 
     Promise.all([
       listen<DocUpdatedPayload>("doc-updated", (event) => {
-        const { sourceWindow, docId, content, updatedAt } = event.payload;
+        const { sourceWindow, docId, content, filePath, updatedAt } = event.payload;
         if (sourceWindow === WINDOW_LABEL) return;
         // Event delivery is not ordered across source windows, and a body
         // event can arrive after this window has already saved a newer body.
@@ -269,28 +308,20 @@ export function useWindowSync(
         // are dropped, so a later peer body still applies.
         noteBodyRevision(docId, updatedAt);
 
-        const committed = commitRemote((current) => {
-          const idx = current.docs.findIndex((d) => d.id === docId);
-          if (idx < 0) return null;
-          // Mirror useFileWatcher's guard: a locally-dirty doc means the
-          // user is actively editing here, so refuse to overwrite content
-          // and keep the dirty flag. Last-write-wins on the disk side
-          // (our own autosave) resolves conflicts, not remote events.
-          if (current.docs[idx].isDirty) return null;
-          const docs = [...current.docs];
-          // Titles are sidecar/rename metadata. A delayed body notification
-          // must not roll a newer rename back in the receiving window.
-          docs[idx] = {
-            ...docs[idx],
-            content,
-            updatedAt: Math.max(docs[idx].updatedAt, updatedAt),
-            isDirty: false,
-          };
-          return { docs };
-        });
-        if (!committed || docId !== getRoutedActiveDocId()) return;
-        const updated = committed.docs.find((d) => d.id === docId);
-        if (updated) showInEditor(updated);
+        if (content != null) {
+          applyRemoteBody(docId, content, updatedAt);
+          return;
+        }
+        void (async () => {
+          let body: string;
+          // A failed read leaves the doc as is; the file watcher sees the
+          // peer's write too and reloads it.
+          try { body = await readTextFile(filePath); } catch { return; }
+          // A newer body may have been applied (or saved here) while the read
+          // was in flight, and this read may predate that write.
+          if (!mounted || isStaleBodyEvent(docId, updatedAt)) return;
+          applyRemoteBody(docId, body, updatedAt);
+        })();
       }),
 
       listen<DocRenamedPayload>("doc-renamed", (event) => {
@@ -534,5 +565,5 @@ export function useWindowSync(
     });
 
     return () => { mounted = false; unlisteners.forEach((fn) => fn()); };
-  }, [commitRemote, getRoutedActiveDocId, showInEditor, notesSortOrder, locale, settleRemoteDeletedDoc]);
+  }, [applyRemoteBody, commitRemote, getRoutedActiveDocId, showInEditor, notesSortOrder, locale, settleRemoteDeletedDoc]);
 }

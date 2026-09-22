@@ -7,6 +7,7 @@ import { createLibraryStore, type LibrarySnapshot, type LibraryUpdater } from ".
 
 const refs = vi.hoisted(() => ({
   handlers: new Map<string, (event: { payload: unknown }) => void>(),
+  diskBodies: new Map<string, string>(),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -21,6 +22,14 @@ vi.mock("@tauri-apps/api/event", () => ({
   }),
 }));
 
+vi.mock("@tauri-apps/plugin-fs", () => ({
+  readTextFile: vi.fn(async (path: string) => {
+    const body = refs.diskBodies.get(path);
+    if (body == null) throw new Error("os error 2");
+    return body;
+  }),
+}));
+
 vi.mock("./useNotesLoader", () => ({
   sortNotes: <T,>(docs: T[]) => docs,
   setTrashedNotesCache: vi.fn(),
@@ -28,7 +37,9 @@ vi.mock("./useNotesLoader", () => ({
   getNotesDir: vi.fn(async () => "/notes"),
 }));
 
-import { useWindowSync, emitDocUpdated, resetDocBodyClocks, resetGroupSyncClocks, emitGroupsDelta } from "./useWindowSync";
+import { useWindowSync, emitDocUpdated, resetDocBodyClocks, resetGroupSyncClocks, emitGroupsDelta, INLINE_BODY_MAX_CHARS } from "./useWindowSync";
+import { emit } from "@tauri-apps/api/event";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 import type { NoteGroup } from "../utils/noteTypes";
 
 function makeDoc(id: string): NoteDoc {
@@ -109,6 +120,9 @@ function renderWindowSync(
 
 beforeEach(() => {
   refs.handlers.clear();
+  refs.diskBodies.clear();
+  vi.mocked(emit).mockClear();
+  vi.mocked(readTextFile).mockClear();
   resetDocBodyClocks();
   resetGroupSyncClocks();
 });
@@ -150,7 +164,7 @@ describe("useWindowSync — remote body update", () => {
     // This window persisted "b" at 9000 and broadcast it. The doc's own
     // updatedAt is not the guard here — a peer body from BEFORE that save
     // arriving late must not roll our newer body back.
-    act(() => { emitDocUpdated("b", "our newer body", 9000); });
+    act(() => { emitDocUpdated("b", "/notes/b.md", "our newer body", 9000); });
     act(() => {
       refs.handlers.get("doc-updated")?.({
         payload: { sourceWindow: "window-b", docId: "b", content: "older peer body", updatedAt: 8000 },
@@ -204,6 +218,130 @@ describe("useWindowSync — remote body update", () => {
       content: "second",
       updatedAt: 5000,
     });
+  });
+});
+
+// Autosave broadcasts every body save. Carrying a large body inline pushed it
+// through IPC to every window (the sender's own listener included) once a
+// second while typing; above the threshold receivers read the saved file.
+describe("useWindowSync — large body updates go through disk", () => {
+  const large = "x".repeat(INLINE_BODY_MAX_CHARS + 1);
+
+  it("carries a small body inline", () => {
+    emitDocUpdated("b", "/notes/b.md", "small", 4000);
+    expect(vi.mocked(emit)).toHaveBeenCalledWith("doc-updated", expect.objectContaining({
+      docId: "b", filePath: "/notes/b.md", content: "small", updatedAt: 4000,
+    }));
+  });
+
+  it("leaves a large body off the event", () => {
+    emitDocUpdated("b", "/notes/b.md", large, 4000);
+    const payload = vi.mocked(emit).mock.calls[0][1] as Record<string, unknown>;
+    expect(payload).toMatchObject({ docId: "b", filePath: "/notes/b.md", updatedAt: 4000 });
+    expect(payload).not.toHaveProperty("content");
+  });
+
+  it("reads a body-less update from the file the sender wrote", async () => {
+    const { result, openDocument } = renderWindowSync(async () => true, [makeDoc("a"), makeDoc("b")]);
+    await waitFor(() => expect(refs.handlers.has("doc-updated")).toBe(true));
+    refs.diskBodies.set("/notes/b.md", large);
+
+    act(() => {
+      refs.handlers.get("doc-updated")?.({
+        payload: { sourceWindow: "window-b", docId: "b", filePath: "/notes/b.md", updatedAt: 4000 },
+      });
+    });
+
+    await waitFor(() => expect(result.current.docs.find((doc) => doc.id === "b")).toMatchObject({
+      content: large,
+      updatedAt: 4000,
+    }));
+    expect(openDocument).not.toHaveBeenCalled();
+  });
+
+  it("drops a disk read overtaken by a newer inline body", async () => {
+    const { result } = renderWindowSync(async () => true, [makeDoc("a"), makeDoc("b")]);
+    await waitFor(() => expect(refs.handlers.has("doc-updated")).toBe(true));
+    let release!: (body: string) => void;
+    vi.mocked(readTextFile).mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+
+    act(() => {
+      refs.handlers.get("doc-updated")?.({
+        payload: { sourceWindow: "window-b", docId: "b", filePath: "/notes/b.md", updatedAt: 4000 },
+      });
+    });
+    act(() => {
+      refs.handlers.get("doc-updated")?.({
+        payload: { sourceWindow: "window-c", docId: "b", filePath: "/notes/b.md", content: "newer", updatedAt: 5000 },
+      });
+    });
+    // The read started before window-c's write and returns the older body.
+    await act(async () => { release("older from disk"); });
+
+    expect(result.current.docs.find((doc) => doc.id === "b")).toMatchObject({
+      content: "newer",
+      updatedAt: 5000,
+    });
+  });
+
+  it("opens a large body read from disk in the editor when the doc is active", async () => {
+    const clean = { ...makeDoc("a"), isDirty: false };
+    const { openDocument } = renderWindowSync(async () => true, [clean, makeDoc("b")]);
+    await waitFor(() => expect(refs.handlers.has("doc-updated")).toBe(true));
+    refs.diskBodies.set("/notes/a.md", large);
+
+    act(() => {
+      refs.handlers.get("doc-updated")?.({
+        payload: { sourceWindow: "window-b", docId: "a", filePath: "/notes/a.md", updatedAt: 4000 },
+      });
+    });
+
+    await waitFor(() => expect(openDocument).toHaveBeenCalledWith(expect.objectContaining({
+      noteId: "a", markdown: large,
+    })));
+  });
+
+  it("does not overwrite a doc that became dirty during the read", async () => {
+    // makeDoc("a") is dirty: the user is typing in it.
+    const { result } = renderWindowSync(async () => true, [makeDoc("a"), makeDoc("b")]);
+    await waitFor(() => expect(refs.handlers.has("doc-updated")).toBe(true));
+    refs.diskBodies.set("/notes/a.md", large);
+
+    await act(async () => {
+      refs.handlers.get("doc-updated")?.({
+        payload: { sourceWindow: "window-b", docId: "a", filePath: "/notes/a.md", updatedAt: 4000 },
+      });
+    });
+
+    expect(readTextFile).toHaveBeenCalledWith("/notes/a.md");
+    expect(result.current.docs.find((doc) => doc.id === "a")).toMatchObject({ content: "a", isDirty: true });
+  });
+
+  it("leaves the doc alone when the read fails", async () => {
+    const { result } = renderWindowSync(async () => true, [makeDoc("a"), makeDoc("b")]);
+    await waitFor(() => expect(refs.handlers.has("doc-updated")).toBe(true));
+
+    await act(async () => {
+      refs.handlers.get("doc-updated")?.({
+        payload: { sourceWindow: "window-b", docId: "b", filePath: "/notes/missing.md", updatedAt: 4000 },
+      });
+    });
+
+    expect(readTextFile).toHaveBeenCalledWith("/notes/missing.md");
+    expect(result.current.docs.find((doc) => doc.id === "b")).toMatchObject({ content: "b" });
+  });
+
+  it("does not read at all for its own broadcast", async () => {
+    renderWindowSync(async () => true, [makeDoc("a"), makeDoc("b")]);
+    await waitFor(() => expect(refs.handlers.has("doc-updated")).toBe(true));
+
+    await act(async () => {
+      refs.handlers.get("doc-updated")?.({
+        payload: { sourceWindow: "window-a", docId: "b", filePath: "/notes/b.md", updatedAt: 4000 },
+      });
+    });
+
+    expect(readTextFile).not.toHaveBeenCalled();
   });
 });
 

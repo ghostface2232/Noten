@@ -2112,6 +2112,38 @@ describe("purgeExpiredTrash — unsafe id defense-in-depth", () => {
     expect(kept).toHaveLength(0);
     expect(await refs.fs!.exists("/test-appdata/notes/.trash/safe.md")).toBe(false);
   });
+
+  // Dropping an expired entry whose body a cloud client still holds removed
+  // its sidecar too, orphaning the body in .trash for good. Keeping it lets
+  // the next launch retry.
+  it("keeps an expired note whose body cannot be removed", async () => {
+    const bodyPath = "/test-appdata/notes/.trash/locked.md";
+    const metaPath = "/test-appdata/notes/.meta/locked.json";
+    refs.fs!.seedTextFile(bodyPath, "body");
+    refs.fs!.seedTextFile(metaPath, "{}");
+    const innerRemove = refs.fs!.remove.bind(refs.fs!);
+    const removeSpy = vi.spyOn(refs.fs!, "remove").mockImplementation(async (p, o) => {
+      if (p === bodyPath) throw new Error("os error 32");
+      return innerRemove(p, o);
+    });
+    const locked: TrashedNote = {
+      id: "locked",
+      fileName: "locked",
+      originalFilePath: "/test-appdata/notes/locked.md",
+      trashFilePath: bodyPath,
+      trashedAt: 1,
+      groupId: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    try {
+      const kept = await purgeExpiredTrash([locked]);
+      expect(kept.map((n) => n.id)).toEqual(["locked"]);
+      expect(await refs.fs!.exists(metaPath)).toBe(true);
+    } finally {
+      removeSpy.mockRestore();
+    }
+  });
 });
 
 describe("useNotesLoader + useAutoSave — autosave re-sort keeps active identity", () => {

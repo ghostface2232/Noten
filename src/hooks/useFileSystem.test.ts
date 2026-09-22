@@ -120,8 +120,20 @@ vi.mock("./useNotesLoader", () => ({
   }),
 }));
 
+// remove/exists delegate to the plugin-fs mocks so trash purges (which go
+// through tauriFileSystem) see the same per-test faults as direct removes.
 vi.mock("../utils/fs", () => ({
-  tauriFileSystem: { writeTextFile: vi.fn(async () => {}) },
+  tauriFileSystem: {
+    writeTextFile: vi.fn(async () => {}),
+    remove: vi.fn(async (path: string, options?: unknown) => {
+      const { remove } = await import("@tauri-apps/plugin-fs");
+      await (remove as (p: string, o?: unknown) => Promise<void>)(path, options);
+    }),
+    exists: vi.fn(async (path: string) => {
+      const { exists } = await import("@tauri-apps/plugin-fs");
+      return exists(path);
+    }),
+  },
 }));
 
 // Body writes (provisionNoteFile / rewriteNoteFile / saveFile) route through
@@ -1436,6 +1448,40 @@ describe("useFileSystem — restoreNote meta-first ordering", () => {
     expect(restoredDocs.find((doc) => doc.id === "t1")?.customName).toBe(true);
   });
 
+  it("keeps the restore when the trash copy cannot be removed, and logs it", async () => {
+    const trashed: TrashedNote = {
+      id: "t1",
+      fileName: "Trashed",
+      originalFilePath: "/notes/t1.md",
+      trashFilePath: "/notes/.trash/t1.md",
+      trashedAt: 2000,
+      groupId: null,
+      createdAt: 1000,
+      updatedAt: 1500,
+      pinned: false,
+    };
+    const removeMock = fsPlugin.remove as ReturnType<typeof vi.fn>;
+    const existsMock = fsPlugin.exists as ReturnType<typeof vi.fn>;
+    removeMock.mockImplementation(async (p: string) => {
+      if (p === "/notes/.trash/t1.md") throw new Error("os error 32");
+    });
+    existsMock.mockImplementation(async (p: string) => p === "/notes/.trash/t1.md");
+    try {
+      const { result } = renderFs({ docs: [makeDoc("a")], trashedNotes: [trashed] });
+      await act(async () => {
+        await result.current.restoreNote("t1");
+      });
+
+      // One attempt, no retry, and the restore still committed.
+      expect(removeMock.mock.calls.filter((c) => c[0] === "/notes/.trash/t1.md")).toHaveLength(1);
+      expect(emitTrashUpdatedMock).toHaveBeenCalledWith({ removed: [{ id: "t1", trashedAt: 2000 }] });
+      expect(logMock).toHaveBeenCalledWith(expect.objectContaining({ code: "TRASH_PURGE_FAILED" }));
+    } finally {
+      removeMock.mockImplementation(async () => {});
+      existsMock.mockImplementation(async () => false);
+    }
+  });
+
   it("fails closed before copying the body when live metadata cannot be written", async () => {
     const trashed: TrashedNote = {
       id: "t1",
@@ -2381,6 +2427,93 @@ describe("useFileSystem — functional group commits survive concurrent store ch
     expect(lastEmit.membership).toEqual([{ noteId: "uuid-1", groupId: "g1", at: expect.any(Number) }]);
     expect(lastEmit.upserted).toEqual([]);
     expect(lastEmit.removedIds).toEqual([]);
+  });
+});
+
+// A trash body another process holds (cloud sync, antivirus, an open
+// handle) makes remove() throw. The entry must stay listed with its sidecar
+// intact, or the body is orphaned in .trash with nothing ever deleting it.
+describe("useFileSystem — trash purge keeps entries whose body survives", () => {
+  const trashedEntry = (id: string): TrashedNote => ({
+    id,
+    fileName: `Note ${id}`,
+    originalFilePath: `/notes/${id}.md`,
+    trashFilePath: `/notes/.trash/${id}.md`,
+    trashedAt: 2000,
+    groupId: null,
+    createdAt: 1000,
+    updatedAt: 1500,
+    pinned: false,
+  });
+  const removeMock = fsPlugin.remove as ReturnType<typeof vi.fn>;
+  const existsMock = fsPlugin.exists as ReturnType<typeof vi.fn>;
+  const removeMetaMock = metadataIOModule.removeMeta as ReturnType<typeof vi.fn>;
+  const lockBody = (path: string) => {
+    removeMock.mockImplementation(async (p: string) => {
+      if (p === path) throw new Error("os error 32");
+    });
+    existsMock.mockImplementation(async (p: string) => p === path);
+  };
+
+  afterEach(() => {
+    removeMock.mockImplementation(async () => {});
+    existsMock.mockImplementation(async () => false);
+  });
+
+  it("permanentlyDeleteNote keeps a locked entry and its sidecar", async () => {
+    const { result } = renderFs({
+      docs: [makeDoc("a")],
+      trashedNotes: [trashedEntry("t1")],
+    });
+    lockBody("/notes/.trash/t1.md");
+    removeMetaMock.mockClear();
+
+    await act(async () => { await result.current.permanentlyDeleteNote("t1"); });
+
+    expect(libraryStore.getSnapshot().trashedNotes.map((n) => n.id)).toEqual(["t1"]);
+    expect(removeMetaMock).not.toHaveBeenCalled();
+    expect(emitTrashUpdatedMock).not.toHaveBeenCalled();
+  });
+
+  it("permanentlyDeleteNote drops an entry whose body is already gone", async () => {
+    const { result } = renderFs({
+      docs: [makeDoc("a")],
+      trashedNotes: [trashedEntry("t1")],
+    });
+    removeMock.mockImplementation(async () => { throw new Error("os error 2"); });
+
+    await act(async () => { await result.current.permanentlyDeleteNote("t1"); });
+
+    expect(libraryStore.getSnapshot().trashedNotes).toEqual([]);
+    expect(emitTrashUpdatedMock).toHaveBeenCalledWith({ removed: [{ id: "t1", trashedAt: 2000 }] });
+  });
+
+  it("emptyTrash drops and announces only the entries it purged", async () => {
+    const { result } = renderFs({
+      docs: [makeDoc("a")],
+      trashedNotes: [trashedEntry("t1"), trashedEntry("t2")],
+    });
+    lockBody("/notes/.trash/t1.md");
+    removeMetaMock.mockClear();
+
+    await act(async () => { await result.current.emptyTrash(); });
+
+    expect(libraryStore.getSnapshot().trashedNotes.map((n) => n.id)).toEqual(["t1"]);
+    expect(emitTrashUpdatedMock).toHaveBeenCalledWith({ removed: [{ id: "t2", trashedAt: 2000 }] });
+    expect(removeMetaMock.mock.calls.map((c) => c[2])).toEqual(["t2"]);
+  });
+
+  it("emptyTrash announces nothing when every body is locked", async () => {
+    const { result } = renderFs({
+      docs: [makeDoc("a")],
+      trashedNotes: [trashedEntry("t1")],
+    });
+    lockBody("/notes/.trash/t1.md");
+
+    await act(async () => { await result.current.emptyTrash(); });
+
+    expect(libraryStore.getSnapshot().trashedNotes.map((n) => n.id)).toEqual(["t1"]);
+    expect(emitTrashUpdatedMock).not.toHaveBeenCalled();
   });
 });
 

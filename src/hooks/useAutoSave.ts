@@ -517,7 +517,7 @@ export function useAutoSave(
       // occupied that slot — repointing activeDocRef and every following
       // keystroke at the wrong file.
       latestSetDocs((prev) => buildCommit(prev) ?? prev);
-      emitDocUpdated(snapshot.docId, snapshot.content, persisted.updatedAt);
+      emitDocUpdated(snapshot.docId, snapshot.filePath, snapshot.content, persisted.updatedAt);
 
       if (editorStillMatches) {
         commitState.state.setIsDirty(false);

@@ -512,7 +512,7 @@ describe("useAutoSave — doSave golden path", () => {
       pinned: true,
       color: "purple",
     });
-    expect(emitDocUpdatedMock).toHaveBeenCalledWith("a", "# Stale derived title\nbody", 7000);
+    expect(emitDocUpdatedMock).toHaveBeenCalledWith("a", "/notes/a.md", "# Stale derived title\nbody", 7000);
   });
 
   it("does not overwrite metadata changed locally while the writer is pending", async () => {
@@ -584,7 +584,7 @@ describe("useAutoSave — doSave golden path", () => {
       updatedAt: 8000,
       content: "hello world",
     });
-    expect(emitDocUpdatedMock).toHaveBeenCalledWith("a", "hello world", 7000);
+    expect(emitDocUpdatedMock).toHaveBeenCalledWith("a", "/notes/a.md", "hello world", 7000);
   });
 
   it("lets a later autosave advance metadata published before React renders it", async () => {
