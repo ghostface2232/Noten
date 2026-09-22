@@ -2,6 +2,7 @@ import { memo, useState, useEffect } from "react";
 import { makeStyles, tokens } from "@fluentui/react-components";
 import { t } from "../i18n";
 import type { Editor } from "@tiptap/react";
+import type { Transaction } from "@tiptap/pm/state";
 import type { Locale } from "../hooks/useSettings";
 import { buildLineIndex, posToLine, type LineIndex } from "../utils/documentLines";
 import { MOTION_DURATION_SLOW } from "../styles/interactions";
@@ -47,6 +48,12 @@ const useStyles = makeStyles({
   },
 });
 
+// While the document keeps changing (typing, IME), the counts wait until
+// the user pauses this long. Each update is a React commit, and any commit
+// that touches the DOM while the editor is focused walks the entire editor
+// DOM (React's selection bookkeeping): ~7 ms per frame in a 1 MB note.
+export const STATS_SETTLE_MS = 300;
+
 function useEditorStats(editor: Editor | null, enabled: boolean) {
   const [stats, setStats] = useState({ charCount: 0, wordCount: 0, lineCount: 0, cursorRow: 1 });
 
@@ -89,8 +96,21 @@ function useEditorStats(editor: Editor | null, enabled: boolean) {
         return next;
       });
     };
-    const schedule = () => {
-      if (frame !== null) return;
+    // The caret row waits with the counts: it is resolved against the line
+    // index, which must be rebuilt for the new document first.
+    let settle: ReturnType<typeof setTimeout> | null = null;
+    const schedule = ({ transaction }: { transaction: Transaction }) => {
+      if (transaction.docChanged) {
+        if (settle !== null) clearTimeout(settle);
+        if (frame !== null) cancelAnimationFrame(frame);
+        frame = null;
+        settle = setTimeout(() => {
+          settle = null;
+          frame = requestAnimationFrame(compute);
+        }, STATS_SETTLE_MS);
+        return;
+      }
+      if (frame !== null || settle !== null) return;
       frame = requestAnimationFrame(compute);
     };
 
@@ -99,6 +119,7 @@ function useEditorStats(editor: Editor | null, enabled: boolean) {
     return () => {
       editor.off("transaction", schedule);
       if (frame !== null) cancelAnimationFrame(frame);
+      if (settle !== null) clearTimeout(settle);
     };
   }, [editor, enabled]);
 

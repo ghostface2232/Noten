@@ -5,11 +5,12 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { TextSelection } from "@tiptap/pm/state";
 import type { Editor as ReactEditor } from "@tiptap/react";
-import { StatusBar } from "./StatusBar";
+import { STATS_SETTLE_MS, StatusBar } from "./StatusBar";
 
 let active: Editor | null = null;
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   active?.destroy();
   active = null;
@@ -77,5 +78,30 @@ describe("StatusBar subscriptions and document work", () => {
     });
 
     await waitFor(() => expect(screen.getByText(/10/)).toBeTruthy());
+  });
+
+  it("waits for a pause in typing, then updates counts and caret row together", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+    const editor = makeEditor();
+    render(status(editor));
+    expect(screen.getByText(/9/)).toBeTruthy();
+    expect(screen.getByText(/Line 1/)).toBeTruthy();
+
+    const advance = (ms: number) => act(() => { vi.advanceTimersByTime(ms); });
+    act(() => { editor.view.dispatch(editor.state.tr.insertText("!", 6)); });
+    advance(STATS_SETTLE_MS - 100);
+    // Still typing: the next edit restarts the wait.
+    act(() => { editor.view.dispatch(editor.state.tr.insertText("?", 7)); });
+    // A caret move meanwhile waits too; its row needs the new line index.
+    act(() => {
+      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 10)));
+    });
+    advance(STATS_SETTLE_MS - 100);
+    expect(screen.getByText(/9/)).toBeTruthy();
+    expect(screen.getByText(/Line 1/)).toBeTruthy();
+
+    advance(200);
+    expect(screen.getByText(/11/)).toBeTruthy();
+    expect(screen.getByText(/Line 2/)).toBeTruthy();
   });
 });
