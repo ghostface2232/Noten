@@ -369,6 +369,42 @@ fn is_servable_note_image(path: &Path, roots: &[PathBuf]) -> bool {
             .is_some_and(|dir| dir.components().any(|c| c == Component::Normal(".assets".as_ref())))
 }
 
+/// Canonical roots note images are served from: the same as the fs scope.
+fn note_image_roots<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
+    [
+        app.path().home_dir(),
+        app.path().app_data_dir(),
+        app.path().app_local_data_dir(),
+    ]
+    .into_iter()
+    .filter_map(|dir| dir.ok().and_then(|dir| fs::canonicalize(dir).ok()))
+    .collect()
+}
+
+/// The files PDF export may point headless Edge at, one per requested image
+/// path: its canonical path when the `noten-asset` scheme would serve it and
+/// it is a file, else `None`. The export must not reach anything the editor
+/// could not show, and this is the scheme's own gate (canonical, so `..`
+/// aliases, symlinks and junctions are judged by where they land).
+#[tauri::command]
+async fn note_image_files<R: Runtime>(
+    app: AppHandle<R>,
+    paths: Vec<String>,
+) -> Vec<Option<String>> {
+    let roots = note_image_roots(&app);
+    paths
+        .iter()
+        .map(|raw| servable_note_image_file(raw, &roots))
+        .collect()
+}
+
+/// `raw`'s canonical path if it is a file the `noten-asset` scheme would serve.
+fn servable_note_image_file(raw: &str, roots: &[PathBuf]) -> Option<String> {
+    let path = fs::canonicalize(raw).ok()?;
+    (path.is_file() && is_servable_note_image(&path, roots))
+        .then(|| path.to_string_lossy().into_owned())
+}
+
 /// Serves note images for the editor. Unlike Tauri's asset protocol, which
 /// reads files synchronously on the UI thread (where WebView2 delivers the
 /// request), the read runs on a blocking worker: an image that OneDrive still
@@ -403,15 +439,7 @@ fn note_asset_response<R: Runtime>(
     let Ok(path) = fs::canonicalize(&raw) else {
         return status(404);
     };
-    let roots: Vec<PathBuf> = [
-        app.path().home_dir(),
-        app.path().app_data_dir(),
-        app.path().app_local_data_dir(),
-    ]
-    .into_iter()
-    .filter_map(|dir| dir.ok().and_then(|dir| fs::canonicalize(dir).ok()))
-    .collect();
-    if !is_servable_note_image(&path, &roots) {
+    if !is_servable_note_image(&path, &note_image_roots(app)) {
         return status(403);
     }
     match fs::read(&path) {
@@ -439,6 +467,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             print_to_pdf,
+            note_image_files,
             toggle_devtools,
             get_windows_app_theme,
             open_windows_emoji_picker
@@ -457,7 +486,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_servable_note_image, note_image_mime, print_temp_stem, wait_for_written_file, wide_null,
+        is_servable_note_image, note_image_mime, print_temp_stem, servable_note_image_file,
+        wait_for_written_file, wide_null,
     };
     use std::io::Write;
     use std::path::{Path, PathBuf};
@@ -490,6 +520,32 @@ mod tests {
         writer.join().unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"%PDF-1.4 partial rest");
         std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn export_gets_only_files_the_image_scheme_would_serve() {
+        let root = std::env::temp_dir().join(format!("{}_root", print_temp_stem()));
+        let assets = root.join("notes").join(".assets").join("n");
+        std::fs::create_dir_all(assets.join("dir.png")).unwrap();
+        std::fs::write(assets.join("a.png"), b"png").unwrap();
+        std::fs::write(assets.join("note.md"), b"md").unwrap();
+        std::fs::write(root.join("notes").join("outside.png"), b"png").unwrap();
+        let roots = vec![std::fs::canonicalize(&root).unwrap()];
+        let file = |p: PathBuf| servable_note_image_file(&p.to_string_lossy(), &roots);
+
+        let served = file(assets.join("a.png")).expect("an image inside .assets is served");
+        let canonical = std::fs::canonicalize(assets.join("a.png")).unwrap();
+        assert_eq!(PathBuf::from(served), canonical);
+        // Win32 strips the trailing space, so `.. ` climbs out of `.assets`:
+        // judged by where it lands, like the editor's own request.
+        let climbing = assets.join(".. ").join(".. ").join("outside.png");
+        assert_eq!(file(climbing), None);
+        assert_eq!(file(root.join("notes").join("outside.png")), None);
+        assert_eq!(file(assets.join("note.md")), None);
+        assert_eq!(file(assets.join("dir.png")), None);
+        assert_eq!(file(assets.join("missing.png")), None);
+        assert_eq!(servable_note_image_file("", &roots), None);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

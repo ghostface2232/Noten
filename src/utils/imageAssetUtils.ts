@@ -286,9 +286,9 @@ export function resolveRenderableImageSource(
 
 /**
  * The `.assets` file behind a URL from `resolveRenderableImageSource`, or null
- * for any other URL. PDF export uses it to inline images: the headless
- * browser that prints cannot load the app's protocol. It reads with the
- * broader fs scope, so it accepts only what the protocol itself would serve.
+ * for any other URL. PDF export uses it to find each image's file (the
+ * headless browser that prints cannot load the app's protocol), then asks the
+ * protocol's own gate, `note_image_files`, whether that file may be used.
  */
 export function assetPathForRenderedUrl(url: string): string | null {
   let path: string;
@@ -300,4 +300,23 @@ export function assetPathForRenderedUrl(url: string): string | null {
   const segments = toUnixPath(path).split("/");
   if (!segments.slice(0, -1).includes(".assets") || segments.includes("..")) return null;
   return convertFileSrc(path, NOTE_ASSET_PROTOCOL) === url ? path : null;
+}
+
+/**
+ * `file:` URL for a local path (`C:\a\b.png`, `C:/a/b.png`, `\\host\share\b.png`
+ * or `/a/b.png`, including the `\\?\` forms a canonical Windows path takes).
+ * Every segment is percent-encoded, so spaces, `#`, `%` and non-ASCII names
+ * survive; the drive letter stays literal.
+ */
+export function fileUrlForPath(path: string): string {
+  const unix = toUnixPath(path)
+    .replace(/^\/\/\?\/UNC\//i, "//")
+    .replace(/^\/\/\?\//, "");
+  const encode = (rest: string) =>
+    rest
+      .split("/")
+      .map((segment, i) => (i === 0 && /^[A-Za-z]:$/.test(segment) ? segment : encodeURIComponent(segment)))
+      .join("/");
+  if (unix.startsWith("//")) return `file://${encode(unix.slice(2))}`;
+  return `file:///${encode(unix.replace(/^\/+/, ""))}`;
 }

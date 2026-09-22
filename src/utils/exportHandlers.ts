@@ -3,9 +3,7 @@ import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
-import { readFile } from "@tauri-apps/plugin-fs";
-import { assetPathForRenderedUrl } from "./imageAssetUtils";
-import { mimeFromExt } from "./imageUtils";
+import { assetPathForRenderedUrl, fileUrlForPath } from "./imageAssetUtils";
 
 async function fontToDataUrl(publicPath: string): Promise<string> {
   try {
@@ -63,47 +61,44 @@ export function cloneEditorContentForExport(editorEl: HTMLElement): HTMLElement 
   return clone;
 }
 
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-}
-
 const NOTE_ASSET_ORIGIN = "http://noten-asset.localhost/";
 
 /**
  * Editor images load their asset through the app's noten-asset scheme, which
- * the headless browser that prints the PDF cannot reach. Inline them into the
- * export copy as data URLs, one at a time (reading every image at once holds
- * them all in memory together, which a note with hundreds of MB of images
- * cannot afford). Returns how many images could not be inlined and were
- * dropped; a noten-asset URL that does not map back to an `.assets` file is
- * dropped too rather than left for the renderer to request.
+ * the headless browser that prints the PDF cannot reach. Point the export
+ * copy's images at their files instead; that browser loads `file:` images
+ * from the `file:` page it prints. Do not inline them as data URLs: the HTML
+ * then holds every image at once, and a note with ~500 MB of images passed
+ * the engine's string limit and printed a blank page.
+ *
+ * Which file an image may point at is decided by `note_image_files`, the
+ * scheme's own gate, so the PDF can show nothing the editor would not. Returns
+ * how many images were dropped: a file that is gone or refused, or a
+ * noten-asset URL that does not map back to an `.assets` file.
  */
-export async function inlineAssetImages(root: HTMLElement): Promise<number> {
+export async function pointAssetImagesAtFiles(root: HTMLElement): Promise<number> {
+  const imgs = Array.from(root.querySelectorAll<HTMLImageElement>("img[src]")).filter((img) =>
+    img.getAttribute("src")!.startsWith(NOTE_ASSET_ORIGIN),
+  );
+  if (imgs.length === 0) return 0;
+  // "" for a URL that maps to no `.assets` path: the gate refuses it too.
+  const paths = imgs.map((img) => assetPathForRenderedUrl(img.getAttribute("src")!) ?? "");
+  let files: Array<string | null>;
+  try {
+    files = await invoke<Array<string | null>>("note_image_files", { paths });
+  } catch {
+    files = [];
+  }
   let dropped = 0;
-  for (const img of Array.from(root.querySelectorAll<HTMLImageElement>("img[src]"))) {
-    const src = img.getAttribute("src")!;
-    const path = assetPathForRenderedUrl(src);
-    if (!path) {
-      if (src.startsWith(NOTE_ASSET_ORIGIN)) {
-        img.removeAttribute("src");
-        dropped += 1;
-      }
-      continue;
-    }
-    try {
-      const bytes = await readFile(path);
-      const ext = path.slice(path.lastIndexOf(".") + 1);
-      img.setAttribute("src", await blobToDataUrl(new Blob([bytes], { type: mimeFromExt(ext) })));
-    } catch {
+  imgs.forEach((img, i) => {
+    const file = files[i];
+    if (file) {
+      img.setAttribute("src", fileUrlForPath(file));
+    } else {
       img.removeAttribute("src");
       dropped += 1;
     }
-  }
+  });
   return dropped;
 }
 
@@ -145,7 +140,7 @@ export async function exportAsPdf(editorEl: HTMLElement, defaultName: string, lo
 
   const fontFaces = await buildFontFaces();
   const exportRoot = cloneEditorContentForExport(editorEl);
-  const droppedImages = await inlineAssetImages(exportRoot);
+  const droppedImages = await pointAssetImagesAtFiles(exportRoot);
 
   const htmlContent = `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
