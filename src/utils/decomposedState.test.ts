@@ -147,6 +147,46 @@ describe("persistDecomposedState diff cache", () => {
   });
 });
 
+describe("persistDecomposedState keeps a manual title it has not seen", () => {
+  // A window that missed a rename (another device, or a doc-renamed dropped
+  // while it hydrated) still persists its unnamed copy whenever something
+  // else about the note changes.
+  it("does not write a sidecar's customName off from an unnamed in-memory copy", async () => {
+    const id = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+    await persistDecomposedState(fs, DIR, createPersistState(), [
+      makeDoc(id, { fileName: "Named", customName: true }),
+    ], null, [], persistOpts());
+
+    await persistDecomposedState(fs, DIR, state, [
+      makeDoc(id, { fileName: "Auto title", updatedAt: 2000 }),
+    ], null, [], persistOpts());
+
+    expect(await readMeta(fs, DIR, id)).toMatchObject({ fileName: "Named", customName: true, updatedAt: 2000 });
+  });
+
+  it("applies the same rule to a trashed note's sidecar", async () => {
+    const id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+    const trashed = (overrides: Partial<TrashedNote>): TrashedNote => ({
+      id,
+      fileName: "Named",
+      originalFilePath: `${DIR}/${id}.md`,
+      trashFilePath: `${DIR}/.trash/${id}.md`,
+      trashedAt: 5000,
+      groupId: null,
+      createdAt: 1000,
+      updatedAt: 1000,
+      ...overrides,
+    });
+    await persistDecomposedState(fs, DIR, createPersistState(), [], null, [],
+      persistOpts({ trashedNotes: [trashed({ customName: true })] }));
+
+    await persistDecomposedState(fs, DIR, state, [], null, [],
+      persistOpts({ trashedNotes: [trashed({ fileName: "Auto title", updatedAt: 2000 })] }));
+
+    expect(await readMeta(fs, DIR, id)).toMatchObject({ fileName: "Named", customName: true });
+  });
+});
+
 describe("group tombstone propagation", () => {
   it("writes a tombstone entry and clears the pending mark after success", async () => {
     const group = makeGroup("g-doomed", { name: "Doomed" });

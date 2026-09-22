@@ -356,7 +356,7 @@ export function useWindowSync(
             ...docs[idx],
             filePath: newFilePath,
             fileName: newFileName,
-            customName: customName || undefined,
+            customName: customName || docs[idx].customName || undefined,
           };
           return { docs };
         });

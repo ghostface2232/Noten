@@ -496,34 +496,36 @@ describe("contract: recovery repoints the editor at what it restored", () => {
   });
 });
 
-describe("contract: customName only ever turns on for a live note", () => {
+describe("contract: customName only ever turns on", () => {
   // The three empty-note prunes (pruneEmptyCurrentDoc, newNote's willReplace,
   // restoreNote's pruneLeavingDoc) read customName as "the user named this"
-  // and delete permanently, bypassing .trash and .conflicts. A stale read that
-  // turned it off re-armed them on a just-named note — through doc-renamed,
-  // hydration and the .meta watcher in turn. Because no user action clears it,
-  // a read that has it off while the live doc has it on is simply older, and
-  // keepManualTitle rebases on that. The first test pins the premise against a
-  // new literal clear; the second pins the two sites that copy a disk title
-  // onto a live doc. A new such site must route through keepManualTitle too.
-  it("nothing clears it except the legacy trashed-note decomposition", () => {
+  // and delete permanently, bypassing .trash and .conflicts. Because no user
+  // action clears it, a copy of the title pair that has it off can never be
+  // newer than one that has it on; keepManualTitle is that rule, and every
+  // site that merges two copies must go through it.
+  it("no code writes it off literally except the legacy trashed-note decomposition", () => {
+    // Pins the premise against a new literal clear. A clear through a
+    // variable is what the call-site test below guards against.
     const clears: string[] = [];
     for (const file of walk(SRC_ROOT)) {
       const rel = relative(SRC_ROOT, file).replace(/\\/g, "/");
       for (const _hit of read(file).match(/customName\s*:\s*(false|undefined)\b/g) ?? []) clears.push(rel);
     }
-    // Both write sidecars for notes that were already in the legacy trash;
-    // neither touches a live doc.
+    // Both write sidecars for notes already in the legacy trash.
     expect(clears.sort()).toEqual(["hooks/useNotesLoader.ts", "utils/migrateNotesDir.ts"]);
   });
 
-  it("every site folding a disk title into a live doc goes through keepManualTitle", () => {
-    const loader = read(resolve(SRC_ROOT, "hooks/useNotesLoader.ts"));
-    const merge = loader.slice(loader.indexOf("export function mergeHydratedLibrary"));
-    expect(merge.slice(0, merge.indexOf("\n}\n"))).toContain("keepManualTitle(");
-
-    const watcher = read(resolve(SRC_ROOT, "hooks/useFileWatcher.ts"));
-    const apply = watcher.slice(watcher.indexOf("const applyMetaChange"));
-    expect(apply.slice(0, apply.indexOf("}, ["))).toContain("keepManualTitle(");
+  it.each([
+    // mergeHydratedLibrary and the lifecycle mergeNoteMeta.
+    ["hooks/useNotesLoader.ts", 2],
+    // applyMetaChange.
+    ["hooks/useFileWatcher.ts", 1],
+    // persistDecomposedState, for live and trashed notes through one helper.
+    ["utils/decomposedState.ts", 1],
+    // mergeMetaForMigration.
+    ["utils/migrateNotesDir.ts", 1],
+  ])("%s merges title pairs through keepManualTitle", (file, sites) => {
+    const calls = read(resolve(SRC_ROOT, file)).match(/\bkeepManualTitle\(/g) ?? [];
+    expect(calls.length).toBeGreaterThanOrEqual(sites);
   });
 });

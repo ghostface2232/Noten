@@ -1481,6 +1481,51 @@ describe("useNotesLoader — saveManifest persistChain", () => {
     });
   });
 
+  it("keeps a peer's rename that the disk sidecar does not have yet", async () => {
+    // doc-renamed commits the title without bumping this window's title clock,
+    // and the peer's sidecar write can land later. Trashing the note in that
+    // window wrote the old title with customName off, and a restore then
+    // brought it back as an unnamed empty note the prunes delete.
+    libraryStore.seedDirectory("/test-appdata/notes", {
+      docs: [{ ...makeDoc("a"), fileName: "Named", customName: true }],
+      groups: [],
+      trashedNotes: [],
+      activeNoteId: "a",
+    });
+    await writeMeta(refs.fs!, "/test-appdata/notes", {
+      version: 2,
+      id: "a",
+      fileName: "Note a",
+      createdAt: 1000,
+      updatedAt: 1000,
+      groupId: null,
+      groupUpdatedAt: 1000,
+      trashedAt: null,
+    }, "remote-machine");
+
+    const transaction = runPersistenceTransaction(
+      "lifecycle-peer-rename",
+      ["a"],
+      async ({ snapshot, readNoteMeta, mergeNoteMeta }) => mergeNoteMeta("a", {
+        version: 2,
+        id: "a",
+        fileName: snapshot.docs[0].fileName,
+        customName: snapshot.docs[0].customName,
+        createdAt: 1000,
+        updatedAt: 1000,
+        groupId: null,
+        groupUpdatedAt: 1000,
+        trashedAt: 9000,
+      }, await readNoteMeta("a")),
+      () => libraryStore.getSnapshot(),
+    );
+
+    await expect(transaction).resolves.toMatchObject({
+      status: "committed",
+      value: { fileName: "Named", customName: true },
+    });
+  });
+
   it("reports an incomplete drain when a sidecar was quarantined", async () => {
     // A persist that skipped a note's sidecar still marks the revision
     // persisted — flushPersistence loops until it is, and an unreadable

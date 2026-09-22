@@ -3,6 +3,7 @@ import type { NoteDoc, NoteGroup, TrashedNote } from "./noteTypes";
 import type { NoteColorId } from "./noteColors";
 import { getFileBaseName } from "./noteText";
 import { normalizeSep } from "./pathUtils";
+import { keepManualTitle } from "./documentTitle";
 import {
   readAllMeta,
   writeMeta as writeMetaFile,
@@ -369,6 +370,12 @@ export async function persistDecomposedState(
     return { groupId: stateGroupId, groupUpdatedAt: Date.now() };
   };
 
+  const foldDiskTitle = (noteId: string, held: { fileName: string; customName?: boolean }) => {
+    const disk = diskMeta.get(noteId);
+    const pair = { fileName: held.fileName, customName: held.customName };
+    return disk ? keepManualTitle(disk, pair) : pair;
+  };
+
   const metaWrites: Promise<unknown>[] = [];
   // A note whose sidecar exists but could not be read this pass is skipped
   // entirely, docs and trash alike. Writing it would resolve its group through
@@ -386,9 +393,11 @@ export async function persistDecomposedState(
     if (skipUnreadable(doc.id)) continue;
     const pendingGroup = state.pendingGroupMembership.get(doc.id);
     const groupSnap = resolveGroupSnapshot(doc.id, noteIdToGroupId.get(doc.id) ?? null);
+    // A window that never saw a rename still persists its unnamed copy.
+    const title = foldDiskTitle(doc.id, doc);
     const snap: MetaSnapshot = {
-      fileName: doc.fileName,
-      customName: !!doc.customName,
+      fileName: title.fileName,
+      customName: !!title.customName,
       createdAt: doc.createdAt,
       updatedAt: doc.updatedAt,
       pinned: doc.pinned === true,
@@ -431,9 +440,10 @@ export async function persistDecomposedState(
     if (skipUnreadable(t.id)) continue;
     const pendingGroup = state.pendingGroupMembership.get(t.id);
     const groupSnap = resolveGroupSnapshot(t.id, t.groupId ?? null);
+    const title = foldDiskTitle(t.id, t);
     const snap: MetaSnapshot = {
-      fileName: t.fileName,
-      customName: !!t.customName,
+      fileName: title.fileName,
+      customName: !!title.customName,
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
       pinned: t.pinned === true,

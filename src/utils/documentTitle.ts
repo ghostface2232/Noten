@@ -28,19 +28,19 @@ export function getDefaultDocumentTitle(locale: Locale, existingNames?: string[]
 }
 
 /**
- * Rebase a disk or sidecar read of a note's title onto the live doc.
+ * Fold one copy of a note's title pair onto another.
  *
- * `customName` only ever turns on for a live note: a rename sets it together
- * with the manual title, and no user action clears it. A read that has it off
- * while the live doc has it on therefore predates that rename, and adopting it
- * would roll the title back and re-arm the empty-note prunes, which read
- * `customName` and delete permanently. Every other combination defers to the
- * read, so a later rename landing from disk still wins.
+ * `customName` only ever turns on for a note: a rename sets it together with
+ * the manual title, and no user action clears it. A copy that has it off can
+ * therefore never be newer than one that has it on, and letting it win would
+ * roll the title back and re-arm the empty-note prunes, which read
+ * `customName` and delete permanently. Every other combination defers to
+ * `incoming`, so a later rename still wins.
  */
 export function keepManualTitle<T extends { fileName: string; customName?: boolean }>(
-  live: { fileName: string; customName?: boolean },
+  other: { fileName: string; customName?: boolean },
   incoming: T,
 ): T {
-  if (!live.customName || incoming.customName) return incoming;
-  return { ...incoming, fileName: live.fileName, customName: true };
+  if (!other.customName || incoming.customName) return incoming;
+  return { ...incoming, fileName: other.fileName, customName: true };
 }

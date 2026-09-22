@@ -317,8 +317,8 @@ export function mergeHydratedLibrary(
     const diskBodyWins = epoch.projectionIds.has(doc.id)
       || live.content === doc.content
       || live.updatedAt <= doc.updatedAt;
-    // A rename that landed while the disk read was in flight is newer than the
-    // sidecar it read; its title and customName must survive the rebase.
+    // The sidecar this read can predate a rename, whether it landed during the
+    // load or is still queued in a peer; the manual pair survives the rebase.
     docs.push(keepManualTitle(
       live,
       diskBodyWins ? doc : { ...doc, content: live.content, updatedAt: live.updatedAt },
@@ -1180,13 +1180,14 @@ export function runPersistenceTransaction<T>(
             pinned: baseline.clock.pinned > baseline.acknowledgedClock.pinned,
             color: baseline.clock.color > baseline.acknowledgedClock.color,
           };
+          // A rename applied from doc-renamed does not bump this window's title
+          // clock, so the disk pair can still predate it here.
+          const title = preferCanonical.title || !disk ? canonical : keepManualTitle(canonical, disk);
           return {
             ...canonical,
             ...(disk ?? {}),
-            fileName: preferCanonical.title ? canonical.fileName : (disk?.fileName ?? canonical.fileName),
-            customName: preferCanonical.title
-              ? canonical.customName
-              : (disk ? disk.customName : canonical.customName),
+            fileName: title.fileName,
+            customName: title.customName,
             createdAt: disk?.createdAt ?? canonical.createdAt,
             updatedAt: Math.max(canonical.updatedAt, disk?.updatedAt ?? 0),
             pinned: preferCanonical.pinned ? canonical.pinned : (disk ? disk.pinned : canonical.pinned),
