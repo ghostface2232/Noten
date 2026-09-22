@@ -173,9 +173,20 @@ vi.mock("./ownWriteTracker", () => ({
   markOwnWrite: vi.fn(),
 }));
 
-vi.mock("../utils/conflictBackup", () => ({
-  setKnownDiskContent: vi.fn(),
-}));
+// A real (in-memory) baseline map, not a bare stub: pruneEmptyCurrentDoc now
+// refuses to delete a note whose body this session has never read or written,
+// and the ABSENCE of an entry is what encodes that. A stubbed getter would
+// make every doc look unread and silently disable the prune path under test.
+vi.mock("../utils/conflictBackup", () => {
+  const known = new Map<string, string>();
+  return {
+    setKnownDiskContent: vi.fn((filePath: string, content: string) => { known.set(filePath, content); }),
+    getKnownDiskContent: vi.fn((filePath: string) => known.get(filePath)),
+    __seedKnownDiskContent: (filePath: string, content: string) => { known.set(filePath, content); },
+    __forgetKnownDiskContent: (filePath: string) => { known.delete(filePath); },
+    __resetKnownDiskContent: () => { known.clear(); },
+  };
+});
 
 vi.mock("../utils/metadataIO", () => ({
   removeMeta: vi.fn(async () => {}),
@@ -211,6 +222,20 @@ import * as notesLoaderModule from "./useNotesLoader";
 import * as windowSyncModule from "./useWindowSync";
 import type { FlushResult } from "./useAutoSave";
 
+// Escape hatches onto the in-memory baseline map inside the conflictBackup
+// mock above, so tests can model a doc whose body the session has seen and
+// one whose body it has not.
+const conflictBackupHarness = conflictBackupModule as unknown as {
+  __seedKnownDiskContent: (filePath: string, content: string) => void;
+  __forgetKnownDiskContent: (filePath: string) => void;
+  __resetKnownDiskContent: () => void;
+};
+const seedKnownDiskContent = (filePath: string, content: string) =>
+  conflictBackupHarness.__seedKnownDiskContent(filePath, content);
+const forgetSeededDiskContent = (filePath: string) =>
+  conflictBackupHarness.__forgetKnownDiskContent(filePath);
+const resetKnownDiskContent = () => conflictBackupHarness.__resetKnownDiskContent();
+
 const writeMock = fsPlugin.writeTextFile as ReturnType<typeof vi.fn>;
 const readMock = fsPlugin.readTextFile as ReturnType<typeof vi.fn>;
 const copyFileMock = fsPlugin.copyFile as ReturnType<typeof vi.fn>;
@@ -222,7 +247,7 @@ const emitDocCreatedMock = windowSyncModule.emitDocCreated as ReturnType<typeof 
 const emitTrashUpdatedMock = windowSyncModule.emitTrashUpdated as ReturnType<typeof vi.fn>;
 
 function makeDoc(id: string, overrides: Partial<NoteDoc> = {}): NoteDoc {
-  return {
+  const doc: NoteDoc = {
     id,
     filePath: `/notes/${id}.md`,
     fileName: `Note ${id}`,
@@ -232,6 +257,21 @@ function makeDoc(id: string, overrides: Partial<NoteDoc> = {}): NoteDoc {
     updatedAt: 1000,
     ...overrides,
   };
+  // Model the production invariant: a doc reaches the store either from the
+  // loader (attachDocContents seeds the baseline with the body it read) or
+  // from newNote (provisionNoteFile seeds it with the body it wrote). Only a
+  // manifest-cache projection has no baseline — makeProjectionDoc covers that.
+  if (doc.filePath) seedKnownDiskContent(doc.filePath, doc.content);
+  return doc;
+}
+
+/** A doc as a FAILED LOAD leaves it: real filePath, empty in-memory body, and
+ *  no baseline because its body was never read. Deleting one destroys a real
+ *  note, so the pruner must refuse it. */
+function makeProjectionDoc(id: string, overrides: Partial<NoteDoc> = {}): NoteDoc {
+  const doc = makeDoc(id, { content: "", ...overrides });
+  forgetSeededDiskContent(doc.filePath);
+  return doc;
 }
 
 function makeState(overrides: Partial<MarkdownState> = {}): MarkdownState {
@@ -395,6 +435,7 @@ function renderFs(opts: RenderOpts = {}) {
 }
 
 beforeEach(() => {
+  resetKnownDiskContent();
   refs.writeShouldThrow = null;
   refs.writeFaultByPath = new Map();
   refs.readShouldThrow = null;
@@ -1287,6 +1328,43 @@ describe("useFileSystem — switchDocument prunes an empty leaving doc", () => {
       removeMock.mockImplementation(async () => {});
       removeMetaMock.mockImplementation(async () => {});
     }
+  });
+
+  it("refuses to prune a doc whose body this session has never read", async () => {
+    // C1, end to end. A load that fails after the manifest-cache projection is
+    // committed (one unreadable sidecar is enough) leaves every note as
+    // `content: ""` against its REAL filePath. Switching notes then ran the
+    // pruner, which saw an empty body, an empty editor and no custom title,
+    // and deleted the note's .md and sidecar outright — no trash, no backup.
+    const projection = makeProjectionDoc("a");
+    const other = makeDoc("b", { content: "real note" });
+    const removeMock2 = fsPlugin.remove as ReturnType<typeof vi.fn>;
+    const { result } = renderFs({ docs: [projection, other], activeIndex: 0 });
+
+    await act(async () => {
+      await result.current.switchDocument(1);
+    });
+
+    expect(removeMock2).not.toHaveBeenCalledWith("/notes/a.md");
+    expect(removeMetaMock).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), "a");
+    // The note survives in the library and the switch still happens.
+    expect([...libraryStore.getSnapshot().docs].map((d) => d.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("still prunes an empty doc whose body WAS read (the ordinary case)", async () => {
+    // The gate keys off an unread body, not an empty one: a note the loader
+    // read as empty, or one newNote just provisioned, must still be cleaned up.
+    const empty = makeDoc("a", { content: "" });
+    const other = makeDoc("b", { content: "real note" });
+    const removeMock2 = fsPlugin.remove as ReturnType<typeof vi.fn>;
+    const { result } = renderFs({ docs: [empty, other], activeIndex: 0 });
+
+    await act(async () => {
+      await result.current.switchDocument(1);
+    });
+
+    expect(removeMock2).toHaveBeenCalledWith("/notes/a.md");
+    expect([...libraryStore.getSnapshot().docs].map((d) => d.id)).toEqual(["b"]);
   });
 
   it("drops the pruned id from groups and deletes the emptied group", async () => {

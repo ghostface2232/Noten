@@ -29,7 +29,7 @@ import { emitDocCreated, emitDocDeleted, emitDocRenamed, emitGroupsDelta, emitNo
 import { diffGroupsDelta, type GroupsDelta } from "../utils/groupsDelta";
 import type { NoteColorId } from "../utils/noteColors";
 import { markOwnWrite } from "./ownWriteTracker";
-import { setKnownDiskContent } from "../utils/conflictBackup";
+import { getKnownDiskContent, setKnownDiskContent } from "../utils/conflictBackup";
 import { removeMeta as removeMetaFile, type NoteMeta } from "../utils/metadataIO";
 import { logNotenError } from "../utils/crashLog";
 import { NotenError } from "../utils/notenError";
@@ -148,6 +148,12 @@ export async function provisionNoteFile(
     filePath = `${notesDir}/${id}.md`;
     markOwnWrite(filePath, content);
     await atomicWriteText(tauriFileSystem, filePath, content, { failClosed: true });
+    // Seed the conflict-backup baseline for the same reason rewriteNoteFile
+    // does, plus one this path alone carries: an ABSENT baseline is the signal
+    // that this session has never seen the file's body, which pruneEmptyCurrentDoc
+    // reads as "do not delete". A freshly provisioned note must not look like
+    // an unread one, or its empty body could never be pruned.
+    setKnownDiskContent(filePath, content);
     return { filePath, ok: true };
   } catch (error) {
     void logNotenError(new NotenError(
@@ -333,6 +339,17 @@ export function useFileSystem(
     if (!leaving) return { docs: baseDocs, groups: currentGroups };
     const currentContent = leaving.content.trim();
     if (currentContent || leaving.customName || baseDocs.length <= 1) {
+      return { docs: baseDocs, groups: currentGroups };
+    }
+    // An empty in-memory body is not proof the FILE is empty. A manifest-cache
+    // projection carries `content: ""` with a real filePath, and a load that
+    // fails after the projection is committed (one unreadable sidecar, an
+    // unreadable .groups.json) leaves that projection as the canonical library.
+    // Pruning then deletes a real note's body and sidecar outright — no trash,
+    // no conflict backup. The conflict-backup baseline is this session's record
+    // of every body it has read or written, so its absence means we have never
+    // seen this file and must not delete it.
+    if (leaving.filePath && getKnownDiskContent(leaving.filePath) === undefined) {
       return { docs: baseDocs, groups: currentGroups };
     }
     // The docs list can lag the live editor: autosave just committed (isDirty

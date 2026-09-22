@@ -21,6 +21,16 @@ async function ensureReadme(fs: FileSystem, notesDir: string, conflictsDir: stri
 }
 
 // Last known on-disk note bodies, used to detect unseen remote writes.
+//
+// The ABSENCE of an entry is load-bearing: it means this session has neither
+// read nor written that path's body, so the bytes on disk are unknown to us.
+// Every path that learns a body seeds it — the loader's attachDocContents
+// (read), provisionNoteFile and rewriteNoteFile (write), autosave after a
+// durable write, and the watcher after an external change. A doc that reached
+// the store as a manifest-cache projection (`content: ""` with a real
+// filePath, the state a failed load leaves behind) therefore has NO entry,
+// and the two destructive consumers below and in pruneEmptyCurrentDoc key off
+// exactly that to refuse to act on a body they have never seen.
 const lastKnownDiskContent = new Map<string, string>();
 
 export function noteIdToDiskKey(filePath: string): string {
@@ -142,8 +152,19 @@ export async function backupIfRemoteWroteFirst(
   }
 
   const lastKnown = getKnownDiskContent(filePath);
-  // First save in this session: seed the baseline, don't back up speculatively.
+  // No baseline: this session has never seen this file's body (see the map's
+  // comment). Seeding and returning false would let the write destroy unseen
+  // content — the projection case, where `intendedContent` is the empty body
+  // a failed load left in memory and the disk still holds the real note.
+  // Back up whenever the disk holds something we are not about to write; an
+  // empty or already-matching file has nothing to lose, so it still seeds
+  // silently and keeps the ordinary first-save path backup-free.
   if (lastKnown === undefined) {
+    if (diskContent !== "" && !markdownEqual(diskContent, intendedContent)) {
+      await backupRemoteVersion(fs, notesDir, noteId, diskContent);
+      setKnownDiskContent(filePath, diskContent);
+      return true;
+    }
     setKnownDiskContent(filePath, diskContent);
     return false;
   }
