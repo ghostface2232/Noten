@@ -37,6 +37,14 @@ interface DocRenamedPayload {
   oldFilePath: string;
   newFilePath: string;
   newFileName: string;
+  /**
+   * Whether the new title is a manual one. This is not cosmetic: `customName`
+   * is what the three empty-note prunes read as "the user named this, never
+   * auto-delete it", and those prunes bypass both `.trash` and `.conflicts`.
+   * Omitting it left the receiving window believing a just-renamed note was
+   * still auto-titled, so switching notes there deleted it outright.
+   */
+  customName: boolean;
 }
 
 interface DocDeletedPayload {
@@ -156,9 +164,15 @@ function isStaleBodyEvent(docId: string, updatedAt: number): boolean {
   return seen != null && updatedAt < seen;
 }
 
-export function emitDocRenamed(docId: string, oldFilePath: string, newFilePath: string, newFileName: string) {
+export function emitDocRenamed(
+  docId: string,
+  oldFilePath: string,
+  newFilePath: string,
+  newFileName: string,
+  customName: boolean,
+) {
   emit("doc-renamed", {
-    sourceWindow: WINDOW_LABEL, docId, oldFilePath, newFilePath, newFileName,
+    sourceWindow: WINDOW_LABEL, docId, oldFilePath, newFilePath, newFileName, customName,
   } satisfies DocRenamedPayload).catch(() => {});
 }
 
@@ -326,14 +340,24 @@ export function useWindowSync(
       }),
 
       listen<DocRenamedPayload>("doc-renamed", (event) => {
-        const { sourceWindow, docId, newFilePath, newFileName } = event.payload;
+        const { sourceWindow, docId, newFilePath, newFileName, customName } = event.payload;
         if (sourceWindow === WINDOW_LABEL) return;
 
         commitRemote((current) => {
           const idx = current.docs.findIndex((d) => d.id === docId);
           if (idx < 0) return null;
           const docs = [...current.docs];
-          docs[idx] = { ...docs[idx], filePath: newFilePath, fileName: newFileName };
+          // customName travels with the title. Taking the title alone left a
+          // manually named note looking auto-titled here until the sidecar
+          // arrived and the .meta watcher repaired it — and the empty-note
+          // prunes, which read it and delete permanently, run long before
+          // that on a cloud folder.
+          docs[idx] = {
+            ...docs[idx],
+            filePath: newFilePath,
+            fileName: newFileName,
+            customName: customName || undefined,
+          };
           return { docs };
         });
       }),

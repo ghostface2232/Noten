@@ -1464,7 +1464,7 @@ export function useFileSystem(
       // not by preferring the in-memory peer copy over what was just written.
       return { ...entry, content: rw.updated, updatedAt: now };
     }), doc.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
-    emitDocRenamed(doc.id, doc.filePath, doc.filePath, trimmed);
+    emitDocRenamed(doc.id, doc.filePath, doc.filePath, trimmed, true);
     return { renamed: true, linkRewriteSkipped: oldTitleIsAmbiguous };
   }, [captureAndQueueSaveRef, flushDocSaveRef, getLiveDocsSnapshot, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);
 

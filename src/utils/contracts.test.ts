@@ -495,3 +495,40 @@ describe("contract: recovery repoints the editor at what it restored", () => {
     expect(applyBody).toContain("primeMarkdown");
   });
 });
+
+describe("contract: a field the permanent prunes read travels on every event that changes it", () => {
+  // Regression class, hit three times in one review cycle: a destructive path
+  // reads a field, and some channel that changes that field does not carry it,
+  // so a peer window acts on a stale value. `customName` is the one that
+  // deletes: the three empty-note prunes (pruneEmptyCurrentDoc, newNote's
+  // willReplace, restoreNote's pruneLeavingDoc) read it as "the user named
+  // this, never auto-delete it", and they bypass .trash and .conflicts. A
+  // rename changes it, so doc-renamed must carry it and its receiver must
+  // commit it.
+  const SYNC = resolve(SRC_ROOT, "hooks/useWindowSync.ts");
+  const FS = resolve(SRC_ROOT, "hooks/useFileSystem.ts");
+
+  it("the prunes still gate on customName (the premise of this test)", () => {
+    const src = read(FS);
+    const prune = src.slice(src.indexOf("const pruneEmptyCurrentDoc"), src.indexOf("const pruneEmptyCurrentDoc") + 1500);
+    expect(prune).toContain("leaving.customName");
+  });
+
+  it("doc-renamed declares customName and its receiver commits it", () => {
+    const src = read(SYNC);
+    const payload = src.match(/interface DocRenamedPayload \{[\s\S]*?\n\}/)?.[0];
+    expect(payload, "DocRenamedPayload not found").toBeDefined();
+    expect(payload).toMatch(/\bcustomName\s*:/);
+
+    const start = src.indexOf('listen<DocRenamedPayload>("doc-renamed"');
+    expect(start).toBeGreaterThan(-1);
+    const receiver = src.slice(start, start + 1400);
+    expect(receiver).toMatch(/\{[^}]*\bcustomName\b[^}]*\}\s*=\s*event\.payload/);
+    expect(receiver).toMatch(/customName:\s*customName/);
+  });
+
+  it("renameNote tells peers the new title is a manual one", () => {
+    const src = read(FS);
+    expect(src).toMatch(/emitDocRenamed\([^)]*,\s*true\)/);
+  });
+});
