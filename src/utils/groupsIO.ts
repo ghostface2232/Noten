@@ -237,9 +237,12 @@ export function isOrderKeyBetween(key: string, before?: { orderKey?: string }, a
 }
 
 /**
- * `count` ascending keys of one fixed width spread evenly across the key
- * space, so the list they are assigned to has room on both sides of every
- * entry again. Equal widths also mean no key is a prefix of another.
+ * `count` ascending keys spread evenly across the key space, so the list they
+ * are assigned to has room on both sides of every entry again. Keys share one
+ * width, plus FI_MID on any that would end in the minimum digit: "k" followed
+ * by "k0" is a pair nothing fits between, one drag away from another rekey.
+ * The suffix keeps order and no key is a prefix of another, since the width
+ * digits already differ.
  */
 export function genSpreadOrderKeys(count: number): string[] {
   let width = 2;
@@ -253,7 +256,7 @@ export function genSpreadOrderKeys(count: number): string[] {
       key = FI_ALPHABET[n % FI_BASE] + key;
       n = Math.floor(n / FI_BASE);
     }
-    keys.push(key);
+    keys.push(key.endsWith(FI_ALPHABET[0]) ? `${key}${FI_MID}` : key);
   }
   return keys;
 }
