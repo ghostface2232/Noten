@@ -308,8 +308,8 @@ describe("useWindowSync — remote body seeds the conflict baseline", () => {
   });
 
   it("does not seed when this window binds the note to a different path", async () => {
-    const renamed = { ...makeDoc("b"), filePath: "/notes/renamed.md" };
-    renderWindowSync(async () => true, [makeDoc("a"), renamed]);
+    const rebound = { ...makeDoc("b"), filePath: "/notes/elsewhere.md" };
+    renderWindowSync(async () => true, [makeDoc("a"), rebound]);
     await waitFor(() => expect(refs.handlers.has("doc-updated")).toBe(true));
 
     act(() => {
@@ -318,7 +318,7 @@ describe("useWindowSync — remote body seeds the conflict baseline", () => {
       });
     });
 
-    expect(getKnownDiskContent("/notes/renamed.md")).toBeUndefined();
+    expect(getKnownDiskContent("/notes/elsewhere.md")).toBeUndefined();
     expect(getKnownDiskContent("/notes/b.md")).toBeUndefined();
   });
 });
