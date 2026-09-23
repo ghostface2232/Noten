@@ -415,9 +415,12 @@ export async function reconcileFolder(
       // (root was not modified after trashing). The root file is a stale
       // leftover, so fold it into trash WITHOUT clobbering the trash body.
       if (trashState === "readable") {
-        // Back up the *root* copy (the loser) when it diverges, then drop the
-        // stale root file — never overwrite the winning trash body with it.
-        if (trashBody !== rootBody && rootBody.length > 0) {
+        // Back up the *root* copy (the loser), then drop the stale root file —
+        // never overwrite the winning trash body with it. An identical root is
+        // backed up too: it can be a peer's restore whose live sidecar is still
+        // in flight past the grace, and once that peer removes its trash copy
+        // the root removed here would have been the last body anywhere.
+        if (rootBody.length > 0) {
           try {
             await backupRemoteVersion(fs, dir, meta.id, rootBody);
           } catch {

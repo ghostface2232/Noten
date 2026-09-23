@@ -336,7 +336,38 @@ describe("reconcileFolder", () => {
     expect((await readMeta(fs, DIR, id))!.trashedAt).toBe(5000);
     expect(await fs.exists(`${DIR}/${id}.md`)).toBe(false);
     expect(await fs.readTextFile(`${DIR}/.trash/${id}.md`)).toBe("same body");
-    expect(await fs.exists(`${DIR}/.conflicts`)).toBe(false);
+    // Kept anyway: past the grace it may still be a slow peer restore, whose
+    // trash removal would leave this root as the last body anywhere.
+    const backups = (await fs.readDir(`${DIR}/.conflicts`)).filter((e) => e.name?.startsWith(`${id}-`));
+    expect(backups).toHaveLength(1);
+  });
+
+  it("does not copy a root over a trash body that arrived after the read", async () => {
+    const id = "22222222-2222-2222-2222-2222222222ff";
+    const trashPath = `${DIR}/.trash/${id}.md`;
+    await seedMeta(fs, makeMeta(id, { trashedAt: 5000, trashedFromPath: `${DIR}/${id}.md` }));
+    fs.seedTextFile(`${DIR}/${id}.md`, "root body");
+    await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+    vi.advanceTimersByTime(ORPHAN_META_GRACE_MS);
+
+    // The trash body lands between this pass's existence check and its copy.
+    const faulty = wrapWithFaults(fs);
+    let existsCalls = 0;
+    faulty.injectFault({
+      op: "exists",
+      path: trashPath,
+      transformResult: (r) => {
+        existsCalls += 1;
+        if (existsCalls > 1) return r;
+        // This pass reads "absent"; the body syncs in right after.
+        fs.seedTextFile(trashPath, "the deleting machine's body");
+        return false;
+      },
+    });
+    await reconcileFolder(faulty, state, DIR, [], [], LOCALE);
+
+    expect(await fs.readTextFile(trashPath)).toBe("the deleting machine's body");
+    expect(await fs.readTextFile(`${DIR}/${id}.md`)).toBe("root body");
   });
 
   it("keeps a peer's deletion when the trash body has not arrived yet, whatever the clocks say", async () => {
