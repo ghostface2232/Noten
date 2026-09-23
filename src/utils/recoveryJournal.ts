@@ -167,9 +167,9 @@ export async function listRecoveryLabels(
 
 /**
  * Remove an orphaned label's directory once nothing is left in it. Secondary
- * labels are never reused, so without this every secondary window ever opened
- * left an empty directory behind that each start then listed and read.
- * Non-recursive: a record that lands meanwhile makes the remove fail.
+ * labels are never reused, so an emptied orphan directory is dead weight that
+ * every start would list and read. Non-recursive: a record that lands
+ * meanwhile makes the remove fail.
  */
 export async function removeRecoveryLabelIfEmpty(
   fs: FileSystem,

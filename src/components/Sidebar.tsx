@@ -554,8 +554,8 @@ export const Sidebar = memo(function Sidebar({
 
   // Cache stripped note text, and its lowercase form, by content. `docs` is a
   // new array on every autosave commit, so anything derived per note inside
-  // filteredDocs is recomputed about once a second while the user types with
-  // the search open; lowercasing there copied the whole library each time.
+  // filteredDocs runs about once a second while the user types with the
+  // search open; per-note work belongs here, keyed by content, not there.
   const strippedCacheRef = useRef(new Map<string, { content: string; stripped: string; lower: string }>());
   const strippedContentMap = useMemo(() => {
     const cache = strippedCacheRef.current;
@@ -572,7 +572,10 @@ export const Sidebar = memo(function Sidebar({
       const cached = cache.get(doc.id);
       if (cached && cached.content === doc.content) continue;
       const stripped = stripMarkdownContent(doc.content);
-      cache.set(doc.id, { content: doc.content, stripped, lower: stripped.toLowerCase() });
+      const lower = stripped.toLowerCase();
+      // Share the string when lowercasing changed nothing, so an all-lowercase
+      // library is not held twice.
+      cache.set(doc.id, { content: doc.content, stripped, lower: lower === stripped ? stripped : lower });
     }
     for (const id of cache.keys()) {
       if (!activeIds.has(id)) cache.delete(id);
