@@ -28,8 +28,18 @@ interface TrashObservationsFile {
 }
 
 /**
- * Record every incarnation not seen before and drop ids no longer in the
- * trash. A missing or reset record only delays a purge, never hastens one.
+ * How long a sighting outlives its id's absence from the trash being purged.
+ * The file is per machine, not per notes folder, so the trash in hand is only
+ * the current library's; dropping every other id at once would reset the
+ * count for a library the user switched away from, and one switched back and
+ * forth within the retention period would never purge.
+ */
+const ABSENT_OBSERVATION_KEEP_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * Record every incarnation not seen before, and keep other ids' sightings for
+ * a bounded time. A missing or reset record only delays a purge, never hastens
+ * one.
  */
 export function observeTrash(
   previous: TrashObservations,
@@ -37,6 +47,9 @@ export function observeTrash(
   now: number,
 ): TrashObservations {
   const next: TrashObservations = {};
+  for (const [id, seen] of Object.entries(previous)) {
+    if (now - seen.seenAt <= ABSENT_OBSERVATION_KEEP_MS) next[id] = seen;
+  }
   for (const note of trashedNotes) {
     const seen = previous[note.id];
     next[note.id] = seen && seen.trashedAt === note.trashedAt
@@ -44,6 +57,21 @@ export function observeTrash(
       : { trashedAt: note.trashedAt, seenAt: now };
   }
   return next;
+}
+
+/**
+ * Days until the purge may remove this note, counted from the later of its
+ * `trashedAt` and this machine's sighting. A note not yet sighted is first
+ * sighted at the next launch, so it counts from now.
+ */
+export function trashDaysLeft(
+  note: TrashedNote,
+  observation: TrashObservation | undefined,
+  now: number,
+): number {
+  const seenAt = observation && observation.trashedAt === note.trashedAt ? observation.seenAt : now;
+  const since = Math.max(note.trashedAt, seenAt);
+  return Math.max(0, Math.ceil((TRASH_RETENTION_MS - (now - since)) / (24 * 60 * 60 * 1000)));
 }
 
 /**

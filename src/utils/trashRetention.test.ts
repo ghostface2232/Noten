@@ -5,6 +5,7 @@ import {
   TRASH_RETENTION_MS,
   isTrashExpired,
   observeTrash,
+  trashDaysLeft,
   readTrashObservations,
   writeTrashObservations,
 } from "./trashRetention";
@@ -52,10 +53,28 @@ describe("trash retention", () => {
     expect(next.a).toEqual({ trashedAt: retrashed.trashedAt, seenAt: now });
   });
 
-  it("keeps existing observations and drops ids that left the trash", () => {
+  it("keeps existing observations and forgets an absent id only after a long absence", () => {
+    // The file is per machine, the trash in hand is one library's: an id
+    // missing from it may belong to a library the user switched away from.
     const kept = trashed("a", 5);
-    const previous = { a: { trashedAt: 5, seenAt: 7 }, gone: { trashedAt: 1, seenAt: 2 } };
-    expect(observeTrash(previous, [kept], now)).toEqual({ a: { trashedAt: 5, seenAt: 7 } });
+    const previous = {
+      a: { trashedAt: 5, seenAt: 7 },
+      otherLibrary: { trashedAt: 1, seenAt: now - 30 * DAY },
+      longGone: { trashedAt: 1, seenAt: now - 120 * DAY },
+    };
+    expect(observeTrash(previous, [kept], now)).toEqual({
+      a: { trashedAt: 5, seenAt: 7 },
+      otherLibrary: { trashedAt: 1, seenAt: now - 30 * DAY },
+    });
+  });
+
+  it("shows days left from the later of the stamp and this machine's sighting", () => {
+    const skewed = trashed("a", now - 20 * DAY);
+    expect(trashDaysLeft(skewed, undefined, now)).toBe(14);
+    expect(trashDaysLeft(skewed, { trashedAt: skewed.trashedAt, seenAt: now - 3 * DAY }, now)).toBe(11);
+    const own = trashed("b", now - 3 * DAY - 1);
+    expect(trashDaysLeft(own, { trashedAt: own.trashedAt, seenAt: own.trashedAt }, now)).toBe(11);
+    expect(trashDaysLeft(own, { trashedAt: own.trashedAt, seenAt: own.trashedAt }, now + 30 * DAY)).toBe(0);
   });
 
   it("round-trips through disk and treats a damaged file as nothing observed", async () => {

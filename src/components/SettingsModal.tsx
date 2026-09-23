@@ -53,7 +53,8 @@ import type {
   ThemeMode,
   WordWrap,
 } from "../hooks/useSettings";
-import type { TrashedNote } from "../hooks/useNotesLoader";
+import { getTrashObservation, type TrashedNote } from "../hooks/useNotesLoader";
+import { trashDaysLeft } from "../utils/trashRetention";
 
 const NAV_WIDTH = "160px";
 const CONTROL_RADIUS = "6px";
@@ -695,7 +696,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   </div>
                 ) : (
                   trashedNotes.map((note) => {
-                    const daysLeft = Math.max(0, 14 - Math.floor((Date.now() - note.trashedAt) / 86400000));
+                    const daysLeft = trashDaysLeft(note, getTrashObservation(note.id), Date.now());
                     return (
                       <div key={note.id} className={settingItemClass(styles)}>
                         <div className={styles.row}>

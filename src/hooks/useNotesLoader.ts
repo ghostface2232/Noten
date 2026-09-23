@@ -73,6 +73,7 @@ import {
   observeTrash,
   readTrashObservations,
   writeTrashObservations,
+  type TrashObservation,
   type TrashObservations,
 } from "../utils/trashRetention";
 import {
@@ -494,6 +495,14 @@ export async function ensureTrashDir(): Promise<string> {
   return dir;
 }
 
+let trashObservationsCache: TrashObservations = {};
+
+/** This machine's sighting of a trash entry as of the last purge pass, for
+ *  showing how long the purge will actually wait. */
+export function getTrashObservation(noteId: string): TrashObservation | undefined {
+  return trashObservationsCache[noteId];
+}
+
 async function getTrashObservationsPath(): Promise<string> {
   const base = await appDataDir();
   const sep = base.endsWith("/") || base.endsWith("\\") ? "" : "/";
@@ -552,10 +561,19 @@ export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<Tr
     }
   }
 
+  const nextObservations = observeTrash(observations, kept, now);
+  trashObservationsCache = nextObservations;
   if (observationsPath) {
-    // A failed write only restarts the local count next launch.
-    await writeTrashObservations(tauriFileSystem, observationsPath, observeTrash(observations, kept, now))
-      .catch(() => {});
+    // A failed write only restarts the local count next launch, but one that
+    // keeps failing means the trash never purges, so leave a trace of it.
+    await writeTrashObservations(tauriFileSystem, observationsPath, nextObservations).catch((err) => {
+      void logNotenError(new NotenError(
+        "TRASH_PURGE_FAILED",
+        "recoverable",
+        "purgeExpiredTrash: could not record trash sightings; purges wait until one is recorded",
+        { context: { path: observationsPath }, cause: err },
+      ));
+    });
   }
   return kept;
 }
