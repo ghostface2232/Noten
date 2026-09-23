@@ -162,6 +162,13 @@ export interface ReconcileState {
   // live before the body copy lands) and during cloud-sync propagation of a
   // delete→restore, so flipping on first sight would re-trash a live note.
   trashOnlyLiveMeta: Map<string, BodyMissingObservation>;
+  // Trashed-meta-with-root observations whose resolution touches the root
+  // without a conflict copy (identical trash body, or none yet). Gated the
+  // same way: a peer's restoreNote writes the live sidecar, copies the body to
+  // root, then removes the trash copy, and a sync client can deliver the root
+  // before the sidecar. Removing that root on first sight, before the peer's
+  // trash removal lands, leaves no body anywhere once the sidecar arrives.
+  trashedMetaWithRoot: Map<string, BodyMissingObservation>;
 }
 
 /**
@@ -176,12 +183,14 @@ export function createReconcileState(): ReconcileState {
   return {
     bodyMissing: new Map<string, BodyMissingObservation>(),
     trashOnlyLiveMeta: new Map<string, BodyMissingObservation>(),
+    trashedMetaWithRoot: new Map<string, BodyMissingObservation>(),
   };
 }
 
 export function clearReconcileState(state: ReconcileState): void {
   state.bodyMissing.clear();
   state.trashOnlyLiveMeta.clear();
+  state.trashedMetaWithRoot.clear();
 }
 
 export async function reconcileFolder(
@@ -310,6 +319,7 @@ export async function reconcileFolder(
 
   // If root and trash bodies both exist, preserve the losing body before
   // resolving the mismatch.
+  const trashedRootNow = new Set<string>();
   for (const meta of allMeta.values()) {
     if (meta.trashedAt == null) continue;
     const rootName = `${meta.id}.md`;
@@ -355,8 +365,35 @@ export async function reconcileFolder(
       continue;
     }
 
-    if (rootMtime != null && rootMtime > meta.trashedAt) {
-      if (trashState === "readable" && trashBody !== null && trashBody !== rootBody && trashBody.length > 0) {
+    // rootMtime is a file time (often the editing machine's clock, carried by
+    // the sync client) and trashedAt is the deleting machine's clock, so the
+    // comparison is only consulted when an order genuinely has to be chosen.
+    // An identical root is a leftover of the very body that was trashed, and
+    // with no trash body yet there is nothing to order against: in both cases
+    // the deletion stands (the absent case moves the root into .trash, so the
+    // note stays restorable). A peer clock running ahead would otherwise undo
+    // the deletion, and the restore would propagate to every machine.
+    const rootEditedAfterTrash = trashState === "readable"
+      && trashBody !== rootBody
+      && rootMtime != null
+      && rootMtime > meta.trashedAt;
+    if (!rootEditedAfterTrash && (trashState === "absent" || trashBody === rootBody)) {
+      trashedRootNow.add(meta.id);
+      const obs = state.trashedMetaWithRoot.get(meta.id);
+      if (!obs) {
+        state.trashedMetaWithRoot.set(meta.id, { firstSeenAt: Date.now(), passes: 1 });
+        removeTrashedDoc();
+        continue;
+      }
+      if (Date.now() - obs.firstSeenAt < ORPHAN_META_GRACE_MS) {
+        obs.passes += 1;
+        removeTrashedDoc();
+        continue;
+      }
+      state.trashedMetaWithRoot.delete(meta.id);
+    }
+    if (rootEditedAfterTrash) {
+      if (trashBody !== null && trashBody.length > 0) {
         try {
           await backupRemoteVersion(fs, dir, meta.id, trashBody);
         } catch {
@@ -366,9 +403,7 @@ export async function reconcileFolder(
           continue;
         }
       }
-      if (trashState === "readable") {
-        try { markOwnWrite(trashPath); await fs.remove(trashPath); } catch { /* ignore */ }
-      }
+      try { markOwnWrite(trashPath); await fs.remove(trashPath); } catch { /* ignore */ }
       try {
         const restored = { ...meta, trashedAt: null, trashedFromPath: null };
         await writeMetaFile(fs, dir, restored, machineId);
@@ -380,9 +415,12 @@ export async function reconcileFolder(
       // (root was not modified after trashing). The root file is a stale
       // leftover, so fold it into trash WITHOUT clobbering the trash body.
       if (trashState === "readable") {
-        // Back up the *root* copy (the loser) when it diverges, then drop the
-        // stale root file — never overwrite the winning trash body with it.
-        if (trashBody !== rootBody && rootBody.length > 0) {
+        // Back up the *root* copy (the loser), then drop the stale root file —
+        // never overwrite the winning trash body with it. An identical root is
+        // backed up too: it can be a peer's restore whose live sidecar is still
+        // in flight past the grace, and once that peer removes its trash copy
+        // the root removed here would have been the last body anywhere.
+        if (rootBody.length > 0) {
           try {
             await backupRemoteVersion(fs, dir, meta.id, rootBody);
           } catch {
@@ -395,16 +433,30 @@ export async function reconcileFolder(
         try { markOwnWrite(rootPath); await fs.remove(rootPath); } catch { /* ignore */ }
       } else {
         // No trash body yet: the root file is the note's only copy, so move it
-        // into trash to preserve the content the user deleted.
+        // into trash to preserve the content the user deleted. A root the
+        // clocks say was written after the deletion may be an edit the deleting
+        // machine never saw, and its trash body can still arrive on the same
+        // path, so keep a conflict copy first. The copy must not land on a
+        // trash body that arrived since the read above.
         try {
+          if (await fs.exists(trashPath)) {
+            removeTrashedDoc();
+            continue;
+          }
+          if ((rootMtime == null || rootMtime > meta.trashedAt) && rootBody.length > 0) {
+            await backupRemoteVersion(fs, dir, meta.id, rootBody);
+          }
           await fs.mkdir(`${base}.trash`, { recursive: true });
           markOwnWrite(rootPath);
           await fs.copyFile(rootPath, trashPath);
           await fs.remove(rootPath);
-        } catch { /* ignore */ }
+        } catch { /* leave both paths as they are and retry next pass */ }
       }
       removeTrashedDoc();
     }
+  }
+  for (const id of Array.from(state.trashedMetaWithRoot.keys())) {
+    if (!trashedRootNow.has(id)) state.trashedMetaWithRoot.delete(id);
   }
 
   // Keep dirty docs even if disk is gone; autosave can still recreate them.

@@ -69,8 +69,18 @@ import {
   scanAndAbsorbConflicts,
 } from "../utils/conflictFileDetector";
 import {
+  isTrashExpired,
+  observeTrash,
+  readTrashObservations,
+  writeTrashObservations,
+  type TrashObservation,
+  type TrashObservations,
+} from "../utils/trashRetention";
+import {
   setKnownDiskContent,
   resetKnownDiskContent,
+  restoreKnownDiskContent,
+  type KnownDiskContentSnapshot,
 } from "../utils/conflictBackup";
 import {
   getUiStateCached,
@@ -421,17 +431,26 @@ export function setNotesDir(dir: string, reconcileState?: ReconcileState) {
   if (reconcileState) clearReconcileState(reconcileState);
 }
 
-/** Rebind a failed directory migration without discarding the still-live UI state. */
+/**
+ * Rebind a failed directory migration without discarding the still-live UI state.
+ *
+ * `baselines` must be captured alongside `preserved`. The settings effect has
+ * usually already switched to the new directory and cleared the map, and no
+ * hydration follows this rollback. An empty map would make every note's first
+ * save write a spurious .conflicts copy, refuse the empty-note prunes for the
+ * rest of the session, and journal recovery records with no base to apply.
+ */
 export function restoreNotesDir(
   dir: string,
   preserved: LibraryData,
+  baselines: KnownDiskContentSnapshot,
   reconcileState?: ReconcileState,
 ) {
   libraryStore.seedDirectory(dir, preserved, "hydrate");
   notesDirCache = dir;
   imageAssetMigrationV1CompletedAtCache = null;
   resetWriteSnapshots();
-  resetKnownDiskContent();
+  restoreKnownDiskContent(baselines);
   invalidateReadAllMetaCache(tauriFileSystem);
   if (reconcileState) clearReconcileState(reconcileState);
 }
@@ -476,11 +495,31 @@ export async function ensureTrashDir(): Promise<string> {
   return dir;
 }
 
-const TRASH_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+let trashObservationsCache: TrashObservations = {};
+
+/** This machine's sighting of a trash entry as of the last purge pass, for
+ *  showing how long the purge will actually wait. */
+export function getTrashObservation(noteId: string): TrashObservation | undefined {
+  return trashObservationsCache[noteId];
+}
+
+async function getTrashObservationsPath(): Promise<string> {
+  const base = await appDataDir();
+  const sep = base.endsWith("/") || base.endsWith("\\") ? "" : "/";
+  return `${base}${sep}trash-observed.json`;
+}
 
 export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<TrashedNote[]> {
   const now = Date.now();
   const kept: TrashedNote[] = [];
+  // Machine-local (appData, never the synced folder): it records what this
+  // machine's clock saw, which is the point.
+  let observationsPath: string | null = null;
+  let observations: TrashObservations = {};
+  try {
+    observationsPath = await getTrashObservationsPath();
+    observations = await readTrashObservations(tauriFileSystem, observationsPath);
+  } catch { /* nothing observed yet: every entry is kept this launch */ }
   let notesDir: string | null = null;
   try {
     notesDir = await getNotesDir();
@@ -515,13 +554,27 @@ export async function purgeExpiredTrash(trashedNotes: TrashedNote[]): Promise<Tr
     // A body that could not be removed stays listed, so the next launch
     // retries instead of the file lingering in .trash with no sidecar.
     if (
-      now - note.trashedAt <= TRASH_RETENTION_MS
+      !isTrashExpired(note, observations[note.id], now)
       || !await purgeTrashedNoteFiles(tauriFileSystem, notesDir, note)
     ) {
       kept.push(note);
     }
   }
 
+  const nextObservations = observeTrash(observations, kept, now);
+  trashObservationsCache = nextObservations;
+  if (observationsPath) {
+    // A failed write only restarts the local count next launch, but one that
+    // keeps failing means the trash never purges, so leave a trace of it.
+    await writeTrashObservations(tauriFileSystem, observationsPath, nextObservations).catch((err) => {
+      void logNotenError(new NotenError(
+        "TRASH_PURGE_FAILED",
+        "recoverable",
+        "purgeExpiredTrash: could not record trash sightings; purges wait until one is recorded",
+        { context: { path: observationsPath }, cause: err },
+      ));
+    });
+  }
   return kept;
 }
 

@@ -159,6 +159,32 @@ describe("contract: notes directory setting commits after copy, before source cl
     expect(body.slice(migrateAt, persistAt)).toContain("clearSource: false");
   });
 
+  it("use-selected-only captures the conflict baselines before its setting commit", () => {
+    // The commit's settings effect clears the baseline map; a capture after it
+    // would hand the rollback an empty map.
+    const text = read(APP);
+    const body = text.match(/const handleChangeNotesDir[\s\S]*?\n  const handleResetNotesDir/)?.[0];
+    expect(body, "handleChangeNotesDir not found").toBeDefined();
+    const captureAt = body!.indexOf("snapshotKnownDiskContent()");
+    const persistAt = body!.lastIndexOf("persistNotesDirectorySetting(newDir)");
+    expect(captureAt).toBeGreaterThanOrEqual(0);
+    expect(captureAt).toBeLessThan(persistAt);
+    expect(body).toMatch(/revertNotesDirChange\([^)]*preservedBaselines\)/);
+  });
+
+  it("reset-notes-dir probes the default dir before any overwrite", () => {
+    // An unconditional overwrite wiped a library left in the default folder by
+    // an earlier migration's deferred or failed source clear, with no backup.
+    const text = read(APP);
+    const body = text.match(/const handleResetNotesDir[\s\S]*?\n  const \{/)?.[0];
+    expect(body, "handleResetNotesDir not found").toBeDefined();
+    const probeAt = body!.indexOf("hasExistingNotenData(defaultDir)");
+    const drainAt = body!.indexOf("const manifestDrain = flushPersistence(");
+    expect(probeAt).toBeGreaterThanOrEqual(0);
+    expect(probeAt).toBeLessThan(drainAt);
+    expect(body).not.toMatch(/migrateNotesDir\(oldDir, defaultDir, "overwrite"/);
+  });
+
   it("both local migration paths enqueue the metadata barrier before raising the guard", () => {
     const text = read(APP);
     const change = text.match(/const handleChangeNotesDir[\s\S]*?\n  const handleResetNotesDir/)?.[0];
@@ -428,6 +454,28 @@ describe("contract: the close gate always has an escape", () => {
     // The escape: a second attempt must offer to discard rather than refuse.
     expect(handler).toContain("close.unsavedDiscard");
     expect(handler).toMatch(/confirm\(\s*t\("close\.unsavedDiscard"/);
+  });
+
+  it("the override is armed per close attempt, not per window lifetime", () => {
+    // A boolean set on the first refusal and cleared only by a successful
+    // drain turned a refusal hours earlier, for another cause, into an
+    // immediate "closing discards these" on the next failed close.
+    const src = read(APP);
+    const start = src.indexOf("onCloseRequested");
+    const end = src.indexOf("useEffect(() => {", src.indexOf("}).then((fn)", start));
+    const handler = src.slice(start, end > start ? end : undefined);
+    expect(handler).toMatch(/isCloseOverrideArmed\(closeRefusedAtRef\.current, attemptStartedAt\)/);
+    expect(src).not.toMatch(/closeBlockedOnceRef/);
+    // Measured from before the drain to after the refusal dialog closes, so a
+    // drain that blocks for minutes cannot expire every refusal.
+    const startAt = handler.indexOf("const attemptStartedAt = performance.now()");
+    const drainAt = handler.indexOf("await flushAutoSaveRef.current");
+    expect(startAt).toBeGreaterThanOrEqual(0);
+    expect(startAt).toBeLessThan(drainAt);
+    const refusalAt = handler.indexOf("await message(t(\"close.unsavedBlocked\"");
+    const stampAt = handler.indexOf("closeRefusedAtRef.current = performance.now()");
+    expect(refusalAt).toBeGreaterThanOrEqual(0);
+    expect(refusalAt).toBeLessThan(stampAt);
   });
 });
 

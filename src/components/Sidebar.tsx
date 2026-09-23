@@ -57,8 +57,7 @@ function compareNotesForSidebar(a: NoteDoc, b: NoteDoc, order: NotesSortOrder, l
   return a.fileName.localeCompare(b.fileName, locale);
 }
 
-function extractSnippet(text: string, query: string, windowSize = 80): SearchSnippet | null {
-  const lowerText = text.toLowerCase();
+function extractSnippet(text: string, lowerText: string, query: string, windowSize = 80): SearchSnippet | null {
   const lowerQuery = query.toLowerCase();
   const idx = lowerText.indexOf(lowerQuery);
   if (idx === -1) return null;
@@ -553,8 +552,11 @@ export const Sidebar = memo(function Sidebar({
     return () => clearTimeout(timer);
   }, [sidebarSearchQuery]);
 
-  // Cache stripped note text by content to keep search cheap.
-  const strippedCacheRef = useRef(new Map<string, { content: string; stripped: string }>());
+  // Cache stripped note text, and its lowercase form, by content. `docs` is a
+  // new array on every autosave commit, so anything derived per note inside
+  // filteredDocs runs about once a second while the user types with the
+  // search open; per-note work belongs here, keyed by content, not there.
+  const strippedCacheRef = useRef(new Map<string, { content: string; stripped: string; lower: string }>());
   const strippedContentMap = useMemo(() => {
     const cache = strippedCacheRef.current;
     // When search is inactive, filteredDocs short-circuits and never reads this
@@ -569,7 +571,11 @@ export const Sidebar = memo(function Sidebar({
       activeIds.add(doc.id);
       const cached = cache.get(doc.id);
       if (cached && cached.content === doc.content) continue;
-      cache.set(doc.id, { content: doc.content, stripped: stripMarkdownContent(doc.content) });
+      const stripped = stripMarkdownContent(doc.content);
+      const lower = stripped.toLowerCase();
+      // Share the string when lowercasing changed nothing, so an all-lowercase
+      // library is not held twice.
+      cache.set(doc.id, { content: doc.content, stripped, lower: lower === stripped ? stripped : lower });
     }
     for (const id of cache.keys()) {
       if (!activeIds.has(id)) cache.delete(id);
@@ -590,12 +596,12 @@ export const Sidebar = memo(function Sidebar({
       const doc = docs[i];
       if (!colorOk(doc)) continue;
       const titleMatch = doc.fileName.toLowerCase().includes(q);
-      const stripped = strippedContentMap.get(doc.id)?.stripped ?? "";
-      const bodyMatch = stripped.toLowerCase().includes(q);
+      const cached = strippedContentMap.get(doc.id);
+      const bodyMatch = !!cached && cached.lower.includes(q);
       if (!titleMatch && !bodyMatch) continue;
 
       const matchType: MatchType = titleMatch && bodyMatch ? "both" : titleMatch ? "title" : "body";
-      const snippet = bodyMatch ? extractSnippet(stripped, debouncedQuery) : null;
+      const snippet = bodyMatch && cached ? extractSnippet(cached.stripped, cached.lower, debouncedQuery) : null;
       results.push({ doc, originalIndex: i, matchType, snippet });
     }
 

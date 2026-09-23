@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { genOrderKeyAfter, genOrderKeyBefore, genOrderKeyBetween } from "./groupsIO";
+import { genOrderKeyAfter, genOrderKeyBefore, genOrderKeyBetween, genSpreadOrderKeys, isOrderKeyBetween } from "./groupsIO";
 
 const ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
 
@@ -45,6 +45,29 @@ describe("fractional order keys", () => {
       if (!(a < mid && mid < b)) failures.push([a, mid, b]);
     }
     expect(failures).toEqual([]);
+  });
+
+  it("spreads ascending keys, none a prefix of another or ending in the minimum digit", () => {
+    for (const count of [0, 1, 2, 3, 5, 8, 11, 17, 35, 36, 1295, 1296, 3000]) {
+      const keys = genSpreadOrderKeys(count);
+      expect(keys).toHaveLength(count);
+      for (let i = 1; i < keys.length; i++) expect(keys[i - 1] < keys[i]).toBe(true);
+      // In a sorted list a prefix can only be the key right before it.
+      const bad = keys.filter((k, i) => k.endsWith("0")
+        || (i > 0 && k.startsWith(keys[i - 1]))
+        || (i > 0 && !isOrderKeyBetween(genOrderKeyBetween(keys[i - 1], k), { orderKey: keys[i - 1] }, { orderKey: k })));
+      expect(bad).toEqual([]);
+      // Room before the first key, so the next drag to the top is representable.
+      if (count > 0) expect(isOrderKeyBetween(genOrderKeyBefore(keys[0]), undefined, { orderKey: keys[0] })).toBe(true);
+    }
+  });
+
+  it("isOrderKeyBetween compares like the group comparator", () => {
+    expect(isOrderKeyBetween("0i", undefined, { orderKey: "0" })).toBe(false);
+    expect(isOrderKeyBetween("b", { orderKey: "a" }, { orderKey: "c" })).toBe(true);
+    expect(isOrderKeyBetween("a", { orderKey: "a" }, undefined)).toBe(false);
+    expect(isOrderKeyBetween("a", undefined, { orderKey: undefined })).toBe(false);
+    expect(isOrderKeyBetween("a", { orderKey: undefined }, undefined)).toBe(true);
   });
 
   it("genOrderKeyAfter and genOrderKeyBefore stay on their side of the input", () => {

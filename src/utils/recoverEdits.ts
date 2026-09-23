@@ -8,6 +8,7 @@ import {
   listRecoveryLabels,
   planRecovery,
   readRecoveryRecords,
+  removeRecoveryLabelIfEmpty,
   type RecoveryRecord,
 } from "./recoveryJournal";
 
@@ -170,6 +171,8 @@ export async function recoverEdits(deps: RecoverEditsDeps): Promise<RecoveryOutc
       }
       await clearRecoveryRecord(fs, appDataDir, label, record.docId);
     }
+    // Own label excluded: this window may journal again at any moment.
+    if (label !== windowLabel) await removeRecoveryLabelIfEmpty(fs, appDataDir, label);
   }
 
   return outcome;

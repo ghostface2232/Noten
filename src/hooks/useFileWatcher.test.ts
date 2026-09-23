@@ -19,6 +19,7 @@ const refs = vi.hoisted(() => ({
   bodyFaultByPath: new Map<string, Error>(),
   // What isOwnWriteContentMatch should return for the next call.
   ownWriteMatch: false,
+  knownDiskByPath: new Map<string, string>(),
   // readMeta result for applyMetaChange tests.
   metaById: new Map<string, NoteMeta>(),
   // Capture for assertions.
@@ -112,6 +113,7 @@ vi.mock("../utils/conflictFileDetector", () => ({
 
 vi.mock("../utils/conflictBackup", () => ({
   setKnownDiskContent: vi.fn(),
+  getKnownDiskContent: vi.fn((p: string) => refs.knownDiskByPath.get(p)),
 }));
 
 vi.mock("../utils/crashLog", () => ({
@@ -191,7 +193,7 @@ function renderWatcher(opts: {
   const setGroups = vi.fn();
   const setActiveIndex = vi.fn();
   const tiptapRef = makeTiptapRef();
-  const reconcileState: ReconcileState = { bodyMissing: new Map(), trashOnlyLiveMeta: new Map() };
+  const reconcileState: ReconcileState = { bodyMissing: new Map(), trashOnlyLiveMeta: new Map(), trashedMetaWithRoot: new Map() };
   const docs = opts.docs;
   const groups = opts.groups ?? [];
   const activeIndex = opts.activeIndex ?? 0;
@@ -232,6 +234,7 @@ beforeEach(() => {
   refs.bodyByPath = new Map();
   refs.bodyFaultByPath = new Map();
   refs.ownWriteMatch = false;
+  refs.knownDiskByPath.clear();
   refs.metaById = new Map();
   refs.reconcileCalls = 0;
   refs.diskGroupsSnapshot = { entries: {}, metaById: new Map(), collapsedByGroup: {} };
@@ -398,6 +401,70 @@ describe("useFileWatcher — own-write echo skip", () => {
     // setDocs must not have been called with a body update for this doc.
     // A content-hash-confirmed echo is also the one safe case where the full
     // folder reconcile can be skipped entirely.
+    expect(setDocs).not.toHaveBeenCalled();
+    expect(reconcileFolderMock).not.toHaveBeenCalled();
+  });
+
+  // Autosave's own rename is reported WATCH_DELAY_MS later, when the user has
+  // usually typed again. Treating the now-dirty doc as unknown ran a
+  // library-wide reconcile per watcher window for as long as they typed.
+  it("skips the full pass for a dirty doc whose disk bytes are this window's write", async () => {
+    const doc = makeDoc("a", { isDirty: true, content: "typing ahead of the save" });
+    refs.bodyByPath.set(doc.filePath, "what autosave just wrote");
+    refs.ownWriteMatch = true;
+    const { setDocs } = renderWatcher({ docs: [doc] });
+    await waitForRootHandler();
+
+    await act(async () => {
+      await refs.rootHandler!({
+        type: { modify: { kind: "data", mode: "any" } },
+        paths: [doc.filePath],
+        attrs: {},
+      } as unknown as WatchEvent);
+    });
+
+    expect(setDocs).not.toHaveBeenCalled();
+    expect(reconcileFolderMock).not.toHaveBeenCalled();
+  });
+
+  it("still reconciles for a dirty doc whose disk bytes came from elsewhere", async () => {
+    const doc = makeDoc("a", { isDirty: true, content: "local edits" });
+    refs.bodyByPath.set(doc.filePath, "a peer's body");
+    refs.ownWriteMatch = false;
+    renderWatcher({ docs: [doc] });
+    await waitForRootHandler();
+
+    await act(async () => {
+      await refs.rootHandler!({
+        type: { modify: { kind: "data", mode: "any" } },
+        paths: [doc.filePath],
+        attrs: {},
+      } as unknown as WatchEvent);
+    });
+
+    expect(reconcileFolderMock).toHaveBeenCalledTimes(1);
+  });
+
+  // Own-write hashes are per window, so a sibling window saw every autosave
+  // of the typing window as unknown and ran the full pass for each one. The
+  // doc-updated receiver already adopted that body and recorded it as the
+  // baseline, so the bytes are fully known here.
+  it("skips the full pass for a sibling window's save this window already adopted", async () => {
+    const doc = makeDoc("a", { content: "sibling's saved body" });
+    refs.bodyByPath.set(doc.filePath, "sibling's saved body");
+    refs.knownDiskByPath.set(doc.filePath, "sibling's saved body");
+    refs.ownWriteMatch = false;
+    const { setDocs } = renderWatcher({ docs: [doc] });
+    await waitForRootHandler();
+
+    await act(async () => {
+      await refs.rootHandler!({
+        type: { modify: { kind: "data", mode: "any" } },
+        paths: [doc.filePath],
+        attrs: {},
+      } as unknown as WatchEvent);
+    });
+
     expect(setDocs).not.toHaveBeenCalled();
     expect(reconcileFolderMock).not.toHaveBeenCalled();
   });
@@ -695,7 +762,7 @@ describe("useFileWatcher — reconcile drift barrier (P0-5)", () => {
     const setGroups = vi.fn();
     const setActiveIndex = vi.fn();
     const tiptapRef = makeTiptapRef();
-    const reconcileState: ReconcileState = { bodyMissing: new Map(), trashOnlyLiveMeta: new Map() };
+    const reconcileState: ReconcileState = { bodyMissing: new Map(), trashOnlyLiveMeta: new Map(), trashedMetaWithRoot: new Map() };
     const { rerender, unmount } = renderHook(
       (p: { docs: NoteDoc[]; groups: NoteGroup[]; activeIndex: number; activeDocId: string | null }) =>
         useFileWatcher(

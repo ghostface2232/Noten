@@ -7,7 +7,7 @@ import {
   type NoteDoc,
   type NoteGroup,
 } from "./useNotesLoader";
-import { genOrderKeyAfter, genOrderKeyBefore, genOrderKeyBetween } from "../utils/groupsIO";
+import { genOrderKeyAfter, genOrderKeyBefore, genOrderKeyBetween, genSpreadOrderKeys, isOrderKeyBetween } from "../utils/groupsIO";
 import { setGroupCollapsedPersisted } from "./useUiState";
 import { emitGroupsDelta } from "./useWindowSync";
 import { diffGroupsDelta } from "../utils/groupsDelta";
@@ -56,13 +56,15 @@ export function useNoteGroups(
       const newGroupId = crypto.randomUUID();
       markGroupMembershipChanges(initialNoteIds, newGroupId, now);
       persist((prev) => {
+        const last = prev[prev.length - 1];
+        const orderKey = genOrderKeyAfter(last?.orderKey);
         const newGroup: NoteGroup = {
           id: newGroupId,
           name,
           noteIds: initialNoteIds,
           collapsed: false,
           createdAt: now,
-          orderKey: genOrderKeyAfter(prev[prev.length - 1]?.orderKey),
+          orderKey,
           orderUpdatedAt: now,
           updatedAt: now,
         };
@@ -72,7 +74,11 @@ export function useNoteGroups(
               noteIds: g.noteIds.filter((id) => !initialNoteIds.includes(id)),
             }))
           : prev;
-        return [...cleaned, newGroup];
+        const next = [...cleaned, newGroup];
+        // A key past the length clamp is a time key, unrelated to `last`.
+        if (isOrderKeyBetween(orderKey, last, undefined)) return next;
+        const keys = genSpreadOrderKeys(next.length);
+        return next.map((group, i) => ({ ...group, orderKey: keys[i], orderUpdatedAt: now }));
       });
       return newGroupId;
     },
@@ -263,6 +269,11 @@ export function useNoteGroups(
       else if (!before) newKey = genOrderKeyBefore(after!.orderKey);
       else if (!after) newKey = genOrderKeyAfter(before.orderKey);
       else newKey = genOrderKeyBetween(before.orderKey, after.orderKey);
+      // The alphabet cannot express every position (nothing sorts before "0",
+      // and long keys fall back to a time key), and a key persisted on the
+      // wrong side of a neighbour sorts wrong on every machine and cannot be
+      // fixed by repeating the drag. Rekey the whole list instead.
+      const renormalize = !isOrderKeyBetween(newKey, before, after);
 
       // Apply the move by id against `prev`: the moved group keeps whatever a
       // concurrent commit did to its members, and the insertion point is
@@ -288,7 +299,11 @@ export function useNoteGroups(
         }
         const next = [...without];
         next.splice(insertPos, 0, updated);
-        return next;
+        if (!renormalize) return next;
+        // Keyed in the committed array's order, which is the render order and
+        // includes whatever a concurrent commit added.
+        const keys = genSpreadOrderKeys(next.length);
+        return next.map((group, i) => ({ ...group, orderKey: keys[i], orderUpdatedAt: now }));
       });
     },
     [groups, persist],

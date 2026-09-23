@@ -136,8 +136,11 @@ export async function writeGroupsWithMerge(
 // before a bare "0", and nothing fits between a key and that same key plus
 // "0". Both need the caller to renormalize the list rather than a cleverer
 // key; `genOrderKeyBefore` reaching "0" is what leads there, and only a list
-// dragged repeatedly to its minimum gets that far. `groupsIO.test.ts` fuzzes
-// the invariant and pins these two as known-unsatisfiable.
+// dragged repeatedly to its minimum gets that far. The length clamp is a third
+// exception, since its time key has no relation to the inputs. A caller that
+// places a key between neighbours checks `isOrderKeyBetween` and rekeys the
+// whole list with `genSpreadOrderKeys` when it fails. `groupsIO.test.ts` fuzzes
+// the invariant and pins the first two as known-unsatisfiable.
 
 const FI_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
 const FI_BASE = FI_ALPHABET.length;
@@ -220,6 +223,42 @@ export function genOrderKeyBetween(a?: string, b?: string): string {
   // key below a whenever a had one (genOrderKeyBetween("hz", "i") gave "hi").
   const prefix = a.slice(0, i) + digitToChar(aDigit);
   return clampKey(`${prefix}${genOrderKeyAfter(a.slice(i + 1))}`);
+}
+
+/**
+ * Whether `key` sorts strictly between the neighbours, in the order the group
+ * comparator uses (a missing key compares as ""). A missing neighbour is an
+ * open end.
+ */
+export function isOrderKeyBetween(key: string, before?: { orderKey?: string }, after?: { orderKey?: string }): boolean {
+  if (before && !((before.orderKey ?? "") < key)) return false;
+  if (after && !(key < (after.orderKey ?? ""))) return false;
+  return true;
+}
+
+/**
+ * `count` ascending keys spread evenly across the key space, so the list they
+ * are assigned to has room on both sides of every entry again. Keys share one
+ * width, plus FI_MID on any that would end in the minimum digit: "k" followed
+ * by "k0" is a pair nothing fits between, one drag away from another rekey.
+ * The suffix keeps order and no key is a prefix of another, since the width
+ * digits already differ.
+ */
+export function genSpreadOrderKeys(count: number): string[] {
+  let width = 2;
+  while (FI_BASE ** width <= count + 1) width++;
+  const space = FI_BASE ** width;
+  const keys: string[] = [];
+  for (let i = 1; i <= count; i++) {
+    let n = Math.floor((i * space) / (count + 1));
+    let key = "";
+    for (let d = 0; d < width; d++) {
+      key = FI_ALPHABET[n % FI_BASE] + key;
+      n = Math.floor(n / FI_BASE);
+    }
+    keys.push(key.endsWith(FI_ALPHABET[0]) ? `${key}${FI_MID}` : key);
+  }
+  return keys;
 }
 
 export { TOMBSTONE_TTL_MS };

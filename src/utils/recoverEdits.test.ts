@@ -209,6 +209,44 @@ describe("recoverEdits — adopting a window that never reopened", () => {
     expect(await readRecoveryRecords(fs, APP_DATA, "window-2")).toEqual([]);
   });
 
+  // A secondary window's label is new every time it opens, so an orphaned
+  // label never comes back. Leaving its emptied directory behind grew the
+  // recovery root by one directory per secondary window ever opened, all of
+  // them listed and read on every start.
+  it("removes an adopted label's directory once its records are resolved", async () => {
+    fs.seedTextFile(NOTE_PATH, "what was on disk");
+    await writeRecoveryRecord(fs, APP_DATA, "win-1-1", record());
+    fs.seedDir(`${APP_DATA}/recovery/win-2-1`);
+
+    await recoverEdits(deps({ adoptLabels: ["win-1-1", "win-2-1"] }));
+
+    expect(await fs.exists(`${APP_DATA}/recovery/win-1-1`)).toBe(false);
+    expect(await fs.exists(`${APP_DATA}/recovery/win-2-1`)).toBe(false);
+    expect(await findOrphanedLabels(fs, APP_DATA, ["main"])).toEqual([]);
+  });
+
+  it("keeps an adopted label's directory while a record in it is deferred", async () => {
+    // No note file, so planRecovery preserves, which needs a write to
+    // .conflicts; make that fail so the record stays journalled.
+    await writeRecoveryRecord(fs, APP_DATA, "win-1-1", record({ filePath: `${DIR}/missing.md` }));
+    const faulty = wrapWithFaults(fs);
+    faulty.injectFault({ op: "writeTextFile", path: /\/\.conflicts\//, throwError: new Error("ENOSPC") });
+
+    const outcome = await recoverEdits(deps({ fs: faulty, adoptLabels: ["win-1-1"] }));
+
+    expect(outcome.deferred).toBe(1);
+    expect(await readRecoveryRecords(fs, APP_DATA, "win-1-1")).toHaveLength(1);
+  });
+
+  it("keeps its own label's directory, which it may journal into again", async () => {
+    fs.seedTextFile(NOTE_PATH, "what was on disk");
+    await writeRecoveryRecord(fs, APP_DATA, LABEL, record());
+
+    await recoverEdits(deps());
+
+    expect(await fs.exists(`${APP_DATA}/recovery/${LABEL}`)).toBe(true);
+  });
+
   it("leaves a live sibling window's records alone", async () => {
     await writeRecoveryRecord(fs, APP_DATA, "main", record());
     await writeRecoveryRecord(fs, APP_DATA, "window-2", record());

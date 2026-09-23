@@ -83,7 +83,7 @@ import type { RecoveryRecord } from "./utils/recoveryJournal";
 import { tauriFileSystem } from "./utils/fs";
 import { atomicWriteText } from "./utils/atomicWrite";
 import { markOwnWrite } from "./hooks/ownWriteTracker";
-import { setKnownDiskContent } from "./utils/conflictBackup";
+import { setKnownDiskContent, snapshotKnownDiskContent, type KnownDiskContentSnapshot } from "./utils/conflictBackup";
 import { markdownEqual } from "./utils/markdownEqual";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { libraryStore } from "./utils/libraryStore";
@@ -92,6 +92,7 @@ import { exportAsMarkdown, exportAsPdf } from "./utils/exportHandlers";
 import { clearManagedNotesData, clearMigratedSource, hasExistingNotenData, migrateNotesDir } from "./utils/migrateNotesDir";
 import { writeMigrationJournal, type MigrationCleanupMode } from "./utils/migrationJournal";
 import { recoverPendingMigration } from "./utils/migrationCleanup";
+import { isCloseOverrideArmed } from "./utils/closeGate";
 import { colorHex } from "./utils/noteColors";
 import { clampMenuToViewport } from "./utils/clampMenuPosition";
 import { sortSignature } from "./utils/docsSignature";
@@ -128,6 +129,7 @@ type NotesDirConflictChoice = "replace-with-current" | "use-selected-only" | "me
 
 interface NotesDirConflictDialogState {
   path: string;
+  allowUseSelectedOnly: boolean;
   resolve: (choice: NotesDirConflictChoice) => void;
 }
 
@@ -302,9 +304,9 @@ function App() {
   const startupUpdateCheckStartedRef = useRef(false);
   const [tiptapEditor, setTiptapEditor] = useState<import("@tiptap/react").Editor | null>(null);
 
-  const requestNotesDirConflictChoice = useCallback((path: string) => (
+  const requestNotesDirConflictChoice = useCallback((path: string, allowUseSelectedOnly = true) => (
     new Promise<NotesDirConflictChoice>((resolve) => {
-      setNotesDirConflict({ path, resolve });
+      setNotesDirConflict({ path, allowUseSelectedOnly, resolve });
     })
   ), []);
 
@@ -446,10 +448,10 @@ function App() {
   // Fresh-locale ref for effects/handlers registered once (empty deps) that
   // still need to localize a late message — e.g. the close-blocked dialog.
   const localeRef = useRef(locale);
-  // Whether a close attempt has already been refused for an undrained save.
-  // See the close handler: the first refusal explains, the second lets the
-  // user out rather than wedging the window forever.
-  const closeBlockedOnceRef = useRef(false);
+  // When a close attempt was last refused for an undrained save. See the close
+  // handler: the first refusal explains, the attempt right after it lets the
+  // user out rather than wedging the window forever (isCloseOverrideArmed).
+  const closeRefusedAtRef = useRef<number | null>(null);
   localeRef.current = locale;
   const wikiDocIndexSignature = useMemo(
     () => docs.map((doc) => `${doc.id}\u0000${doc.fileName}`).join("\u0001"),
@@ -582,12 +584,12 @@ function App() {
 
   // Finish any migration whose old dir was retained for deferred cleanup (a
   // previous session quit before every window left the old dir). Runs once the
-  // initial load settled, and only acts when this is the sole window.
+  // initial load settled, and does nothing unless this is the sole window.
   const migrationRecoveryDone = useRef(false);
   useEffect(() => {
     if (migrationRecoveryDone.current || isLoading) return;
     migrationRecoveryDone.current = true;
-    void recoverPendingMigration();
+    void getNotesDir().then(recoverPendingMigration).catch(() => {});
   }, [isLoading]);
 
   const fileParamHandled = useRef(false);
@@ -856,8 +858,9 @@ function App() {
     oldDir: string,
     previousNotesDirectory: string,
     preservedLibrary: LibraryData,
+    preservedBaselines: KnownDiskContentSnapshot,
   ) => {
-    restoreNotesDir(oldDir, preservedLibrary, reconcileStateRef.current);
+    restoreNotesDir(oldDir, preservedLibrary, preservedBaselines, reconcileStateRef.current);
     await persistNotesDirectorySetting(previousNotesDirectory);
     setMigrationInProgress(false);
   }, [persistNotesDirectorySetting]);
@@ -979,6 +982,8 @@ function App() {
         trashedNotes: trashedNotesRef.current,
         activeNoteId: docsRef.current[activeIndexRef.current]?.id ?? null,
       };
+      // Captured before the setting commit: its settings effect clears the map.
+      const preservedBaselines = snapshotKnownDiskContent();
       if (!(await persistNotesDirectorySetting(newDir))) {
         await abortMigration("settings.notesDirectory.settingsFailed");
         return;
@@ -990,7 +995,7 @@ function App() {
       } else {
         const result = await clearManagedNotesData(oldDir, newDir);
         if (!result.success) {
-          await revertNotesDirChange(oldDir, previousNotesDirectory, preservedLibrary);
+          await revertNotesDirChange(oldDir, previousNotesDirectory, preservedLibrary, preservedBaselines);
           broadcastMigrationFinished(migrationId, false, "");
           await message(t("settings.notesDirectory.migrationFailed", locale), { kind: "error" });
           return;
@@ -1004,17 +1009,34 @@ function App() {
     broadcastMigrationFinished(migrationId, true, newDir, sourceRetained);
     // If we turned out to be the only window after all, finish the deferred
     // cleanup now instead of waiting for the next launch.
-    if (sourceRetained) void recoverPendingMigration();
+    if (sourceRetained) void recoverPendingMigration(newDir);
     // Reload owns releasing migrationInProgress.
   }, [locale, persistNotesDirectorySetting, requestNotesDirConflictChoice, revertNotesDirChange, settings.notesDirectory]);
 
   const handleResetNotesDir = useCallback(async () => {
     if (!settings.notesDirectory) return;
 
-    const ok = await confirm(t("settings.notesDirectory.confirmMove", locale));
-    if (!ok) return;
-
     const oldDir = await getNotesDir();
+    // Resolve the default dir without mutating the loader cache — the cache
+    // must keep pointing at the old dir until the copy lands and the setting
+    // commits.
+    const defaultDir = await getDefaultNotesDir();
+
+    // The default folder is usually empty, but an earlier migration's deferred
+    // or failed source clear leaves a library there, which an overwrite would
+    // delete with no backup, so ask exactly as a folder change would. Keeping
+    // only the default folder's notes is not offered here; it needs the
+    // no-copy branch of handleChangeNotesDir.
+    const normalize = (p: string) => p.replace(/[\\/]+$/, "").replace(/\\/g, "/");
+    let mergeStrategy: "merge" | "overwrite" = "overwrite";
+    if (normalize(oldDir) !== normalize(defaultDir) && await hasExistingNotenData(defaultDir)) {
+      const choice = await requestNotesDirConflictChoice(defaultDir, false);
+      if (choice !== "merge" && choice !== "replace-with-current") return;
+      if (choice === "merge") mergeStrategy = "merge";
+    } else {
+      const ok = await confirm(t("settings.notesDirectory.confirmMove", locale));
+      if (!ok) return;
+    }
 
     // Flush before moving paths.
     await flushAutoSaveRef.current?.().catch(() => {});
@@ -1054,16 +1076,11 @@ function App() {
       await message(t(messageKey, locale), { kind: "error" });
     };
 
-    // Resolve the default dir without mutating the loader cache — the cache
-    // must keep pointing at the old dir until the copy lands and the setting
-    // commits.
-    const defaultDir = await getDefaultNotesDir();
-
     // Same crash-safe ordering as handleChangeNotesDir: copy → persist →
     // clear source (or defer the clear when not all windows drained).
     let result;
     try {
-      result = await migrateNotesDir(oldDir, defaultDir, "overwrite", { clearSource: false });
+      result = await migrateNotesDir(oldDir, defaultDir, mergeStrategy, { clearSource: false });
     } catch (err) {
       setMigrationInProgress(false);
       broadcastMigrationFinished(migrationId, false, "");
@@ -1091,9 +1108,9 @@ function App() {
     setCurrentNotesDir(defaultDir);
     setReloadKey((k) => k + 1);
     broadcastMigrationFinished(migrationId, true, "", sourceRetained);
-    if (sourceRetained) void recoverPendingMigration();
+    if (sourceRetained) void recoverPendingMigration(defaultDir);
     // Reload owns releasing migrationInProgress.
-  }, [locale, persistNotesDirectorySetting, settings.notesDirectory]);
+  }, [locale, persistNotesDirectorySetting, requestNotesDirConflictChoice, settings.notesDirectory]);
 
   const {
     chromeVisible,
@@ -1384,6 +1401,12 @@ function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     getCurrentWindow().onCloseRequested(async (event) => {
+      // Taken before the drain, and the refusal is stamped after its dialog
+      // closes: an episode is the gap between the user dismissing a refusal and
+      // trying again, not the drain time. A drain that blocks for minutes on a
+      // vanished share would otherwise expire every refusal before the next
+      // attempt reached the check, and the override could never be reached.
+      const attemptStartedAt = performance.now();
       // Four-step drain: (1) flushAutoSave commits the current doc's pending
       // edits, (2) awaitInFlightSaves waits for any background save queued by
       // switchDocument's fast path, (3) flushPendingSnapshots retries any
@@ -1420,7 +1443,7 @@ function App() {
         // the window on both while promising they would come back.
         const bodiesRecorded = (await journalPendingEditsRef.current?.()) ?? false;
         if (bodiesRecorded && manifestOk && !hasUnsaveableChangesRef.current?.()) {
-          closeBlockedOnceRef.current = false;
+          closeRefusedAtRef.current = null;
           await message(t("close.unsavedJournalled", localeRef.current), { kind: "info" });
           return;
         }
@@ -1430,12 +1453,12 @@ function App() {
         // with every edit intact. A gate that ONLY ever refuses is a trap
         // though: when the cause cannot be fixed from here — a sidecar that
         // stays unreadable, a folder that is gone — the window can never be
-        // closed at all. So a second attempt offers the override and says
-        // plainly what it discards.
-        if (!closeBlockedOnceRef.current) {
-          closeBlockedOnceRef.current = true;
+        // closed at all. So the attempt right after a refusal offers the
+        // override and says plainly what it discards.
+        if (!isCloseOverrideArmed(closeRefusedAtRef.current, attemptStartedAt)) {
           event.preventDefault();
           await message(t("close.unsavedBlocked", localeRef.current), { kind: "error" });
+          closeRefusedAtRef.current = performance.now();
           return;
         }
         const discard = await confirm(t("close.unsavedDiscard", localeRef.current), { kind: "warning" });
@@ -1452,7 +1475,7 @@ function App() {
         return;
       }
       // The drain succeeded, so a later failure starts the two-step gate over.
-      closeBlockedOnceRef.current = false;
+      closeRefusedAtRef.current = null;
       if (hasUnsaveableChangesRef.current?.()) {
         // A dirty doc with no filePath (loader-failure stub whose provisioning
         // keeps failing) can never drain, so blocking would wedge the window
@@ -1932,21 +1955,23 @@ function App() {
                 {t("dialog.replaceWithCurrent", locale)}
               </Button>
             </Tooltip>
-            <Tooltip
-              content={t("settings.notesDirectory.useSelectedOnlyHelp", locale)}
-              relationship="description"
-              positioning="above"
-              appearance={isDarkMode ? "inverted" : undefined}
-            >
-              <Button
-                size="medium"
-                appearance="subtle"
-                onClick={() => resolveNotesDirConflictChoice("use-selected-only")}
-                style={{ justifyContent: "flex-start", color: tokens.colorPaletteRedForeground1 }}
+            {notesDirConflict?.allowUseSelectedOnly !== false && (
+              <Tooltip
+                content={t("settings.notesDirectory.useSelectedOnlyHelp", locale)}
+                relationship="description"
+                positioning="above"
+                appearance={isDarkMode ? "inverted" : undefined}
               >
-                {t("dialog.useSelectedOnly", locale)}
-              </Button>
-            </Tooltip>
+                <Button
+                  size="medium"
+                  appearance="subtle"
+                  onClick={() => resolveNotesDirConflictChoice("use-selected-only")}
+                  style={{ justifyContent: "flex-start", color: tokens.colorPaletteRedForeground1 }}
+                >
+                  {t("dialog.useSelectedOnly", locale)}
+                </Button>
+              </Tooltip>
+            )}
             <Tooltip
               content={t("settings.notesDirectory.mergeHelp", locale)}
               relationship="description"

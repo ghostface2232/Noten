@@ -9,10 +9,12 @@ import { getNotesDir } from "./useNotesLoader";
  * Tauri binding for the recovery replay. Kept apart from `recoverEdits` so the
  * decisions stay testable without a window or an app-data path.
  *
- * Window labels are reused across app runs, so a window normally finds its own
- * previous run's records. It also adopts labels no live window owns — a second
- * window that was open when the process died and did not reopen this time. A
- * live sibling's records are left alone: that window is still protecting them.
+ * Only `main` reopens under the same label and finds its own previous run's
+ * records. A secondary window's label is new every time it opens, so its
+ * records, whether it closed with edits journalled or died with the process,
+ * come back through the orphan sweep: the sweeping window adopts every label
+ * no live window owns. A live sibling's records are left alone: that window is
+ * still protecting them.
  */
 export async function recoverJournalledEdits(
   applyBody: (record: RecoveryRecord) => Promise<boolean>,

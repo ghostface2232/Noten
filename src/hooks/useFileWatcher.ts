@@ -26,7 +26,7 @@ import { isOwnWrite, isOwnWriteContentMatch, pruneOwnWrites, pathKey } from "./o
 import { getFileTimestamps } from "../utils/fileTimestamps";
 import { readMeta, invalidateReadAllMetaCache } from "../utils/metadataIO";
 import { scanAndAbsorbConflicts } from "../utils/conflictFileDetector";
-import { setKnownDiskContent } from "../utils/conflictBackup";
+import { getKnownDiskContent, setKnownDiskContent } from "../utils/conflictBackup";
 import { markdownEqual } from "../utils/markdownEqual";
 import { keepManualTitle } from "../utils/documentTitle";
 import { NotenError } from "../utils/notenError";
@@ -464,7 +464,17 @@ export function useFileWatcher(
       }
       const doc = currentDocs[docIndex];
       if (doc.isDirty) {
-        shouldReconcile = true;
+        // The event for autosave's own rename arrives WATCH_DELAY_MS later, by
+        // which time the user has typed again and the doc is dirty. Bytes that
+        // match a write from this window are the same proof the clean path
+        // accepts, so the typing window skips the library-wide pass for them.
+        // Anything else still takes the pass; the dirty body is never replaced
+        // here either way.
+        let diskContent: string | null = null;
+        try { diskContent = await readTextFile(doc.filePath); } catch { /* reconcile decides */ }
+        if (diskContent === null || !(await isOwnWriteContentMatch(doc.filePath, diskContent))) {
+          shouldReconcile = true;
+        }
         continue;
       }
 
@@ -477,6 +487,10 @@ export function useFileWatcher(
       }
 
       if (await isOwnWriteContentMatch(doc.filePath, content)) continue;
+      // A sibling window's autosave: this window already adopted the body
+      // through doc-updated, which recorded it as the baseline, so the bytes
+      // are known in full. Own-write hashes are per window and cannot say so.
+      if (content === doc.content && content === getKnownDiskContent(doc.filePath)) continue;
       shouldReconcile = true;
 
       // A purely cosmetic external rewrite (line endings / trailing newline) is

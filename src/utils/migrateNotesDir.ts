@@ -76,6 +76,10 @@ function normalizePathForCompare(path: string): string {
   return normalizeSep(path).replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 
+export function isSameDirectory(a: string, b: string): boolean {
+  return normalizePathForCompare(a) === normalizePathForCompare(b);
+}
+
 function isSameOrChildPath(parentPath: string, candidatePath: string): boolean {
   const parent = normalizePathForCompare(parentPath);
   const candidate = normalizePathForCompare(candidatePath);
@@ -115,13 +119,16 @@ async function clearDirContents(dir: string, protectedPath?: string, strict = fa
   const base = normalizeSep(dir);
   for (const entry of entries) {
     if (!entry.name) continue;
+    // `.conflicts` is deliberately not managed: it holds bodies the app already
+    // decided to preserve, often the only copy left, and its README tells the
+    // user it is theirs to delete. Every copy of it is best-effort, so a
+    // source clear could also destroy an archive that never arrived.
     const isManagedRootEntry = entry.name === "manifest.json"
       || entry.name === "manifest.legacy.json"
       || entry.name === ".groups.json"
       || entry.name === ".meta"
       || entry.name === ".assets"
       || entry.name === ".trash"
-      || entry.name === ".conflicts"
       || (entry.isFile && entry.name.endsWith(".md"));
     if (!isManagedRootEntry) continue;
     const target = `${base}${entry.name}`;
@@ -606,7 +613,9 @@ export async function hasExistingNotenData(dir: string): Promise<boolean> {
     if (entries.some((e) => e.name === ".meta" && e.isDirectory)) return true;
     if (entries.some((e) => e.name === ".trash" && e.isDirectory)) return true;
     if (entries.some((e) => e.name === ".assets" && e.isDirectory)) return true;
-    if (entries.some((e) => e.name === ".conflicts" && e.isDirectory)) return true;
+    // A lone `.conflicts` is not library data: no clear removes it, so every
+    // folder a library ever moved out of keeps one, and counting it would put
+    // the merge/overwrite prompt in front of moving back.
   } catch {
     return true;
   }

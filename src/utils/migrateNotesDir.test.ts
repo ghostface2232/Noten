@@ -35,7 +35,7 @@ vi.mock("./crashLog", () => ({
   logNotenError: vi.fn(() => Promise.resolve()),
 }));
 
-import { migrateNotesDir } from "./migrateNotesDir";
+import { clearManagedNotesData, hasExistingNotenData, migrateNotesDir } from "./migrateNotesDir";
 import * as crashLogModule from "./crashLog";
 import { NotenError } from "./notenError";
 import { invalidateReadAllMetaCache, type NoteMeta } from "./metadataIO";
@@ -170,6 +170,56 @@ describe("migrateNotesDir — overwrite happy path", () => {
     // The source's managed entries are cleared after a successful move.
     expect(await refs.fs!.exists("/from/a.md")).toBe(false);
     expect(await refs.fs!.exists("/from/.meta")).toBe(false);
+  });
+});
+
+// .conflicts holds bodies the app already chose to preserve, often the only
+// copy left. Both overwrite paths used to wipe the destination's archive, and
+// the source's copy is best-effort, so a source clear could also destroy one
+// that never arrived.
+describe("migrateNotesDir — the conflict archive is never cleared", () => {
+  it("overwrite keeps the destination's archive and adds the source's", async () => {
+    refs.fs!.seedTextFile("/from/a.md", "source body");
+    refs.fs!.seedTextFile("/from/.conflicts/a-1-src.md", "source backup");
+    refs.fs!.seedTextFile("/to/b.md", "destination body");
+    refs.fs!.seedTextFile("/to/.conflicts/b-1-dest.md", "destination backup");
+
+    const result = await migrateNotesDir("/from", "/to", "overwrite");
+    expect(result).toEqual({ success: true });
+
+    expect(await refs.fs!.exists("/to/b.md")).toBe(false);
+    expect(await refs.fs!.readTextFile("/to/.conflicts/b-1-dest.md")).toBe("destination backup");
+    expect(await refs.fs!.readTextFile("/to/.conflicts/a-1-src.md")).toBe("source backup");
+  });
+
+  it("the source clear leaves the source's archive in place", async () => {
+    refs.fs!.seedTextFile("/from/a.md", "source body");
+    refs.fs!.seedTextFile("/from/.conflicts/a-1-src.md", "source backup");
+
+    for (const strategy of ["overwrite", "merge"] as const) {
+      const result = await migrateNotesDir("/from", `/to-${strategy}`, strategy);
+      expect(result).toEqual({ success: true });
+      expect(await refs.fs!.readTextFile("/from/.conflicts/a-1-src.md")).toBe("source backup");
+      refs.fs!.seedTextFile("/from/a.md", "source body");
+    }
+    expect(await refs.fs!.exists("/from/a.md")).toBe(true);
+  });
+
+  it("clearManagedNotesData leaves the archive in place", async () => {
+    refs.fs!.seedTextFile("/from/a.md", "discarded body");
+    refs.fs!.seedTextFile("/from/.conflicts/a-1-src.md", "backup");
+
+    expect(await clearManagedNotesData("/from")).toEqual({ success: true });
+
+    expect(await refs.fs!.exists("/from/a.md")).toBe(false);
+    expect(await refs.fs!.readTextFile("/from/.conflicts/a-1-src.md")).toBe("backup");
+  });
+
+  it("a folder holding only an archive is not treated as existing library data", async () => {
+    refs.fs!.seedTextFile("/to/.conflicts/a-1-src.md", "backup");
+    expect(await hasExistingNotenData("/to")).toBe(false);
+    refs.fs!.seedTextFile("/to/a.md", "body");
+    expect(await hasExistingNotenData("/to")).toBe(true);
   });
 });
 
