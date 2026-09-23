@@ -66,6 +66,17 @@ async function seedMeta(fs: InMemoryFileSystem, meta: NoteMeta): Promise<void> {
 let fs: InMemoryFileSystem;
 let state: ReconcileState;
 
+/** A trashed sidecar beside a root body waits out the grace before any
+ *  conflict-free resolution touches the root; run the pass that acts. */
+async function reconcileAfterGrace(
+  target: Parameters<typeof reconcileFolder>[0],
+  docs: NoteDoc[] = [],
+): Promise<Awaited<ReturnType<typeof reconcileFolder>>> {
+  await reconcileFolder(target, state, DIR, docs, [], LOCALE);
+  vi.advanceTimersByTime(ORPHAN_META_GRACE_MS);
+  return reconcileFolder(target, state, DIR, docs, [], LOCALE);
+}
+
 beforeEach(async () => {
   // Orphan-meta deletion is gated on wall-clock age, so the suite pins time.
   vi.useFakeTimers();
@@ -315,6 +326,10 @@ describe("reconcileFolder", () => {
     fs.seedTextFile(`${DIR}/${id}.md`, "same body");
     fs.seedTextFile(`${DIR}/.trash/${id}.md`, "same body");
 
+    const first = await reconcileFolder(fs, state, DIR, [makeDoc(id)], [], LOCALE);
+    expect(first.docs.find((d) => d.id === id)).toBeUndefined();
+    expect(await fs.exists(`${DIR}/${id}.md`)).toBe(true);
+    vi.advanceTimersByTime(ORPHAN_META_GRACE_MS);
     const result = await reconcileFolder(fs, state, DIR, [makeDoc(id)], [], LOCALE);
 
     expect(result.docs.find((d) => d.id === id)).toBeUndefined();
@@ -330,13 +345,52 @@ describe("reconcileFolder", () => {
     await seedMeta(fs, makeMeta(id, { trashedAt: 5000, trashedFromPath: `${DIR}/${id}.md` }));
     fs.seedTextFile(`${DIR}/${id}.md`, "only copy");
 
-    const result = await reconcileFolder(fs, state, DIR, [makeDoc(id)], [], LOCALE);
+    const result = await reconcileAfterGrace(fs, [makeDoc(id)]);
 
     expect(result.docs.find((d) => d.id === id)).toBeUndefined();
     expect((await readMeta(fs, DIR, id))!.trashedAt).toBe(5000);
     expect(await fs.exists(`${DIR}/${id}.md`)).toBe(false);
     // Still restorable from the trash.
     expect(await fs.readTextFile(`${DIR}/.trash/${id}.md`)).toBe("only copy");
+  });
+
+  // A peer's restoreNote writes the live sidecar, copies the body to root and
+  // then removes its trash copy. A sync client that delivers the root first
+  // made the identical-root rule delete it; once the trash removal and the
+  // live sidecar landed there was no body left anywhere.
+  it("leaves a root that arrived ahead of a peer's restore sidecar alone until it settles", async () => {
+    const id = "22222222-2222-2222-2222-2222222222dd";
+    await seedMeta(fs, makeMeta(id, { trashedAt: 5000, trashedFromPath: `${DIR}/${id}.md` }));
+    fs.seedTextFile(`${DIR}/${id}.md`, "restored body");
+    fs.seedTextFile(`${DIR}/.trash/${id}.md`, "restored body");
+
+    await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+    expect(await fs.exists(`${DIR}/${id}.md`)).toBe(true);
+
+    // The peer's trash removal and live sidecar arrive within the grace.
+    vi.advanceTimersByTime(10_000);
+    await fs.remove(`${DIR}/.trash/${id}.md`);
+    await seedMeta(fs, makeMeta(id));
+    invalidateReadAllMetaCache(fs);
+    vi.advanceTimersByTime(ORPHAN_META_GRACE_MS);
+    const settled = await reconcileFolder(fs, state, DIR, [], [], LOCALE);
+
+    expect(settled.docs.find((d) => d.id === id)?.content).toBe("restored body");
+    expect(state.trashedMetaWithRoot.has(id)).toBe(false);
+  });
+
+  it("keeps a conflict copy of a root written after the deletion before moving it into trash", async () => {
+    // Possibly an edit the deleting machine never saw, and that machine's
+    // trash body can still arrive on the same path.
+    const id = "22222222-2222-2222-2222-2222222222ee";
+    await seedMeta(fs, makeMeta(id, { trashedAt: 5000, trashedFromPath: `${DIR}/${id}.md` }));
+    fs.seedTextFile(`${DIR}/${id}.md`, "edited after the delete");
+
+    await reconcileAfterGrace(fs);
+
+    expect(await fs.readTextFile(`${DIR}/.trash/${id}.md`)).toBe("edited after the delete");
+    const backups = (await fs.readDir(`${DIR}/.conflicts`)).filter((e) => e.name?.startsWith(`${id}-`));
+    expect(backups).toHaveLength(1);
   });
 
   it("keeps note trashed when stat fails on the root body (cloud-sync placeholder)", async () => {
@@ -355,7 +409,7 @@ describe("reconcileFolder", () => {
       throwError: new Error("EBUSY: simulated cloud-sync lock"),
     });
 
-    const result = await reconcileFolder(faultFs, state, DIR, [], [], LOCALE);
+    const result = await reconcileAfterGrace(faultFs);
 
     const meta = await readMeta(faultFs, DIR, id);
     expect(meta).not.toBeNull();
@@ -381,7 +435,7 @@ describe("reconcileFolder", () => {
       transformResult: (s) => ({ ...(s as object), mtime: null }),
     });
 
-    await reconcileFolder(faultFs, state, DIR, [], [], LOCALE);
+    await reconcileAfterGrace(faultFs);
 
     const meta = await readMeta(faultFs, DIR, id);
     expect(meta!.trashedAt).toBe(trashedAt);
@@ -399,9 +453,10 @@ describe("reconcileFolder", () => {
     await seedMeta(fs, makeMeta(id, { trashedAt: rootMtime + 60_000, trashedFromPath: `${DIR}/${id}.md` }));
 
     const startingDoc = makeDoc(id);
-    const result = await reconcileFolder(fs, state, DIR, [startingDoc], [], LOCALE);
+    const first = await reconcileFolder(fs, state, DIR, [startingDoc], [], LOCALE);
+    expect(first.changed).toBe(true);
+    const result = await reconcileAfterGrace(fs, first.docs);
 
-    expect(result.changed).toBe(true);
     expect(result.docs.find((d) => d.id === id)).toBeUndefined();
     expect(await fs.exists(`${DIR}/.trash/${id}.md`)).toBe(true);
     expect(await fs.exists(`${DIR}/${id}.md`)).toBe(false);

@@ -191,7 +191,7 @@ function renderWatcher(opts: {
   const setGroups = vi.fn();
   const setActiveIndex = vi.fn();
   const tiptapRef = makeTiptapRef();
-  const reconcileState: ReconcileState = { bodyMissing: new Map(), trashOnlyLiveMeta: new Map() };
+  const reconcileState: ReconcileState = { bodyMissing: new Map(), trashOnlyLiveMeta: new Map(), trashedMetaWithRoot: new Map() };
   const docs = opts.docs;
   const groups = opts.groups ?? [];
   const activeIndex = opts.activeIndex ?? 0;
@@ -695,7 +695,7 @@ describe("useFileWatcher — reconcile drift barrier (P0-5)", () => {
     const setGroups = vi.fn();
     const setActiveIndex = vi.fn();
     const tiptapRef = makeTiptapRef();
-    const reconcileState: ReconcileState = { bodyMissing: new Map(), trashOnlyLiveMeta: new Map() };
+    const reconcileState: ReconcileState = { bodyMissing: new Map(), trashOnlyLiveMeta: new Map(), trashedMetaWithRoot: new Map() };
     const { rerender, unmount } = renderHook(
       (p: { docs: NoteDoc[]; groups: NoteGroup[]; activeIndex: number; activeDocId: string | null }) =>
         useFileWatcher(
