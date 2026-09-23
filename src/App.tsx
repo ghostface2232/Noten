@@ -584,7 +584,7 @@ function App() {
 
   // Finish any migration whose old dir was retained for deferred cleanup (a
   // previous session quit before every window left the old dir). Runs once the
-  // initial load settled, and only acts when this is the sole window.
+  // initial load settled, and does nothing unless this is the sole window.
   const migrationRecoveryDone = useRef(false);
   useEffect(() => {
     if (migrationRecoveryDone.current || isLoading) return;

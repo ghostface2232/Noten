@@ -127,13 +127,13 @@ describe("runDeferredCleanup — the journalled old dir is live again", () => {
     expect(clearJournalMock).toHaveBeenCalledTimes(1);
   });
 
-  it("drops it even while other windows are open", async () => {
+  it("leaves it for a sole-window run, since a peer's cached dir can lag the migration", async () => {
     refs.windowLabels = ["main", "second"];
     refs.journal = mergeJournal;
     await recoverPendingMigration("/old");
     expect(migrateMock).not.toHaveBeenCalled();
     expect(clearManagedMock).not.toHaveBeenCalled();
-    expect(clearJournalMock).toHaveBeenCalledTimes(1);
+    expect(clearJournalMock).not.toHaveBeenCalled();
   });
 });
 

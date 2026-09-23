@@ -27,11 +27,6 @@ import { readMigrationJournal, clearMigrationJournal, type MigrationJournal } fr
  * clean, and it is dropped without touching either folder.
  */
 export async function runDeferredCleanup(journal: MigrationJournal, currentNotesDir: string): Promise<boolean> {
-  if (isSameDirectory(journal.oldDir, currentNotesDir)) {
-    await clearMigrationJournal();
-    return true;
-  }
-
   let windowCount: number;
   try {
     windowCount = (await getAllWebviewWindows()).length;
@@ -39,6 +34,14 @@ export async function runDeferredCleanup(journal: MigrationJournal, currentNotes
     return false; // can't confirm we're alone — defer to a later run
   }
   if (windowCount > 1) return false;
+
+  // Only after the sole-window check: a peer that finished loading before it
+  // handled migration-finished still reports the pre-migration dir, and would
+  // drop a journal that is genuinely pending.
+  if (isSameDirectory(journal.oldDir, currentNotesDir)) {
+    await clearMigrationJournal();
+    return true;
+  }
 
   // The old dir is already gone (cleaned externally, or by a prior partial
   // run): nothing left to do — drop the journal so we stop retrying it.
