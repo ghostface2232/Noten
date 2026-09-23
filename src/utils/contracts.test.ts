@@ -464,8 +464,18 @@ describe("contract: the close gate always has an escape", () => {
     const start = src.indexOf("onCloseRequested");
     const end = src.indexOf("useEffect(() => {", src.indexOf("}).then((fn)", start));
     const handler = src.slice(start, end > start ? end : undefined);
-    expect(handler).toMatch(/isCloseOverrideArmed\(/);
+    expect(handler).toMatch(/isCloseOverrideArmed\(closeRefusedAtRef\.current, attemptStartedAt\)/);
     expect(src).not.toMatch(/closeBlockedOnceRef/);
+    // Measured from before the drain to after the refusal dialog closes, so a
+    // drain that blocks for minutes cannot expire every refusal.
+    const startAt = handler.indexOf("const attemptStartedAt = performance.now()");
+    const drainAt = handler.indexOf("await flushAutoSaveRef.current");
+    expect(startAt).toBeGreaterThanOrEqual(0);
+    expect(startAt).toBeLessThan(drainAt);
+    const refusalAt = handler.indexOf("await message(t(\"close.unsavedBlocked\"");
+    const stampAt = handler.indexOf("closeRefusedAtRef.current = performance.now()");
+    expect(refusalAt).toBeGreaterThanOrEqual(0);
+    expect(refusalAt).toBeLessThan(stampAt);
   });
 });
 

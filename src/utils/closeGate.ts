@@ -10,6 +10,8 @@
  */
 export const CLOSE_OVERRIDE_WINDOW_MS = 5 * 60 * 1000;
 
+/** Both times come from `performance.now()`: a monotonic clock, so a wall
+ *  clock correction cannot arm or expire the override. */
 export function isCloseOverrideArmed(lastRefusedAt: number | null, now: number): boolean {
   return lastRefusedAt != null && now >= lastRefusedAt && now - lastRefusedAt <= CLOSE_OVERRIDE_WINDOW_MS;
 }

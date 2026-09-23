@@ -1401,6 +1401,12 @@ function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     getCurrentWindow().onCloseRequested(async (event) => {
+      // Taken before the drain, and the refusal is stamped after its dialog
+      // closes: an episode is the gap between the user dismissing a refusal and
+      // trying again, not the drain time. A drain that blocks for minutes on a
+      // vanished share would otherwise expire every refusal before the next
+      // attempt reached the check, and the override could never be reached.
+      const attemptStartedAt = performance.now();
       // Four-step drain: (1) flushAutoSave commits the current doc's pending
       // edits, (2) awaitInFlightSaves waits for any background save queued by
       // switchDocument's fast path, (3) flushPendingSnapshots retries any
@@ -1449,11 +1455,10 @@ function App() {
         // stays unreadable, a folder that is gone — the window can never be
         // closed at all. So the attempt right after a refusal offers the
         // override and says plainly what it discards.
-        const now = Date.now();
-        if (!isCloseOverrideArmed(closeRefusedAtRef.current, now)) {
-          closeRefusedAtRef.current = now;
+        if (!isCloseOverrideArmed(closeRefusedAtRef.current, attemptStartedAt)) {
           event.preventDefault();
           await message(t("close.unsavedBlocked", localeRef.current), { kind: "error" });
+          closeRefusedAtRef.current = performance.now();
           return;
         }
         const discard = await confirm(t("close.unsavedDiscard", localeRef.current), { kind: "warning" });
