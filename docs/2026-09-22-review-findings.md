@@ -38,10 +38,14 @@
 - **시나리오**: `Date.now() - note.trashedAt`을 14일과 비교하며 하한도 없고 `.trash` 파일 mtime과의 교차 확인도 없습니다. 시계가 14일 이상 뒤진 기기(CMOS 배터리 방전, 스냅샷에서 복원한 VM, NTP 이전에 부팅한 기기)에서 버린 노트는 정상 기기의 **다음 실행에서** 본문·사이드카·`.assets/<id>/`가 함께 영구 삭제됩니다. 사용자는 아직 복원할 수 있다고 기대하는 구간입니다. 반대 방향(`trashedAt > now`)은 영원히 보존되므로 무해합니다.
 - **수정 방향**: `NoteMeta`에 이미 있는 `lastWriterMachineId`로 자기 기기 스탬프와 외부 스탬프를 구분하고, 두 시계가 허용 오차 이상 어긋나면 퍼지를 보류.
 
+- **처리 (브랜치 `c/review-findings-backlog-2`)**: `lastWriterMachineId`는 휴지통 스탬프를 찍은 기기가 아니라 사이드카를 마지막으로 쓴 기기라서 쓰지 않았습니다. `12c6738`이 기기별 첫 목격 기록(`src/utils/trashRetention.ts`, appData에 보관, id와 `trashedAt`으로 키)을 두고, `trashedAt`과 목격 시각 양쪽으로 14일이 지나야 퍼지합니다. 옛 규칙보다 이르게 지우는 경우는 없고, 업그레이드 직후 한 번 퍼지가 미뤄집니다. `2ed4f6d`는 검토 지적에 따라 현재 휴지통에 없는 id의 목격 기록을 90일간 유지해(폴더를 오가면 계수가 계속 초기화되던 문제), 기록 실패를 로그로 남기고, 휴지통 UI의 남은 일수도 같은 기준으로 표시합니다.
+
 ### R4. reconcile의 root 대 trash 판정이 로컬 mtime과 원격 벽시계를 직접 비교
 - **위치**: `src/utils/reconcileFolder.ts:358`
 - **시나리오**: `rootMtime > meta.trashedAt`으로 "삭제 이후에 본문이 수정되었는가"를 판정하는데, 좌변은 로컬 파일시스템 mtime이고 우변은 다른 기기의 벽시계입니다. 기기 B의 시계가 A보다 (B가 그 노트를 마지막으로 편집한 시점만큼) 앞서 있으면 A의 삭제가 B에서 취소되고 복원으로 역전파됩니다. 내용은 살아남지만(휴지통 본문이 먼저 `.conflicts`로 백업됨) 삭제가 붙지 않고 노트가 되돌아옵니다.
 - **수정 방향**: R3과 동일하게 `lastWriterMachineId` 기반으로 바꾸거나, 두 시계를 비교하는 일 자체를 없애고 존재 여부로 판정.
+
+- **처리 (브랜치 `c/review-findings-backlog-2`)**: `8434636`이 시계 비교를 본문이 서로 다를 때로 한정했습니다. 루트가 휴지통 본문과 같으면 버린 본문 그 자체의 잔재이고, 휴지통 본문이 아직 없으면 비교할 대상이 없으므로 둘 다 삭제를 유지합니다(후자는 루트를 `.trash`로 옮겨 복원 가능). 검토에서 이 두 경로가 동료 기기의 `restoreNote`(라이브 사이드카보다 루트 사본이 먼저 동기화되는 경우)와 같은 디스크 상태를 만들어 본문이 어디에도 남지 않을 수 있음이 드러나, `990bb54`가 orphan-meta와 같은 유예(`trashedMetaWithRoot`)를 두고 삭제 이후로 보이는 루트는 `.conflicts`에 먼저 보존하며, `79adb6a`는 유예를 넘긴 동일 루트도 제거 전에 보존합니다. 이 창은 이전 코드에도 있던 것입니다.
 
 ### R5. `restoreNotesDir` 롤백이 baseline 맵을 비우고 재하이드레이션하지 않음
 - **위치**: `src/hooks/useNotesLoader.ts:425-438` (`resetKnownDiskContent()` 호출), `src/App.tsx:846-851` (`revertNotesDirChange`가 `reloadKey`를 올리지 않음)
@@ -49,31 +53,43 @@
 - **경계**: 기존 코드지만 PR #60의 baseline 의미 변경이 결과를 악화시켰습니다. 우선순위를 높게 볼 근거가 됩니다.
 - **수정 방향**: 롤백 경로에서 재하이드레이션하거나, 보존해 둔 `preserved` 스냅샷으로 baseline을 다시 seed.
 
+- **처리 (브랜치 `c/review-findings-backlog-2`)**: `preserved`의 본문으로 다시 seed하면 읽지 않은 투영(빈 본문)을 알려진 본문으로 만들어 prune을 무장시키므로 쓰지 않았습니다. `e795bdc`가 설정 커밋 전에 baseline 맵 자체를 스냅샷하고(`snapshotKnownDiskContent`) 롤백에서 그대로 복원합니다. `756375b`의 contract 테스트가 캡처 순서를 고정합니다.
+
 ### R6. 폴더 초기화가 대상 폴더를 가드 없이 지우고, 두 overwrite 경로가 `.conflicts`까지 삭제
 - **위치**: `src/App.tsx:1007-1011, 1051` 대 `:883-893`; `src/utils/migrateNotesDir.ts:470-473`, `isManagedRootEntry`(`:110-118`)
 - **시나리오**: `handleChangeNotesDir`는 `hasExistingNotenData`를 확인하고 병합/덮어쓰기/선택 폴더만 사용 중에서 고르게 합니다. `handleResetNotesDir`는 일반적인 확인 하나만 받고 `migrateNotesDir(oldDir, defaultDir, "overwrite")`를 호출하며, 이는 `clearDirContents`로 대상의 모든 관리 데이터를 지운 뒤 복사합니다. `merge` 경로에 있는 `backupOverwrittenBody`가 없습니다. 기본 폴더는 보통 비어 있지만, 이전 마이그레이션의 source clear가 유예되었거나 실패한 경우 도달합니다.
 - **별개로**: `.conflicts`가 관리 항목 목록에 있어서 두 overwrite 경로 모두 대상 폴더의 충돌 보관함을 지웁니다. 앱이 이미 보존해 둔 본문이 있는 유일한 장소이고, 경고 문구(`i18n.ts:257`)는 그 사실을 말하지 않으며, `merge`는 의도적으로 `.conflicts`를 합집합 복사합니다(`migrateNotesDir.ts:588-594`).
 - **수정 방향**: `isManagedRootEntry`에서 `.conflicts` 제외. 초기화 경로에도 목적지 데이터 확인을 추가.
 
+- **처리 (브랜치 `c/review-findings-backlog-2`)**: `6e06e9d`가 `.conflicts`를 관리 항목에서 빼(양쪽 어느 clear도 지우지 않음) `hasExistingNotenData`도 `.conflicts`만 있는 폴더는 데이터로 보지 않게 했고, 초기화 경로는 기본 폴더를 확인해 병합/교체를 묻습니다(선택 폴더만 사용은 제외). 검토에서 이 선택지가 기존의 다른 손실 경로로 이어짐이 드러났습니다. 보류된 마이그레이션 저널(기본→사용자 폴더)이 남은 채 기본 폴더로 되돌아오면 다음 단일 창 실행이 라이브 라이브러리를 버려진 폴더로 병합하고 지웠습니다. `c2aa4af`와 `9e489d7`이 단일 창 확인 뒤에 old dir이 현재 폴더인 저널을 건드리지 않고 버립니다.
+
 ### R7. `applyRemoteBody`가 baseline을 seed하지 않음
 - **위치**: `src/hooks/useWindowSync.ts:270-292` (인라인 `content` 분기와 `:320`의 `readTextFile` 폴백 모두)
 - **시나리오**: PR #60이 `doc-created`와 `restoreNote` 읽기에는 seed를 넣었지만 이 형제 경로는 빠졌습니다. 창 A가 노트 N을 저장하고 emit → B는 본문을 메모리에 반영하지만 baseline은 예전 값 유지 → B의 워처 이벤트가 도착하기 전에 사용자가 B에서 N을 편집하고 자동 저장이 돌면, `backupIfRemoteWroteFirst`가 `disk ≠ lastKnown`이자 `disk ≠ intended`를 보고 **이미 메모리에 갖고 있던 본문의** `.conflicts` 사본을 만듭니다. 창 간 편집 인계마다 불필요한 파일 하나입니다. 손실은 아니지만 `src/hooks/AGENTS.md`의 "본문을 알게 되는 모든 경로가 seed해야 한다" 규칙의 열거에서도 이 경로가 빠져 있어 코드와 문서가 함께 틀려 있습니다.
 - **수정 방향**: `applyRemoteBody`가 `commitRemote`의 결과(거절 시 null)를 반환하므로, 워처와 같은 "채택했을 때만 seed" 패턴을 그대로 쓸 수 있습니다.
+
+- **처리 (브랜치 `c/review-findings-backlog-2`)**: `2726978`이 채택했을 때만, 그리고 동료가 쓴 경로에 이 창이 노트를 바인딩하고 있을 때만 seed하며, `src/hooks/AGENTS.md`의 열거에도 추가했습니다.
 
 ### R8. 순서 키의 표현 불가능한 두 경우에 재정규화 경로가 없음
 - **위치**: `src/utils/groupsIO.ts:186-190, 214-221`, 유일한 호출부 `src/hooks/useNoteGroups.ts:262-265`
 - **시나리오**: PR #60의 주석은 "호출부가 목록을 재정규화해야 한다"고 적었지만 그런 경로는 트리 어디에도 없습니다. `reorderGroups`는 받은 키를 그대로 persist합니다. 그룹을 맨 위로 열여덟 번쯤 끌면 첫 키가 `"0"`에 도달하고, `genOrderKeyBefore("0")`은 `"0i"`를 반환해 `"0"` **뒤에** 정렬됩니다. 그룹이 시각적으로는 두 번째에 놓이고 잘못된 키가 `.groups.json`에 기록되어 모든 기기로 전파되며, 같은 드래그를 반복해도 낫지 않습니다. `genOrderKeyBetween(a, a + "0")`도 같습니다. 퍼즈 테스트는 이 두 입력을 `continue`로 건너뛰므로 불변식이 성립하는 범위에서만 검증합니다.
 - **수정 방향**: 호출부에서 `!(a < key && key < b)`를 감지하면 목록 전체를 다시 키잉.
 
+- **처리 (브랜치 `c/review-findings-backlog-2`)**: `37084d2`가 `reorderGroups`와 `createGroup`(길이 제한의 시간 키 폴백도 같은 계열)에서 `isOrderKeyBetween`으로 확인하고, 실패하면 커밋된 목록 전체를 렌더 순서대로 `genSpreadOrderKeys`로 다시 키잉합니다. `42c6a89`는 재키잉 키가 최소 자릿수로 끝나 두 번 만에 다시 재키잉되던 문제를 막습니다. 로드 시점 생성기(레거시 분해, 마이그레이션, 키 없는 그룹 채우기)는 아직 확인하지 않습니다.
+
 ### R9. `closeBlockedOnceRef`가 만료되지 않음
 - **위치**: `src/App.tsx:452, 1428-1437`
 - **시나리오**: 이 ref는 닫기 시도의 드레인이 **성공**할 때만 초기화됩니다. 10시에 일시적 클라우드 문제로 한 번 거부당한 사용자가 종일 작업하고 18시에 처음 닫기를 시도하면, 완전히 다른(그리고 고칠 수 있는) 원인에 대해 곧바로 "닫으면 버려집니다" 확인을 받습니다. 한 번의 클릭으로 저널이 덮지 않는 하루치 이름/핀/색상/그룹 변경이 사라집니다. 주석은 "첫 거부는 원인을 설명하고 창을 열어 둔다"고 약속하지만 창 수명당 한 번입니다.
 - **수정 방향**: 에피소드 단위로 만료(시간 기반, 또는 실패 원인이 바뀌면 초기화).
 
+- **처리 (브랜치 `c/review-findings-backlog-2`)**: `744df6d`가 거부 시각을 기록하고 5분 안의 다음 시도에만 재정의를 제시합니다(`src/utils/closeGate.ts`). 검토에서 드레인이 몇 분씩 막히면 재정의에 영영 도달하지 못함이 드러나, `28da6b1`이 시도 시작을 드레인 전에, 거부 시각을 대화상자가 닫힌 뒤에 `performance.now()`로 잽니다.
+
 ### R10. 보조 창 레이블이 실행마다 새로 만들어지고 빈 디렉터리가 누적
 - **위치**: `src/utils/newWindow.ts:7` (`win-${Date.now()}-${n}`), `src/utils/recoveryJournal.ts:149-162`, `src/hooks/editRecovery.ts:23-29`
 - **시나리오**: 보조 창은 "자기 이전 실행의 레코드"를 절대 찾지 못합니다. 그 레코드는 오직 main의 고아 수거를 통해서만 돌아옵니다. 따라서 `close.unsavedJournalled`의 "다음에 Noten을 실행할 때 복구합니다"는, 닫는 창이 마지막 창이 아닐 때 사실이 아닙니다. 그리고 `clearRecoveryRecord`는 파일만 지우고 레이블 디렉터리는 남기므로 `recovery/`에 빈 `win-<ts>-<n>/`가 실행마다 하나씩 영구 누적되고, 매 시작 시 전부 `readDir`합니다.
 - **수정 방향**: 레이블을 창 슬롯 단위로 안정화하거나, 레이블별 프레이밍을 버리고 main이 전부 수거한다고 문서와 코드에 명시. 빈 디렉터리는 수거 후 제거.
+
+- **처리 (브랜치 `c/review-findings-backlog-2`)**: 확인해 보니 "다음 실행 때 복구"는 사실입니다. 다음 시작의 수거 창(main)이 살아 있는 창이 없는 모든 레이블을 입양합니다. 틀린 것은 레이블이 실행 간 재사용된다는 주석이었습니다. `3729e78`이 주석을 고치고, 수거가 비워진 입양 레이블 디렉터리를 비재귀로 제거합니다(자기 레이블은 제외).
 
 ---
 
@@ -86,12 +102,25 @@
 - **시나리오**: `isOwnWriteContentMatch` 단축 경로(`:475`)는 dirty가 **아닌** 문서에서만 도달합니다(`:461-464`). `App.tsx:729-736`이 `state.isDirty`를 활성 문서에 반영하므로, 자동 저장 자신의 `.md` rename에 대한 1500 ms 지연 이벤트가 도착할 무렵 문서는 이미 다시 dirty입니다. 그래서 `shouldReconcile = true`로 빠지고, `scanAndAbsorbConflicts`(노트 디렉터리와 `.meta`의 `readDir`)와 캐시가 무효화된 사이드카 전수 읽기, `.trash`의 `readDir`이 워처 창마다 한 번씩, 사용자가 타이핑하는 내내 반복됩니다. 수천 개 노트 OneDrive 폴더에서 2초마다 수천 번의 IPC 왕복이며 각각이 플레이스홀더 하이드레이션을 유발할 수 있습니다.
 - **수정 방향**: own-write 내용 일치를 dirty 검사보다 먼저 판정하거나, 변경된 `.md` 경로가 전부 알려진 own write일 때 reconcile을 생략.
 
+- **처리 (브랜치 `c/review-findings-backlog-2`)**: `91457b6`이 dirty 문서도 디스크 바이트를 읽어 이 창의 own write와 일치하면 전체 패스를 생략합니다(dirty 본문은 어느 쪽이든 교체하지 않음). own-write 해시는 창별이라 같은 기기의 다른 창은 여전히 매번 reconcile하던 것을, `5b169dd`가 `doc-updated`로 이미 채택하고 baseline으로 기록한 바이트면 생략하도록 보완했습니다.
+
 ### R12. 사이드바 검색이 `docs` 커밋마다 라이브러리 전체를 다시 소문자화
 - **위치**: `src/components/Sidebar.tsx:579-609`
 - **시나리오**: `strippedContentMap`은 문서 id별로 본문을 캐시하지만(`:558-577`), `filteredDocs`는 `docs`에 의존해 배열 identity가 바뀔 때마다 모든 노트에 대해 `stripped.toLowerCase().includes(q)`를 다시 계산합니다. `docs`는 자동 저장 커밋마다 새 배열입니다(`useAutoSave.ts:600`의 `sortNotes`). 검색 바를 열어 둔 채 타이핑하면 초당 한 번씩 라이브러리 전체의 소문자 사본을 할당하고 훑습니다.
 - **수정 방향**: 소문자형을 `stripped` 옆에 함께 캐시.
 
+- **처리 (브랜치 `c/review-findings-backlog-2`)**: `35b59e9`가 소문자형을 함께 캐시해 `extractSnippet`에 넘기고, `b15fe75`는 소문자화로 바뀌는 것이 없을 때 같은 문자열을 공유해 메모리 사본을 늘리지 않습니다.
+
 ---
+
+## 남은 후속 항목
+
+R3-R12 처리 중 검토에서 나왔지만 이 브랜치에서 다루지 않은 것들입니다. 모두 파괴적이지 않습니다.
+
+- 마이그레이션 저널은 한 칸이고 보유 마이그레이션만 씁니다. A→B가 보류된 채 B→C가 드레인 완료로 끝나면, 다음 실행이 A를 버려진 B로 병합하고 A를 지웁니다(늦은 쓰기가 아무도 보지 않는 곳에 남음). 보유 마이그레이션이 보류 저널을 덮어쓰면 A가 방치됩니다. 마이그레이션 완료 시 저널을 조정(대상이 old dir이면 폐기, `newDir`이 이번 old dir이면 A→C로 재지정)하는 것이 방향입니다.
+- 초기화 경로가 재사용하는 충돌 대화상자의 도움말은 사용자가 고르지 않은 기본 폴더에도 "선택한 폴더"라고 씁니다.
+- 로드 시점의 순서 키 생성기는 `isOrderKeyBetween` 확인이 없습니다(R8 처리 참고).
+- 복구 레이블 디렉터리에 남은 `.json.tmp`는 그 디렉터리의 제거를 영구히 막습니다.
 
 ## 구조 관찰 (버그 아님)
 
