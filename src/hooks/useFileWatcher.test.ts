@@ -19,6 +19,7 @@ const refs = vi.hoisted(() => ({
   bodyFaultByPath: new Map<string, Error>(),
   // What isOwnWriteContentMatch should return for the next call.
   ownWriteMatch: false,
+  knownDiskByPath: new Map<string, string>(),
   // readMeta result for applyMetaChange tests.
   metaById: new Map<string, NoteMeta>(),
   // Capture for assertions.
@@ -112,6 +113,7 @@ vi.mock("../utils/conflictFileDetector", () => ({
 
 vi.mock("../utils/conflictBackup", () => ({
   setKnownDiskContent: vi.fn(),
+  getKnownDiskContent: vi.fn((p: string) => refs.knownDiskByPath.get(p)),
 }));
 
 vi.mock("../utils/crashLog", () => ({
@@ -232,6 +234,7 @@ beforeEach(() => {
   refs.bodyByPath = new Map();
   refs.bodyFaultByPath = new Map();
   refs.ownWriteMatch = false;
+  refs.knownDiskByPath.clear();
   refs.metaById = new Map();
   refs.reconcileCalls = 0;
   refs.diskGroupsSnapshot = { entries: {}, metaById: new Map(), collapsedByGroup: {} };
@@ -440,6 +443,30 @@ describe("useFileWatcher — own-write echo skip", () => {
     });
 
     expect(reconcileFolderMock).toHaveBeenCalledTimes(1);
+  });
+
+  // Own-write hashes are per window, so a sibling window saw every autosave
+  // of the typing window as unknown and ran the full pass for each one. The
+  // doc-updated receiver already adopted that body and recorded it as the
+  // baseline, so the bytes are fully known here.
+  it("skips the full pass for a sibling window's save this window already adopted", async () => {
+    const doc = makeDoc("a", { content: "sibling's saved body" });
+    refs.bodyByPath.set(doc.filePath, "sibling's saved body");
+    refs.knownDiskByPath.set(doc.filePath, "sibling's saved body");
+    refs.ownWriteMatch = false;
+    const { setDocs } = renderWatcher({ docs: [doc] });
+    await waitForRootHandler();
+
+    await act(async () => {
+      await refs.rootHandler!({
+        type: { modify: { kind: "data", mode: "any" } },
+        paths: [doc.filePath],
+        attrs: {},
+      } as unknown as WatchEvent);
+    });
+
+    expect(setDocs).not.toHaveBeenCalled();
+    expect(reconcileFolderMock).not.toHaveBeenCalled();
   });
 
   it("updates setDocs when isOwnWriteContentMatch returns false (sanity check)", async () => {
