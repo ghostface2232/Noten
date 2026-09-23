@@ -10,6 +10,18 @@
   inherits: false;
 }
 
+@property --changelog-mask-top {
+  syntax: '<length>';
+  initial-value: 0px;
+  inherits: false;
+}
+
+@property --changelog-mask-bottom {
+  syntax: '<length>';
+  initial-value: 0px;
+  inherits: false;
+}
+
 *,
 *::before,
 *::after {
