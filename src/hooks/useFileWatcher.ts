@@ -464,7 +464,17 @@ export function useFileWatcher(
       }
       const doc = currentDocs[docIndex];
       if (doc.isDirty) {
-        shouldReconcile = true;
+        // The event for autosave's own rename arrives WATCH_DELAY_MS later, by
+        // which time the user has typed again and the doc is dirty. Bytes that
+        // match a write from this window are the same proof the clean path
+        // accepts, and skipping the pass for them keeps typing from running a
+        // library-wide reconcile per watcher window. Anything else still takes
+        // the pass; the dirty body is never replaced here either way.
+        let diskContent: string | null = null;
+        try { diskContent = await readTextFile(doc.filePath); } catch { /* reconcile decides */ }
+        if (diskContent === null || !(await isOwnWriteContentMatch(doc.filePath, diskContent))) {
+          shouldReconcile = true;
+        }
         continue;
       }
 

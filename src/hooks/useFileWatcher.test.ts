@@ -402,6 +402,46 @@ describe("useFileWatcher — own-write echo skip", () => {
     expect(reconcileFolderMock).not.toHaveBeenCalled();
   });
 
+  // Autosave's own rename is reported WATCH_DELAY_MS later, when the user has
+  // usually typed again. Treating the now-dirty doc as unknown ran a
+  // library-wide reconcile per watcher window for as long as they typed.
+  it("skips the full pass for a dirty doc whose disk bytes are this window's write", async () => {
+    const doc = makeDoc("a", { isDirty: true, content: "typing ahead of the save" });
+    refs.bodyByPath.set(doc.filePath, "what autosave just wrote");
+    refs.ownWriteMatch = true;
+    const { setDocs } = renderWatcher({ docs: [doc] });
+    await waitForRootHandler();
+
+    await act(async () => {
+      await refs.rootHandler!({
+        type: { modify: { kind: "data", mode: "any" } },
+        paths: [doc.filePath],
+        attrs: {},
+      } as unknown as WatchEvent);
+    });
+
+    expect(setDocs).not.toHaveBeenCalled();
+    expect(reconcileFolderMock).not.toHaveBeenCalled();
+  });
+
+  it("still reconciles for a dirty doc whose disk bytes came from elsewhere", async () => {
+    const doc = makeDoc("a", { isDirty: true, content: "local edits" });
+    refs.bodyByPath.set(doc.filePath, "a peer's body");
+    refs.ownWriteMatch = false;
+    renderWatcher({ docs: [doc] });
+    await waitForRootHandler();
+
+    await act(async () => {
+      await refs.rootHandler!({
+        type: { modify: { kind: "data", mode: "any" } },
+        paths: [doc.filePath],
+        attrs: {},
+      } as unknown as WatchEvent);
+    });
+
+    expect(reconcileFolderMock).toHaveBeenCalledTimes(1);
+  });
+
   it("updates setDocs when isOwnWriteContentMatch returns false (sanity check)", async () => {
     // Mirror test: without the own-write match, a real remote change DOES
     // reach setDocs. This proves the "skip" assertion above isn't a false
