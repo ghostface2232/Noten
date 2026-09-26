@@ -13,6 +13,8 @@ class ResizeObserverStub {
   disconnect() {}
 }
 vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+// jsdom elements have no scrollTo; the sidebar scrolls to the top on a query.
+Element.prototype.scrollTo = function scrollTo() {};
 
 function makeDoc(id: string, name: string): NoteDoc {
   return {
@@ -28,7 +30,7 @@ function makeDoc(id: string, name: string): NoteDoc {
 
 const docs = [makeDoc("a", "Alpha"), makeDoc("b", "Beta")];
 
-function makeProps() {
+function makeProps(docs: NoteDoc[], sidebarSearchQuery = "") {
   return {
     docs,
     activeIndex: 0,
@@ -47,8 +49,8 @@ function makeProps() {
     notesSortOrder: "updated-desc" as const,
     locale: "en" as const,
     onOpenSettings: vi.fn(),
-    sidebarSearchOpen: false,
-    sidebarSearchQuery: "",
+    sidebarSearchOpen: sidebarSearchQuery !== "",
+    sidebarSearchQuery,
     onSidebarSearchQueryChange: vi.fn(),
     onSidebarSearchClose: vi.fn(),
     groups: [],
@@ -80,7 +82,7 @@ function makeProps() {
 }
 
 function renderSidebar() {
-  const props = makeProps();
+  const props = makeProps(docs);
   const view = render(
     <FluentProvider theme={webLightTheme}>
       <Sidebar {...props} />
@@ -129,6 +131,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   document.documentElement.dataset.sidebarActive = "";
 });
 
@@ -235,20 +238,10 @@ describe("Sidebar keyboard shortcuts — exact modifier matching", () => {
     expect(props.onToggleNotePinned).toHaveBeenCalledTimes(1);
   });
 
-  it("activates on keyboard focus alone, with no preceding mousedown", () => {
+  it("activates on keyboard focus alone and acts on the focused row, not the open note", () => {
     const { props } = renderSidebar();
     // Tab traversal emits focusin without any pointer event; without it the
     // sidebar shortcuts were unreachable for keyboard-only users.
-    focusInto("[data-note-id]");
-
-    expect(press({ key: "d", ctrlKey: true })).toBe(true);
-    expect(props.onDuplicateNote).toHaveBeenCalledTimes(1);
-    expect(press({ key: "Delete" })).toBe(true);
-    expect(props.onDeleteNote).toHaveBeenCalledWith(0);
-  });
-
-  it("acts on the focused row, not the open note, when they differ", () => {
-    const { props } = renderSidebar();
     // Note 0 (Alpha) is the active/open one; Tab moves focus to note 1 (Beta).
     // Targeting activeIndex here would delete the note the user is reading
     // while looking straight at a different row.
@@ -325,5 +318,45 @@ describe("Sidebar keyboard shortcuts — exact modifier matching", () => {
     expect(press({ key: "Delete" })).toBe(false);
     expect(props.onDuplicateNote).not.toHaveBeenCalled();
     expect(props.onDeleteNote).not.toHaveBeenCalled();
+  });
+});
+
+function renderSearch(initialDocs: NoteDoc[], query: string) {
+  const ui = (d: NoteDoc[]) => (
+    <FluentProvider theme={webLightTheme}>
+      <Sidebar {...makeProps(d, query)} />
+    </FluentProvider>
+  );
+  const view = render(ui(initialDocs));
+  return { rerender: (d: NoteDoc[]) => view.rerender(ui(d)) };
+}
+
+function visibleNoteIds(): string[] {
+  return [...new Set([...document.querySelectorAll("[data-note-id]")].map((el) => el.getAttribute("data-note-id")!))];
+}
+
+// The lowercase body is cached next to the stripped body, so a docs commit
+// that changes nothing else must keep matching and snippeting exactly as a
+// fresh search would.
+describe("Sidebar search", () => {
+  it("matches bodies case-insensitively and keeps the original casing in the snippet", () => {
+    vi.useFakeTimers();
+    const searchDocs = [
+      { ...makeDoc("a", "Alpha"), content: "Notes on the GAMMA ray burst" },
+      { ...makeDoc("b", "Beta"), content: "nothing relevant" },
+    ];
+    const { rerender } = renderSearch(searchDocs, "gamma");
+    act(() => { vi.advanceTimersByTime(300); });
+
+    expect(visibleNoteIds()).toEqual(["a"]);
+    expect(document.body.textContent).toContain("GAMMA");
+
+    // Autosave commits hand the sidebar a new array with the same bodies.
+    rerender(searchDocs.map((d) => ({ ...d })));
+    expect(visibleNoteIds()).toEqual(["a"]);
+
+    // An edited body is re-stripped and re-lowercased.
+    rerender([searchDocs[0], { ...searchDocs[1], content: "a gamma note too" }]);
+    expect(visibleNoteIds().sort()).toEqual(["a", "b"]);
   });
 });

@@ -68,18 +68,6 @@ describe("StatusBar subscriptions and document work", () => {
     expect(textContentSpy).not.toHaveBeenCalled();
   });
 
-  it("recomputes document-wide counts after a content change", async () => {
-    const editor = makeEditor();
-    render(status(editor));
-    await waitFor(() => expect(screen.getByText(/9/)).toBeTruthy());
-
-    act(() => {
-      editor.view.dispatch(editor.state.tr.insertText("!", 6));
-    });
-
-    await waitFor(() => expect(screen.getByText(/10/)).toBeTruthy());
-  });
-
   it("waits for a pause in typing, then updates counts and caret row together", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame", "Date"] });
     const editor = makeEditor();

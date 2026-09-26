@@ -136,16 +136,11 @@ describe("FastLexer performance", () => {
     return out.slice(0, approxChars);
   }
 
-  it("lexes a 1M-char code-span block far faster than quadratic", () => {
-    const md = giantBlock(1_000_000, "a `code` b ");
-    const start = performance.now();
-    fastLex(md);
-    const elapsed = performance.now() - start;
-    expect(elapsed).toBeLessThan(2000);
-  });
-
-  it("lexes a 1M-char escape block far faster than quadratic", () => {
-    const md = giantBlock(1_000_000, "a \\* b \\_ ");
+  it.each([
+    ["code-span", "a `code` b "],
+    ["escape", "a \\* b \\_ "],
+  ])("lexes a 1M-char %s block far faster than quadratic", (_name, unit) => {
+    const md = giantBlock(1_000_000, unit);
     const start = performance.now();
     fastLex(md);
     const elapsed = performance.now() - start;

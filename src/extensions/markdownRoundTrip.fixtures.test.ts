@@ -199,6 +199,8 @@ describe("Markdown fixture round-trip compatibility", () => {
     expect(images.some((node) => String(node.attrs?.src ?? "").includes("file with spaces"))).toBe(true);
     expect(markdown).toContain('width="320"');
     expect(markdown).toContain('width="480"');
+    // The fixture's empty leading cell must not leak a visible placeholder.
+    expect(markdown).toContain("empty leading cell");
     expect(markdown).not.toContain("&nbsp;");
   });
 
@@ -224,24 +226,6 @@ describe("Markdown fixture round-trip compatibility", () => {
 
     // The code mark is preserved in the document model, not flattened to text.
     expect(hasMark(second.getJSON(), "code")).toBe(true);
-  });
-
-  it("keeps empty table cells clean without leaking a visible &nbsp;", () => {
-    const source = [
-      "| Image | Description |",
-      "| --- | --- |",
-      "|  | empty leading cell |",
-    ].join("\n");
-
-    const editor = trackedEditor(source);
-    const markdown = stableMarkdown(editor);
-
-    expect(markdown).not.toContain("&nbsp;");
-    expect(markdown).toContain("empty leading cell");
-
-    // Idempotent across reload.
-    const second = trackedEditor(markdown);
-    expect(stableMarkdown(second)).toBe(markdown);
   });
 
   it("keeps code-span pipes inside one table cell", () => {

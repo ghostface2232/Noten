@@ -232,12 +232,12 @@ describe("controls", () => {
     }
   });
 
-  it("toggles match case from the input with Alt+C", () => {
+  it("toggles match case from the input with Alt+C, matched by physical key under an IME", () => {
     const { findInput } = renderBar("<p>Foo foo</p>");
     fireEvent.change(findInput, { target: { value: "foo" } });
     expect(counter().textContent).toBe("1/2");
 
-    fireEvent.keyDown(findInput, { key: "c", code: "KeyC", altKey: true });
+    fireEvent.keyDown(findInput, { key: "Process", code: "KeyC", altKey: true });
 
     expect(caseToggle().getAttribute("aria-pressed")).toBe("true");
     expect(counter().textContent).toBe("1/1");
@@ -255,14 +255,5 @@ describe("controls", () => {
     fireEvent.click(caseToggle());
     expect(caseToggle().getAttribute("aria-pressed")).toBe("false");
     expect(counter().textContent).toBe("1/2");
-  });
-
-  it("recognizes Alt+C by physical key while an IME rewrites e.key", () => {
-    const { findInput } = renderBar("<p>Foo foo</p>");
-    fireEvent.change(findInput, { target: { value: "foo" } });
-
-    fireEvent.keyDown(findInput, { key: "Process", code: "KeyC", altKey: true });
-
-    expect(caseToggle().getAttribute("aria-pressed")).toBe("true");
   });
 });

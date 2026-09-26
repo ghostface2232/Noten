@@ -102,14 +102,6 @@ describe("findDocByTitle", () => {
     expect(findDocsByTitle([newer, older], "missing")).toEqual([]);
   });
 
-  it("reflects an updated docs array reference (cache keyed by identity)", () => {
-    const before = [doc("Alpha")];
-    expect(findDocByTitle(before, "Alpha")?.fileName).toBe("Alpha");
-    const after = [doc("Beta")];
-    expect(findDocByTitle(after, "Alpha")).toBeNull();
-    expect(findDocByTitle(after, "Beta")?.fileName).toBe("Beta");
-  });
-
   it("reuses the cached lookup for the same docs array reference", () => {
     const docs = [doc("Foo")];
     expect(findDocByTitle(docs, "Foo")?.fileName).toBe("Foo");

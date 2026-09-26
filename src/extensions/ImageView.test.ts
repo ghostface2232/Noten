@@ -18,61 +18,25 @@ vi.mock("../utils/imageAssetUtils", async (importOriginal) => {
 });
 
 describe("shouldRefreshImageSelection", () => {
-  it("skips the typing hot path: nothing selected and nothing changed", () => {
-    expect(
-      shouldRefreshImageSelection(
-        { pos: null, readonly: false },
-        { pos: null, readonly: false },
-      ),
-    ).toBe(false);
-  });
-
-  it("refreshes when an image becomes selected", () => {
-    expect(
-      shouldRefreshImageSelection(
-        { pos: null, readonly: false },
-        { pos: 5, readonly: false },
-      ),
-    ).toBe(true);
-  });
-
-  it("refreshes when an image is deselected", () => {
-    expect(
-      shouldRefreshImageSelection(
-        { pos: 5, readonly: false },
-        { pos: null, readonly: false },
-      ),
-    ).toBe(true);
-  });
-
-  it("refreshes when the selected image position shifts (edit above it)", () => {
-    expect(
-      shouldRefreshImageSelection(
-        { pos: 5, readonly: false },
-        { pos: 8, readonly: false },
-      ),
-    ).toBe(true);
-  });
-
-  it("keeps refreshing while an image stays selected (selectNode-skip guard)", () => {
-    // Same position, no readonly change, but an image is selected: still refresh
-    // so a transaction where PM skipped selectNode/deselectNode can't strand the
-    // outline in the wrong state.
-    expect(
-      shouldRefreshImageSelection(
-        { pos: 5, readonly: false },
-        { pos: 5, readonly: false },
-      ),
-    ).toBe(true);
-  });
-
-  it("refreshes when readonly toggles even with no selection", () => {
-    expect(
-      shouldRefreshImageSelection(
-        { pos: null, readonly: false },
-        { pos: null, readonly: true },
-      ),
-    ).toBe(true);
+  type State = { pos: number | null; readonly: boolean };
+  const cases: [string, State, State, boolean][] = [
+    ["skips the typing hot path: nothing selected and nothing changed",
+      { pos: null, readonly: false }, { pos: null, readonly: false }, false],
+    ["refreshes when an image becomes selected",
+      { pos: null, readonly: false }, { pos: 5, readonly: false }, true],
+    ["refreshes when an image is deselected",
+      { pos: 5, readonly: false }, { pos: null, readonly: false }, true],
+    ["refreshes when the selected image position shifts (edit above it)",
+      { pos: 5, readonly: false }, { pos: 8, readonly: false }, true],
+    // A transaction where PM skipped selectNode/deselectNode must not strand the
+    // outline in the wrong state, so a still-selected image always refreshes.
+    ["keeps refreshing while an image stays selected (selectNode-skip guard)",
+      { pos: 5, readonly: false }, { pos: 5, readonly: false }, true],
+    ["refreshes when readonly toggles even with no selection",
+      { pos: null, readonly: false }, { pos: null, readonly: true }, true],
+  ];
+  it.each(cases)("%s", (_name, prev, next, expected) => {
+    expect(shouldRefreshImageSelection(prev, next)).toBe(expected);
   });
 });
 

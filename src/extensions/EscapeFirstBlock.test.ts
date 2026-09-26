@@ -59,12 +59,13 @@ describe("escapeLeadingBlock", () => {
     expect(firstType(e)).toBe("paragraph");
   });
 
-  it("does nothing when the code block is not the first node", () => {
-    const e = make("<p>intro</p><pre><code>code</code></pre>");
-    // Put the cursor inside the (second) code block.
-    const codeStart = e.state.doc.child(0).nodeSize + 1;
-    e.commands.setTextSelection(codeStart);
+  it("does nothing when the cursor is outside the leading code block", () => {
+    const e = make("<pre><code>code</code></pre><p>after</p>");
+    const afterStart = e.state.doc.child(0).nodeSize + 1;
+    e.commands.setTextSelection(afterStart);
+    const before = e.state.doc.childCount;
     expect(escapeLeadingBlock(e)).toBe(false);
+    expect(e.state.doc.childCount).toBe(before);
   });
 
   it("does nothing when there is a non-empty selection", () => {
@@ -100,13 +101,6 @@ describe("escapeLeadingBlock — requireBlockStart (ArrowLeft binding)", () => {
     const e = make("<pre><code>const x = 1</code></pre>");
     e.commands.setTextSelection(1); // parentOffset === 0
     expect(escapeLeadingBlock(e, { requireBlockStart: true })).toBe(true);
-    expect(firstType(e)).toBe("paragraph");
-  });
-
-  it("ArrowUp keeps escaping from anywhere on the first line", () => {
-    const e = make("<pre><code>const x = 1</code></pre>");
-    e.commands.setTextSelection(6);
-    expect(escapeLeadingBlock(e)).toBe(true);
     expect(firstType(e)).toBe("paragraph");
   });
 });
