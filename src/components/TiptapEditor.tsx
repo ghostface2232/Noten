@@ -23,7 +23,6 @@ import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
-import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
@@ -53,6 +52,7 @@ import { SearchHighlight } from "../extensions/SearchHighlight";
 import FocusMode, { syncFocusModeState } from "../extensions/FocusMode";
 import OffscreenBlocks from "../extensions/OffscreenBlocks";
 import IncrementalMarkdown from "../extensions/IncrementalMarkdown";
+import { NotenTable } from "../extensions/NotenTable";
 import { TableBubbleMenu } from "./TableBubbleMenu";
 import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
@@ -65,7 +65,6 @@ import {
 } from "../utils/headingSlug";
 import { extractHeadings, outlineIndentDepth } from "../utils/outline";
 import { serializeImageMarkdown } from "../utils/imageMarkdownSerialize";
-import { stripTableCellNbsp } from "../utils/tableCellNbsp";
 import "../styles/tiptap-editor.css";
 import "../styles/mermaid-theme.css";
 import "../styles/wiki-link.css";
@@ -114,10 +113,6 @@ function getScrollParent(element: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-function readEditorMarkdown(editor: Editor): string {
-  return stripTableCellNbsp(editor.getMarkdown());
-}
-
 function refreshRenderedContent(editor: Editor) {
   // Do not replace content while the browser owns an IME composition buffer.
   if (editor.view.composing) return;
@@ -126,7 +121,7 @@ function refreshRenderedContent(editor: Editor) {
   const scrollTop = scrollParent?.scrollTop ?? 0;
   const scrollLeft = scrollParent?.scrollLeft ?? 0;
   const { from, to } = editor.state.selection;
-  const markdown = readEditorMarkdown(editor);
+  const markdown = editor.getMarkdown();
   const wasReadonly = editor.storage.readonlyGuard.readonly;
 
   editor.storage.readonlyGuard.readonly = false;
@@ -835,7 +830,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         // `lastColumnResizable: false` pins the rightmost edge so dragging an
         // inner column redistributes width between siblings instead of growing
         // the whole table past the editor width.
-        Table.configure({
+        NotenTable.configure({
           resizable: true,
           handleWidth: 6,
           cellMinWidth: 48,
@@ -878,7 +873,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       const contextFilePath = editor.storage.documentContext.filePath;
       const key = currentSessionKeyRef.current ?? buildDocumentSessionKey(contextNoteId, contextFilePath);
       if (!key) return;
-      const markdown = readEditorMarkdown(editor);
+      const markdown = editor.getMarkdown();
       touchDocumentSession(key, {
         state: editor.state,
         markdownSignature: computeMarkdownSignature(markdown),
@@ -949,13 +944,11 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       closeLinkHoverPopover();
 
       const {
+        markdown,
         noteId,
         filePath,
         reason = "switch",
       } = params;
-      // Normalize legacy "&nbsp;" leakage from empty table cells before any
-      // signature or parse path sees the markdown.
-      const markdown = stripTableCellNbsp(params.markdown);
       const nextKey = buildDocumentSessionKey(noteId, filePath);
       const currentKey = currentSessionKeyRef.current;
       const sameSession = !!nextKey && nextKey === currentKey;
@@ -974,7 +967,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       let applied = false;
 
       if (sameSession) {
-        const currentSignature = computeMarkdownSignature(readEditorMarkdown(editor));
+        const currentSignature = computeMarkdownSignature(editor.getMarkdown());
         if (currentSignature !== expectedSignature) {
           const shouldTrackInHistory = reason === "window-sync" || reason === "file-watch";
           applied = replaceCurrentDocumentContent(markdown, shouldTrackInHistory);
@@ -1377,7 +1370,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       () => ({
         getMarkdown: () => {
           if (!editor) return "";
-          return readEditorMarkdown(editor);
+          return editor.getMarkdown();
         },
         openDocument,
         invalidateDocumentSession,

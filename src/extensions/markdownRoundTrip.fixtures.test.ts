@@ -10,7 +10,6 @@ import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
-import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
@@ -19,10 +18,10 @@ import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import MermaidCodeBlock from "./MermaidCodeBlock";
 import WikiLink from "./WikiLink";
+import { NotenTable } from "./NotenTable";
 import { normalizeFragmentHref } from "../utils/headingSlug";
 import { serializeImageMarkdown } from "../utils/imageMarkdownSerialize";
 import { isSafeLinkHref } from "../utils/linkHref";
-import { stripTableCellNbsp } from "../utils/tableCellNbsp";
 
 const lowlight = createLowlight(common);
 const fastMarked = createFastMarked();
@@ -69,7 +68,7 @@ function createMarkdownEditor(content: string): Editor {
       Underline,
       TaskList,
       TaskItem.configure({ nested: true }),
-      Table.configure({
+      NotenTable.configure({
         resizable: true,
         handleWidth: 6,
         cellMinWidth: 48,
@@ -86,7 +85,7 @@ function createMarkdownEditor(content: string): Editor {
 }
 
 function stableMarkdown(editor: Editor): string {
-  return stripTableCellNbsp(editor.getMarkdown()).trimEnd();
+  return editor.getMarkdown().trimEnd();
 }
 
 function descendants(node: JSONContent): JSONContent[] {
@@ -246,6 +245,81 @@ describe("Markdown fixture round-trip compatibility", () => {
     const second = trackedEditor(markdown);
     expect(stableMarkdown(second)).toBe(markdown);
     expect(textContent(second.getJSON())).toContain("a || b");
+  });
+
+  describe("legacy &nbsp; placeholder cells", () => {
+    const bodyCells = (editor: Editor) => {
+      const table = descendants(editor.getJSON()).find((node) => node.type === "table");
+      return (table?.content?.[1]?.content ?? []).map(textContent);
+    };
+
+    it("empties whole-cell placeholders in header and body rows, and stays stable on reload", () => {
+      const source = [
+        "| &nbsp; | b |",
+        "| --- | --- |",
+        "| &nbsp;&nbsp; | &nbsp; |",
+        "| x | y |",
+      ].join("\n");
+
+      const first = trackedEditor(source);
+      const markdown = stableMarkdown(first);
+      expect(bodyCells(first)).toEqual(["", ""]);
+      expect(markdown).not.toContain("nbsp");
+      expect(markdown).toContain("| b ");
+      expect(markdown).toContain("| x ");
+
+      expect(stableMarkdown(trackedEditor(markdown))).toBe(markdown);
+    });
+
+    it("keeps an entity that is only part of a cell's content", () => {
+      const source = [
+        "| a | b | c |",
+        "| --- | --- | --- |",
+        "| x&nbsp;y | note &nbsp; | **&nbsp;** |",
+      ].join("\n");
+
+      for (const text of bodyCells(trackedEditor(source))) {
+        expect(text).toContain("nbsp");
+      }
+    });
+
+    it("leaves a fenced code block that draws a table untouched", () => {
+      const source = "```\n| &nbsp; | col |\n```";
+      expect(stableMarkdown(trackedEditor(source))).toBe(source);
+    });
+
+    it("empties placeholders in a table nested inside a blockquote", () => {
+      const source = "> | a | b |\n> | --- | --- |\n> | &nbsp; | y |";
+      const editor = trackedEditor(source);
+      expect(bodyCells(editor)).toEqual(["", "y"]);
+      expect(stableMarkdown(editor)).not.toContain("nbsp");
+    });
+
+    // Loading is the only place this is handled, so the serializer must never
+    // produce a placeholder for an empty cell, even after empty paragraphs,
+    // whose own marker is `&nbsp;`.
+    it("never serializes an empty cell as a placeholder", () => {
+      const cell = (type: string): JSONContent => ({ type, content: [{ type: "paragraph" }] });
+      const editor = trackedEditor("");
+      editor.commands.setContent({
+        type: "doc",
+        content: [
+          { type: "paragraph" },
+          { type: "paragraph" },
+          {
+            type: "table",
+            content: [
+              { type: "tableRow", content: [cell("tableHeader"), cell("tableHeader")] },
+              { type: "tableRow", content: [cell("tableCell"), cell("tableCell")] },
+            ],
+          },
+        ],
+      });
+
+      const tableLines = editor.getMarkdown().split("\n").filter((line) => line.startsWith("|"));
+      expect(tableLines).toHaveLength(3);
+      for (const line of tableLines) expect(line).not.toContain("nbsp");
+    });
   });
 
   it("preserves a plain bullet nested under a task-list parent", () => {

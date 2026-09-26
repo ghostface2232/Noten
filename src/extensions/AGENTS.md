@@ -52,6 +52,6 @@ Chromium's per-keystroke and per-IME-composition cost grows with the whole conte
 ## Tables and Mermaid
 
 - Tables use Tiptap v3 table extensions with `lastColumnResizable: false`, so dragging an inner column redistributes width instead of growing the table past the editor width.
-- Empty table cells may serialize through `&nbsp;`; `stripTableCellNbsp` removes placeholder-only leakage before load/save while preserving a user-authored literal `&nbsp;`.
+- Older serializers wrote an empty table cell as a literal `&nbsp;`. `NotenTable` empties such cells in `parseMarkdown`, on lexer tokens, so fenced code and inline-code `&nbsp;` are never touched; a cell whose text only contains the entity keeps it. Do not reintroduce a string-level pass over the Markdown: it cannot see block structure. The save path relies on the serializer never emitting the placeholder, which `markdownRoundTrip.fixtures.test.ts` pins.
 - Mermaid diagrams are `mermaid` code blocks rendered by the `MermaidCodeBlock` NodeView; keep its source/preview toggle and SVG/PNG export controls inside the NodeView. User-visible Mermaid labels go through `src/i18n.ts`.
 - Exported SVGs round-trip their source: `mermaidExport.ts` embeds the original Mermaid source via `embedMermaidSourceInSvg` (`src/extensions/mermaidSourceMetadata.ts`, stored in `<metadata>` under a private namespace), and `ImageDrop.ts` restores a marked SVG back into an editable Mermaid block via `extractMermaidSourceFromSvg`.
