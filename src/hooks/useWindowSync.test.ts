@@ -403,7 +403,7 @@ describe("useWindowSync — large body updates go through disk", () => {
     })));
   });
 
-  it("does not overwrite a doc that became dirty during the read", async () => {
+  it("reads the body but does not overwrite a doc that is dirty", async () => {
     // makeDoc("a") is dirty: the user is typing in it.
     const { result } = renderWindowSync(async () => true, [makeDoc("a"), makeDoc("b")]);
     await waitFor(() => expect(refs.handlers.has("doc-updated")).toBe(true));
