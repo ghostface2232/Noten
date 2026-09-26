@@ -34,7 +34,8 @@ describe("slugifyHeading", () => {
     expect(slugifyHeading("서론 개요".normalize("NFD"))).toBe("서론-개요");
   });
 
-  it("returns hyphens-only for whitespace-only input and empty for empty", () => {
+  it("returns hyphens-only for whitespace-only input and empty for empty or punctuation-only", () => {
+    expect(slugifyHeading("   ")).toBe("---");
     expect(slugifyHeading("")).toBe("");
     expect(slugifyHeading("!!!")).toBe("");
   });
@@ -121,8 +122,18 @@ describe("resolveHeadingFragment", () => {
   });
 
   it("falls back to raw title match, exact then case-insensitive", () => {
-    expect(resolveHeadingFragment(headings, "#서론 개요")?.pos).toBe(0);
-    expect(resolveHeadingFragment(headings, "#MY HEADING")?.pos).toBe(12);
+    // Edge whitespace survives slugification ("--spaced--"), so a bare
+    // "Spaced" fragment misses every slug and only the trimmed title matches.
+    // "!!!" has no slug at all and is reachable only by its raw title.
+    const unslugged = [
+      heading("  Spaced  ", 0),
+      heading("  SPACED  ", 10),
+      heading("!!!", 20),
+    ];
+    expect(resolveHeadingFragment(unslugged, "#Spaced")?.pos).toBe(0);
+    expect(resolveHeadingFragment(unslugged, "#SPACED")?.pos).toBe(10);
+    expect(resolveHeadingFragment(unslugged, "#!!!")?.pos).toBe(20);
+    expect(resolveHeadingFragment(unslugged, "#spaced")?.pos).toBe(0);
   });
 
   it("resolves duplicate suffixes to the later heading", () => {

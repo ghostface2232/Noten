@@ -169,19 +169,24 @@ describe("backupIfRemoteWroteFirst", () => {
 });
 
 describe("backupRemoteVersion", () => {
-  it("throws BACKUP_FAILED when the conflict file write fails", async () => {
+  it("throws a fatal BACKUP_FAILED carrying filePath and noteId when the conflict file write fails", async () => {
     fs.injectFault({
       op: "writeTextFile",
       path: CONFLICTS_DIR_RE,
       throwError: new Error("EPERM"),
     });
 
-    await expect(
-      backupRemoteVersion(fs, DIR, NOTE_ID, "doomed remote body"),
-    ).rejects.toMatchObject({
+    const err = await backupRemoteVersion(fs, DIR, NOTE_ID, "doomed remote body").then(
+      () => { throw new Error("expected backupRemoteVersion to throw"); },
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(NotenError);
+    expect(err).toMatchObject({
       name: "NotenError",
       code: "BACKUP_FAILED",
       severity: "fatal",
+      context: { noteId: NOTE_ID, filePath: expect.stringMatching(CONFLICTS_DIR_RE) },
     });
   });
 
@@ -195,24 +200,6 @@ describe("backupRemoteVersion", () => {
   it("returns null for an empty body without throwing", async () => {
     const result = await backupRemoteVersion(fs, DIR, NOTE_ID, "");
     expect(result).toBeNull();
-  });
-
-  it("BACKUP_FAILED carries filePath and noteId context", async () => {
-    fs.injectFault({
-      op: "writeTextFile",
-      path: CONFLICTS_DIR_RE,
-      throwError: new Error("EPERM"),
-    });
-
-    try {
-      await backupRemoteVersion(fs, DIR, NOTE_ID, "body");
-      throw new Error("expected backupRemoteVersion to throw");
-    } catch (err) {
-      expect(err).toBeInstanceOf(NotenError);
-      const ne = err as NotenError;
-      expect(ne.context?.noteId).toBe(NOTE_ID);
-      expect(ne.context?.filePath).toMatch(CONFLICTS_DIR_RE);
-    }
   });
 });
 

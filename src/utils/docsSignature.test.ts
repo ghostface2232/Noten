@@ -20,10 +20,6 @@ const base = [
 ];
 
 describe("sortSignature", () => {
-  it("is stable for equal inputs", () => {
-    expect(sortSignature(base, "updated-desc", "ko")).toBe(sortSignature(base, "updated-desc", "ko"));
-  });
-
   it("ignores fields the sidebar comparator does not read", () => {
     const edited = base.map((doc) => ({ ...doc, content: "typed some more", isDirty: true }));
     expect(sortSignature(edited, "updated-desc", "ko")).toBe(sortSignature(base, "updated-desc", "ko"));

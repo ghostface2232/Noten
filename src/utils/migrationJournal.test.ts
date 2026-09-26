@@ -68,18 +68,12 @@ describe("migrationJournal", () => {
     expect(await readMigrationJournal()).toBeNull();
   });
 
-  it("rejects a journal with an invalid cleanupMode", async () => {
-    store.set(JOURNAL_PATH, JSON.stringify({ ...sample, cleanupMode: "wipe-everything" }));
-    expect(await readMigrationJournal()).toBeNull();
-  });
-
-  it("rejects a journal missing required fields", async () => {
-    store.set(JOURNAL_PATH, JSON.stringify({ migrationId: "m1" }));
-    expect(await readMigrationJournal()).toBeNull();
-  });
-
-  it("rejects malformed JSON instead of throwing", async () => {
-    store.set(JOURNAL_PATH, "{ not valid json");
+  it.each([
+    ["with an invalid cleanupMode", JSON.stringify({ ...sample, cleanupMode: "wipe-everything" })],
+    ["missing required fields", JSON.stringify({ migrationId: "m1" })],
+    ["that is malformed JSON, without throwing", "{ not valid json"],
+  ])("rejects a journal %s", async (_label, raw) => {
+    store.set(JOURNAL_PATH, raw);
     expect(await readMigrationJournal()).toBeNull();
   });
 

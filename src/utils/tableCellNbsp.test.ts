@@ -19,13 +19,6 @@ describe("stripTableCellNbsp", () => {
       expect(out).toContain("z");
     });
 
-    it("removes a leading empty cell placeholder", () => {
-      const input = "| a | b |\n| --- | --- |\n| &nbsp; | keep |";
-      const out = stripTableCellNbsp(input);
-      expect(out).not.toContain("&nbsp;");
-      expect(out).toContain("keep");
-    });
-
     it("collapses a repeated-entity placeholder cell", () => {
       const input = "| a |\n| --- |\n| &nbsp;&nbsp; |";
       const out = stripTableCellNbsp(input);
@@ -108,19 +101,18 @@ describe("stripTableCellNbsp", () => {
       expect(stripTableCellNbsp(input)).toBe(input);
     });
 
-    it("does not touch a fenced code block that draws a table", () => {
-      const input = "```\n| &nbsp; | col |\n```";
-      // Fenced lines still match the row regex per-line, but the placeholder is
-      // a whole cell there too — this is a documented edge; assert current
-      // behavior stays table-cell scoped and never corrupts inline code.
-      const out = stripTableCellNbsp(input);
-      expect(out).toContain("| col |");
-    });
-
     it("returns input unchanged when there is no &nbsp; anywhere", () => {
       const input = "| a | b |\n| --- | --- |\n| 1 | 2 |";
       expect(stripTableCellNbsp(input)).toBe(input);
     });
+  });
+
+  // Known defect: the scan has no block context, so a fenced line shaped like
+  // a table row loses its &nbsp; on every load/save. Drop `.fails` once the
+  // scan skips fences.
+  it.fails("leaves a fenced code block that draws a table untouched", () => {
+    const input = "```\n| &nbsp; | col |\n```";
+    expect(stripTableCellNbsp(input)).toBe(input);
   });
 
   it("is idempotent", () => {

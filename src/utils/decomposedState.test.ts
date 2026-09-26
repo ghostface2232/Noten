@@ -350,31 +350,7 @@ describe("local cache", () => {
 });
 
 describe("writtenGroups commit semantics — only update on disk-write success", () => {
-  it("does not poison state.writtenGroups when writeGroupsWithMerge throws", async () => {
-    const faultFs = wrapWithFaults(fs);
-    // Fault both the atomicWrite tmp path and its direct-overwrite fallback so
-    // writeGroupsWithMerge actually rejects rather than degrading silently.
-    faultFs.injectFault({
-      op: "writeTextFile",
-      path: /\.groups\.json/,
-      throwError: new Error("EBUSY: groups write blocked"),
-    });
-
-    const group = makeGroup("g-doomed-write", { name: "First" });
-    // The groups failure now propagates (no longer swallowed) so durable-intent
-    // gates can see it; the snapshot must still stay pending for retry.
-    await expect(
-      persistDecomposedState(faultFs, DIR, state, [], null, [group], persistOpts()),
-    ).rejects.toThrow();
-
-    // The in-memory snapshot must remain empty so the next persist call
-    // recognises the group as unwritten and retries. Without the fix, the
-    // snapshot would be updated eagerly during iteration, making the next
-    // call compare snap-equal-to-prev and skip the write forever.
-    expect(state.writtenGroups.has("g-doomed-write")).toBe(false);
-  });
-
-  it("retries the write on the next call after a transient failure", async () => {
+  it("leaves state.writtenGroups unpoisoned when the groups write throws, then retries on the next call", async () => {
     const faultFs = wrapWithFaults(fs);
     // One failure = one full atomicWrite attempt. .groups.json writes fail
     // closed (it is the only index of every group and tombstone, so a torn
@@ -390,7 +366,9 @@ describe("writtenGroups commit semantics — only update on disk-write success",
 
     const group = makeGroup("g-flaky", { name: "Flaky" });
 
-    // First call: write fails, persist rejects, snapshot stays pending.
+    // The failure propagates so durable-intent gates can see it. The snapshot
+    // must stay empty: updating it eagerly would make the retry compare
+    // snap-equal-to-prev and skip the write forever.
     await expect(
       persistDecomposedState(faultFs, DIR, state, [], null, [group], persistOpts()),
     ).rejects.toThrow();

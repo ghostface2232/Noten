@@ -370,11 +370,14 @@ describe("reconcileFolder", () => {
     expect(await fs.readTextFile(`${DIR}/${id}.md`)).toBe("root body");
   });
 
-  it("keeps a peer's deletion when the trash body has not arrived yet, whatever the clocks say", async () => {
-    // The sidecar is small and often syncs before the moved body.
+  it("keeps a peer's deletion when the trash body has not arrived yet, moving a root written after it into trash behind a conflict copy", async () => {
+    // The sidecar is small and often syncs before the moved body. The root's
+    // clock says it was written after the deletion, which must not undo the
+    // deletion; but it may be an edit the deleting machine never saw, and that
+    // machine's trash body can still arrive on the same path.
     const id = "22222222-2222-2222-2222-2222222222cc";
     await seedMeta(fs, makeMeta(id, { trashedAt: 5000, trashedFromPath: `${DIR}/${id}.md` }));
-    fs.seedTextFile(`${DIR}/${id}.md`, "only copy");
+    fs.seedTextFile(`${DIR}/${id}.md`, "edited after the delete");
 
     const result = await reconcileAfterGrace(fs, [makeDoc(id)]);
 
@@ -382,7 +385,9 @@ describe("reconcileFolder", () => {
     expect((await readMeta(fs, DIR, id))!.trashedAt).toBe(5000);
     expect(await fs.exists(`${DIR}/${id}.md`)).toBe(false);
     // Still restorable from the trash.
-    expect(await fs.readTextFile(`${DIR}/.trash/${id}.md`)).toBe("only copy");
+    expect(await fs.readTextFile(`${DIR}/.trash/${id}.md`)).toBe("edited after the delete");
+    const backups = (await fs.readDir(`${DIR}/.conflicts`)).filter((e) => e.name?.startsWith(`${id}-`));
+    expect(backups).toHaveLength(1);
   });
 
   // A peer's restoreNote writes the live sidecar, copies the body to root and
@@ -410,35 +415,20 @@ describe("reconcileFolder", () => {
     expect(state.trashedMetaWithRoot.has(id)).toBe(false);
   });
 
-  it("keeps a conflict copy of a root written after the deletion before moving it into trash", async () => {
-    // Possibly an edit the deleting machine never saw, and that machine's
-    // trash body can still arrive on the same path.
-    const id = "22222222-2222-2222-2222-2222222222ee";
-    await seedMeta(fs, makeMeta(id, { trashedAt: 5000, trashedFromPath: `${DIR}/${id}.md` }));
-    fs.seedTextFile(`${DIR}/${id}.md`, "edited after the delete");
-
-    await reconcileAfterGrace(fs);
-
-    expect(await fs.readTextFile(`${DIR}/.trash/${id}.md`)).toBe("edited after the delete");
-    const backups = (await fs.readDir(`${DIR}/.conflicts`)).filter((e) => e.name?.startsWith(`${id}-`));
-    expect(backups).toHaveLength(1);
-  });
-
-  it("keeps note trashed when stat fails on the root body (cloud-sync placeholder)", async () => {
+  // OneDrive/Dropbox placeholders can EBUSY/EPERM on stat, or report no mtime,
+  // while readDir still lists them.
+  it.each([
+    ["stat fails on the root body (cloud-sync placeholder)", { throwError: new Error("EBUSY: simulated cloud-sync lock") }],
+    ["stat returns null mtime", { transformResult: (st: unknown) => ({ ...(st as object), mtime: null }) }],
+  ])("keeps note trashed when %s", async (_label, fault) => {
     const id = "22222222-2222-2222-2222-22222222aaaa";
     const trashedAt = 5000;
     await seedMeta(fs, makeMeta(id, { trashedAt, trashedFromPath: `${DIR}/${id}.md` }));
     const rootPath = `${DIR}/${id}.md`;
     fs.seedTextFile(rootPath, "ghost body");
 
-    // Simulate a transient stat failure on the root path only (OneDrive/Dropbox
-    // placeholders can EBUSY/EPERM on stat while readDir still lists them).
     const faultFs = wrapWithFaults(fs);
-    faultFs.injectFault({
-      op: "stat",
-      path: rootPath,
-      throwError: new Error("EBUSY: simulated cloud-sync lock"),
-    });
+    faultFs.injectFault({ op: "stat", path: rootPath, ...fault });
 
     const result = await reconcileAfterGrace(faultFs);
 
@@ -450,28 +440,6 @@ describe("reconcileFolder", () => {
     expect(await faultFs.exists(`${DIR}/.trash/${id}.md`)).toBe(true);
     expect(await faultFs.exists(rootPath)).toBe(false);
     expect(result.docs.find((d) => d.id === id)).toBeUndefined();
-  });
-
-  it("keeps note trashed when stat returns null mtime", async () => {
-    const id = "22222222-2222-2222-2222-22222222bbbb";
-    const trashedAt = 5000;
-    await seedMeta(fs, makeMeta(id, { trashedAt, trashedFromPath: `${DIR}/${id}.md` }));
-    const rootPath = `${DIR}/${id}.md`;
-    fs.seedTextFile(rootPath, "ghost body");
-
-    const faultFs = wrapWithFaults(fs);
-    faultFs.injectFault({
-      op: "stat",
-      path: rootPath,
-      transformResult: (s) => ({ ...(s as object), mtime: null }),
-    });
-
-    await reconcileAfterGrace(faultFs);
-
-    const meta = await readMeta(faultFs, DIR, id);
-    expect(meta!.trashedAt).toBe(trashedAt);
-    expect(await faultFs.exists(`${DIR}/.trash/${id}.md`)).toBe(true);
-    expect(await faultFs.exists(rootPath)).toBe(false);
   });
 
   it("moves root body to trash when trashedAt is newer than root mtime", async () => {
