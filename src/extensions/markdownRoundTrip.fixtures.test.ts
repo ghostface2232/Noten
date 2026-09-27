@@ -361,6 +361,30 @@ describe("Markdown fixture round-trip compatibility", () => {
     expect(stableMarkdown(second)).toBe(markdown);
   });
 
+  it.each([
+    { name: "italic", source: "x *`a`* y", marks: ["italic"] },
+    { name: "strike", source: "x ~~`a`~~ y", marks: ["strike"] },
+    { name: "bold and italic", source: "x ***`a`*** y", marks: ["bold", "italic"] },
+    { name: "underline", source: "x ++`a`++ y", marks: ["underline"] },
+    { name: "italic continuing past it", source: "*`a` b*", marks: ["italic"] },
+  ])("keeps $name outside inline code", ({ source, marks }) => {
+    const markTypes = (doc: JSONContent) =>
+      descendants(doc)
+        .filter((node) => node.text === "a")
+        .map((node) => (node.marks ?? []).map((mark) => mark.type).sort());
+    const expected = [[...marks, "code"].sort()];
+
+    const first = trackedEditor(source);
+    expect(markTypes(first.getJSON())).toEqual(expected);
+
+    const markdown = stableMarkdown(first);
+    expect(markdown).toBe(source);
+
+    const second = trackedEditor(markdown);
+    expect(markTypes(second.getJSON())).toEqual(expected);
+    expect(stableMarkdown(second)).toBe(markdown);
+  });
+
   it("round-trips inline code holding a backtick inside a table cell", () => {
     const source = ["| a | b |", "| --- | --- |", "| ``a`|b`` | z |"].join("\n");
 

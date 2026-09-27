@@ -93,7 +93,15 @@ export function annotateCodeSpanFences(nodes: JSONContent[]): JSONContent[] {
   return out ?? nodes;
 }
 
+// The schema ranks marks by extension priority, then order, and the Markdown
+// serializer nests a node's marks by that rank, lowest outermost. The stock
+// code mark ranks right after bold, so italic, strike, underline and wiki
+// links opened inside it and `` *`a`* `` saved as `` `*a*` ``, whose asterisks
+// are code text on reload. One below the default priority makes code the
+// last mark and so always the innermost: code content cannot hold formatting.
 export const NotenCode = Code.extend({
+  priority: 99,
+
   renderMarkdown: (node, h) => {
     if (!node.content) return "";
     const fence = typeof node.attrs?.[FENCE_ATTR] === "string" ? node.attrs[FENCE_ATTR] : "`";
@@ -102,8 +110,6 @@ export const NotenCode = Code.extend({
   },
 });
 
-// Swapped in at the stock code mark's own position: the schema ranks marks by
-// extension order, and the rank decides how combined marks nest on output.
 export const NotenStarterKit = StarterKit.extend({
   addExtensions() {
     return (this.parent?.() ?? []).map((extension) =>

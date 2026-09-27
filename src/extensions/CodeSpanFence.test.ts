@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { Editor, type JSONContent } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import Link from "@tiptap/extension-link";
+import Underline from "@tiptap/extension-underline";
 import { Markdown } from "@tiptap/markdown";
 import CodeSpanFence, { annotateCodeSpanFences, codeSpanFence, NotenStarterKit } from "./CodeSpanFence";
 import IncrementalMarkdown from "./IncrementalMarkdown";
+import WikiLink from "./WikiLink";
 import { createFastMarked } from "./fastMarkdownLexer";
 
 describe("codeSpanFence", () => {
@@ -53,14 +56,32 @@ describe("annotateCodeSpanFences", () => {
 });
 
 describe("NotenStarterKit", () => {
-  it("keeps the stock mark ranks, which decide how combined marks nest", () => {
+  it("keeps the stock schema apart from ranking code as the last mark", () => {
     const options = { codeBlock: false, underline: false, link: false } as const;
     const stock = new Editor({ extensions: [StarterKit.configure(options)] });
     const noten = new Editor({ extensions: [NotenStarterKit.configure(options)] });
-    expect(Object.keys(noten.schema.marks)).toEqual(Object.keys(stock.schema.marks));
+    const stockMarks = Object.keys(stock.schema.marks);
+    expect(Object.keys(noten.schema.marks)).toEqual([
+      ...stockMarks.filter((name) => name !== "code"),
+      "code",
+    ]);
     expect(Object.keys(noten.schema.nodes)).toEqual(Object.keys(stock.schema.nodes));
     stock.destroy();
     noten.destroy();
+  });
+
+  it("ranks code after marks registered later in the extension list", () => {
+    const editor = new Editor({
+      extensions: [
+        NotenStarterKit.configure({ codeBlock: false, underline: false, link: false }),
+        Link,
+        Underline,
+        WikiLink,
+      ],
+    });
+    const marks = Object.keys(editor.schema.marks);
+    expect(marks[marks.length - 1]).toBe("code");
+    editor.destroy();
   });
 });
 
