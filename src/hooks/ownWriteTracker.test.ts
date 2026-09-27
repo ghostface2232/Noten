@@ -67,35 +67,14 @@ describe("pathKey", () => {
 });
 
 describe("markOwnWrite / isOwnWrite", () => {
-  it("recognizes the exact same path as own-write within the grace window", () => {
-    markOwnWrite("C:\\notes\\abc.md");
-    expect(isOwnWrite("C:\\notes\\abc.md")).toBe(true);
-  });
-
-  it("recognizes a watcher event that uses forward slashes", () => {
+  it("recognizes a watcher event that reports the path in another case and separator form", () => {
     // Tauri writeTextFile passed the backslash form; the watcher reports the
     // same file in the forward-slash form. Without canonical key, the
     // watcher would treat this as a remote edit and reconcile every save.
+    // The individual path equivalences are pathKey's tests; this one proves
+    // that marking and lookup go through the same key.
     markOwnWrite("C:\\notes\\abc.md");
     expect(isOwnWrite("c:/notes/abc.md")).toBe(true);
-  });
-
-  it("recognizes the file when caller used mixed separators", () => {
-    // This is exactly the shape useFileSystem.provisionNoteFile creates:
-    // `${notesDir}/${id}.md` where notesDir came from appDataDir() and
-    // already has backslashes on Windows.
-    markOwnWrite("C:\\Users\\foo\\AppData\\Roaming\\app/notes/xyz.md");
-    expect(isOwnWrite("C:\\Users\\foo\\AppData\\Roaming\\app\\notes\\xyz.md")).toBe(true);
-  });
-
-  it("recognizes a watcher event reported under the \\\\?\\ extended prefix", () => {
-    markOwnWrite("C:\\notes\\abc.md");
-    expect(isOwnWrite("\\\\?\\C:\\notes\\abc.md")).toBe(true);
-  });
-
-  it("recognizes a UNC path reported via the \\\\?\\UNC\\ prefix", () => {
-    markOwnWrite("\\\\share\\team\\notes\\abc.md");
-    expect(isOwnWrite("\\\\?\\UNC\\share\\team\\notes\\abc.md")).toBe(true);
   });
 
   it("ignores a path that was never marked", () => {
@@ -123,29 +102,15 @@ describe("markOwnWrite / isOwnWrite", () => {
 });
 
 describe("isOwnWriteContentMatch", () => {
-  it("matches when watcher reports the same file under a different path form", async () => {
-    // crypto.subtle is async, so the test must wait for the hash to land
-    // before checking — same as the real watcher path delay (WATCH_DELAY_MS).
-    markOwnWrite("C:\\notes\\abc.md", "hello world");
-    await flushPendingHashes();
-    expect(await isOwnWriteContentMatch("c:/notes/abc.md", "hello world")).toBe(true);
-  });
-
-  it("matches across the \\\\?\\ extended-length prefix", async () => {
-    markOwnWrite("C:\\notes\\abc.md", "body");
-    await flushPendingHashes();
-    expect(
-      await isOwnWriteContentMatch("\\\\?\\C:\\notes\\abc.md", "body"),
-    ).toBe(true);
-  });
-
   it("returns false when the content differs from anything we wrote", async () => {
     markOwnWrite("C:\\notes\\abc.md", "ours");
     await flushPendingHashes();
     expect(await isOwnWriteContentMatch("c:/notes/abc.md", "theirs")).toBe(false);
   });
 
-  it("consumes the hash so a later identical remote write is not swallowed", async () => {
+  // Marked and looked up under different path forms, so this also proves both
+  // sides share pathKey.
+  it("matches our write under another path form, then consumes the hash so a later identical remote write is not swallowed", async () => {
     markOwnWrite("C:\\notes\\abc.md", "same");
     await flushPendingHashes();
     expect(await isOwnWriteContentMatch("c:/notes/abc.md", "same")).toBe(true);

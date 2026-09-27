@@ -51,9 +51,10 @@ import { SearchHighlight } from "../extensions/SearchHighlight";
 import FocusMode, { syncFocusModeState } from "../extensions/FocusMode";
 import OffscreenBlocks from "../extensions/OffscreenBlocks";
 import IncrementalMarkdown from "../extensions/IncrementalMarkdown";
-import NotenTable from "../extensions/NotenTable";
+import { NotenTable } from "../extensions/NotenTable";
 import TableNodeSelect from "../extensions/TableNodeSelect";
 import CodeSpanFence, { NotenStarterKit } from "../extensions/CodeSpanFence";
+import { sessionHoldsSource, signaturesForStore } from "../utils/documentSession";
 import { TableBubbleMenu } from "./TableBubbleMenu";
 import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
@@ -66,7 +67,6 @@ import {
 } from "../utils/headingSlug";
 import { extractHeadings, outlineIndentDepth } from "../utils/outline";
 import { serializeImageMarkdown } from "../utils/imageMarkdownSerialize";
-import { stripTableCellNbsp } from "../utils/tableCellNbsp";
 import "../styles/tiptap-editor.css";
 import "../styles/mermaid-theme.css";
 import "../styles/wiki-link.css";
@@ -115,10 +115,6 @@ function getScrollParent(element: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-function readEditorMarkdown(editor: Editor): string {
-  return stripTableCellNbsp(editor.getMarkdown());
-}
-
 function refreshRenderedContent(editor: Editor) {
   // Do not replace content while the browser owns an IME composition buffer.
   if (editor.view.composing) return;
@@ -127,7 +123,7 @@ function refreshRenderedContent(editor: Editor) {
   const scrollTop = scrollParent?.scrollTop ?? 0;
   const scrollLeft = scrollParent?.scrollLeft ?? 0;
   const { from, to } = editor.state.selection;
-  const markdown = readEditorMarkdown(editor);
+  const markdown = editor.getMarkdown();
   const wasReadonly = editor.storage.readonlyGuard.readonly;
 
   editor.storage.readonlyGuard.readonly = false;
@@ -585,7 +581,7 @@ interface TiptapEditorProps {
 
 type DocumentSession = {
   state: EditorState;
-  markdownSignature: string;
+  markdownSignatures: string[];
   noteId: string | null;
   filePath: string | null;
 };
@@ -778,7 +774,15 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         Underline,
         TaskList,
         TaskItem.configure({ nested: true }),
-        NotenTable,
+        // `lastColumnResizable: false` pins the rightmost edge so dragging an
+        // inner column redistributes width between siblings instead of growing
+        // the whole table past the editor width.
+        NotenTable.configure({
+          resizable: true,
+          handleWidth: 6,
+          cellMinWidth: 48,
+          lastColumnResizable: false,
+        }),
         TableRow,
         TableCell,
         TableHeader,
@@ -816,10 +820,14 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       const contextFilePath = editor.storage.documentContext.filePath;
       const key = currentSessionKeyRef.current ?? buildDocumentSessionKey(contextNoteId, contextFilePath);
       if (!key) return;
-      const markdown = readEditorMarkdown(editor);
+      const serializedSignature = computeMarkdownSignature(editor.getMarkdown());
       touchDocumentSession(key, {
         state: editor.state,
-        markdownSignature: computeMarkdownSignature(markdown),
+        markdownSignatures: signaturesForStore(
+          documentSessionsRef.current.get(key),
+          editor.state.doc,
+          serializedSignature,
+        ),
         noteId: contextNoteId,
         filePath: contextFilePath,
       });
@@ -887,13 +895,11 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       closeLinkHoverPopover();
 
       const {
+        markdown,
         noteId,
         filePath,
         reason = "switch",
       } = params;
-      // Normalize legacy "&nbsp;" leakage from empty table cells before any
-      // signature or parse path sees the markdown.
-      const markdown = stripTableCellNbsp(params.markdown);
       const nextKey = buildDocumentSessionKey(noteId, filePath);
       const currentKey = currentSessionKeyRef.current;
       const sameSession = !!nextKey && nextKey === currentKey;
@@ -908,12 +914,14 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
 
       const expectedSignature = computeMarkdownSignature(markdown);
       const cachedSession = nextKey ? documentSessionsRef.current.get(nextKey) : null;
-      const shouldRestoreCachedSession = !!cachedSession && cachedSession.markdownSignature === expectedSignature;
+      const shouldRestoreCachedSession = !!cachedSession && cachedSession.markdownSignatures.includes(expectedSignature);
       let applied = false;
 
       if (sameSession) {
-        const currentSignature = computeMarkdownSignature(readEditorMarkdown(editor));
-        if (currentSignature !== expectedSignature) {
+        const alreadyShown =
+          sessionHoldsSource(cachedSession ?? undefined, editor.state.doc, expectedSignature) ||
+          computeMarkdownSignature(editor.getMarkdown()) === expectedSignature;
+        if (!alreadyShown) {
           const shouldTrackInHistory = reason === "window-sync" || reason === "file-watch";
           applied = replaceCurrentDocumentContent(markdown, shouldTrackInHistory);
         } else {
@@ -965,7 +973,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       if (resolvedKey) {
         touchDocumentSession(resolvedKey, {
           state: editor.state,
-          markdownSignature: expectedSignature,
+          markdownSignatures: [expectedSignature],
           noteId,
           filePath,
         });
@@ -1315,7 +1323,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       () => ({
         getMarkdown: () => {
           if (!editor) return "";
-          return readEditorMarkdown(editor);
+          return editor.getMarkdown();
         },
         openDocument,
         invalidateDocumentSession,

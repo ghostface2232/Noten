@@ -778,7 +778,7 @@ describe("useNotesLoader — canonical library store adapter", () => {
     expect(executedAgainst).toEqual(["a:body-a"]);
   });
 
-  it("restarts a load torn down mid-flight instead of leaving isLoading stuck", async () => {
+  it("finishes an in-flight load once, without restarting it, when the locale changes mid-flight", async () => {
     let releaseReconcile!: () => void;
     refs.reconcileGate = new Promise<void>((resolve) => { releaseReconcile = resolve; });
     const a = makeDoc("a");
@@ -2153,29 +2153,10 @@ function seedTrashObservation(id: string, trashedAt: number, seenAt: number): vo
 }
 
 describe("purgeExpiredTrash — unsafe id defense-in-depth", () => {
-  it("retains (never purges) a trashed note whose id is a traversal segment", async () => {
-    const unsafe: TrashedNote = {
-      id: "..",
-      fileName: "x",
-      originalFilePath: "/test-appdata/notes/x.md",
-      trashFilePath: "/test-appdata/notes/.trash/...md",
-      trashedAt: 1, // long expired
-      groupId: null,
-      createdAt: 1,
-      updatedAt: 1,
-    };
-    const kept = await purgeExpiredTrash([unsafe]);
-    expect(kept.map((n) => n.id)).toContain("..");
-    const logged = logNotenErrorMock.mock.calls.find(
-      (c) => (c[0] as { code: string }).code === "INVALID_NOTE_ID",
-    );
-    expect(logged).toBeDefined();
-  });
-
-  it("retains Win32-aliasing and reserved-name ids instead of purging them", async () => {
+  it("retains traversal, Win32-aliasing and reserved-name ids instead of purging them", async () => {
     // Each of these would, if purged, drive `.assets/<id>` to alias `.assets`
     // itself (or its parent) on Windows and mass-delete note images/notes.
-    const unsafeIds = ["...", " ", ".. ", "note.", "NUL"];
+    const unsafeIds = ["..", "...", " ", ".. ", "note.", "NUL"];
     const trashed: TrashedNote[] = unsafeIds.map((id) => ({
       id,
       fileName: "x",

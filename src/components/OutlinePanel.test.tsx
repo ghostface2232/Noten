@@ -32,8 +32,8 @@ function swapDocument(editor: Editor, content: string) {
   editor.view.updateState(EditorState.create({ doc, plugins: editor.state.plugins }));
 }
 
-function renderPanel(editor: Editor, docKey: string, open = true) {
-  return render(
+function panel(editor: Editor, docKey: string, open: boolean) {
+  return (
     <FluentProvider theme={webLightTheme}>
       <OutlinePanel
         editor={editor as unknown as ReactEditor}
@@ -43,8 +43,12 @@ function renderPanel(editor: Editor, docKey: string, open = true) {
         onClose={vi.fn()}
         onNavigate={vi.fn()}
       />
-    </FluentProvider>,
+    </FluentProvider>
   );
+}
+
+function renderPanel(editor: Editor, docKey: string, open = true) {
+  return render(panel(editor, docKey, open));
 }
 
 function rerenderPanel(
@@ -53,18 +57,7 @@ function rerenderPanel(
   docKey: string,
   open = true,
 ) {
-  view.rerender(
-    <FluentProvider theme={webLightTheme}>
-      <OutlinePanel
-        editor={editor as unknown as ReactEditor}
-        locale="en"
-        open={open}
-        docKey={docKey}
-        onClose={vi.fn()}
-        onNavigate={vi.fn()}
-      />
-    </FluentProvider>,
-  );
+  view.rerender(panel(editor, docKey, open));
 }
 
 describe("OutlinePanel — document loading and note switches", () => {

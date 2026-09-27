@@ -246,39 +246,6 @@ afterEach(() => {
 });
 
 
-describe("useFileWatcher — isDirty protection", () => {
-  // The most important invariant in the watcher: if the user is mid-edit on
-  // a note and a cloud-sync write arrives for the same file, the watcher must
-  // NOT overwrite the dirty in-memory content. Losing this guard silently
-  // discards whatever the user has typed since their last save.
-  it("does not update setDocs when a watcher event arrives for a doc with isDirty=true", async () => {
-    const dirtyDoc = makeDoc("a", { isDirty: true, content: "user-edits-in-progress" });
-    refs.bodyByPath.set(dirtyDoc.filePath, "remote-content-that-must-not-overwrite");
-    const { setDocs } = renderWatcher({ docs: [dirtyDoc] });
-    await waitForRootHandler();
-
-    await act(async () => {
-      await refs.rootHandler!({
-        type: { modify: { kind: "data", mode: "any" } },
-        paths: [dirtyDoc.filePath],
-        attrs: {},
-      } as unknown as WatchEvent);
-    });
-
-    // setDocs may be called for the unrelated reconcile pass; what matters
-    // is that no updater wrote remote content over the dirty in-memory body.
-    for (const call of setDocs.mock.calls) {
-      const updater = call[0];
-      if (typeof updater !== "function") continue;
-      const result = updater([dirtyDoc]);
-      // Either the updater returns the same array (unchanged) or, if it does
-      // produce a new array, the dirty doc's content must not be the remote.
-      const stillDirty = result.find((d: NoteDoc) => d.id === "a");
-      expect(stillDirty?.content).not.toBe("remote-content-that-must-not-overwrite");
-    }
-  });
-});
-
 describe("useFileWatcher — isDirty race protection (dirty during await)", () => {
   // Regression for the TOCTOU gap: the top-of-loop isDirty check runs on a
   // pre-await snapshot. If the user starts typing while readTextFile /
@@ -427,11 +394,14 @@ describe("useFileWatcher — own-write echo skip", () => {
     expect(reconcileFolderMock).not.toHaveBeenCalled();
   });
 
-  it("still reconciles for a dirty doc whose disk bytes came from elsewhere", async () => {
+  // If the user is mid-edit and a cloud-sync write arrives for the same file,
+  // the watcher must hand the event to reconcile, never overwrite the dirty
+  // body itself: that would discard whatever was typed since the last save.
+  it("reconciles for a dirty doc whose disk bytes came from elsewhere without replacing its body", async () => {
     const doc = makeDoc("a", { isDirty: true, content: "local edits" });
     refs.bodyByPath.set(doc.filePath, "a peer's body");
     refs.ownWriteMatch = false;
-    renderWatcher({ docs: [doc] });
+    const { setDocs } = renderWatcher({ docs: [doc] });
     await waitForRootHandler();
 
     await act(async () => {
@@ -442,6 +412,7 @@ describe("useFileWatcher — own-write echo skip", () => {
       } as unknown as WatchEvent);
     });
 
+    expect(setDocs).not.toHaveBeenCalled();
     expect(reconcileFolderMock).toHaveBeenCalledTimes(1);
   });
 

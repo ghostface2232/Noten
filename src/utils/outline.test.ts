@@ -124,18 +124,14 @@ describe("activeHeadingIndex", () => {
 });
 
 describe("clampOutlinePos — stale jump positions never throw", () => {
-  it("passes in-range positions through unchanged", () => {
-    expect(clampOutlinePos(5, 100)).toBe(5);
-    expect(clampOutlinePos(0, 100)).toBe(0);
-    expect(clampOutlinePos(100, 100)).toBe(100);
-  });
-
-  it("clamps positions beyond the document to doc.content.size", () => {
-    expect(clampOutlinePos(250, 100)).toBe(100);
-  });
-
-  it("clamps negative positions to 0", () => {
-    expect(clampOutlinePos(-3, 100)).toBe(0);
+  it.each([
+    ["in range", 5, 5],
+    ["at 0", 0, 0],
+    ["at doc.content.size", 100, 100],
+    ["beyond the document", 250, 100],
+    ["negative", -3, 0],
+  ])("clamps a position %s against size 100", (_label, pos, expected) => {
+    expect(clampOutlinePos(pos, 100)).toBe(expected);
   });
 
   it("resolves without throwing after a stale-pos clamp against a real doc", () => {

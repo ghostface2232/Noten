@@ -7,7 +7,7 @@ import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { Markdown } from "@tiptap/markdown";
 import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
-import NotenTable from "./NotenTable";
+import { NotenTable } from "./NotenTable";
 import TableNodeSelect from "./TableNodeSelect";
 import { createFastMarked } from "./fastMarkdownLexer";
 
