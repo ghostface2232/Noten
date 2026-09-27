@@ -2,7 +2,6 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Editor, type JSONContent } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import Image from "@tiptap/extension-image";
@@ -17,6 +16,7 @@ import { common, createLowlight } from "lowlight";
 import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import MermaidCodeBlock from "./MermaidCodeBlock";
+import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
 import WikiLink from "./WikiLink";
 import { NotenTable } from "./NotenTable";
 import { normalizeFragmentHref } from "../utils/headingSlug";
@@ -41,8 +41,9 @@ function readFixture(name: (typeof fixtureNames)[number]): string {
 function createMarkdownEditor(content: string): Editor {
   return new Editor({
     extensions: [
-      StarterKit.configure({ codeBlock: false, underline: false, link: false }),
+      NotenStarterKit.configure({ codeBlock: false, underline: false, link: false }),
       Markdown.configure({ marked: fastMarked }),
+      CodeSpanFence,
       Link.configure({
         autolink: true,
         linkOnPaste: true,
@@ -109,6 +110,36 @@ function hasMark(doc: JSONContent, type: string): boolean {
 function textContent(node: JSONContent): string {
   if (node.text) return node.text;
   return node.content?.map(textContent).join("") ?? "";
+}
+
+// Split a table row the way GFM does, before any inline parsing: every `|`
+// behind an even run of backslashes is a delimiter, and `\|` becomes `|`.
+// Noten's own tokenizer reads code spans as atomic, so reloading in Noten
+// alone cannot show whether GitHub would see the same cells.
+function gfmRowCells(line: string): string[] {
+  const cells: string[] = [];
+  let cell = "";
+  let backslashes = 0;
+  for (const ch of line.trim().replace(/^\|/, "")) {
+    if (ch === "|" && backslashes % 2 === 0) {
+      cells.push(cell);
+      cell = "";
+    } else {
+      cell += ch;
+    }
+    backslashes = ch === "\\" ? backslashes + 1 : 0;
+  }
+  if (cell.trim() !== "") cells.push(cell);
+  return cells.map((c) => c.trim().replace(/\\\|/g, "|"));
+}
+
+function tableRowLines(markdown: string): string[] {
+  return markdown.split("\n").filter((line) => line.trimStart().startsWith("|"));
+}
+
+function tableCells(doc: JSONContent): JSONContent[][] {
+  const table = descendants(doc).find((node) => node.type === "table");
+  return (table?.content ?? []).map((row) => row.content ?? []);
 }
 
 describe("Markdown fixture round-trip compatibility", () => {
@@ -245,6 +276,122 @@ describe("Markdown fixture round-trip compatibility", () => {
     const second = trackedEditor(markdown);
     expect(stableMarkdown(second)).toBe(markdown);
     expect(textContent(second.getJSON())).toContain("a || b");
+  });
+
+  it.each([
+    { name: "a doubled pipe in code", cell: "`a || b`", code: true, text: "a || b", out: "`a \\|\\| b`" },
+    { name: "an escaped pipe in code", cell: "`x \\| y`", code: true, text: "x | y", out: "`x \\| y`" },
+    { name: "an escaped pipe in plain text", cell: "a \\| b", code: false, text: "a | b", out: "a \\| b" },
+    { name: "a pipe after two backslashes in code", cell: "`a\\\\\\|b`", code: true, text: "a\\\\|b", out: "`a\\\\\\|b`" },
+    { name: "a pipe after a backslash in plain text", cell: "a\\\\\\|b", code: false, text: "a\\|b", out: "a\\\\\\|b" },
+  ])("serializes $name so GFM keeps the table's cells", ({ cell, code, text, out }) => {
+    const source = ["| a | b |", "| --- | --- |", `| ${cell} | z |`].join("\n");
+
+    const first = trackedEditor(source);
+    const firstCell = tableCells(first.getJSON())[1][0];
+    expect(textContent(firstCell)).toBe(text);
+    expect(hasMark(firstCell, "code")).toBe(code);
+
+    const markdown = stableMarkdown(first);
+    expect(markdown).toContain(out);
+    const rows = tableRowLines(markdown);
+    expect(rows).toHaveLength(3);
+    for (const row of rows) expect(gfmRowCells(row)).toHaveLength(2);
+    const [bodyFirst, bodySecond] = gfmRowCells(rows[2]);
+    expect(bodyFirst).toBe(code ? `\`${text}\`` : text.replace(/\\/g, "\\\\"));
+    expect(bodySecond).toBe("z");
+
+    const second = trackedEditor(markdown);
+    const reloadedCells = tableCells(second.getJSON());
+    expect(reloadedCells[1]).toHaveLength(2);
+    expect(textContent(reloadedCells[1][0])).toBe(text);
+    expect(hasMark(reloadedCells[1][0], "code")).toBe(code);
+    expect(stableMarkdown(second)).toBe(markdown);
+    expect(stableMarkdown(trackedEditor(stableMarkdown(second)))).toBe(markdown);
+  });
+
+  it("escapes pipes in header cells too", () => {
+    const source = ["| `a|b` | c |", "| --- | --- |", "| 1 | 2 |"].join("\n");
+
+    const first = trackedEditor(source);
+    expect(textContent(tableCells(first.getJSON())[0][0])).toBe("a|b");
+
+    const markdown = stableMarkdown(first);
+    expect(markdown).toContain("`a\\|b`");
+    for (const row of tableRowLines(markdown)) expect(gfmRowCells(row)).toHaveLength(2);
+
+    const second = trackedEditor(markdown);
+    expect(textContent(tableCells(second.getJSON())[0][0])).toBe("a|b");
+    expect(stableMarkdown(second)).toBe(markdown);
+  });
+
+  it.each([
+    { name: "one backtick", source: "x ``a`b`` y", text: "a`b", out: "x ``a`b`` y" },
+    { name: "a run of two backticks", source: "```a``b```", text: "a``b", out: "```a``b```" },
+    { name: "a leading backtick", source: "`` `a ``", text: "`a", out: "`` `a ``" },
+    { name: "a trailing backtick", source: "`` a` ``", text: "a`", out: "`` a` ``" },
+    { name: "nothing but backticks", source: "` `` `", text: "``", out: "``` `` ```" },
+    { name: "a backtick under a bold mark", source: "**``a`b``**", text: "a`b", out: "**``a`b``**" },
+    { name: "no backtick", source: "`a b`", text: "a b", out: "`a b`" },
+  ])("round-trips inline code holding $name", ({ source, text, out }) => {
+    const first = trackedEditor(source);
+    const codeText = (doc: JSONContent) =>
+      descendants(doc)
+        .filter((node) => node.marks?.some((mark) => mark.type === "code"))
+        .map(textContent);
+    expect(codeText(first.getJSON())).toEqual([text]);
+
+    const markdown = stableMarkdown(first);
+    expect(markdown).toBe(out);
+
+    const second = trackedEditor(markdown);
+    expect(codeText(second.getJSON())).toEqual([text]);
+    expect(stableMarkdown(second)).toBe(markdown);
+  });
+
+  it.each([
+    { name: "italic", source: "x *`a`* y", marks: ["italic"] },
+    { name: "strike", source: "x ~~`a`~~ y", marks: ["strike"] },
+    { name: "bold and italic", source: "x ***`a`*** y", marks: ["bold", "italic"] },
+    { name: "underline", source: "x ++`a`++ y", marks: ["underline"] },
+    { name: "italic continuing past it", source: "*`a` b*", marks: ["italic"] },
+  ])("keeps $name outside inline code", ({ source, marks }) => {
+    const markTypes = (doc: JSONContent) =>
+      descendants(doc)
+        .filter((node) => node.text === "a")
+        .map((node) => (node.marks ?? []).map((mark) => mark.type).sort());
+    const expected = [[...marks, "code"].sort()];
+
+    const first = trackedEditor(source);
+    expect(markTypes(first.getJSON())).toEqual(expected);
+
+    const markdown = stableMarkdown(first);
+    expect(markdown).toBe(source);
+
+    const second = trackedEditor(markdown);
+    expect(markTypes(second.getJSON())).toEqual(expected);
+    expect(stableMarkdown(second)).toBe(markdown);
+  });
+
+  it("round-trips inline code holding a backtick inside a table cell", () => {
+    const source = ["| a | b |", "| --- | --- |", "| ``a`|b`` | z |"].join("\n");
+
+    const first = trackedEditor(source);
+    const firstCell = tableCells(first.getJSON())[1][0];
+    expect(textContent(firstCell)).toBe("a`|b");
+    expect(hasMark(firstCell, "code")).toBe(true);
+
+    const markdown = stableMarkdown(first);
+    expect(markdown).toContain("``a`\\|b``");
+    const rows = tableRowLines(markdown);
+    for (const row of rows) expect(gfmRowCells(row)).toHaveLength(2);
+    expect(gfmRowCells(rows[2])).toEqual(["``a`|b``", "z"]);
+
+    const second = trackedEditor(markdown);
+    const reloadedCell = tableCells(second.getJSON())[1][0];
+    expect(textContent(reloadedCell)).toBe("a`|b");
+    expect(hasMark(reloadedCell, "code")).toBe(true);
+    expect(stableMarkdown(second)).toBe(markdown);
   });
 
   describe("legacy &nbsp; placeholder cells", () => {

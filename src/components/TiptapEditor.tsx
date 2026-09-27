@@ -14,7 +14,6 @@ import { Plugin, PluginKey, NodeSelection, TextSelection, EditorState, Selection
 import { GapCursor } from "@tiptap/pm/gapcursor";
 import { Slice } from "@tiptap/pm/model";
 import { closeHistory } from "@tiptap/pm/history";
-import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import { Markdown } from "@tiptap/markdown";
@@ -53,6 +52,8 @@ import FocusMode, { syncFocusModeState } from "../extensions/FocusMode";
 import OffscreenBlocks from "../extensions/OffscreenBlocks";
 import IncrementalMarkdown from "../extensions/IncrementalMarkdown";
 import { NotenTable } from "../extensions/NotenTable";
+import TableNodeSelect from "../extensions/TableNodeSelect";
+import CodeSpanFence, { NotenStarterKit } from "../extensions/CodeSpanFence";
 import { sessionHoldsSource, signaturesForStore } from "../utils/documentSession";
 import { TableBubbleMenu } from "./TableBubbleMenu";
 import { t } from "../i18n";
@@ -347,62 +348,6 @@ const MarkdownPaste = Extension.create({
               refreshSpellcheckMarkers(editor, true);
             });
             return true;
-          },
-        },
-      }),
-    ];
-  },
-});
-
-const TableNodeSelect = Extension.create({
-  name: "tableNodeSelect",
-
-  addProseMirrorPlugins() {
-    return [
-      new Plugin({
-        key: new PluginKey("tableNodeSelect"),
-        props: {
-          handleKeyDown(view, event) {
-            if (
-              event.key !== "ArrowDown"
-              && event.key !== "ArrowUp"
-              && event.key !== "ArrowLeft"
-              && event.key !== "ArrowRight"
-            ) {
-              return false;
-            }
-
-            const { selection, doc } = view.state;
-            if (selection instanceof NodeSelection) return false;
-            if (!(selection instanceof TextSelection) || !selection.empty) return false;
-
-            const pos = selection.$from;
-            const forward = event.key === "ArrowDown" || event.key === "ArrowRight";
-
-            if (forward) {
-              const after = pos.after();
-              if (after < doc.content.size) {
-                const nodeAfter = doc.resolve(after).nodeAfter;
-                if (nodeAfter?.type.name === "table") {
-                  event.preventDefault();
-                  view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, after)));
-                  return true;
-                }
-              }
-            } else {
-              const before = pos.before();
-              if (before > 0) {
-                const nodeBefore = doc.resolve(before).nodeBefore;
-                if (nodeBefore?.type.name === "table") {
-                  event.preventDefault();
-                  const tablePos = before - nodeBefore.nodeSize;
-                  view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, tablePos)));
-                  return true;
-                }
-              }
-            }
-
-            return false;
           },
         },
       }),
@@ -796,8 +741,9 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
 
     const editor = useEditor({
       extensions: [
-        StarterKit.configure({ codeBlock: false, underline: false, link: false }),
+        NotenStarterKit.configure({ codeBlock: false, underline: false, link: false }),
         Markdown.configure({ marked: fastMarked }),
+        CodeSpanFence,
         IncrementalMarkdown,
         Link.configure({
           autolink: true,
