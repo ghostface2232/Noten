@@ -17,7 +17,6 @@ import { closeHistory } from "@tiptap/pm/history";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import { Markdown } from "@tiptap/markdown";
-import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 import TaskList from "@tiptap/extension-task-list";
@@ -51,6 +50,7 @@ import { SearchHighlight } from "../extensions/SearchHighlight";
 import FocusMode, { syncFocusModeState } from "../extensions/FocusMode";
 import OffscreenBlocks from "../extensions/OffscreenBlocks";
 import IncrementalMarkdown from "../extensions/IncrementalMarkdown";
+import { NotenImage } from "../extensions/NotenImage";
 import { NotenTable } from "../extensions/NotenTable";
 import TableNodeSelect from "../extensions/TableNodeSelect";
 import CodeSpanFence, { NotenStarterKit } from "../extensions/CodeSpanFence";
@@ -66,7 +66,6 @@ import {
   type HeadingAnchor,
 } from "../utils/headingSlug";
 import { extractHeadings, outlineIndentDepth } from "../utils/outline";
-import { serializeImageMarkdown } from "../utils/imageMarkdownSerialize";
 import "../styles/tiptap-editor.css";
 import "../styles/mermaid-theme.css";
 import "../styles/wiki-link.css";
@@ -755,16 +754,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
             defaultValidate(url) && isSafeLinkHref(url),
         }),
         MermaidCodeBlock.configure({ lowlight }),
-        Image.configure({ allowBase64: true }).extend({
-          renderMarkdown(node) {
-            return serializeImageMarkdown({
-              src: node.attrs?.src,
-              alt: node.attrs?.alt,
-              title: node.attrs?.title,
-              width: node.attrs?.width,
-              height: node.attrs?.height,
-            });
-          },
+        NotenImage.extend({
           addNodeView() {
             return createImageNodeView(this.editor);
           },

@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { Editor, type JSONContent } from "@tiptap/core";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
-import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 import TaskList from "@tiptap/extension-task-list";
@@ -18,9 +17,9 @@ import { createFastMarked } from "./fastMarkdownLexer";
 import MermaidCodeBlock from "./MermaidCodeBlock";
 import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
 import WikiLink from "./WikiLink";
+import { NotenImage } from "./NotenImage";
 import { NotenTable } from "./NotenTable";
 import { normalizeFragmentHref } from "../utils/headingSlug";
-import { serializeImageMarkdown } from "../utils/imageMarkdownSerialize";
 import { isSafeLinkHref } from "../utils/linkHref";
 
 const lowlight = createLowlight(common);
@@ -53,17 +52,7 @@ function createMarkdownEditor(content: string): Editor {
           defaultValidate(url) && isSafeLinkHref(url),
       }),
       MermaidCodeBlock.configure({ lowlight }),
-      Image.configure({ allowBase64: true }).extend({
-        renderMarkdown(node) {
-          return serializeImageMarkdown({
-            src: node.attrs?.src,
-            alt: node.attrs?.alt,
-            title: node.attrs?.title,
-            width: node.attrs?.width,
-            height: node.attrs?.height,
-          });
-        },
-      }),
+      NotenImage,
       Placeholder.configure({ placeholder: "Start writing" }),
       Typography,
       Underline,

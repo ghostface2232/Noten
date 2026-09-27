@@ -5,7 +5,6 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
-import Image from "@tiptap/extension-image";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { Table } from "@tiptap/extension-table";
@@ -19,8 +18,8 @@ import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import MermaidCodeBlock from "./MermaidCodeBlock";
 import WikiLink from "./WikiLink";
+import { NotenImage } from "./NotenImage";
 import IncrementalMarkdown, { createIncrementalSerializer } from "./IncrementalMarkdown";
-import { serializeImageMarkdown } from "../utils/imageMarkdownSerialize";
 
 // The incremental getMarkdown must be byte-identical to @tiptap/markdown's
 // own serializer after any sequence of edits.
@@ -40,11 +39,7 @@ function makeEditor(content: string): Editor {
       Markdown.configure({ marked: createFastMarked() }),
       Link.configure({ openOnClick: false }),
       MermaidCodeBlock.configure({ lowlight }),
-      Image.configure({ allowBase64: true }).extend({
-        renderMarkdown(node) {
-          return serializeImageMarkdown({ src: node.attrs?.src, alt: node.attrs?.alt, title: node.attrs?.title, width: node.attrs?.width, height: node.attrs?.height });
-        },
-      }),
+      NotenImage,
       Underline,
       TaskList,
       TaskItem.configure({ nested: true }),
