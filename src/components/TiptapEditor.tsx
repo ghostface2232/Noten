@@ -53,6 +53,7 @@ import FocusMode, { syncFocusModeState } from "../extensions/FocusMode";
 import OffscreenBlocks from "../extensions/OffscreenBlocks";
 import IncrementalMarkdown from "../extensions/IncrementalMarkdown";
 import { NotenTable } from "../extensions/NotenTable";
+import { sessionHoldsSource, signaturesForStore } from "../utils/documentSession";
 import { TableBubbleMenu } from "./TableBubbleMenu";
 import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
@@ -635,7 +636,7 @@ interface TiptapEditorProps {
 
 type DocumentSession = {
   state: EditorState;
-  markdownSignature: string;
+  markdownSignatures: string[];
   noteId: string | null;
   filePath: string | null;
 };
@@ -873,10 +874,14 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       const contextFilePath = editor.storage.documentContext.filePath;
       const key = currentSessionKeyRef.current ?? buildDocumentSessionKey(contextNoteId, contextFilePath);
       if (!key) return;
-      const markdown = editor.getMarkdown();
+      const serializedSignature = computeMarkdownSignature(editor.getMarkdown());
       touchDocumentSession(key, {
         state: editor.state,
-        markdownSignature: computeMarkdownSignature(markdown),
+        markdownSignatures: signaturesForStore(
+          documentSessionsRef.current.get(key),
+          editor.state.doc,
+          serializedSignature,
+        ),
         noteId: contextNoteId,
         filePath: contextFilePath,
       });
@@ -963,12 +968,14 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
 
       const expectedSignature = computeMarkdownSignature(markdown);
       const cachedSession = nextKey ? documentSessionsRef.current.get(nextKey) : null;
-      const shouldRestoreCachedSession = !!cachedSession && cachedSession.markdownSignature === expectedSignature;
+      const shouldRestoreCachedSession = !!cachedSession && cachedSession.markdownSignatures.includes(expectedSignature);
       let applied = false;
 
       if (sameSession) {
-        const currentSignature = computeMarkdownSignature(editor.getMarkdown());
-        if (currentSignature !== expectedSignature) {
+        const alreadyShown =
+          sessionHoldsSource(cachedSession ?? undefined, editor.state.doc, expectedSignature) ||
+          computeMarkdownSignature(editor.getMarkdown()) === expectedSignature;
+        if (!alreadyShown) {
           const shouldTrackInHistory = reason === "window-sync" || reason === "file-watch";
           applied = replaceCurrentDocumentContent(markdown, shouldTrackInHistory);
         } else {
@@ -1020,7 +1027,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       if (resolvedKey) {
         touchDocumentSession(resolvedKey, {
           state: editor.state,
-          markdownSignature: expectedSignature,
+          markdownSignatures: [expectedSignature],
           noteId,
           filePath,
         });
