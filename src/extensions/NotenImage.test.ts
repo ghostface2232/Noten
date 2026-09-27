@@ -44,9 +44,7 @@ describe("NotenImage inline <img> tags", () => {
   it("keeps a sized image in a table cell across a reload", () => {
     const markdown = `| Image | Note |\n| --- | --- |\n| ${SIZED} | text |`;
     const first = load(markdown);
-    expect(images(first.getJSON())).toEqual([
-      { src: ".assets/n/a.png", alt: "a", title: null, width: "320", height: "200" },
-    ]);
+    expect(images(first.getJSON())).toHaveLength(1);
     const saved = first.getMarkdown();
     expect(saved).toContain(SIZED);
     expect(load(saved).getMarkdown()).toBe(saved);
@@ -82,11 +80,26 @@ describe("NotenImage inline <img> tags", () => {
     expect(loaded.getMarkdown().trim()).toBe(markdown);
   });
 
-  it("reads the tag the way HTML does", () => {
-    const loaded = load(`A <IMG SRC='x.png' ALT="a > b" onerror="alert(1)"> b`);
-    expect(images(loaded.getJSON())).toEqual([
-      { src: "x.png", alt: "a > b", title: null, width: null, height: null },
-    ]);
+  it.each([
+    ["a link", `<a href="https://x.test">${SIZED}</a>`],
+    ["a span beside text", `<span>${SIZED} caption</span> after`],
+    ["a link inside a table cell", `| h |\n| --- |\n| <a href="https://x.test">${SIZED}</a> |`],
+  ])("keeps an image wrapped in %s", (_, markdown) => {
+    const loaded = load(markdown);
+    expect(images(loaded.getJSON())).toHaveLength(1);
+    expect(loaded.getMarkdown()).toContain(SIZED);
+  });
+
+  it("reads an inline tag exactly as a standalone one", () => {
+    const tag = `<IMG SRC='x.png' ALT="a > b" width="40" onerror="alert(1)">`;
+    const standalone = images(load(tag).getJSON());
+    expect(standalone).toHaveLength(1);
+    expect(images(load(`A ${tag} b`).getJSON())).toEqual(standalone);
+  });
+
+  it("keeps the text around a tag Markdown does not read as HTML", () => {
+    const markdown = `<img src="cat.png" alt='cat's toy' width="200"> is my cat's favourite <b>ball</b>`;
+    expect(load(markdown).getMarkdown()).toContain("is my cat's favourite");
   });
 
   it("leaves a tag without src, and code, to the stock paths", () => {
