@@ -18,6 +18,8 @@ const dict = {
   "tool.bulletList": { en: "Bullet list", ko: "글머리 기호 목록" },
   "tool.orderedList": { en: "Numbered list", ko: "번호 목록" },
   "tool.taskList": { en: "Task list", ko: "할 일 목록" },
+  "task.checkbox": { en: "Task: {text}", ko: "할 일: {text}" },
+  "task.checkboxEmpty": { en: "Empty task", ko: "빈 할 일" },
   "tool.blockquote": { en: "Blockquote", ko: "인용문" },
   "tool.hr": { en: "Horizontal rule", ko: "구분선" },
   "tool.codeBlock": { en: "Code block", ko: "코드 블록" },
