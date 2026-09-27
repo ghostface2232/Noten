@@ -87,7 +87,7 @@ const LINES = [
   "Fig. 1 caption", "Vol. 2", "1a. x", "ABC) x",
   "paragraph text", "Another line", "lazy continuation", "   indented text", "\tindented tab",
   "", "", "", "   ", "\t", " ", " 　 ",
-  "# Heading", "## Sub", "```", "```ts", "~~~", "> quote", "---", "***",
+  "# Heading", "## Sub", "```", "```ts", "~~~", "$$", "$$ x", "> quote", "---", "***",
   "| a | b |", "|---|---|", "| 1 | 2 |", "a | b", "--- | ---", "1 | 2", "| x \\| y | z |", ":--|--:",
   "text with | pipe", "[[wiki link]]", "**bold** start",
 ];
