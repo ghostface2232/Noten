@@ -23,7 +23,6 @@ import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
-import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
@@ -53,6 +52,7 @@ import { SearchHighlight } from "../extensions/SearchHighlight";
 import FocusMode, { syncFocusModeState } from "../extensions/FocusMode";
 import OffscreenBlocks from "../extensions/OffscreenBlocks";
 import IncrementalMarkdown from "../extensions/IncrementalMarkdown";
+import NotenTable from "../extensions/NotenTable";
 import { TableBubbleMenu } from "./TableBubbleMenu";
 import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
@@ -832,15 +832,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         Underline,
         TaskList,
         TaskItem.configure({ nested: true }),
-        // `lastColumnResizable: false` pins the rightmost edge so dragging an
-        // inner column redistributes width between siblings instead of growing
-        // the whole table past the editor width.
-        Table.configure({
-          resizable: true,
-          handleWidth: 6,
-          cellMinWidth: 48,
-          lastColumnResizable: false,
-        }),
+        NotenTable,
         TableRow,
         TableCell,
         TableHeader,

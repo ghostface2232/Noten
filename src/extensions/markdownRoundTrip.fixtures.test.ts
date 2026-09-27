@@ -10,7 +10,6 @@ import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
-import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
@@ -18,6 +17,7 @@ import { common, createLowlight } from "lowlight";
 import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import MermaidCodeBlock from "./MermaidCodeBlock";
+import NotenTable from "./NotenTable";
 import WikiLink from "./WikiLink";
 import { normalizeFragmentHref } from "../utils/headingSlug";
 import { serializeImageMarkdown } from "../utils/imageMarkdownSerialize";
@@ -69,12 +69,7 @@ function createMarkdownEditor(content: string): Editor {
       Underline,
       TaskList,
       TaskItem.configure({ nested: true }),
-      Table.configure({
-        resizable: true,
-        handleWidth: 6,
-        cellMinWidth: 48,
-        lastColumnResizable: false,
-      }),
+      NotenTable,
       TableRow,
       TableCell,
       TableHeader,
@@ -110,6 +105,36 @@ function hasMark(doc: JSONContent, type: string): boolean {
 function textContent(node: JSONContent): string {
   if (node.text) return node.text;
   return node.content?.map(textContent).join("") ?? "";
+}
+
+// Split a table row the way GFM does, before any inline parsing: every `|`
+// behind an even run of backslashes is a delimiter, and `\|` becomes `|`.
+// Noten's own tokenizer reads code spans as atomic, so reloading in Noten
+// alone cannot show whether GitHub would see the same cells.
+function gfmRowCells(line: string): string[] {
+  const cells: string[] = [];
+  let cell = "";
+  let backslashes = 0;
+  for (const ch of line.trim().replace(/^\|/, "")) {
+    if (ch === "|" && backslashes % 2 === 0) {
+      cells.push(cell);
+      cell = "";
+    } else {
+      cell += ch;
+    }
+    backslashes = ch === "\\" ? backslashes + 1 : 0;
+  }
+  if (cell.trim() !== "") cells.push(cell);
+  return cells.map((c) => c.trim().replace(/\\\|/g, "|"));
+}
+
+function tableRowLines(markdown: string): string[] {
+  return markdown.split("\n").filter((line) => line.trimStart().startsWith("|"));
+}
+
+function tableCells(doc: JSONContent): JSONContent[][] {
+  const table = descendants(doc).find((node) => node.type === "table");
+  return (table?.content ?? []).map((row) => row.content ?? []);
 }
 
 describe("Markdown fixture round-trip compatibility", () => {
@@ -262,6 +287,53 @@ describe("Markdown fixture round-trip compatibility", () => {
     const second = trackedEditor(markdown);
     expect(stableMarkdown(second)).toBe(markdown);
     expect(textContent(second.getJSON())).toContain("a || b");
+  });
+
+  it.each([
+    { name: "a doubled pipe in code", cell: "`a || b`", code: true, text: "a || b", out: "`a \\|\\| b`" },
+    { name: "an escaped pipe in code", cell: "`x \\| y`", code: true, text: "x | y", out: "`x \\| y`" },
+    { name: "an escaped pipe in plain text", cell: "a \\| b", code: false, text: "a | b", out: "a \\| b" },
+    { name: "a pipe after two backslashes in code", cell: "`a\\\\\\|b`", code: true, text: "a\\\\|b", out: "`a\\\\\\|b`" },
+    { name: "a pipe after a backslash in plain text", cell: "a\\\\\\|b", code: false, text: "a\\|b", out: "a\\\\\\|b" },
+  ])("serializes $name so GFM keeps the table's cells", ({ cell, code, text, out }) => {
+    const source = ["| a | b |", "| --- | --- |", `| ${cell} | z |`].join("\n");
+
+    const first = trackedEditor(source);
+    const firstCell = tableCells(first.getJSON())[1][0];
+    expect(textContent(firstCell)).toBe(text);
+    expect(hasMark(firstCell, "code")).toBe(code);
+
+    const markdown = stableMarkdown(first);
+    expect(markdown).toContain(out);
+    const rows = tableRowLines(markdown);
+    expect(rows).toHaveLength(3);
+    for (const row of rows) expect(gfmRowCells(row)).toHaveLength(2);
+    const [bodyFirst, bodySecond] = gfmRowCells(rows[2]);
+    expect(bodyFirst).toBe(code ? `\`${text}\`` : text.replace(/\\/g, "\\\\"));
+    expect(bodySecond).toBe("z");
+
+    const second = trackedEditor(markdown);
+    const reloadedCells = tableCells(second.getJSON());
+    expect(reloadedCells[1]).toHaveLength(2);
+    expect(textContent(reloadedCells[1][0])).toBe(text);
+    expect(hasMark(reloadedCells[1][0], "code")).toBe(code);
+    expect(stableMarkdown(second)).toBe(markdown);
+    expect(stableMarkdown(trackedEditor(stableMarkdown(second)))).toBe(markdown);
+  });
+
+  it("escapes pipes in header cells too", () => {
+    const source = ["| `a|b` | c |", "| --- | --- |", "| 1 | 2 |"].join("\n");
+
+    const first = trackedEditor(source);
+    expect(textContent(tableCells(first.getJSON())[0][0])).toBe("a|b");
+
+    const markdown = stableMarkdown(first);
+    expect(markdown).toContain("`a\\|b`");
+    for (const row of tableRowLines(markdown)) expect(gfmRowCells(row)).toHaveLength(2);
+
+    const second = trackedEditor(markdown);
+    expect(textContent(tableCells(second.getJSON())[0][0])).toBe("a|b");
+    expect(stableMarkdown(second)).toBe(markdown);
   });
 
   it("preserves a plain bullet nested under a task-list parent", () => {
