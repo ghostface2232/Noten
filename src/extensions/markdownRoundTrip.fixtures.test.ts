@@ -2,7 +2,6 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Editor, type JSONContent } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import Image from "@tiptap/extension-image";
@@ -18,6 +17,7 @@ import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import MermaidCodeBlock from "./MermaidCodeBlock";
 import NotenTable from "./NotenTable";
+import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
 import WikiLink from "./WikiLink";
 import { normalizeFragmentHref } from "../utils/headingSlug";
 import { serializeImageMarkdown } from "../utils/imageMarkdownSerialize";
@@ -42,8 +42,9 @@ function readFixture(name: (typeof fixtureNames)[number]): string {
 function createMarkdownEditor(content: string): Editor {
   return new Editor({
     extensions: [
-      StarterKit.configure({ codeBlock: false, underline: false, link: false }),
+      NotenStarterKit.configure({ codeBlock: false, underline: false, link: false }),
       Markdown.configure({ marked: fastMarked }),
+      CodeSpanFence,
       Link.configure({
         autolink: true,
         linkOnPaste: true,
@@ -333,6 +334,51 @@ describe("Markdown fixture round-trip compatibility", () => {
 
     const second = trackedEditor(markdown);
     expect(textContent(tableCells(second.getJSON())[0][0])).toBe("a|b");
+    expect(stableMarkdown(second)).toBe(markdown);
+  });
+
+  it.each([
+    { name: "one backtick", source: "x ``a`b`` y", text: "a`b", out: "x ``a`b`` y" },
+    { name: "a run of two backticks", source: "```a``b```", text: "a``b", out: "```a``b```" },
+    { name: "a leading backtick", source: "`` `a ``", text: "`a", out: "`` `a ``" },
+    { name: "a trailing backtick", source: "`` a` ``", text: "a`", out: "`` a` ``" },
+    { name: "nothing but backticks", source: "` `` `", text: "``", out: "``` `` ```" },
+    { name: "a backtick under a bold mark", source: "**``a`b``**", text: "a`b", out: "**``a`b``**" },
+    { name: "no backtick", source: "`a b`", text: "a b", out: "`a b`" },
+  ])("round-trips inline code holding $name", ({ source, text, out }) => {
+    const first = trackedEditor(source);
+    const codeText = (doc: JSONContent) =>
+      descendants(doc)
+        .filter((node) => node.marks?.some((mark) => mark.type === "code"))
+        .map(textContent);
+    expect(codeText(first.getJSON())).toEqual([text]);
+
+    const markdown = stableMarkdown(first);
+    expect(markdown).toBe(out);
+
+    const second = trackedEditor(markdown);
+    expect(codeText(second.getJSON())).toEqual([text]);
+    expect(stableMarkdown(second)).toBe(markdown);
+  });
+
+  it("round-trips inline code holding a backtick inside a table cell", () => {
+    const source = ["| a | b |", "| --- | --- |", "| ``a`|b`` | z |"].join("\n");
+
+    const first = trackedEditor(source);
+    const firstCell = tableCells(first.getJSON())[1][0];
+    expect(textContent(firstCell)).toBe("a`|b");
+    expect(hasMark(firstCell, "code")).toBe(true);
+
+    const markdown = stableMarkdown(first);
+    expect(markdown).toContain("``a`\\|b``");
+    const rows = tableRowLines(markdown);
+    for (const row of rows) expect(gfmRowCells(row)).toHaveLength(2);
+    expect(gfmRowCells(rows[2])).toEqual(["``a`|b``", "z"]);
+
+    const second = trackedEditor(markdown);
+    const reloadedCell = tableCells(second.getJSON())[1][0];
+    expect(textContent(reloadedCell)).toBe("a`|b");
+    expect(hasMark(reloadedCell, "code")).toBe(true);
     expect(stableMarkdown(second)).toBe(markdown);
   });
 

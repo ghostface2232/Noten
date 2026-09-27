@@ -14,7 +14,6 @@ import { Plugin, PluginKey, NodeSelection, TextSelection, EditorState, Selection
 import { GapCursor } from "@tiptap/pm/gapcursor";
 import { Slice } from "@tiptap/pm/model";
 import { closeHistory } from "@tiptap/pm/history";
-import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import { Markdown } from "@tiptap/markdown";
@@ -53,6 +52,7 @@ import FocusMode, { syncFocusModeState } from "../extensions/FocusMode";
 import OffscreenBlocks from "../extensions/OffscreenBlocks";
 import IncrementalMarkdown from "../extensions/IncrementalMarkdown";
 import NotenTable from "../extensions/NotenTable";
+import CodeSpanFence, { NotenStarterKit } from "../extensions/CodeSpanFence";
 import { TableBubbleMenu } from "./TableBubbleMenu";
 import { t } from "../i18n";
 import type { Locale, WordWrap } from "../hooks/useSettings";
@@ -800,8 +800,9 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
 
     const editor = useEditor({
       extensions: [
-        StarterKit.configure({ codeBlock: false, underline: false, link: false }),
+        NotenStarterKit.configure({ codeBlock: false, underline: false, link: false }),
         Markdown.configure({ marked: fastMarked }),
+        CodeSpanFence,
         IncrementalMarkdown,
         Link.configure({
           autolink: true,
