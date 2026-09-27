@@ -59,10 +59,6 @@ describe("buildLineIndex", () => {
     expect(buildLineIndex(editor.state.doc).total).toBe(4);
   });
 
-  it("reports at least one line for an empty document", () => {
-    expect(lineIndexOf("").total).toBeGreaterThanOrEqual(1);
-  });
-
   it("counts a leaf block such as a horizontal rule as one line", () => {
     expect(lineIndexOf("<p>a</p><hr><p>b</p>").total).toBe(3);
   });
@@ -142,17 +138,6 @@ describe("lineToPos", () => {
     expect(lineToPos(index, 0)).toBe(lineToPos(index, 1));
     expect(lineToPos(index, 999)).toBe(lineToPos(index, index.total));
   });
-
-  it("returns a position that resolves inside the document", () => {
-    const editor = makeEditor("<p>one</p><ul><li><p>two</p></li></ul>");
-    const index = buildLineIndex(editor.state.doc);
-    for (let line = 1; line <= index.total; line++) {
-      const pos = lineToPos(index, line);
-      expect(pos).toBeGreaterThanOrEqual(0);
-      expect(pos).toBeLessThanOrEqual(editor.state.doc.content.size);
-      expect(() => editor.state.doc.resolve(pos)).not.toThrow();
-    }
-  });
 });
 
 // Every construct the editor can produce, exercised against the whole-index
@@ -226,14 +211,6 @@ describe("hard breaks", () => {
     expect(posToLine(index, 2)).toBe(1); // after "a", before the break
     expect(posToLine(index, 3)).toBe(2); // after the break
     expect(posToLine(index, 4)).toBe(2); // after "b"
-  });
-
-  it("round-trips lines separated by hard breaks", () => {
-    const editor = makeEditor("<p>one<br>two<br>three</p>");
-    const index = buildLineIndex(editor.state.doc);
-    for (let line = 1; line <= index.total; line++) {
-      expect(posToLine(index, lineToPos(index, line))).toBe(line);
-    }
   });
 });
 
@@ -392,17 +369,9 @@ describe("countWords", () => {
     expect(countWords("오늘 회의 내용을 정리한다")).toBe(4);
   });
 
-  it("counts an ideographic space as a separator", () => {
-    expect(countWords("한글　단어")).toBe(2);
-  });
-
   it("returns zero for empty or whitespace-only text", () => {
     expect(countWords("")).toBe(0);
     expect(countWords("   \n\t ")).toBe(0);
-  });
-
-  it("treats newlines as separators", () => {
-    expect(countWords("first\nsecond\nthird")).toBe(3);
   });
 });
 

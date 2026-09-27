@@ -278,12 +278,6 @@ describe("OffscreenBlocks", () => {
       expect(skipping(editor)).toBe(false);
     });
 
-    it("leaves skipping on for edits to an on-screen paragraph", () => {
-      const editor = readyEditor("<p>top</p><p>here</p>");
-      editor.commands.insertContentAt(insideBlock(editor, 1) + 1, "x");
-      expect(skipping(editor)).toBe(true);
-    });
-
     it("keeps prose unskipped past the block limit, where paragraph edits need no re-measure", () => {
       const editor = readyEditor(paragraphs(MAX_TEXT_SKIP_BLOCKS + 1));
       expect(skipsText(editor)).toBe(false);

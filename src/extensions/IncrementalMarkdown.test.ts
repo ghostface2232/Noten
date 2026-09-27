@@ -170,25 +170,6 @@ describe("IncrementalMarkdown", () => {
     expect(stock(e)).toBe("");
   });
 
-  it("re-renders only the blocks that changed", () => {
-    const e = makeEditor(Array.from({ length: 50 }, (_, i) => `paragraph ${i}`).join("\n\n"));
-    e.getMarkdown();
-    let rendered = 0;
-    const manager = e.markdown as unknown as { renderNodeToMarkdown: (...args: unknown[]) => string };
-    const original = manager.renderNodeToMarkdown.bind(manager);
-    manager.renderNodeToMarkdown = (...args: unknown[]) => {
-      rendered++;
-      return original(...args);
-    };
-    e.view.dispatch(e.state.tr.insertText("!", 3));
-    const md = e.getMarkdown();
-    manager.renderNodeToMarkdown = original;
-    expect(md).toBe(stock(e));
-    // The edited paragraph, and the one after it (its previous sibling
-    // changed); each render recurses into its text node.
-    expect(rendered).toBeLessThanOrEqual(4);
-  });
-
   function countRenders(e: Editor) {
     const manager = e.markdown as unknown as { renderNodeToMarkdown: (...args: unknown[]) => string };
     const original = manager.renderNodeToMarkdown.bind(manager);
@@ -199,6 +180,19 @@ describe("IncrementalMarkdown", () => {
     };
     return counter;
   }
+
+  it("re-renders only the blocks that changed", () => {
+    const e = makeEditor(Array.from({ length: 50 }, (_, i) => `paragraph ${i}`).join("\n\n"));
+    e.getMarkdown();
+    const renders = countRenders(e);
+    e.view.dispatch(e.state.tr.insertText("!", 3));
+    const md = e.getMarkdown();
+    renders.restore();
+    expect(md).toBe(stock(e));
+    // The edited paragraph, and the one after it (its previous sibling
+    // changed); each render recurses into its text node.
+    expect(renders.n).toBeLessThanOrEqual(4);
+  });
 
   it("fills the cache in idle time after an edit, a slice at a time", () => {
     vi.useFakeTimers();

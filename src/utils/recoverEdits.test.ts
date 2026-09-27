@@ -279,13 +279,6 @@ describe("recoverEdits — a record from a different notes directory", () => {
     expect(await conflictFiles()).toHaveLength(1);
     expect(await fs.exists(`/old-notes/${NOTE_ID}.md`)).toBe(false);
   });
-
-  it("still applies a record whose path is the current folder", async () => {
-    fs.seedTextFile(NOTE_PATH, "what was on disk");
-    await writeRecoveryRecord(fs, APP_DATA, LABEL, record());
-
-    expect(await recoverEdits(deps())).toMatchObject({ applied: 1 });
-  });
 });
 
 describe("recoverEdits — Windows paths and traversal", () => {

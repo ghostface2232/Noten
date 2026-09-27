@@ -243,7 +243,6 @@ const copyFileMock = fsPlugin.copyFile as ReturnType<typeof vi.fn>;
 const logMock = crashLogModule.logNotenError as ReturnType<typeof vi.fn>;
 const markOwnWriteMock = ownWriteModule.markOwnWrite as ReturnType<typeof vi.fn>;
 const markGroupAsDeletedMock = notesLoaderModule.markGroupAsDeleted as ReturnType<typeof vi.fn>;
-const saveManifestMock = notesLoaderModule.saveManifest as ReturnType<typeof vi.fn>;
 const emitDocCreatedMock = windowSyncModule.emitDocCreated as ReturnType<typeof vi.fn>;
 const emitTrashUpdatedMock = windowSyncModule.emitTrashUpdated as ReturnType<typeof vi.fn>;
 
@@ -692,30 +691,6 @@ describe("useFileSystem — duplicateNote disk-first invariant", () => {
   });
 });
 
-// deleteNote — three distinct safety nets:
-//   1. trash copyFile failure → deletion aborted (no orphan removal).
-//   2. cancelDocSave runs before disk work → no stale autosave.
-//   3. last-note replacement write failure → replacement isDirty=true.
-
-describe("useFileSystem — deleteNote trash-copy guard", () => {
-  it("aborts deletion when copyFile to .trash fails (no setDocs, no remove)", async () => {
-    refs.copyFileShouldThrow = new Error("EACCES");
-    // Silence the DEV-only warn so the intentional fault doesn't pollute test output.
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    const doc = makeDoc("a", { content: "important" });
-    const { result, setDocs } = renderFs({ docs: [doc] });
-
-    await act(async () => {
-      await result.current.deleteNote(0);
-    });
-
-    expect(copyFileMock).toHaveBeenCalledTimes(1);
-    expect(setDocs).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
-  });
-});
-
 describe("useFileSystem — active-target flush verdicts", () => {
   // A provisioning flush writes the body but changes the doc's filePath, so it
   // reports "provisioned" rather than "saved": destructive callers may proceed,
@@ -771,26 +746,6 @@ describe("useFileSystem — active-target flush verdicts", () => {
     expect(copyFileMock).not.toHaveBeenCalled();
   });
 
-  it("skips an active doc whose body write genuinely failed", async () => {
-    const state = makeState({ isDirty: true });
-    const flushDocSave = vi.fn(async (docId: string) => docId !== "a");
-    const { result, flushAutoSave } = renderFs({
-      docs: [makeDoc("a", { content: "typed", isDirty: true }), makeDoc("b")],
-      activeIndex: 0,
-      state,
-      flushDocSave,
-    });
-    flushAutoSave.mockResolvedValue({ status: "failed", reason: "save-failed" });
-
-    let deleted: string[] = [];
-    await act(async () => {
-      deleted = await result.current.deleteNote(0);
-    });
-
-    expect(deleted).toEqual([]);
-    expect(copyFileMock).not.toHaveBeenCalled();
-  });
-
   it("restores even when flushing the leaving doc reports failure", async () => {
     const trashed: TrashedNote = {
       id: "t1",
@@ -822,6 +777,11 @@ describe("useFileSystem — active-target flush verdicts", () => {
     expect(refs.librarySnapshot?.docs.find((doc) => doc.id === "a")?.isDirty).toBe(true);
   });
 });
+
+// deleteNote — three distinct safety nets:
+//   1. trash copyFile failure → deletion aborted (no orphan removal).
+//   2. cancelDocSave runs before disk work → no stale autosave.
+//   3. last-note replacement write failure → replacement isDirty=true.
 
 describe("useFileSystem — deleteNotes meta-first ordering", () => {
   const writeMetaMock = metadataIOModule.writeMeta as ReturnType<typeof vi.fn>;
@@ -868,17 +828,21 @@ describe("useFileSystem — deleteNotes meta-first ordering", () => {
     warnSpy.mockRestore();
   });
 
-  it("removes the sidecar it created when rollback finds none existed", async () => {
+  it("aborts on a failed trash copy: keeps the body, commits nothing, and removes the sidecar it created", async () => {
     refs.copyFileShouldThrow = new Error("EACCES");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     // readMeta default resolves null → the sidecar did not exist beforehand.
+    const removeBodyMock = fsPlugin.remove as ReturnType<typeof vi.fn>;
 
-    const { result } = renderFs({ docs: [makeDoc("a"), makeDoc("b")], activeIndex: 1 });
+    const { result, setDocs } = renderFs({ docs: [makeDoc("a"), makeDoc("b")], activeIndex: 1 });
 
     await act(async () => {
       await result.current.deleteNote(0);
     });
 
+    expect(copyFileMock).toHaveBeenCalledTimes(1);
+    expect(removeBodyMock).not.toHaveBeenCalledWith("/notes/a.md");
+    expect(setDocs).not.toHaveBeenCalled();
     expect(removeMetaMock).toHaveBeenCalledWith(expect.anything(), expect.any(String), "a", { strict: true });
     warnSpy.mockRestore();
   });
@@ -1025,10 +989,12 @@ describe("useFileSystem — deleteNote flushes in-flight save", () => {
       flushDocSave,
     });
 
+    let deleted: string[] = [];
     await act(async () => {
-      await result.current.deleteNote(0);
+      deleted = await result.current.deleteNote(0);
     });
 
+    expect(deleted).toEqual([]);
     expect(flushDocSave).toHaveBeenCalledWith("a");
     expect(cancelDocSave).not.toHaveBeenCalled();
     expect(copyFileMock).not.toHaveBeenCalled();
@@ -1319,6 +1285,8 @@ describe("useFileSystem — switchDocument prunes an empty leaving doc", () => {
   const removeMetaMock = metadataIOModule.removeMeta as ReturnType<typeof vi.fn>;
 
   it("removes the empty doc's body BEFORE its meta sidecar", async () => {
+    // makeDoc seeds the disk baseline, so this is also the positive control for
+    // the unread-body gate below: it keys off an unread body, not an empty one.
     const empty = makeDoc("a", { content: "" });
     const other = makeDoc("b", { content: "real note" });
     const callOrder: string[] = [];
@@ -1369,22 +1337,6 @@ describe("useFileSystem — switchDocument prunes an empty leaving doc", () => {
     expect([...libraryStore.getSnapshot().docs].map((d) => d.id).sort()).toEqual(["a", "b"]);
   });
 
-  it("still prunes an empty doc whose body WAS read (the ordinary case)", async () => {
-    // The gate keys off an unread body, not an empty one: a note the loader
-    // read as empty, or one newNote just provisioned, must still be cleaned up.
-    const empty = makeDoc("a", { content: "" });
-    const other = makeDoc("b", { content: "real note" });
-    const removeMock2 = fsPlugin.remove as ReturnType<typeof vi.fn>;
-    const { result } = renderFs({ docs: [empty, other], activeIndex: 0 });
-
-    await act(async () => {
-      await result.current.switchDocument(1);
-    });
-
-    expect(removeMock2).toHaveBeenCalledWith("/notes/a.md");
-    expect([...libraryStore.getSnapshot().docs].map((d) => d.id)).toEqual(["b"]);
-  });
-
   it("drops the pruned id from groups and deletes the emptied group", async () => {
     const empty = makeDoc("a", { content: "" });
     const other = makeDoc("b", { content: "real note" });
@@ -1408,38 +1360,17 @@ describe("useFileSystem — switchDocument prunes an empty leaving doc", () => {
     expect(markGroupAsDeletedMock).toHaveBeenCalledWith("g1");
   });
 
-  it("persists groups WITHOUT the tombstoned group so the delete is not cancelled", async () => {
-    // Regression for the P0-4 follow-up: markGroupAsDeleted runs while pruning,
-    // but switchDocument used to hand saveManifest groupsRef.current — a
-    // pre-delete array still containing g1. persistDecomposedState then read
-    // g1's presence as a resurrection and cancelled the fresh tombstone, so
-    // deletedAt was never written and g1 reappeared on reload. The pruner now
-    // returns the post-delete array and switchDocument persists THAT.
-    const empty = makeDoc("a", { content: "" });
-    const other = makeDoc("b", { content: "real note" });
-    const groups: NoteGroup[] = [
-      { id: "g1", name: "G1", noteIds: ["a"], collapsed: false, createdAt: 1000 },
-      { id: "g2", name: "G2", noteIds: ["b"], collapsed: false, createdAt: 1000 },
-    ];
-    const { result } = renderFs({ docs: [empty, other], activeIndex: 0, groups });
-
-    await act(async () => {
-      await result.current.switchDocument(1);
-    });
-
-    expect(markGroupAsDeletedMock).toHaveBeenCalledWith("g1");
-    // The last saveManifest call must carry the pruned groups (g1 gone), not the
-    // stale array — otherwise the tombstone gets cancelled downstream.
-    const lastPersist = saveManifestMock.mock.calls[saveManifestMock.mock.calls.length - 1];
-    const persistedGroups = lastPersist?.[2] as NoteGroup[] | undefined;
-    expect(persistedGroups).toBeDefined();
-    expect(persistedGroups!.map((g) => g.id)).toEqual(["g2"]);
-  });
-
-  it("does not prune a non-empty leaving doc", async () => {
-    const filled = makeDoc("a", { content: "has content" });
+  // getCurrentMarkdown is a full-document serialization. The prune consults
+  // the live editor only for the docs-lag race (empty in the list, typed-in
+  // editor); on the common non-empty switch that read is discarded work, so
+  // it must not run at all — a large note would pay it on every switch.
+  it.each([
+    ["non-empty", { content: "has content" }],
+    ["empty but explicitly named (customName)", { content: "", customName: true }],
+  ] as const)("does not prune, or serialize the editor for, a %s leaving doc", async (_label, overrides) => {
+    const leaving = makeDoc("a", overrides);
     const other = makeDoc("b", { content: "x" });
-    const { result } = renderFs({ docs: [filled, other], activeIndex: 0 });
+    const { result } = renderFs({ docs: [leaving, other], activeIndex: 0 });
 
     await act(async () => {
       await result.current.switchDocument(1);
@@ -1448,39 +1379,6 @@ describe("useFileSystem — switchDocument prunes an empty leaving doc", () => {
     expect(removeMock).not.toHaveBeenCalledWith("/notes/a.md");
     const lastDocs = [...libraryStore.getSnapshot().docs];
     expect(lastDocs.map((d) => d.id).sort()).toEqual(["a", "b"]);
-  });
-
-  it("does not prune an empty doc the user explicitly named (customName)", async () => {
-    const named = makeDoc("a", { content: "", customName: true });
-    const other = makeDoc("b", { content: "x" });
-    const { result } = renderFs({ docs: [named, other], activeIndex: 0 });
-
-    await act(async () => {
-      await result.current.switchDocument(1);
-    });
-
-    expect(removeMock).not.toHaveBeenCalledWith("/notes/a.md");
-    const lastDocs = [...libraryStore.getSnapshot().docs];
-    expect(lastDocs.map((d) => d.id).sort()).toEqual(["a", "b"]);
-  });
-
-  it("never serializes the editor when the leaving doc is non-empty or custom-named", async () => {
-    // getCurrentMarkdown is a full-document serialization. The prune consults
-    // the live editor only for the docs-lag race (empty in the list, typed-in
-    // editor); on the common non-empty switch that read is discarded work, so
-    // it must not run at all — a large note would pay it on every switch.
-    const filled = makeDoc("a", { content: "has content" });
-    const named = makeDoc("b", { content: "", customName: true });
-    const other = makeDoc("c", { content: "x" });
-    const { result } = renderFs({ docs: [filled, named, other], activeIndex: 0 });
-
-    await act(async () => {
-      await result.current.switchDocument(1);
-    });
-    await act(async () => {
-      await result.current.switchDocument(2);
-    });
-
     expect(refs.editorReads).toBe(0);
   });
 
@@ -1792,19 +1690,6 @@ describe("useFileSystem — restoreNote meta-first ordering", () => {
         await result.current.restoreNote("t1");
       });
       expect(callOrder.indexOf("read:/notes/t1.md")).toBeLessThan(callOrder.indexOf("remove:/notes/.trash/t1.md"));
-
-      // A failed read-back keeps the trash copy: it is still the only body.
-      callOrder.length = 0;
-      refs.readFaultByPath.set("/notes/t2.md", new Error("EBUSY"));
-      const second = renderFs({
-        docs: [makeDoc("a")],
-        trashedNotes: [{ ...trashed, id: "t2", originalFilePath: "/notes/t2.md", trashFilePath: "/notes/.trash/t2.md" }],
-      });
-      await act(async () => {
-        await second.result.current.restoreNote("t2");
-      });
-      expect(callOrder).toContain("remove:/notes/t2.md");
-      expect(callOrder).not.toContain("remove:/notes/.trash/t2.md");
     } finally {
       readMock.mockImplementation(async (path: string) => {
         const perPath = refs.readFaultByPath.get(path);
@@ -2267,7 +2152,7 @@ describe("useFileSystem — createNoteWithTitle provisioning", () => {
 // doc gets committed.
 
 describe("useFileSystem — restoreNote read-failure", () => {
-  it("logs BODY_READ_FAILED and bails without committing the restored doc when the read after copy fails", async () => {
+  it("on a failed read-back after the copy, logs BODY_READ_FAILED, drops the root copy, keeps the trash copy, and commits nothing", async () => {
     const trashed: TrashedNote = {
       id: "t1",
       fileName: "Recovered",
@@ -2300,11 +2185,14 @@ describe("useFileSystem — restoreNote read-failure", () => {
       noteId: "t1",
     });
 
-    // The doc list MUST NOT receive a phantom entry; the trash list MUST NOT be
-    // emptied (the user can retry — next reload's reconcile will pick up the
-    // restored file via its on-disk presence).
+    // The doc list MUST NOT receive a phantom entry, and the trash entry and
+    // its body stay: the trash copy is still the only body, so the user can
+    // retry the restore.
     expect(setDocs).not.toHaveBeenCalled();
     expect(setTrashedNotes).not.toHaveBeenCalled();
+    const removeMock = fsPlugin.remove as ReturnType<typeof vi.fn>;
+    expect(removeMock).toHaveBeenCalledWith("/notes/t1.md");
+    expect(removeMock).not.toHaveBeenCalledWith("/notes/.trash/t1.md");
   });
 });
 

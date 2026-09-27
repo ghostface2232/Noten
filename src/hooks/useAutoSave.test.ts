@@ -1057,7 +1057,7 @@ describe("useAutoSave — doSave functional commit", () => {
 });
 
 describe("useAutoSave — debounce queue", () => {
-  it("defers Markdown serialization until the debounce fires", async () => {
+  it("defers Markdown serialization and the write until DEBOUNCE_MS has elapsed", async () => {
     vi.useFakeTimers();
     const { result } = renderAutoSave({ state: makeState({ isDirty: true }) });
 
@@ -1066,24 +1066,12 @@ describe("useAutoSave — debounce queue", () => {
     expect(getCurrentMarkdownMock).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(999); });
     expect(getCurrentMarkdownMock).not.toHaveBeenCalled();
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    expect(getCurrentMarkdownMock).toHaveBeenCalledTimes(1);
-    expect(writeMock).toHaveBeenCalledWith("/notes/a.md", "hello world");
-  });
-
-  it("does not fire doSave until DEBOUNCE_MS has elapsed since the last schedule", async () => {
-    vi.useFakeTimers();
-    const { result } = renderAutoSave({ state: makeState({ isDirty: true }) });
-
-    act(() => result.current.scheduleAutoSave());
-
-    // Just under debounce — no write yet.
-    await act(async () => { await vi.advanceTimersByTimeAsync(999); });
     expect(writeMock).not.toHaveBeenCalled();
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(getCurrentMarkdownMock).toHaveBeenCalledTimes(1);
     expect(writeMock).toHaveBeenCalledTimes(1);
+    expect(writeMock).toHaveBeenCalledWith("/notes/a.md", "hello world");
   });
 
   it("rapid scheduleAutoSave for the same doc cancels the prior timer (one fire, not two)", async () => {
@@ -1821,21 +1809,55 @@ describe("useAutoSave — what the recovery journal is allowed to claim", () => 
   // journalPendingEdits is read by the close gate as "is this edit safe to
   // lose the process over". It has to answer only for what it can actually
   // record, or the gate closes the window on work that was never written.
-  it("records a failed save's body, and only that doc's", async () => {
+  it("records only the failed save's own body, with a null base when this session never saw the file", async () => {
+    // b's save is still in flight when a's fails, so b's snapshot is pending
+    // too. A folder outage fails every pending save at once, and re-recording
+    // every pending body on each failure is quadratic.
+    // a is the projection case: no disk baseline was ever seeded. A record with
+    // no base must never be applied, and that depends entirely on this value
+    // being null rather than the body the empty editor happened to hold.
     vi.useFakeTimers();
-    refs.writeShouldThrow = new Error("EPERM: folder offline");
-    refs.editorContent = "typed while the folder was gone";
-    const { result } = renderAutoSave({
-      docs: [makeDoc("a", { content: "old" })],
-      state: makeState({ isDirty: true }),
+    let releaseB!: () => void;
+    const bBlocked = new Promise<void>((resolve) => { releaseB = resolve; });
+    writeMock.mockImplementation(async (path: string) => {
+      if (path === "/notes/b.md") return bBlocked;
+      throw new Error("EPERM: folder offline");
     });
+    try {
+      const { result } = renderAutoSave({
+        docs: [makeDoc("a", { content: "" }), makeDoc("b")],
+        state: makeState({ isDirty: true }),
+      });
 
-    act(() => result.current.scheduleAutoSave());
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    await act(async () => { await Promise.resolve(); });
+      let pendingB!: Promise<FlushResult>;
+      await act(async () => {
+        result.current.notifyActiveDoc("b", "/notes/b.md");
+        refs.editorContent = "b's edit";
+        pendingB = result.current.flushAutoSave();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(writeMock).toHaveBeenCalledWith("/notes/b.md", "b's edit");
 
-    expect(refs.journalled.map((r) => r.docId)).toEqual(["a"]);
-    expect(refs.journalled[0].content).toBe("typed while the folder was gone");
+      refs.editorContent = "typed while the folder was gone";
+      act(() => {
+        result.current.notifyActiveDoc("a", "/notes/a.md");
+        result.current.scheduleAutoSave();
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      await act(async () => { await Promise.resolve(); });
+
+      expect(refs.journalled.map((r) => r.docId)).toEqual(["a"]);
+      expect(refs.journalled[0].content).toBe("typed while the folder was gone");
+      expect(refs.journalled[0].baseContent).toBeNull();
+
+      releaseB();
+      await act(async () => { await pendingB; });
+      expect(refs.journalled.map((r) => r.docId)).toEqual(["a"]);
+    } finally {
+      writeMock.mockImplementation(async () => {
+        if (refs.writeShouldThrow) throw refs.writeShouldThrow;
+      });
+    }
   });
 
   it("refuses to claim coverage for keystrokes newer than the snapshot it holds", async () => {
@@ -1904,25 +1926,5 @@ describe("useAutoSave — a record carries the body the edit was made against", 
     expect(refs.journalled).toHaveLength(1);
     expect(refs.journalled[0].content).toBe("the unsaved edit");
     expect(refs.journalled[0].baseContent).toBe("what was on disk");
-  });
-
-  it("records a null base when this session never saw the file", async () => {
-    // The projection case. A record with no base must never be applied, and
-    // that depends entirely on this value being null rather than the body the
-    // empty editor happened to hold.
-    vi.useFakeTimers();
-    refs.writeShouldThrow = new Error("EPERM: folder offline");
-    refs.editorContent = "typed into a projection";
-    const { result } = renderAutoSave({
-      docs: [makeDoc("a", { content: "" })],
-      state: makeState({ isDirty: true }),
-    });
-
-    act(() => result.current.scheduleAutoSave());
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    await act(async () => { await Promise.resolve(); });
-
-    expect(refs.journalled).toHaveLength(1);
-    expect(refs.journalled[0].baseContent).toBeNull();
   });
 });
