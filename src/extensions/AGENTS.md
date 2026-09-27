@@ -53,6 +53,12 @@ Chromium's per-keystroke and per-IME-composition cost grows with the whole conte
 - On insert, images are capped to 560px width via `clampImageDimensions`. Height is always `auto` in CSS — only width is set in px, to prevent aspect-ratio distortion on narrow viewports.
 - `createImageNodeView` owns resize handles, drag reorder (6px `pointerdown` threshold → `startReorder()`, single undo step), context menu, and asset-source rendering. Ctrl+C on a selected image copies the image blob, not HTML.
 
+## Task Lists
+
+- TaskItem (since Tiptap 3.31) writes each checkbox's accessible name into both its `aria-label` and a visually hidden span in its label, on creation and on every update of the item and of each task item above it. Tiptap's default name is `node.textContent`, the item's whole subtree, so every ancestor's span held all of its descendants' text: laid out in Chromium, 1 MiB list notes took up to 1.7x as long to lay out and a keystroke deep in a large nested list cost hundreds of milliseconds.
+- `createNotenTaskItem` (`NotenTaskItem.ts`) names the checkbox after the item's own first paragraph through `task.checkbox` / `task.checkboxEmpty`, so an update costs one paragraph and the name follows the locale. Never return an empty name: Tiptap falls back to its subtree default on a falsy one.
+- `tiptap-editor.css` keeps the span `display: none`; screen readers name the checkbox from `aria-label` alone, as they did before 3.31, and the text leaves Chromium's IME text walk. `src/styles/tiptap-editor.test.ts` judges the rule by computed style with the real stylesheet, so a lost rule or an inline `display` from a Tiptap upgrade fails it.
+
 ## Tables and Mermaid
 
 - Tables use Tiptap v3 table extensions through `NotenTable` (`NotenTable.ts`) with `lastColumnResizable: false`, so dragging an inner column redistributes width instead of growing the table past the editor width.

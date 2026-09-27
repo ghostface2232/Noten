@@ -322,6 +322,13 @@
   accent-color: var(--editor-color-accent);
 }
 
+/* TaskItem repeats the checkbox's aria-label in this visually hidden span.
+   Laid out, the copies cost layout on every load and join the text Chromium
+   walks on each IME composition update. See src/extensions/AGENTS.md. */
+.ProseMirror ul[data-type="taskList"] li > label > span {
+  display: none;
+}
+
 .tiptap-readonly ul[data-type="taskList"] li > label input[type="checkbox"] {
   pointer-events: none;
   opacity: 0.6;
