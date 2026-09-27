@@ -322,6 +322,14 @@
   accent-color: var(--editor-color-accent);
 }
 
+/* TaskItem fills this span with a visually hidden copy of the item's whole
+   text, nested items included, which the checkbox already carries as its
+   aria-label. Laid out, that copy doubled every task list's text in the
+   document: a 1 MiB list note took 28% longer to lay out. */
+.ProseMirror ul[data-type="taskList"] li > label > span {
+  display: none;
+}
+
 .tiptap-readonly ul[data-type="taskList"] li > label input[type="checkbox"] {
   pointer-events: none;
   opacity: 0.6;
