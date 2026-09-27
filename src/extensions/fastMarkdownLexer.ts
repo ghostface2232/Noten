@@ -2,6 +2,9 @@ import { marked, Lexer, Marked } from "marked";
 import type { Token, Tokens } from "marked";
 import Underline from "@tiptap/extension-underline";
 import { boundBlockExtension, MAYBE_ORDERED_ITEM } from "./boundedBlockTokenizers";
+// Every Noten parse is configured with createFastMarked, so installing the
+// per-manager HTML schema cache here covers every editor that parses Markdown.
+import "./markdownHtmlSchema";
 
 // Why this file exists
 // --------------------

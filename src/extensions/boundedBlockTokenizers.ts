@@ -116,6 +116,7 @@ const LAZY_INTERRUPTERS = [
   /^#{1,6}(?:\s|$)/,
   /^[-+*]\s+/,
   /^(?:```|~~~)/,
+  /^\$\$/,
   /^(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$/,
 ];
 
@@ -126,7 +127,8 @@ const LAZY_INTERRUPTERS = [
 // without being consumed when either
 //  (a) it directly follows a blank line, which was consumed into the current
 //      item and set its `sawBlankLine`; or
-//  (b) it is a lazy-continuation interrupter (heading, bullet, fence, break):
+//  (b) it is a lazy-continuation interrupter (heading, bullet, fence, math
+//      block, break):
 // the inner loop's lazy-continuation branch breaks there and the outer loop
 // rejects the line. The truncated input stops at the same index by
 // exhaustion, and `raw` is `lines.slice(0, consumed)`, identical in both.
