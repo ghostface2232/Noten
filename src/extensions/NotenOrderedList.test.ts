@@ -139,6 +139,10 @@ describe("NotenOrderedList Markdown", () => {
     "i. one\nii. two\n\na. x",
     "c. x\n\ni. y",
     "A. x\nB. y\n\nI. z",
+    // A lone letter list after a roman one merged into it: `V.` saved as `II.`.
+    "I. para\n\nV. x",
+    "i. intro\n\nx. ten",
+    "iv. four\nv. five\n\nc. letter",
   ])("keeps a change of marker kind at the top level as separate lists: %j", (markdown) => {
     const first = markdownOf(createEditor(markdown));
     expect(first).toBe(markdown);
@@ -174,6 +178,8 @@ describe("NotenOrderedList Markdown", () => {
     expect(listSegmentStarts(["a", "b", "i", "ii"])).toEqual([0, 2]);
     expect(listSegmentStarts(["h", "i", "j"])).toEqual([0]);
     expect(listSegmentStarts(["v", "vi", "a"])).toEqual([0, 2]);
+    expect(listSegmentStarts(["iv", "v", "vi", "x"])).toEqual([0, 3]);
+    expect(listSegmentStarts(["ix", "x", "xi"])).toEqual([0]);
     expect(listSegmentStarts(["a", "A"])).toEqual([0, 1]);
     expect(listSegmentStarts(["1", null, "a"])).toEqual([0, 2]);
     expect(listSegmentStarts([])).toEqual([0]);

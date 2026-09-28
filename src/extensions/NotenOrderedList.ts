@@ -153,8 +153,10 @@ function alphaMarker(position: number): string {
  * saved the letters as numbers. An item starts a new list when its marker is
  * of another kind (numbers, lowercase, uppercase), or of the same case but
  * the other letter style: a roman numeral that is not the next letter of a
- * letter list (`i.` after `a.` `b.`, but not after `h.`), or a non-roman
- * letter in a roman list. An item whose marker cannot be read never splits.
+ * letter list (`i.` after `a.` `b.`, but not after `h.`), or in a roman list
+ * a non-roman letter or a single letter that is not its next numeral (`V.`
+ * after `I.` is a letter list, the editor's own reading of a lone `V.`). An
+ * item whose marker cannot be read never splits.
  */
 export function listSegmentStarts(markers: readonly (string | null)[]): number[] {
   const starts = [0];
@@ -178,7 +180,8 @@ export function listSegmentStarts(markers: readonly (string | null)[]): number[]
         other =
           letters === "alpha"
             ? isRoman(marker) && marker.toLowerCase() !== alphaMarker(alphaValue(first) + count)
-            : !isRoman(marker);
+            : !isRoman(marker) ||
+              (marker.length === 1 && marker.toLowerCase() !== toRoman(markerToStart(first) + count));
       }
     }
     if (other) {
