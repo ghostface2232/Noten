@@ -3,6 +3,7 @@ import { OrderedList, detectMarkerType, markerToStart, toRoman } from "@tiptap/e
 import type { Node as ProseMirrorNode, NodeType } from "@tiptap/pm/model";
 import type { Selection, Transaction } from "@tiptap/pm/state";
 import { StepMap, canJoin } from "@tiptap/pm/transform";
+import { normalizeListItemContent } from "./NotenListItem";
 import { tokenizeOrderedList } from "./orderedListTokenizer";
 
 /**
@@ -91,6 +92,18 @@ function disambiguate(parsed: JSONContent, markers: readonly (string | null)[]):
   return {
     ...parsed,
     attrs: { ...rest, type: alpha.type, ...(alpha.start !== 1 ? { start: alpha.start } : {}) },
+  };
+}
+
+// The stock parse builds each item itself (`parseListItems`), not through
+// the listItem extension, so NotenListItem's parse never sees them; see
+// normalizeListItemContent.
+function withValidItems(list: JSONContent): JSONContent {
+  return {
+    ...list,
+    content: list.content?.map((item) =>
+      item.type === "listItem" ? { ...item, content: normalizeListItemContent(item.content ?? []) } : item,
+    ),
   };
 }
 
@@ -230,7 +243,7 @@ export const NotenOrderedList = OrderedList.extend({
             };
       const parsed = stock.call(this, segment as typeof token, helpers);
       for (const list of Array.isArray(parsed) ? parsed : [parsed]) {
-        if (list) lists.push(disambiguate(list, markers.slice(start, end)));
+        if (list) lists.push(disambiguate(withValidItems(list), markers.slice(start, end)));
       }
     });
     return lists.length === 1 ? lists[0] : lists;

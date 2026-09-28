@@ -80,9 +80,17 @@ describe("a list item whose first child is not a paragraph", () => {
   });
 
   // Only the first child's later lines differ from the stock renderer.
+  // Only the lead block's later lines differ from the stock renderer given
+  // that block first, which is how stock Tiptap parses such an item.
   it("renders the rest of the item as the stock list item does", () => {
     const noten = createEditor("- # h\n\n  para\n  - x\n1. > q\n\n   ```\n   c\n   ```");
-    const stock = createEditor(noten.getJSON(), StarterKit);
+    const withoutLead = (node: JSONContent): JSONContent => {
+      const content = node.content?.map(withoutLead);
+      if (node.type !== "listItem" || !content) return { ...node, ...(content ? { content } : {}) };
+      const empty = content[0]?.type === "paragraph" && !content[0].content?.length;
+      return { ...node, content: empty ? content.slice(1) : content };
+    };
+    const stock = createEditor(withoutLead(noten.getJSON()), StarterKit);
     expect(noten.getMarkdown()).toBe(stock.getMarkdown());
   });
 
@@ -93,6 +101,67 @@ describe("a list item whose first child is not a paragraph", () => {
     const started = performance.now();
     expect(editor.getMarkdown().trimEnd()).toBe(markdown);
     expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  // The stock parse left the block as the item's first child, and a marked
+  // `text` token beside it as a bare text node, neither of which the schema
+  // allows. Loading did not check, but Enter, Backspace, deletions and Tab
+  // threw there.
+  it.each([
+    "1. - [ ] t1\n   - [x] t2\n\n   para\n2. m9",
+    "1. > t1 t2\n\n   para\n2. m9",
+    "- - [ ] t1\n  - [x] t2\n\n  para\n- m9",
+    "- - a\n\n  para\n- m9",
+  ])("reads %j into items the schema allows, and edits them", (markdown) => {
+    const load = () => {
+      const editor = new Editor({
+        element: document.createElement("div"),
+        extensions: [
+          NotenStarterKit.configure({ underline: false, link: false }),
+          Markdown.configure({ marked: createFastMarked() }),
+          CodeSpanFence,
+          NotenTaskList,
+          TaskItem.configure({ nested: true }),
+        ],
+        content: markdown,
+        contentType: "markdown",
+      } as ConstructorParameters<typeof Editor>[0]);
+      editors.push(editor);
+      return editor;
+    };
+    const textPos = (editor: Editor, text: string) => {
+      let found = -1;
+      editor.state.doc.descendants((node, pos) => {
+        if (found < 0 && node.isText && node.text?.includes(text)) found = pos + node.text.indexOf(text);
+      });
+      return found;
+    };
+    const editor = load();
+    expect(() => editor.state.doc.check()).not.toThrow();
+    expect(editor.getMarkdown().trimEnd()).toBe(markdown);
+    const edits: ((editor: Editor) => void)[] = [
+      (e) => e.chain().setTextSelection(textPos(e, "para") + 4).run() && e.commands.keyboardShortcut("Enter"),
+      (e) => e.chain().setTextSelection(textPos(e, "para")).run() && e.commands.keyboardShortcut("Backspace"),
+      (e) => e.chain().setTextSelection({ from: textPos(e, "a") + 1, to: textPos(e, "para") + 2 }).run() && e.commands.deleteSelection(),
+      (e) => e.chain().setTextSelection(textPos(e, "m9")).run() && e.commands.keyboardShortcut("Tab"),
+    ];
+    for (const edit of edits) {
+      const edited = load();
+      expect(() => edit(edited)).not.toThrow();
+      expect(() => edited.state.doc.check()).not.toThrow();
+    }
+  });
+
+  it("writes an empty first paragraph and a block as the block on the marker line", () => {
+    const item = (content: JSONContent[]): JSONContent => ({ type: "listItem", content });
+    const nested: JSONContent = { type: "bulletList", content: [item([paragraph("a")])] };
+    expect(save(doc({ type: "orderedList", attrs: { start: 1 }, content: [item([{ type: "paragraph" }, nested])] }))).toBe(
+      "1. - a",
+    );
+    expect(nodesOf(createEditor("1. - a").getJSON(), "listItem")[0].content?.map((child) => child.type)).toEqual([
+      "paragraph",
+      "bulletList",
+    ]);
   });
 
   it("keeps a task list's checkboxes through two saves", () => {

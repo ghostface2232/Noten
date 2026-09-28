@@ -142,8 +142,12 @@ describe("block content under an ordered item", () => {
     ["1. ---", "horizontalRule"],
     ["1. - a\n   - b", "bulletList"],
   ])("reads the block on the marker line of %j", (markdown, type) => {
+    // After the empty paragraph the schema requires first; see NotenListItem.
     const item = nodesOf(createEditor(markdown).getJSON(), "listItem")[0];
-    expect(item.content?.[0].type).toBe(type);
+    expect(item.content?.slice(0, 2).map((child) => [child.type, child.content?.length ?? 0])).toEqual([
+      ["paragraph", 0],
+      [type, expect.any(Number)],
+    ]);
     expect(save(markdown)).toBe(markdown);
   });
 
