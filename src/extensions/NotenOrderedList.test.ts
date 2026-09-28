@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { Editor, type JSONContent } from "@tiptap/core";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
+import { CellSelection } from "@tiptap/pm/tables";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { TableRow } from "@tiptap/extension-table-row";
@@ -416,6 +417,26 @@ describe("setOrderedListStyle", () => {
     expect(editor.commands.setOrderedListStyle("a")).toBe(true);
     expect(markdownOf(editor)).toBe(expected);
     if (stable) expect(markdownOf(createEditor(expected))).toBe(expected);
+  });
+
+  it("refuses a table cell, whose Markdown cannot hold a list", () => {
+    const markdown = "| h1 | h2 |\n| --- | --- |\n| c1 | c2 |";
+    const caret = createEditor(markdown);
+    caretAt(caret, "c1");
+    const before = caret.state.doc;
+    expect(caret.can().setOrderedListStyle("a")).toBe(false);
+    expect(caret.commands.setOrderedListStyle("a")).toBe(false);
+    expect(caret.state.doc.eq(before)).toBe(true);
+
+    const whole = createEditor(markdown);
+    const cells: number[] = [];
+    whole.state.doc.descendants((node, pos) => {
+      if (node.type.spec.tableRole === "cell" || node.type.spec.tableRole === "header_cell") cells.push(pos);
+    });
+    whole.view.dispatch(whole.state.tr.setSelection(CellSelection.create(whole.state.doc, cells[0], cells[cells.length - 1])));
+    const wholeBefore = whole.state.doc;
+    expect(whole.commands.setOrderedListStyle("I")).toBe(false);
+    expect(whole.state.doc.eq(wholeBefore)).toBe(true);
   });
 
   // Clearing a quote, table or list and then failing to wrap left them

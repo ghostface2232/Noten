@@ -65,6 +65,17 @@ function targetList(selection: Selection): { node: ProseMirrorNode; pos: number 
   return findParentNodeClosestToPos(selection.$from, isList) ?? null;
 }
 
+// Whether the selection starts inside a table cell; a CellSelection (what
+// prosemirror-tables makes of a selected table) starts in its first cell.
+function inTableCell(selection: Selection): boolean {
+  const { $from } = selection;
+  for (let depth = $from.depth; depth > 0; depth--) {
+    const role = $from.node(depth).type.spec.tableRole;
+    if (role === "cell" || role === "header_cell") return true;
+  }
+  return false;
+}
+
 // Turn every heading and code block the selection touches into a paragraph,
 // where it stands. Sizes do not change, so positions and the selection hold.
 function textblocksToParagraphs(tr: Transaction): void {
@@ -330,6 +341,9 @@ export const NotenOrderedList = OrderedList.extend({
             // and can() gives the same answer. A selected node outside a list
             // (a rule, an image) is not text to style.
             if (tr.selection instanceof NodeSelection) return false;
+            // A GFM cell holds one line, so a list in it is saved as its text
+            // (`| a. c1 |`) and reads back as a paragraph for good.
+            if (inTableCell(tr.selection)) return false;
             const canWrap = can().wrapInList(this.name, { type });
             const wrapsAsParagraphs = !canWrap && wrapsAfterParagraphs(tr, this.type, { type });
             if (!dispatch) return canWrap || wrapsAsParagraphs;
