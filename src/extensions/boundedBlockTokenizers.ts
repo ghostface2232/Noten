@@ -22,7 +22,7 @@
 // `NotenStarterKit` registers under the stock name; with the stock tokenizer
 // it can stop short, since that one also takes lines like "Dr. Smith".
 
-import { isOrderedItemLine } from "./orderedListTokenizer";
+import { interruptsLazyContinuation, isOrderedItemLine } from "./orderedListTokenizer";
 
 type BlockTokenizer = (this: unknown, src: string, tokens: unknown[]) => unknown;
 type StartFn = (this: unknown, src: string) => number | void;
@@ -122,15 +122,6 @@ function boundTaskList(src: string): string {
 // real pattern accepts matches this one, so "does not match" is conclusive.
 export const MAYBE_ORDERED_ITEM = /^\s*[0-9A-Za-z]+[.)]\s/;
 
-// Copied verbatim from @tiptap/extension-list's PARAGRAPH_INTERRUPTERS.
-const LAZY_INTERRUPTERS = [
-  /^#{1,6}(?:\s|$)/,
-  /^[-+*]\s+/,
-  /^(?:```|~~~)/,
-  /^\$\$/,
-  /^(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$/,
-];
-
 // orderedList → `collectOrderedListItems(src.split("\n"))`.
 //
 // A first line that is not an item yields no list, so one line suffices.
@@ -139,7 +130,8 @@ const LAZY_INTERRUPTERS = [
 //  (a) it directly follows a blank line, which was consumed into the current
 //      item and set its `sawBlankLine`; or
 //  (b) it is a lazy-continuation interrupter (heading, bullet, fence, math
-//      block, break):
+//      block, break, quote), by the tokenizer's own
+//      `interruptsLazyContinuation`:
 // the inner loop's lazy-continuation branch breaks there and the outer loop
 // rejects the line. The truncated input stops at the same index by
 // exhaustion, and `raw` is `lines.slice(0, consumed)`, identical in both.
@@ -160,7 +152,7 @@ function boundOrderedList(src: string): string {
     if (index === 0) return false;
     if (index === 1 && !isOrderedItemLine(src.slice(0, src.indexOf("\n")))) return true;
     if (BLANK.test(line) || STARTS_WITH_SPACE.test(line) || isOrderedItemLine(line)) return false;
-    return previousBlank || LAZY_INTERRUPTERS.some((pattern) => pattern.test(line));
+    return previousBlank || interruptsLazyContinuation(line);
   });
 }
 

@@ -301,6 +301,40 @@ describe("markers detectMarkerType cannot read", () => {
   });
 });
 
+describe("a quote line after an item", () => {
+  const depth = (node: JSONContent): number => 1 + Math.max(0, ...(node.content ?? []).map(depth));
+
+  // A quote interrupts the item's paragraph. The stock tokenizer took it and
+  // every line after it into the item, and a quote re-lexed its list through
+  // this tokenizer, so each repetition nested one quote deeper.
+  it.each([
+    ["1. x\n> q", "1. x\n\n> q"],
+    ["1. x\n>q", "1. x\n\n> q"],
+    ["a. x\nfoo\n> q\nbar", "a. x\nfoo\n\n> q\n> bar"],
+    ["1. x\n   > q", "1. x\n   > q"],
+  ])("ends the list in %j", (markdown, saved) => {
+    const first = save(markdown);
+    expect(first).toBe(saved);
+    expect(save(first)).toBe(first);
+  });
+
+  it.each(["foo y", "Dr. y"])("keeps a quote alternating with %j lines flat", (lazy) => {
+    const markdown = `> a. x\n${lazy}\n`.repeat(3);
+    expect(depth(createEditor(markdown).getJSON())).toBe(depth(createEditor("> a. x").getJSON()));
+    // The quote's lists are written apart, and join into one list on the next
+    // load, as a quote with `1.` items always has.
+    const settled = save(save(markdown));
+    expect(save(settled)).toBe(settled);
+    expect(settled.split(lazy).length - 1).toBe(3);
+  });
+
+  it.each(["foo y", "Dr. y"])("opens a quote alternating with %j lines a thousand times", (lazy) => {
+    const doc = createEditor(`> a. x\n${lazy}\n`.repeat(1000)).getJSON();
+    expect(depth(doc)).toBe(depth(createEditor("> a. x").getJSON()));
+    expect(nodesOf(doc, "text").filter((text) => text.text?.includes(lazy))).toHaveLength(1000);
+  });
+});
+
 describe("tokenizeOrderedList against the stock tokenizer", () => {
   const stock = OrderedList.config.markdownTokenizer!.tokenize;
   const manager = createEditor("").markdown as unknown as {
@@ -357,8 +391,14 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
         continue;
       }
       sameLines++;
-      const expected = stock(src, [], helpers() as never) as { raw?: string } | undefined;
       const actual = tokenizeOrderedList(src, [], helpers());
+      // An unindented quote line ends the list, where the stock tokenizer
+      // took it lazily into the item; it is compared up to that line.
+      expect((actual?.raw ?? "").split("\n").some((line) => line.startsWith(">")), JSON.stringify(src)).toBe(false);
+      const srcLines = src.split("\n");
+      const quote = srcLines.findIndex((line) => line.startsWith(">"));
+      const upToQuote = quote < 0 ? src : srcLines.slice(0, quote).join("\n");
+      const expected = stock(upToQuote, [], helpers() as never) as { raw?: string } | undefined;
       expect(actual?.raw, JSON.stringify(src)).toBe(expected?.raw);
       const rawLines = (expected?.raw ?? "").split("\n");
       const consumed = rawLines.slice(1);

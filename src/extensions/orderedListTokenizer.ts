@@ -1,7 +1,8 @@
 // @tiptap/extension-list's orderedList Markdown tokenizer, transcribed with
 // two changes to how an item's block content is dedented, one to how its
-// first line is read, and one to which markers start an item (see
-// matchOrderedItem).
+// first line is read, one to which markers start an item (see
+// matchOrderedItem), and one to which lines end it (see
+// interruptsLazyContinuation).
 //
 // The stock `collectOrderedListItems` strips `indent + marker.length + 1`
 // columns from each line under an item, one short of its content column
@@ -44,10 +45,10 @@
 // Last, `buildNestedStructure` dropped items less indented than their group's
 // first; see its comment.
 // Without a fence, the lines an item takes are unchanged except at a marker
-// detectMarkerType cannot read, and a list with no indented continuation
-// lines, no block on a marker line and no item left of its group's first
-// tokenizes exactly as before; `orderedListTokenizer.test.ts` compares both
-// with the stock one.
+// detectMarkerType cannot read and at an unindented quote line, and on the
+// lines it takes a list with no indented continuation lines, no block on a
+// marker line and no item left of its group's first tokenizes exactly as
+// before; `orderedListTokenizer.test.ts` compares both with the stock one.
 // With one, a column-0 line still meets the same branch as before, which is
 // what the cut rule in boundedBlockTokenizers.ts relies on.
 // Re-transcribe on an @tiptap/extension-list upgrade, or drop this file if
@@ -143,8 +144,19 @@ function openFence(line: string): OpenFence | null {
   return { indent, closer: new RegExp(`^ {0,3}${match[2]}${match[2][0]}* *$`) };
 }
 
-function interruptsLazyContinuation(line: string): boolean {
-  return Object.values(PARAGRAPH_INTERRUPTERS).some((pattern) => pattern.test(line));
+/**
+ * Whether an unindented line ends the item instead of continuing its
+ * paragraph lazily.
+ *
+ * The seventh change: a block quote does, as it interrupts a paragraph in
+ * CommonMark. The stock list left it out, so an item took every line after it
+ * into its block content, where a quote re-lexed its list through this
+ * tokenizer (marked's blockquote → createFastMarked's `list` fallback), which
+ * took the rest again: `> a. x` / `foo y` repeated nested one quote deeper per
+ * repetition, was saved that deep, and overflowed the stack at a few hundred.
+ */
+export function interruptsLazyContinuation(line: string): boolean {
+  return line.startsWith(">") || Object.values(PARAGRAPH_INTERRUPTERS).some((pattern) => pattern.test(line));
 }
 
 // The third change: blocks the text after an item's marker can open.

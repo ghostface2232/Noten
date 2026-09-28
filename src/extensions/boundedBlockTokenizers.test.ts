@@ -110,10 +110,12 @@ const LINES = [
   "text with | pipe", "[[wiki link]]", "**bold** start",
 ];
 
-// Items to the stock ordered-list tokenizer and text to Noten's, whose item
-// test the ordered-list cut rule uses: with the stock kit the bound may stop
-// short at them, so its runs leave them out.
-const STOCK_ONLY_ITEM = /^\s*(?:Mr|Dr|St|Vim|IIII)[.)]\s/m;
+// Lines the ordered-list cut rule stops at, by Noten's item and interrupter
+// tests, where the stock tokenizer reads on: markers it cannot read (items to
+// the stock one, text to Noten's) and unindented quote lines (lazy text to
+// the stock one). With the stock kit the bound may stop short at them, so its
+// runs leave them out; the Noten kit's runs keep them.
+const STOCK_READS_ON = /^(?:\s*(?:Mr|Dr|St|Vim|IIII)[.)]\s|>)/m;
 
 function randomDoc(rand: () => number, lineCount: number, crlf: boolean, lines = LINES): string {
   const out: string[] = [];
@@ -132,7 +134,7 @@ describe.each(Object.keys(EXTENSION_SETS))("bounded block tokenizers (%s)", (set
     reference: makeEditor(referenceMarked, EXTENSION_SETS[setName]),
   };
   const bounded = instances.bounded;
-  const pool = setName === "stock" ? LINES.filter((line) => !STOCK_ONLY_ITEM.test(line)) : LINES;
+  const pool = setName === "stock" ? LINES.filter((line) => !STOCK_READS_ON.test(line)) : LINES;
 
   it("match the unbounded tokenizers on hand-written boundary cases", () => {
     const cases = [
@@ -164,7 +166,7 @@ describe.each(Object.keys(EXTENSION_SETS))("bounded block tokenizers (%s)", (set
       "\n",
       "\n\n",
     ];
-    for (const md of cases) if (setName !== "stock" || !STOCK_ONLY_ITEM.test(md)) expectEquivalent(instances, md);
+    for (const md of cases) if (setName !== "stock" || !STOCK_READS_ON.test(md)) expectEquivalent(instances, md);
   });
 
   it("match the unbounded tokenizers on fuzzed documents", () => {
@@ -190,6 +192,7 @@ describe.each(Object.keys(EXTENSION_SETS))("bounded block tokenizers (%s)", (set
     expect(__test.boundTaskList(`plain paragraph${tail}`)).toBe("plain paragraph");
     expect(__test.boundTaskList(`- [ ] a\n- bullet${tail}`)).toBe("- [ ] a");
     expect(__test.boundOrderedList(`1. a\n# heading${tail}`)).toBe("1. a");
+    expect(__test.boundOrderedList(`1. a\n> quote${tail}`)).toBe("1. a");
     expect(__test.boundTable(`a | b\nnot a separator${tail}`)).toBe("a | b\nnot a separator");
     expect(__test.boundTaskList(`- [ ] a\n- [ ] b${tail}`)).toBe("- [ ] a\n- [ ] b");
     expect(__test.boundOrderedList(`plain paragraph${tail}`)).toBe("plain paragraph");
