@@ -1,5 +1,5 @@
 import { findParentNodeClosestToPos, wrappingInputRule, type JSONContent } from "@tiptap/core";
-import { OrderedList, detectMarkerType } from "@tiptap/extension-list";
+import { OrderedList, detectMarkerType, markerToStart, toRoman } from "@tiptap/extension-list";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type { Selection } from "@tiptap/pm/state";
 
@@ -60,14 +60,15 @@ function itemMarker(item: unknown): string | null {
  * `x.` parsed as roman (100, 500, ...) and saved its next item as `ci.`,
  * `di.`, `ii.`: the reload rewrote the user's markers. A single letter is
  * read as a letter unless it is `i`/`I` (a roman list's usual start), and
- * the second item settles the choice whenever it follows one reading.
+ * the second item settles the choice whenever it follows one reading
+ * (`v.` `w.` are letters, `v.` `vi.` roman numerals).
  */
 export function alphaAttrsForAmbiguousMarkers(first: string, second: string | null): { type: "a" | "A"; start: number } | null {
   if (!/^[a-zA-Z]$/.test(first)) return null;
   const upper = first === first.toUpperCase();
   const code = first.toLowerCase().charCodeAt(0);
   const alphaNext = code < 122 ? String.fromCharCode(code + 1) : null;
-  const romanNext = first.toLowerCase() === "i" ? "ii" : null;
+  const romanNext = isRoman(first) ? toRoman(markerToStart(first) + 1) : null;
   const secondLower = second && (second === second.toUpperCase()) === upper ? second.toLowerCase() : null;
   let alpha: boolean;
   if (secondLower !== null && secondLower === alphaNext) alpha = true;

@@ -84,6 +84,24 @@ describe("NotenOrderedList Markdown", () => {
     expect(markdownOf(createEditor(first))).toBe(markdown);
   });
 
+  // Only `i` → `ii` counted as a roman reading at first, so an outline
+  // resuming at `V.` split in two and a nested `vi.` was saved as `w.`.
+  it.each([
+    "v. five\nvi. six\nvii. seven",
+    "V. Five\nVI. Six",
+    "X. Ten\nXI. Eleven\nXII. Twelve",
+    "l. fifty\nli. fifty-one",
+    "c. x\nci. y",
+    "M. x\nMI. y",
+    "> v. q\n> vi. r",
+    "1. a\n   v. nested\n   vi. nested2\n2. b",
+    "I. u0\n   v. s1\n   vi. s2",
+  ])("keeps a roman list starting past i: %j", (markdown) => {
+    const first = markdownOf(createEditor(markdown));
+    expect(first).toBe(markdown);
+    expect(markdownOf(createEditor(first))).toBe(markdown);
+  });
+
   it("reads a lone ambiguous letter as a letter, except i", () => {
     expect(createEditor("c. x").getJSON().content?.[0].attrs).toMatchObject({ type: "a", start: 3 });
     expect(createEditor("i. x").getJSON().content?.[0].attrs).toMatchObject({ type: "i", start: 1 });
