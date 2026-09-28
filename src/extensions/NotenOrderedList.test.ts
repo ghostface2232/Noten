@@ -9,6 +9,7 @@ import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
 import {
   MAX_LIST_SEGMENTS,
   alphaAttrsForAmbiguousMarkers,
+  listItemMarker,
   listSegmentStarts,
   selectedOrderedListStyle,
 } from "./NotenOrderedList";
@@ -247,6 +248,33 @@ describe("NotenOrderedList Markdown", () => {
     expect(html).toContain('<ol type="a" data-list-style="lower-alpha">');
     expect(html).toContain('<ol type="I" data-list-style="upper-roman">');
     expect(html).toContain("<ol><li><p>n</p></li></ol>");
+  });
+});
+
+describe("letter lists past zz", () => {
+  // Tiptap has no letter marker past `zz` (702) and wrote `undefineda.`,
+  // which reads back as text of item 702, so the items were lost.
+  it("numbers the items past 702 and keeps every item across saves", () => {
+    const count = 705;
+    const editor = createEditor(Array.from({ length: count }, (_, k) => `${k + 1}. item ${k + 1}`).join("\n"));
+    caretAt(editor, "item 1");
+    editor.commands.setOrderedListStyle("a");
+    const first = markdownOf(editor);
+    expect(first).not.toContain("undefined");
+    const lines = first.split("\n");
+    expect(lines[701]).toBe("zz. item 702");
+    expect(lines[702]).toBe("703. item 703");
+    const reloaded = createEditor(first);
+    const texts = nodesOf(reloaded.getJSON(), "paragraph").map((p) => p.content?.[0]?.text);
+    expect(texts).toEqual(Array.from({ length: count }, (_, k) => `item ${k + 1}`));
+    expect(markdownOf(createEditor(markdownOf(reloaded)))).toBe(markdownOf(reloaded));
+  });
+
+  it("marks the positions each style can spell", () => {
+    expect(listItemMarker("a", 701)).toBe("zz. ");
+    expect(listItemMarker("A", 702)).toBe("703. ");
+    expect(listItemMarker("i", 999)).toBe("m. ");
+    expect(listItemMarker(null, 4)).toBe("5. ");
   });
 });
 

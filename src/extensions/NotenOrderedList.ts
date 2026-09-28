@@ -1,5 +1,10 @@
-import { findParentNodeClosestToPos, wrappingInputRule, type JSONContent } from "@tiptap/core";
-import { OrderedList, detectMarkerType, markerToStart, toRoman } from "@tiptap/extension-list";
+import {
+  findParentNodeClosestToPos,
+  renderNestedMarkdownContent,
+  wrappingInputRule,
+  type JSONContent,
+} from "@tiptap/core";
+import { ListItem, OrderedList, detectMarkerType, getListMarker, markerToStart, toRoman } from "@tiptap/extension-list";
 import type { Node as ProseMirrorNode, NodeType } from "@tiptap/pm/model";
 import { NodeSelection, type Selection, type Transaction } from "@tiptap/pm/state";
 import { StepMap, canJoin } from "@tiptap/pm/transform";
@@ -201,6 +206,40 @@ export const MAX_LIST_SEGMENTS = 10_000;
 // list meant to start there, and the toolbar sets any style.
 const LETTER_INPUT = /^([a-zA-Z])\.\s$/;
 
+// The last position a letter marker can spell: Tiptap reads and writes one
+// or two letters, `zz` being 702.
+const MAX_LETTER_POSITION = 26 * 27;
+
+/**
+ * The stock marker for a list item, except that a letter list's items past
+ * `zz.` are numbered. Tiptap has no letter marker there and wrote
+ * `undefineda.`, `undefinedb.`, ..., which reads back as text of item 702: a
+ * letter list of over 702 items (a toolbar restyle of a long list, or the
+ * one-list fallback of a token past MAX_LIST_SEGMENTS) lost its items on save.
+ * Numbered, they read back as a numbered list continuing at 703.
+ */
+export function listItemMarker(type: unknown, index: number): string {
+  const position = index + 1;
+  if ((type === "a" || type === "A") && position > MAX_LETTER_POSITION) return `${position}. `;
+  return getListMarker(type as string | undefined, index, ". ");
+}
+
+export const NotenListItem = ListItem.extend({
+  // Transcribed from the stock renderMarkdown; only the marker differs.
+  renderMarkdown: (node, h, ctx) =>
+    renderNestedMarkdownContent(
+      node,
+      h,
+      (context) => {
+        if (context.parentType !== "orderedList") return "- ";
+        const attrs = context.meta?.parentAttrs as { start?: number; type?: unknown } | undefined;
+        return listItemMarker(attrs?.type, (attrs?.start || 1) - 1 + (context.index || 0));
+      },
+      ctx,
+      { alignNestedToPrefix: ctx?.parentType === "orderedList" },
+    ),
+});
+
 export const NotenOrderedList = OrderedList.extend({
   renderHTML({ node, HTMLAttributes }) {
     const rendered = this.parent?.({ node, HTMLAttributes }) as ["ol", Record<string, unknown>, 0];
@@ -215,9 +254,11 @@ export const NotenOrderedList = OrderedList.extend({
     const markers = items.map(itemMarker);
     let starts = listSegmentStarts(markers);
     // Tiptap spreads a nested list's parse result into call arguments
-    // (`content.push(...)`), so ~100,000 lists from one token overflowed the
-    // stack and the note would not open. Past the cap the token stays one list,
-    // as the stock reading has it: its markers are restyled, but it opens.
+    // (`content.push(...)`), so 140,000 lists from one token (`a.`/`A.`
+    // alternating 70,000 times) overflowed the stack, about 124,000 arguments
+    // in V8, and the note would not open. Past the cap the token stays one
+    // list, as the stock reading has it: every item takes the first item's
+    // style, so the other markers are rewritten on save, but the note opens.
     if (starts.length > MAX_LIST_SEGMENTS) starts = [0];
     const lists: JSONContent[] = [];
     starts.forEach((start, index) => {
