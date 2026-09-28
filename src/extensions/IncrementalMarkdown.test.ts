@@ -2,10 +2,8 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Editor } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
-import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
@@ -16,6 +14,8 @@ import { TextSelection } from "@tiptap/pm/state";
 import { common, createLowlight } from "lowlight";
 import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
+import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
+import NotenTaskList from "./NotenTaskList";
 import MermaidCodeBlock from "./MermaidCodeBlock";
 import WikiLink from "./WikiLink";
 import { NotenImage } from "./NotenImage";
@@ -35,13 +35,14 @@ afterEach(() => {
 function makeEditor(content: string): Editor {
   editor = new Editor({
     extensions: [
-      StarterKit.configure({ codeBlock: false, underline: false, link: false }),
+      NotenStarterKit.configure({ codeBlock: false, underline: false, link: false }),
       Markdown.configure({ marked: createFastMarked() }),
+      CodeSpanFence,
       Link.configure({ openOnClick: false }),
       MermaidCodeBlock.configure({ lowlight }),
       NotenImage,
       Underline,
-      TaskList,
+      NotenTaskList,
       TaskItem.configure({ nested: true }),
       Table,
       TableRow,
@@ -129,6 +130,35 @@ describe("IncrementalMarkdown", () => {
       expect(e.getMarkdown()).toBe(stock(e));
       e.destroy();
       editor = null;
+    }
+  });
+
+  // Items led by a block render through NotenListItem, and task lists and
+  // fences parse through Noten's own tokenizer and parseMarkdown.
+  it("matches the stock serializer on list items led by a block", () => {
+    const markdown = [
+      "1. - [ ] t1",
+      "   - [x] t2",
+      "",
+      "   para",
+      "2. > quote",
+      "",
+      "- - a",
+      "  - b",
+      "",
+      "- [ ] task",
+      "\t- [x] tab nested",
+      "",
+      " ```",
+      " indented fence",
+      " ```",
+    ].join("\n");
+    const e = makeEditor(markdown);
+    expect(e.getMarkdown()).toBe(stock(e));
+    const rand = mulberry32(0x1ead);
+    for (let i = 0; i < 100; i++) {
+      randomEdit(e, rand);
+      expect(e.getMarkdown(), `after edit ${i}`).toBe(stock(e));
     }
   });
 
