@@ -105,7 +105,10 @@ function wrapsAfterParagraphs(tr: Transaction, listType: NodeType, attrs: Record
   return wrapInList(listType, attrs)(scratch.apply(trial));
 }
 
-const ITEM_MARKER = /^[ \t]*(\d+|[A-Za-z]+)[.)]/;
+// `\s`, as the tokenizer indents: an item indented with a no-break space had
+// no marker here, so it could not split its list and a `1.` after it was
+// saved as the next letter.
+const ITEM_MARKER = /^\s*(\d+|[A-Za-z]+)[.)]/;
 
 function itemMarker(item: unknown): string | null {
   const raw = (item as { raw?: unknown } | null)?.raw;

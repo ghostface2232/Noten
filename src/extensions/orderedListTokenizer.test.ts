@@ -243,6 +243,8 @@ describe("block content under an ordered item", () => {
     // parent content column, which would make `d` a sibling of `b`; kept all
     // the same.
     ["1. a\n   2. b\n      3. c\n    4. d", "1. a\n   2. b\n      3. c\n      4. d"],
+    // A no-break space indents too, and the item after it keeps its marker.
+    ["\u00a0a. x\n1. y", "a. x\n\n1. y"],
   ])("keeps every item of %j", (markdown, saved) => {
     const first = save(markdown);
     expect(first).toBe(saved);
