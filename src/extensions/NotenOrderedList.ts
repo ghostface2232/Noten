@@ -1,7 +1,7 @@
 import { findParentNodeClosestToPos, wrappingInputRule, type JSONContent } from "@tiptap/core";
 import { OrderedList, detectMarkerType, markerToStart, toRoman } from "@tiptap/extension-list";
 import type { Node as ProseMirrorNode, NodeType } from "@tiptap/pm/model";
-import type { Selection, Transaction } from "@tiptap/pm/state";
+import { NodeSelection, type Selection, type Transaction } from "@tiptap/pm/state";
 import { StepMap, canJoin } from "@tiptap/pm/transform";
 
 /**
@@ -245,6 +245,11 @@ export const NotenOrderedList = OrderedList.extend({
         (style) =>
         ({ tr, state, chain, can, commands, dispatch }) => {
           const type = style === "1" ? null : style;
+          // A selected node (a rule, an image, a whole list) is not text to
+          // style. Wrapping it clears nodes first and can still fail after
+          // that, and a failed chain dispatches anyway: a selected list was
+          // flattened into paragraphs.
+          if (tr.selection instanceof NodeSelection) return false;
           const list = findParentNodeClosestToPos(tr.selection.$from, isList);
           if (!list) {
             // Not toggleOrderedList: it joins the new list into a numbered one

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { Editor, type JSONContent } from "@tiptap/core";
-import { TextSelection } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { Markdown } from "@tiptap/markdown";
@@ -308,7 +308,18 @@ describe("setOrderedListStyle", () => {
     expect(markdownOf(editor)).toBe(markdown);
   });
 
-  it("answers can() the way running it goes", () => {
+  it("refuses a selected node without touching the document", () => {
+    for (const [markdown, pos] of [["1. x\n   - y\n2. z", 0], ["a\n\n---\n\nb", 3]] as const) {
+      const editor = createEditor(markdown);
+      editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, pos)));
+      const before = markdownOf(editor);
+      expect(editor.can().setOrderedListStyle("a"), markdown).toBe(false);
+      expect(editor.commands.setOrderedListStyle("a"), markdown).toBe(false);
+      expect(markdownOf(editor), markdown).toBe(before);
+    }
+  });
+
+  it("answers can() the way running it goes for text selections", () => {
     for (const markdown of ["para", "# heading", "- [ ] task", "- bullet", "1. n"]) {
       const editor = createEditor(markdown);
       caretAt(editor, markdown.replace(/^(# |- \[ \] |- |1\. )/, ""));
