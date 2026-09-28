@@ -19,3 +19,20 @@ After the rule.
    - Nested bullet stays nested
 
   1. Indented ordered item with **formatted** text
+
+Letter and roman lists:
+
+1. Numbered before letters
+2. Second number
+
+a. Letter list after it
+b. Second letter
+   i. Nested roman
+   ii. Second roman
+c. Third letter
+
+C. Uppercase list starting at c
+D. Next uppercase
+
+V. Roman five
+VI. Roman six
