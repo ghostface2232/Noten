@@ -239,6 +239,10 @@ describe("block content under an ordered item", () => {
     ["1. a\n      2. b\n   3. c", "1. a\n   2. b\n   3. c"],
     ["1. a\n   2. b\n  3. c", "1. a\n   2. b\n   3. c"],
     [" a. x\nb. y", "a. x\nb. y"],
+    // Nested items keep the stock rule (deeper nests) rather than CommonMark's
+    // parent content column, which would make `d` a sibling of `b`; kept all
+    // the same.
+    ["1. a\n   2. b\n      3. c\n    4. d", "1. a\n   2. b\n      3. c\n      4. d"],
   ])("keeps every item of %j", (markdown, saved) => {
     const first = save(markdown);
     expect(first).toBe(saved);

@@ -97,6 +97,8 @@ const LINES = [
   // Fences in ordered items, and marker-shaped lines inside them.
   "1. ```", "2. ~~~js", "   ```", "   ````", "   ~~~", "   2. in code", "   b) in code", "      3. deeper in code",
   " 2. shallow in code", "2. in code at column 0", "   - ```", "     2. in bullet code", "     ```",
+  // Lines of the other fence character, which close no fence.
+  "```~~~", "   ```~", "~~~```", "   ~~~`",
   "\t- [ ] tab task", "- [] not a task", "-[ ] no space", "- plain bullet", "  - nested bullet", "* star bullet",
   "1. one", "2) two", "10. ten", "  1. nested one", "a. alpha", "B) beta", "iv. roman", "xii) roman2",
   "ab. two letters", "abc. three letters", "1.no space", "Mr. Smith said", "I) interrupt", "(216) 555-1234",

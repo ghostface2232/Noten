@@ -94,6 +94,10 @@ describe.each(Object.keys(CODE_BLOCKS))("code blocks (%s)", (name) => {
     ["- n\n  ```\n  ```~~~\n  2. x\n  ```", ["```~~~\n2. x"]],
     ["- [ ] t\n  ```\n  ```~\n  y\n  ```", ["```~\ny"]],
     ["> ```\n> ```~\n> x\n> ```", ["```~\nx"]],
+    // Nothing closes it, so it runs to the end, as CommonMark reads it, and
+    // saves inside a longer fence.
+    ["```\na\n```~~~\n\n# H\npara", ["a\n```~~~\n\n# H\npara"]],
+    ["~~~\na\n~~~`\n```js\nb\n```\nafter", ["a\n~~~`\n```js\nb\n```\nafter"]],
   ])("keeps the line of the other fence character in %j", (markdown, code) => {
     expect(codeOf(createEditor(markdown).getJSON())).toEqual(code);
     const first = save(markdown);
