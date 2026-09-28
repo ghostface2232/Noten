@@ -346,6 +346,26 @@ describe("setOrderedListStyle", () => {
   });
 });
 
+describe("plain-text paste", () => {
+  function paste(editor: Editor, text: string): boolean {
+    const event = { clipboardData: { getData: (type: string) => (type === "text/plain" ? text : "") } } as unknown as ClipboardEvent;
+    return editor.view.someProp("handlePaste", (f) => f(editor.view, event, editor.state.selection.content())) ?? false;
+  }
+
+  // The stock handler read `c.` as roman 100, so the next item showed `ci.`.
+  it.each([
+    ["c. x", "c. x", { type: "a", start: 3 }],
+    ["V. x", "V. x", { type: "A", start: 22 }],
+    ["i. x\nii. y", "i. x\nii. y", { type: "i" }],
+    ["v. x\nvi. y", "v. x\nvi. y", { type: "i", start: 5 }],
+  ] as const)("reads pasted %j the way a loaded file is read", (text, markdown, attrs) => {
+    const editor = createEditor("");
+    expect(paste(editor, text)).toBe(true);
+    expect(editor.getJSON().content?.[0].attrs).toMatchObject(attrs);
+    expect(markdownOf(editor)).toBe(markdown);
+  });
+});
+
 describe("letter input rule", () => {
   it("starts a list from `a. `, `B. ` and `i. `", () => {
     const lower = createEditor("");

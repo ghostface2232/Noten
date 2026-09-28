@@ -1,7 +1,13 @@
 import { findParentNodeClosestToPos, wrappingInputRule, type JSONContent } from "@tiptap/core";
-import { OrderedList, detectMarkerType, markerToStart, toRoman } from "@tiptap/extension-list";
+import {
+  OrderedList,
+  detectMarkerType,
+  markerToStart,
+  parsePlainTextOrderedListPaste,
+  toRoman,
+} from "@tiptap/extension-list";
 import type { Node as ProseMirrorNode, NodeType } from "@tiptap/pm/model";
-import { NodeSelection, type Selection, type Transaction } from "@tiptap/pm/state";
+import { NodeSelection, Plugin, type Selection, type Transaction } from "@tiptap/pm/state";
 import { StepMap, canJoin } from "@tiptap/pm/transform";
 
 /**
@@ -196,6 +202,8 @@ export function listSegmentStarts(markers: readonly (string | null)[]): number[]
 
 export const MAX_LIST_SEGMENTS = 10_000;
 
+const PASTED_MARKER = /^(\d+|[A-Za-z]+)[.)]/;
+
 // `a. `, `B. `, `i. `, `I. ` at the start of a textblock. Multi-letter
 // markers are left alone: `ii. ` or `iv. ` typed as prose is likelier than a
 // list meant to start there, and the toolbar sets any style.
@@ -289,6 +297,38 @@ export const NotenOrderedList = OrderedList.extend({
           return true;
         },
     };
+  },
+
+  // The stock plugin, reading the pasted markers the way parseMarkdown does:
+  // it took a list's style from its first marker alone, so pasting `c. x` as
+  // plain text gave a roman list from 100 whose next item showed `ci.`, where
+  // the same Markdown loaded from a file is a letter list. It runs before
+  // Noten's MarkdownPaste (same priority, earlier in the extension list).
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          handlePaste: (view, event) => {
+            if (event.clipboardData?.getData("text/html")?.trim()) return false;
+            const text = event.clipboardData?.getData("text/plain");
+            if (!text) return false;
+            const content = parsePlainTextOrderedListPaste(text);
+            if (!content) return false;
+            const markers = text
+              .split("\n")
+              .filter((line) => line.trim().length > 0)
+              .map((line) => line.trim().match(PASTED_MARKER)?.[1] ?? null);
+            try {
+              const list = view.state.schema.nodeFromJSON(disambiguate(content, markers));
+              view.dispatch(view.state.tr.replaceSelectionWith(list));
+              return true;
+            } catch {
+              return false;
+            }
+          },
+        },
+      }),
+    ];
   },
 
   addInputRules() {
