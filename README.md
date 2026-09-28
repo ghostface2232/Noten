@@ -27,6 +27,7 @@ Download `noten-setup.exe` from [GitHub Releases](https://github.com/ghostface22
 - **Anchor links** - Link to a heading in the same note with `[text](#heading-slug)`; typing `#` in the link editor suggests headings, additional `#` characters filter by heading depth, clicking jumps to the target, and a broken target shows a notice
 - **Table of contents** - Toggleable heading outline panel with click-to-jump, current-heading highlight, and keyboard navigation
 - **Focus mode** - Dim everything except the block you are writing, with the editor chrome tucked away
+- **Lists** - Bullet, numbered, and task lists, plus letter (`a.`, `A.`) and roman (`i.`, `I.`) numbered lists from the toolbar, `/`, or by typing `a. `; nested lists keep their own style
 - **Tables** - Insert with a grid picker, resize columns in-place, and edit rows/columns from the table bubble toolbar
 - **Mermaid diagrams** - Render Mermaid code blocks inline, collapse source, and export diagrams as SVG or PNG
 - **Image support** - Drag & drop, paste, resize with corner handles, and drag to reorder
