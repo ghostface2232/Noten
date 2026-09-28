@@ -273,12 +273,19 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
   return [listItems, consumed];
 }
 
+// The fifth change: the stock loop kept only items at exactly `baseIndent`
+// and skipped the rest, and a nested group's base was its smallest indent.
+// An item less indented than its group's first (` 1. a` / `2. b`, or
+// `      2. b` / `   3. c` under `1. a`) was consumed, since its line is in
+// the token's `raw`, but never parsed: it vanished on the first save. Here a
+// group's base is its first item's indent and an item at or left of it is a
+// sibling, as CommonMark reads a later item indented 0-3 spaces.
 function buildNestedStructure(items: ListItemLine[], baseIndent: number, lexer: BlockLexer): unknown[] {
   const result: unknown[] = [];
   let currentIndex = 0;
   while (currentIndex < items.length) {
     const item = items[currentIndex];
-    if (item.indent === baseIndent) {
+    if (item.indent <= baseIndent) {
       const { paragraphLines, blockLines } = splitItemContent(item.contentLines);
       const mainText = paragraphLines.join("\n").trim();
       const tokens: unknown[] = [];
@@ -294,11 +301,7 @@ function buildNestedStructure(items: ListItemLine[], baseIndent: number, lexer: 
         lookAheadIndex += 1;
       }
       if (nestedItems.length > 0) {
-        const nestedListItems = buildNestedStructure(
-          nestedItems,
-          Math.min(...nestedItems.map((nestedItem) => nestedItem.indent)),
-          lexer,
-        );
+        const nestedListItems = buildNestedStructure(nestedItems, nestedItems[0].indent, lexer);
         tokens.push({
           type: "list",
           ordered: true,

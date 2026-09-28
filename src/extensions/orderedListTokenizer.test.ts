@@ -229,6 +229,22 @@ describe("block content under an ordered item", () => {
     expect(ordered).toHaveLength(items);
   });
 
+  // The stock structure kept only items at exactly the group's smallest
+  // indent: a less indented later item, or the first of a nested group
+  // indented deeper than the next, was consumed but never parsed, and
+  // vanished on the first save.
+  it.each([
+    [" 1. a\n2. b", "1. a\n2. b"],
+    ["  1. a\n 2. b\n3. c", "1. a\n2. b\n3. c"],
+    ["1. a\n      2. b\n   3. c", "1. a\n   2. b\n   3. c"],
+    ["1. a\n   2. b\n  3. c", "1. a\n   2. b\n   3. c"],
+    [" a. x\nb. y", "a. x\nb. y"],
+  ])("keeps every item of %j", (markdown, saved) => {
+    const first = save(markdown);
+    expect(first).toBe(saved);
+    expect(save(first)).toBe(first);
+  });
+
   it("reads the content column the way CommonMark does", () => {
     expect(orderedItemContentIndent("1. x")).toBe(3);
     expect(orderedItemContentIndent("10. x")).toBe(4);
@@ -265,6 +281,19 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
       "1. - [ ] first task", "2. > quoted", "3. ```", "   2. - bullet",
     ];
     const blockOnMarkerLine = /^\s*[0-9A-Za-z]+[.)]\s+(?:[-+*]\s|#|>|```)/;
+    // Items in the list token and the ordered lists nested in its items.
+    const countItems = (token: unknown): number => {
+      const items = (token as { items?: { tokens?: unknown[] }[] } | undefined)?.items ?? [];
+      return items.reduce(
+        (sum, item) =>
+          sum +
+          1 +
+          (item.tokens ?? [])
+            .filter((child) => (child as { type?: string; ordered?: boolean }).type === "list" && (child as { ordered?: boolean }).ordered)
+            .reduce((nested: number, child) => nested + countItems(child), 0),
+        0,
+      );
+    };
     let compared = 0;
     let sameLines = 0;
     for (let n = 0; n < 1500; n++) {
@@ -276,7 +305,12 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
       expect(actual?.raw, JSON.stringify(src)).toBe(expected?.raw);
       const rawLines = (expected?.raw ?? "").split("\n");
       const consumed = rawLines.slice(1);
+      // Every item line the list takes is an item of the token (the stock one
+      // dropped items less indented than their group's first).
+      const itemLines = rawLines.filter((line) => orderedItemContentIndent(line) !== null).length;
+      expect(countItems(actual), JSON.stringify(src)).toBe(itemLines);
       if (
+        countItems(expected) === itemLines &&
         !consumed.some((line) => /^\s/.test(line) && line.trim() !== "" && orderedItemContentIndent(line) === null) &&
         !rawLines.some((line) => blockOnMarkerLine.test(line))
       ) {
