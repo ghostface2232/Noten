@@ -6,7 +6,22 @@ import TaskItem from "@tiptap/extension-task-item";
 import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
-import { alphaAttrsForAmbiguousMarkers, listSegmentStarts, selectedOrderedListStyle } from "./NotenOrderedList";
+import {
+  MAX_LIST_SEGMENTS,
+  alphaAttrsForAmbiguousMarkers,
+  listSegmentStarts,
+  selectedOrderedListStyle,
+} from "./NotenOrderedList";
+
+function nodesOf(doc: JSONContent, type: string): JSONContent[] {
+  const out: JSONContent[] = [];
+  const visit = (node: JSONContent) => {
+    if (node.type === type) out.push(node);
+    node.content?.forEach(visit);
+  };
+  visit(doc);
+  return out;
+}
 
 const editors: Editor[] = [];
 afterEach(() => {
@@ -143,6 +158,16 @@ describe("NotenOrderedList Markdown", () => {
       markdown.match(/^\s*(\d+|[a-z]+)\./gm)?.map((m) => m.trim()),
     );
   });
+
+  // One list per segment, spread by Tiptap into call arguments, overflowed the
+  // stack for a long nested run (`a.`/`A.` alternating 70,000 times).
+  it("opens a nested run with more segments than the cap as one list", () => {
+    const run = "  a. x\n  A. y\n".repeat(MAX_LIST_SEGMENTS / 2 + 1);
+    const lists = (markdown: string) => nodesOf(createEditor(markdown).getJSON(), "orderedList").length;
+    expect(lists(`- outer\n${run}`)).toBe(1);
+    expect(lists("- outer\n" + "  a. x\n  A. y\n".repeat(50))).toBe(100);
+    expect(() => createEditor("- outer\n" + "  a. x\n  A. y\n".repeat(70_000))).not.toThrow();
+  }, 60_000);
 
   it("finds list boundaries from markers alone", () => {
     expect(listSegmentStarts(["1", "2", "a", "b", "3"])).toEqual([0, 2, 4]);

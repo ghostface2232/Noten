@@ -187,6 +187,8 @@ export function listSegmentStarts(markers: readonly (string | null)[]): number[]
   return starts;
 }
 
+export const MAX_LIST_SEGMENTS = 10_000;
+
 // `a. `, `B. `, `i. `, `I. ` at the start of a textblock. Multi-letter
 // markers are left alone: `ii. ` or `iv. ` typed as prose is likelier than a
 // list meant to start there, and the toolbar sets any style.
@@ -204,7 +206,12 @@ export const NotenOrderedList = OrderedList.extend({
     const stock = OrderedList.config.parseMarkdown!;
     const items = (token as { items?: unknown[] }).items ?? [];
     const markers = items.map(itemMarker);
-    const starts = listSegmentStarts(markers);
+    let starts = listSegmentStarts(markers);
+    // Tiptap spreads a nested list's parse result into call arguments
+    // (`content.push(...)`), so ~100,000 lists from one token overflowed the
+    // stack and the note would not open. Past the cap the token stays one list,
+    // as the stock reading has it: its markers are restyled, but it opens.
+    if (starts.length > MAX_LIST_SEGMENTS) starts = [0];
     const lists: JSONContent[] = [];
     starts.forEach((start, index) => {
       const end = starts[index + 1] ?? items.length;
