@@ -6,7 +6,7 @@ import TaskItem from "@tiptap/extension-task-item";
 import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
-import { alphaAttrsForAmbiguousMarkers, selectedOrderedListStyle } from "./NotenOrderedList";
+import { alphaAttrsForAmbiguousMarkers, listSegmentStarts, selectedOrderedListStyle } from "./NotenOrderedList";
 
 const editors: Editor[] = [];
 afterEach(() => {
@@ -128,6 +128,57 @@ describe("NotenOrderedList Markdown", () => {
     const first = markdownOf(createEditor(markdown));
     expect(first).toBe(markdown);
     expect(markdownOf(createEditor(first))).toBe(markdown);
+  });
+
+  // Inside a list item, sibling lists are written a single newline apart, so
+  // the tokenizer-level split (top level only) let `a.` come back as `2.`.
+  it.each([
+    "1. outer\n   1. x\n   a. para",
+    "- bullet\n  1. x\n  a. y\n  i. z",
+    "1. q\na. opt\nb. opt\n2. q\na. opt",
+  ])("splits nested and flat runs of mixed markers the same way: %j", (markdown) => {
+    const first = markdownOf(createEditor(markdown));
+    expect(markdownOf(createEditor(first))).toBe(first);
+    expect(first.match(/^\s*(\d+|[a-z]+)\./gm)?.map((m) => m.trim())).toEqual(
+      markdown.match(/^\s*(\d+|[a-z]+)\./gm)?.map((m) => m.trim()),
+    );
+  });
+
+  it("finds list boundaries from markers alone", () => {
+    expect(listSegmentStarts(["1", "2", "a", "b", "3"])).toEqual([0, 2, 4]);
+    expect(listSegmentStarts(["a", "b", "i", "ii"])).toEqual([0, 2]);
+    expect(listSegmentStarts(["h", "i", "j"])).toEqual([0]);
+    expect(listSegmentStarts(["v", "vi", "a"])).toEqual([0, 2]);
+    expect(listSegmentStarts(["a", "A"])).toEqual([0, 1]);
+    expect(listSegmentStarts(["1", null, "a"])).toEqual([0, 2]);
+    expect(listSegmentStarts([])).toEqual([0]);
+  });
+
+  // Loading and saving twice must give the same Markdown as once: a list that
+  // splits or merges differently on each reading rewrites markers every save.
+  it("saves mixed-marker lists stably across reloads (seeded fuzz)", () => {
+    let seed = 7;
+    const random = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const pick = <T,>(values: readonly T[]) => values[Math.floor(random() * values.length)];
+    const markers = ["1.", "2.", "10.", "a.", "b.", "c.", "h.", "i.", "ii.", "v.", "vi.", "x.", "A.", "B.", "I.", "II.", "V."];
+    const indents = ["", "", "   ", "      "];
+    for (let n = 0; n < 300; n++) {
+      // In a quote, later lines may drop the `>` (lazy continuation).
+      const quoteMode = pick(["none", "none", "all", "lazy"] as const);
+      const lines: string[] = [];
+      const count = 2 + Math.floor(random() * 7);
+      for (let k = 0; k < count; k++) {
+        const quote = quoteMode === "all" || (quoteMode === "lazy" && k === 0) ? "> " : "";
+        const roll = random();
+        if (roll < 0.12) lines.push(quote.trimEnd());
+        else if (roll < 0.2) lines.push(`${quote}text ${k}`);
+        else lines.push(`${quote}${pick(indents)}${pick(markers)} item ${k}`);
+      }
+      const once = markdownOf(createEditor(lines.join("\n")));
+      const twice = markdownOf(createEditor(once));
+      expect(twice, JSON.stringify(lines.join("\n"))).toBe(once);
+      while (editors.length > 0) editors.pop()!.destroy();
+    }
   });
 
   it("keeps a letter list whose markers run into roman letters as one list", () => {
