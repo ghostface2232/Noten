@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { Editor } from "@tiptap/core";
+import { Editor, type JSONContent } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
@@ -13,7 +13,7 @@ afterEach(() => {
   while (editors.length > 0) editors.pop()!.destroy();
 });
 
-function createEditor(markdown: string): Editor {
+function createEditor(markdown: string | JSONContent): Editor {
   const editor = new Editor({
     extensions: [
       NotenStarterKit.configure({ codeBlock: false, underline: false, link: false }),
@@ -23,7 +23,7 @@ function createEditor(markdown: string): Editor {
       TaskItem.configure({ nested: true }),
     ],
     content: markdown,
-    contentType: "markdown",
+    contentType: typeof markdown === "string" ? "markdown" : "json",
   } as ConstructorParameters<typeof Editor>[0]);
   editors.push(editor);
   return editor;
@@ -220,6 +220,65 @@ describe("setOrderedListStyle", () => {
     editor.commands.setOrderedListStyle("a");
     expect(markdownOf(editor)).toBe("1. one\n   a. sub\n2. two");
     expect(selectedOrderedListStyle(editor.state.selection)).toBe("a");
+  });
+
+  // toggleOrderedList joined the new list into a numbered list next to it
+  // before the style was set, so the whole numbered list became letters.
+  it("leaves a numbered list next to the new list alone", () => {
+    const after = createEditor("1. x\n2. y\n\npara");
+    caretAt(after, "para");
+    after.commands.setOrderedListStyle("a");
+    expect(markdownOf(after)).toBe("1. x\n2. y\n\na. para");
+
+    const before = createEditor("para\n\n1. x\n2. y");
+    caretAt(before, "para");
+    before.commands.setOrderedListStyle("A");
+    expect(markdownOf(before)).toBe("A. para\n\n1. x\n2. y");
+  });
+
+  it("joins the new list with a neighbour of the same style", () => {
+    const editor = createEditor("a. x\nb. y\n\npara");
+    caretAt(editor, "para");
+    editor.commands.setOrderedListStyle("a");
+    expect(editor.getJSON().content?.filter((node) => node.type === "orderedList")).toHaveLength(1);
+    expect(markdownOf(editor)).toBe("a. x\nb. y\nc. para");
+  });
+
+  it("converts a task list nested in a numbered item in place, as one undo step", () => {
+    // Built from JSON: Tiptap's Markdown reading of a task list nested at
+    // three spaces folds `task2` into task1's text.
+    const paragraph = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] });
+    const task = (text: string, checked: boolean) => ({ type: "taskItem", attrs: { checked }, content: [paragraph(text)] });
+    const editor = createEditor({
+      type: "doc",
+      content: [{
+        type: "orderedList",
+        content: [
+          { type: "listItem", content: [paragraph("n"), { type: "taskList", content: [task("task1", false), task("task2", true)] }] },
+          { type: "listItem", content: [paragraph("m")] },
+        ],
+      }],
+    });
+    const markdown = markdownOf(editor);
+    expect(markdown).toBe("1. n\n   - [ ] task1\n   - [x] task2\n2. m");
+    caretAt(editor, "task1");
+    expect(editor.commands.setOrderedListStyle("i")).toBe(true);
+    expect(markdownOf(editor)).toBe("1. n\n   i. task1\n   ii. task2\n2. m");
+    expect(selectedOrderedListStyle(editor.state.selection)).toBe("i");
+    editor.commands.undo();
+    expect(markdownOf(editor)).toBe(markdown);
+  });
+
+  it("answers can() the way running it goes", () => {
+    for (const markdown of ["para", "# heading", "- [ ] task", "- bullet", "1. n"]) {
+      const editor = createEditor(markdown);
+      caretAt(editor, markdown.replace(/^(# |- \[ \] |- |1\. )/, ""));
+      const doc = editor.state.doc;
+      expect(editor.can().setOrderedListStyle("a"), markdown).toBe(true);
+      expect(editor.state.doc).toBe(doc);
+      expect(editor.commands.setOrderedListStyle("a"), markdown).toBe(true);
+      expect(selectedOrderedListStyle(editor.state.selection), markdown).toBe("a");
+    }
   });
 
   it("converts a bullet list nested in a numbered one instead of restyling the outer list", () => {

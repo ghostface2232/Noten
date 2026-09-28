@@ -1,7 +1,8 @@
 import { findParentNodeClosestToPos, wrappingInputRule, type JSONContent } from "@tiptap/core";
 import { OrderedList, detectMarkerType, markerToStart, toRoman } from "@tiptap/extension-list";
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import type { Selection } from "@tiptap/pm/state";
+import type { Node as ProseMirrorNode, NodeType } from "@tiptap/pm/model";
+import type { Selection, Transaction } from "@tiptap/pm/state";
+import { StepMap, canJoin } from "@tiptap/pm/transform";
 
 /**
  * The marker styles an ordered list can carry, as HTML `<ol type>` values.
@@ -25,8 +26,9 @@ declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     notenOrderedList: {
       /**
-       * Give the innermost ordered list around the selection this marker
-       * style, wrapping the selection in a new list when it is in none.
+       * Give the innermost list around the selection this marker style,
+       * converting a bullet or task list, or wrap the selection in a new
+       * list of that style when it is in none.
        */
       setOrderedListStyle: (style: OrderedListStyle) => ReturnType;
     };
@@ -93,6 +95,23 @@ function disambiguate(parsed: JSONContent, markers: readonly (string | null)[]):
 
 function isList(node: ProseMirrorNode): boolean {
   return (node.type.spec.group ?? "").split(" ").includes("list");
+}
+
+// Join a newly wrapped list with an ordered list of the same style right
+// before or after it, as typing its next marker would.
+function joinSameStyleNeighbours(tr: Transaction, listType: NodeType): void {
+  const find = () => findParentNodeClosestToPos(tr.selection.$from, (node) => node.type === listType);
+  const sameStyle = (node: ProseMirrorNode | null | undefined, list: ProseMirrorNode) =>
+    node?.type === listType && orderedListStyleOf(node) === orderedListStyleOf(list);
+  let list = find();
+  if (!list) return;
+  if (sameStyle(tr.doc.resolve(list.pos).nodeBefore, list.node) && canJoin(tr.doc, list.pos)) {
+    tr.join(list.pos);
+    list = find();
+    if (!list) return;
+  }
+  const end = list.pos + list.node.nodeSize;
+  if (sameStyle(tr.doc.resolve(end).nodeAfter, list.node) && canJoin(tr.doc, end)) tr.join(end);
 }
 
 // 1-based position of a letter marker: a = 1, z = 26, aa = 27.
@@ -213,14 +232,41 @@ export const NotenOrderedList = OrderedList.extend({
       ...this.parent?.(),
       setOrderedListStyle:
         (style) =>
-        ({ tr, commands, dispatch }) => {
-          // The innermost list decides: a bullet list nested in a numbered one
-          // is converted, rather than restyling the numbered list around it.
-          const innermostList = () => findParentNodeClosestToPos(tr.selection.$from, isList);
-          if (innermostList()?.node.type.name !== this.name && !commands.toggleOrderedList()) return false;
-          const list = innermostList();
-          if (!list || list.node.type.name !== this.name) return false;
-          if (dispatch) tr.setNodeMarkup(list.pos, undefined, { ...list.node.attrs, type: style === "1" ? null : style });
+        ({ tr, state, chain, can, commands, dispatch }) => {
+          const type = style === "1" ? null : style;
+          const list = findParentNodeClosestToPos(tr.selection.$from, isList);
+          if (!list) {
+            // Not toggleOrderedList: it joins the new list into a numbered one
+            // next to it before the style is set, restyling that list too. A
+            // heading or code block becomes a paragraph first, as it does there.
+            // A dry run cannot clear nodes, so it answers as clearing would.
+            if (!dispatch) return true;
+            return chain()
+              .command(() => can().wrapInList(this.name, { type }) || commands.clearNodes())
+              .wrapInList(this.name, { type })
+              .command(({ tr: chained }) => {
+                joinSameStyleNeighbours(chained, this.type);
+                return true;
+              })
+              .run();
+          }
+          if (!dispatch) return true;
+          if (list.node.type === this.type) {
+            tr.setNodeMarkup(list.pos, undefined, { ...list.node.attrs, type });
+            return true;
+          }
+          // A bullet or task list becomes an ordered list in place. Tiptap's
+          // toggle lifts a task list nested in a numbered item out into that
+          // numbered list, which is then what the style would land on.
+          const itemType = state.schema.nodes[this.options.itemTypeName];
+          const items: ProseMirrorNode[] = [];
+          list.node.forEach((item) => items.push(item.type === itemType ? item : itemType.create(null, item.content)));
+          const converted = this.type.create({ type }, items);
+          if (!converted.type.validContent(converted.content)) return false;
+          const selection = tr.selection;
+          tr.replaceWith(list.pos, list.pos + list.node.nodeSize, converted);
+          // Items keep their size, so every position inside is unchanged.
+          tr.setSelection(selection.map(tr.doc, StepMap.empty));
           return true;
         },
     };
