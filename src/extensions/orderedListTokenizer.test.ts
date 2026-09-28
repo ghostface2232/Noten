@@ -6,7 +6,12 @@ import TaskItem from "@tiptap/extension-task-item";
 import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
-import { isOrderedItemLine, orderedItemContentIndent, tokenizeOrderedList } from "./orderedListTokenizer";
+import {
+  MAX_ORDERED_LIST_DEPTH,
+  isOrderedItemLine,
+  orderedItemContentIndent,
+  tokenizeOrderedList,
+} from "./orderedListTokenizer";
 
 const editors: Editor[] = [];
 afterAll(() => {
@@ -333,6 +338,47 @@ describe("a quote line after an item", () => {
     expect(depth(doc)).toBe(depth(createEditor("> a. x").getJSON()));
     expect(nodesOf(doc, "text").filter((text) => text.text?.includes(lazy))).toHaveLength(1000);
   });
+});
+
+describe("deep nesting", () => {
+  const listDepth = (node: JSONContent): number =>
+    (node.type === "orderedList" ? 1 : 0) + Math.max(0, ...(node.content ?? []).map(listDepth));
+  const paragraphs = (doc: JSONContent) =>
+    nodesOf(doc, "paragraph").map((node) => (node.content ?? []).map((child) => child.text ?? "").join(""));
+  const staircase = (levels: number, step: number) =>
+    Array.from({ length: levels }, (_, i) => `${" ".repeat(i * step)}1. x${i}`).join("\n");
+
+  // Every deeper indent nests, and Tiptap parses nested lists recursively:
+  // past a few hundred levels the parse overflowed the stack.
+  it.each([1, 3])("opens a list indented %i more space(s) per item, flattened past the cap", (step) => {
+    const levels = MAX_ORDERED_LIST_DEPTH * 6;
+    const doc = createEditor(staircase(levels, step)).getJSON();
+    expect(listDepth(doc)).toBe(MAX_ORDERED_LIST_DEPTH);
+    expect(paragraphs(doc)).toEqual(Array.from({ length: levels }, (_, i) => `x${i}`));
+    const first = save(staircase(levels, step));
+    expect(save(first)).toBe(first);
+  }, 60_000);
+
+  it("keeps a list nested as deep as the cap byte for byte", () => {
+    const markdown = staircase(MAX_ORDERED_LIST_DEPTH, 3);
+    expect(listDepth(createEditor(markdown).getJSON())).toBe(MAX_ORDERED_LIST_DEPTH);
+    expect(save(markdown)).toBe(markdown);
+  });
+
+  // Each nested list's `raw` joined its items' lines, a new copy of every
+  // deeper line per level: about 200 MB per tokenization here.
+  it("holds each line once in a list nested up to the cap", () => {
+    const manager = createEditor("").markdown as unknown as {
+      createLexer(): unknown;
+      createTokenizerHelpers(lexer: unknown): Parameters<typeof tokenizeOrderedList>[2];
+    };
+    const src = staircase(2000, 1);
+    const kept: unknown[] = [];
+    const before = process.memoryUsage().heapUsed;
+    for (let n = 0; n < 3; n++) kept.push(tokenizeOrderedList(src, [], manager.createTokenizerHelpers(manager.createLexer())));
+    expect(process.memoryUsage().heapUsed - before).toBeLessThan(150e6);
+    expect(kept.every(Boolean)).toBe(true);
+  }, 60_000);
 });
 
 describe("tokenizeOrderedList against the stock tokenizer", () => {
