@@ -137,6 +137,13 @@ describe("NotenOrderedList Markdown", () => {
     expect(alphaAttrsForAmbiguousMarkers("I", "II")).toBeNull();
     expect(alphaAttrsForAmbiguousMarkers("I", "J")).toEqual({ type: "A", start: 9 });
     expect(alphaAttrsForAmbiguousMarkers("iv", null)).toBeNull();
+    // A letter pair that is also a numeral: the second item decides, and
+    // alone it stays a numeral.
+    expect(alphaAttrsForAmbiguousMarkers("cc", "cd")).toEqual({ type: "a", start: 81 });
+    expect(alphaAttrsForAmbiguousMarkers("LV", "LW")).toEqual({ type: "A", start: 334 });
+    expect(alphaAttrsForAmbiguousMarkers("cc", "cci")).toBeNull();
+    expect(alphaAttrsForAmbiguousMarkers("cc", null)).toBeNull();
+    expect(alphaAttrsForAmbiguousMarkers("iv", "v")).toBeNull();
   });
 
   // Tiptap's tokenizer takes every following item line into the first list, so
@@ -259,6 +266,52 @@ describe("NotenOrderedList Markdown", () => {
     expect(listSegmentStarts(["z", "aa", "ab"])).toEqual([0]);
     expect(listSegmentStarts(["aa", "b"])).toEqual([0, 1]);
   });
+
+  // A letter list from item 81 on starts at `cc.`, which also reads as roman
+  // 200: the reload split its later items off, and before that rewrote them.
+  it.each(["cc. t0\ncd. t1\nce. t2", "ml. a\nmm. b", "LV. a\nLW. b", "1. top\n   ci. a\n   cj. b"])(
+    "reads a letter list starting on a numeral pair as letters: %j",
+    (markdown) => {
+      expect(markdownOf(createEditor(markdown))).toBe(markdown);
+    },
+  );
+
+  // Every list Noten writes must read back as the lists it wrote.
+  it("reads back every ordered list it saves (seeded fuzz)", () => {
+    let seed = 13;
+    const random = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const pick = <T,>(values: readonly T[]) => values[Math.floor(random() * values.length)];
+    const starts = [1, 2, 9, 26, 27, 28, 81, 87, 200, 334, 350, 400, 500, 690];
+    const list = (depth: number): JSONContent => {
+      const type = pick([null, "a", "A", "i", "I"]);
+      const count = 1 + Math.floor(random() * 4);
+      // Past `zz.` (702) a letter list is numbered, which reads back as a second list.
+      const start = Math.min(random() < 0.5 ? pick(starts) : 1 + Math.floor(random() * 690), 703 - count);
+      const items = Array.from({ length: count }, (_, i) => ({
+        type: "listItem",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: `t${depth}${i}` }] },
+          ...(depth === 0 && random() < 0.3 ? [list(1)] : []),
+        ],
+      }));
+      return { type: "orderedList", attrs: { type, start }, content: items };
+    };
+    const shape = (editor: Editor) =>
+      nodesOf(editor.getJSON(), "orderedList").map((node) => node.content?.length ?? 0);
+    for (let n = 0; n < 400; n++) {
+      const blocks: JSONContent[] = [];
+      for (let k = 0, count = 1 + Math.floor(random() * 3); k < count; k++) {
+        if (k > 0) blocks.push({ type: "paragraph", content: [{ type: "text", text: `p${k}` }] });
+        blocks.push(list(0));
+      }
+      const written = createEditor({ type: "doc", content: blocks });
+      const once = markdownOf(written);
+      const reloaded = createEditor(once);
+      expect(markdownOf(reloaded), once).toBe(once);
+      expect(shape(reloaded), once).toEqual(shape(written));
+      while (editors.length > 0) editors.pop()!.destroy();
+    }
+  }, 30_000);
 
   // Loading and saving twice must give the same Markdown as once: a list that
   // splits or merges differently on each reading rewrites markers every save.

@@ -116,20 +116,24 @@ function itemMarker(item: unknown): string | null {
  * `di.`, `ii.`: the reload rewrote the user's markers. A single letter is
  * read as a letter unless it is `i`/`I` (a roman list's usual start), and
  * the second item settles the choice whenever it follows one reading
- * (`v.` `w.` are letters, `v.` `vi.` roman numerals).
+ * (`v.` `w.` are letters, `v.` `vi.` roman numerals). A letter pair that is
+ * also a numeral (`cc.`, `ci.`, `mi.`, `LV.`) is read the same way, but
+ * alone it stays a numeral (`iv.`, `xi.`): a letter list Noten saved from
+ * item 81 on (`cc.` `cd.` `ce.`) read back as roman 200 with its later
+ * markers split off or rewritten.
  */
 export function alphaAttrsForAmbiguousMarkers(first: string, second: string | null): { type: "a" | "A"; start: number } | null {
-  if (!/^[a-zA-Z]$/.test(first)) return null;
+  if (!/^(?:[a-z]{1,2}|[A-Z]{1,2})$/.test(first)) return null;
   const upper = first === first.toUpperCase();
-  const code = first.toLowerCase().charCodeAt(0);
-  const alphaNext = code < 122 ? String.fromCharCode(code + 1) : null;
+  const position = alphaValue(first);
+  const alphaNext = position < MAX_LETTER_POSITION ? alphaMarker(position + 1) : null;
   const romanNext = isRoman(first) ? toRoman(markerToStart(first) + 1) : null;
   const secondLower = second && (second === second.toUpperCase()) === upper ? second.toLowerCase() : null;
   let alpha: boolean;
   if (secondLower !== null && secondLower === alphaNext) alpha = true;
   else if (secondLower !== null && secondLower === romanNext) alpha = false;
-  else alpha = first.toLowerCase() !== "i";
-  return alpha ? { type: upper ? "A" : "a", start: code - 96 } : null;
+  else alpha = first.length === 1 ? first.toLowerCase() !== "i" : !isRoman(first);
+  return alpha ? { type: upper ? "A" : "a", start: position } : null;
 }
 
 function disambiguate(parsed: JSONContent, markers: readonly (string | null)[]): JSONContent {
@@ -222,13 +226,16 @@ function alphaMarker(position: number): string {
  */
 export function listSegmentStarts(markers: readonly (string | null)[]): number[] {
   const starts = [0];
+  // Cast, not annotated: TypeScript does not see `begin` assign it, and would
+  // narrow it to null below.
   let first = null as string | null;
-  // Letter style, once known: a lone roman letter waits for the second item.
+  // Letter style, once known: a first marker that reads both ways (`v`, `cc`)
+  // waits for the second item.
   let letters: "alpha" | "roman" | null = null;
   let count = 0;
   const begin = (marker: string | null) => {
     first = marker;
-    letters = !marker || markerKind(marker) === "number" ? null : !isRoman(marker) ? "alpha" : marker.length > 1 ? "roman" : null;
+    letters = !marker || markerKind(marker) === "number" ? null : !isRoman(marker) ? "alpha" : marker.length > 2 ? "roman" : null;
     count = 1;
   };
   begin(markers[0] ?? null);
