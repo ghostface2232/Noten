@@ -245,7 +245,8 @@ describe("NotenOrderedList Markdown", () => {
       expect(twice, JSON.stringify(lines.join("\n"))).toBe(once);
       while (editors.length > 0) editors.pop()!.destroy();
     }
-  });
+    // 600 editors: about 2.5 s alone, past the 5 s default under a full run.
+  }, 30_000);
 
   it("keeps a letter list whose markers run into roman letters as one list", () => {
     const markdown = "h. x\ni. y\nj. z\nk. w\nl. v\nm. u";
