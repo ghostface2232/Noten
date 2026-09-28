@@ -164,6 +164,27 @@ describe("a list item whose first child is not a paragraph", () => {
     ]);
   });
 
+  // An ordered list on the marker line reads back as text (`1. 1. b`), so
+  // one under an empty item, as Tab on the item below it makes, stays on the
+  // lines below; so does a rule under a bullet, since `- ---` is a rule itself.
+  it.each([
+    ["ordered", { type: "orderedList", attrs: { start: 1 }, content: [{ type: "listItem", content: [paragraph("b")] }] }, "1. \n   1. b"],
+    ["rule", { type: "horizontalRule" }, "1. ---"],
+  ] as [string, JSONContent, string][])("keeps an empty item's nested %s where the next load finds it", (_name, block, saved) => {
+    const item: JSONContent = { type: "listItem", content: [{ type: "paragraph" }, block] };
+    const tree = doc({ type: "orderedList", attrs: { start: 1 }, content: [item, { type: "listItem", content: [paragraph("c")] }] });
+    const first = save(tree);
+    expect(first).toBe(`${saved}\n2. c`);
+    const reloaded = nodesOf(createEditor(first).getJSON(), "listItem")[0];
+    expect(reloaded.content?.map((child) => child.type)).toEqual(["paragraph", block.type]);
+    expect(save(first)).toBe(first);
+  });
+
+  it("writes a rule under an empty bullet item below the marker line", () => {
+    const tree = doc({ type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph" }, { type: "horizontalRule" }] }] });
+    expect(save(tree)).toBe("- \n  ---");
+  });
+
   it("keeps a task list's checkboxes through two saves", () => {
     const second = save(save("1.\n   - [ ] t1\n   - [x] t2"));
     const tasks = nodesOf(createEditor(second).getJSON(), "taskItem");

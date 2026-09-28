@@ -24,6 +24,15 @@ function itemPrefix(ctx: RenderContext): string {
 
 const INLINE_TYPES = new Set(["text", "hardBreak"]);
 
+// Blocks both readings take from an item's marker line: marked's for a bullet
+// item and orderedListTokenizer.ts's for an ordered one. An ordered list is
+// not among them (Tiptap keeps `- 1. a` as text, and so does the ordered
+// reading), and a rule only in an ordered item: `- ---` is a rule itself.
+const MARKER_LINE_BLOCKS = new Set(["bulletList", "taskList", "blockquote", "heading", "codeBlock"]);
+// The block's first line as rendered must still open it there: an empty
+// nested item (`- - `, `- - [ ] `) reads back as text.
+const MARKER_LINE_HEAD = /^(?:[-+*] +\[[ xX]\] +\S|[-+*] +(?!\[[ xX]\])\S|#{1,6} +\S|>|```|~~~|---$)/;
+
 function isEmptyParagraph(node: JSONContent | undefined): boolean {
   return node?.type === "paragraph" && (node.content ?? []).length === 0;
 }
@@ -78,10 +87,13 @@ export const parseListItemMarkdown: ParseListItem = function (this: unknown, tok
  * which reloads as a second list after the item, and a fence there ended the
  * item at its first code line. The parse gives such an item an empty first
  * paragraph (`normalizeListItemContent`), and an empty paragraph followed by
- * a block is written as that block on the marker line, so the Markdown round-
- * trips. A first child that is itself not a paragraph (from HTML or older
- * JSON) is written the same way. Other items are left to the stock renderer,
- * byte for byte.
+ * a block the next load reads back from the marker line is written as that
+ * block on the marker line, so the Markdown round-trips. A first child that
+ * is itself not a paragraph (from HTML or older JSON) is written the same way.
+ * Any other block stays on the lines below an empty marker line, as the stock
+ * renderer writes it after an empty paragraph: an ordered list there
+ * (`1. 1. b`) reads back as text, and under a bullet `- ---` is a rule of its
+ * own. Paragraph-first items are left to the stock renderer, byte for byte.
  *
  * Every child is rendered once. Rendering the first child again beside the
  * stock renderer's own pass doubled the work at each level of `- - - a`
@@ -93,19 +105,30 @@ export const renderListItemMarkdown: RenderListItem = function (this: unknown, n
   if (!content[lead] || content[lead].type === "paragraph") return ListItem.config.renderMarkdown!.call(this, node, h, ctx);
   // From here on renderNestedMarkdownContent, transcribed, but for the lead
   // block's later lines.
+  const ordered = ctx?.parentType === "orderedList";
   const prefix = itemPrefix(ctx);
   const configured = h.indent("");
   const width = columnWidth(prefix);
   // The stock `alignNestedToPrefix` is set for ordered items only.
   const indentLine = (line: string) =>
-    ctx?.parentType === "orderedList"
-      ? (columnWidth(configured) >= width ? configured : " ".repeat(width)) + line
-      : h.indent(line);
-  const [head, ...rest] = h.renderChildren([content[lead]]).split("\n");
-  let output = prefix + [head, ...rest.map(indentLine)].join("\n");
-  for (let index = lead + 1; index < content.length; index++) {
+    ordered ? (columnWidth(configured) >= width ? configured : " ".repeat(width)) + line : h.indent(line);
+  const leadRendered = h.renderChildren([content[lead]]);
+  const [head, ...rest] = leadRendered.split("\n");
+  const onMarkerLine =
+    (MARKER_LINE_BLOCKS.has(content[lead].type ?? "") || (ordered && content[lead].type === "horizontalRule")) &&
+    MARKER_LINE_HEAD.test(head);
+  let output: string;
+  let from: number;
+  if (onMarkerLine) {
+    output = prefix + [head, ...rest.map(indentLine)].join("\n");
+    from = lead + 1;
+  } else {
+    output = prefix + (lead === 1 ? h.renderChildren([content[0]]) : "");
+    from = lead;
+  }
+  for (let index = from; index < content.length; index++) {
     const child = content[index];
-    const rendered = h.renderChild?.(child, index) ?? h.renderChildren([child]);
+    const rendered = index === lead ? leadRendered : (h.renderChild?.(child, index) ?? h.renderChildren([child]));
     if (rendered === undefined || rendered === null) continue;
     output += (child.type === "paragraph" ? "\n\n" : "\n") + rendered.split("\n").map(indentLine).join("\n");
   }
