@@ -133,8 +133,9 @@ describe("IncrementalMarkdown", () => {
     }
   });
 
-  // Items led by a block render through NotenListItem, and task lists and
-  // fences parse through Noten's own tokenizer and parseMarkdown.
+  // Items led by a block render through NotenListItem and code blocks through
+  // renderCodeBlockMarkdown, and task lists and fences parse through Noten's
+  // own tokenizer and parseMarkdown.
   it("matches the stock serializer on list items led by a block", () => {
     const markdown = [
       "1. - [ ] t1",
@@ -152,6 +153,12 @@ describe("IncrementalMarkdown", () => {
       " ```",
       " indented fence",
       " ```",
+      "",
+      "````md",
+      "```",
+      "fenced in the code",
+      "```",
+      "````",
     ].join("\n");
     const e = makeEditor(markdown);
     expect(e.getMarkdown()).toBe(stock(e));
