@@ -3,6 +3,12 @@ import { Editor, type JSONContent } from "@tiptap/core";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
+import { TableRow } from "@tiptap/extension-table-row";
+import { TableCell } from "@tiptap/extension-table-cell";
+import { TableHeader } from "@tiptap/extension-table-header";
+import MermaidCodeBlock from "./MermaidCodeBlock";
+import { common, createLowlight } from "lowlight";
+import { NotenTable } from "./NotenTable";
 import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
@@ -37,6 +43,11 @@ function createEditor(markdown: string | JSONContent): Editor {
       CodeSpanFence,
       TaskList,
       TaskItem.configure({ nested: true }),
+      MermaidCodeBlock.configure({ lowlight: createLowlight(common) }),
+      NotenTable,
+      TableRow,
+      TableCell,
+      TableHeader,
     ],
     content: markdown,
     contentType: typeof markdown === "string" ? "markdown" : "json",
@@ -351,15 +362,33 @@ describe("setOrderedListStyle", () => {
     expect(markdownOf(editor)).toBe(markdown);
   });
 
-  it("refuses a selected node without touching the document", () => {
-    for (const [markdown, pos] of [["1. x\n   - y\n2. z", 0], ["a\n\n---\n\nb", 3]] as const) {
-      const editor = createEditor(markdown);
-      editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, pos)));
-      const before = markdownOf(editor);
-      expect(editor.can().setOrderedListStyle("a"), markdown).toBe(false);
-      expect(editor.commands.setOrderedListStyle("a"), markdown).toBe(false);
-      expect(markdownOf(editor), markdown).toBe(before);
-    }
+  it("refuses a selected node outside a list without touching the document", () => {
+    const editor = createEditor("a\n\n---\n\nb");
+    editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, 3)));
+    expect(editor.can().setOrderedListStyle("a")).toBe(false);
+    expect(editor.commands.setOrderedListStyle("a")).toBe(false);
+    expect(markdownOf(editor)).toBe("a\n\n---\n\nb");
+  });
+
+  // Refusing every NodeSelection also blocked restyling the list around a
+  // selected image or table, while the toolbar showed that list's style.
+  it("restyles a selected list, or the list around a selected node", () => {
+    const whole = createEditor("1. x\n   - y\n2. z");
+    whole.view.dispatch(whole.state.tr.setSelection(NodeSelection.create(whole.state.doc, 0)));
+    expect(selectedOrderedListStyle(whole.state.selection)).toBe("1");
+    expect(whole.commands.setOrderedListStyle("a")).toBe(true);
+    expect(markdownOf(whole)).toBe("a. x\n   - y\nb. z");
+
+    const inside = createEditor("a. text\n\n   ---\nb. two");
+    let rule = -1;
+    inside.state.doc.descendants((node, pos) => {
+      if (node.type.name === "horizontalRule") rule = pos;
+    });
+    inside.view.dispatch(inside.state.tr.setSelection(NodeSelection.create(inside.state.doc, rule)));
+    expect(selectedOrderedListStyle(inside.state.selection)).toBe("a");
+    expect(inside.can().setOrderedListStyle("I")).toBe(true);
+    expect(inside.commands.setOrderedListStyle("I")).toBe(true);
+    expect(selectedOrderedListStyle(inside.state.selection)).toBe("I");
   });
 
   it("answers can() the way running it goes for text selections", () => {

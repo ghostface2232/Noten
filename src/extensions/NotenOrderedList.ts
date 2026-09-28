@@ -50,8 +50,18 @@ export function orderedListStyleOf(node: ProseMirrorNode): OrderedListStyle {
 
 /** The style of the innermost list around the selection, or null when that list is not ordered. */
 export function selectedOrderedListStyle(selection: Selection): OrderedListStyle | null {
-  const list = findParentNodeClosestToPos(selection.$from, isList);
+  const list = targetList(selection);
   return list?.node.type.name === "orderedList" ? orderedListStyleOf(list.node) : null;
+}
+
+/**
+ * The list a style applies to: a selected list node itself, else the
+ * innermost list around the selection's start, which includes a selected
+ * image or table inside a list.
+ */
+function targetList(selection: Selection): { node: ProseMirrorNode; pos: number } | null {
+  if (selection instanceof NodeSelection && isList(selection.node)) return { node: selection.node, pos: selection.from };
+  return findParentNodeClosestToPos(selection.$from, isList) ?? null;
 }
 
 const ITEM_MARKER = /^[ \t]*(\d+|[A-Za-z]+)[.)]/;
@@ -286,17 +296,16 @@ export const NotenOrderedList = OrderedList.extend({
         (style) =>
         ({ tr, state, chain, can, commands, dispatch }) => {
           const type = style === "1" ? null : style;
-          // A selected node (a rule, an image, a whole list) is not text to
-          // style. Wrapping it clears nodes first and can still fail after
-          // that, and a failed chain dispatches anyway: a selected list was
-          // flattened into paragraphs.
-          if (tr.selection instanceof NodeSelection) return false;
-          const list = findParentNodeClosestToPos(tr.selection.$from, isList);
+          const list = targetList(tr.selection);
           if (!list) {
             // Not toggleOrderedList: it joins the new list into a numbered one
             // next to it before the style is set, restyling that list too. A
             // heading or code block becomes a paragraph first, as it does there.
-            // A dry run cannot clear nodes, so it answers as clearing would.
+            // A dry run cannot clear nodes, so it answers as clearing would. A
+            // selected node outside a list (a rule, an image) is not text to
+            // style: wrapping it clears nodes and can still fail after that,
+            // and a failed chain dispatches anyway.
+            if (tr.selection instanceof NodeSelection) return false;
             if (!dispatch) return true;
             return chain()
               .command(() => can().wrapInList(this.name, { type }) || commands.clearNodes())
