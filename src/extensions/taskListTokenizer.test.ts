@@ -85,6 +85,23 @@ describe("lines under a task item", () => {
     expect(save(first)).toBe(first);
   });
 
+  // Obsidian indents with tabs. Counted as one column each, a tab fell short
+  // of the content column: nesting was saved flat, a paragraph became
+  // indented code, and a fence became code holding its own fence lines.
+  it("measures tab indentation in columns", () => {
+    const nested = createEditor("- [ ] a\n\t- [ ] b\n\t\t- [x] c").getJSON();
+    expect(nodesOf(nested, "taskList")).toHaveLength(3);
+    expect(checkedOf(nested)).toEqual([false, false, true]);
+    expect(save("- [ ] a\n\t- [ ] b\n\t\t- [x] c")).toBe("- [ ] a\n  - [ ] b\n    - [x] c");
+
+    const para = createEditor("- [ ] a\n\n\tpara").getJSON();
+    expect(nodesOf(para, "codeBlock")).toHaveLength(0);
+    expect(textOf(para)).toContain("para");
+
+    const fence = createEditor("- [ ] a\n\t```\n\tcode\n\t\tdeeper\n\t```").getJSON();
+    expect(nodesOf(fence, "codeBlock").map((block) => block.content?.[0].text)).toEqual(["code\n\tdeeper"]);
+  });
+
   it("ends the list at a line short of the content column after a blank line", () => {
     const doc = createEditor("- [ ] t1\n\n after").getJSON();
     expect(doc.content?.map((node) => node.type)).toEqual(["taskList", "paragraph"]);

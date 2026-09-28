@@ -11,7 +11,8 @@
 //  - `- [ ] t1` / blank / ` after` saved `after` as `fter`;
 //  - `- [ ] t1` / ` - [x] t2` saved t2 as the text `\[x\] t2`.
 // Here, with the item's content column C (its marker and the 1-4 spaces after
-// it, so `- [ ] ` has C = indent + 2):
+// it, so `- [ ] ` has C = indent + 2), and indentation measured in columns
+// with a tab running to the next multiple of 4, as CommonMark measures it:
 //  - a line indented at least C is content, dedented by C as before;
 //  - a line indented past the marker but short of C ends the item when it
 //    starts a task item (the next item of this list), a bullet, a heading, a
@@ -55,16 +56,44 @@ const ITEM_INTERRUPTERS = [
   /^(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$/,
 ];
 
-function indentOf(line: string): number {
-  return line.match(LEADING_WHITESPACE)?.[1].length ?? 0;
+const TAB_STOP = 4;
+
+// The column after `text`, starting from column `from`: a tab runs to the
+// next multiple of 4, as CommonMark measures indentation; any other character
+// is one column. Counting a tab as one column read Obsidian's tab-indented
+// nesting (`- [ ] a` / `\t- [ ] b`) as short of the content column.
+function columnAfter(text: string, from = 0): number {
+  let column = from;
+  for (const character of text) column = character === "\t" ? column + TAB_STOP - (column % TAB_STOP) : column + 1;
+  return column;
 }
 
-/** Content column of a task item: indent, marker, then 1-4 spaces (5+ count as 1). */
+function indentOf(line: string): number {
+  return columnAfter(line.match(LEADING_WHITESPACE)?.[1] ?? "");
+}
+
+// `line` without its first `columns` columns of indentation, or all of it if
+// it has fewer. A tab straddling the cut leaves its remaining columns as
+// spaces; the characters after it are kept as written.
+function dedent(line: string, columns: number): string {
+  let column = 0;
+  let index = 0;
+  while (index < line.length && column < columns && /\s/.test(line[index])) {
+    const next = columnAfter(line[index], column);
+    if (next > columns) return " ".repeat(next - columns) + line.slice(index + 1);
+    column = next;
+    index += 1;
+  }
+  return line.slice(index);
+}
+
+/** Content column of a task item: indent, marker, then 1-4 columns of space (5+ count as 1). */
 export function taskItemContentIndent(line: string): number | null {
   const match = line.match(TASK_ITEM_PATTERN);
   if (!match) return null;
-  const spaces = match[3].length;
-  return match[1].length + 1 + (spaces > 4 ? 1 : spaces);
+  const marker = columnAfter(match[1]) + 1;
+  const spaces = columnAfter(match[3], marker) - marker;
+  return marker + (spaces > 4 ? 1 : spaces);
 }
 
 function parseTaskItems(src: string, lexer: BlockLexer): { items: TaskItemToken[]; raw: string } | undefined {
@@ -84,7 +113,9 @@ function parseTaskItems(src: string, lexer: BlockLexer): { items: TaskItemToken[
       }
       return undefined;
     }
+    // The token keeps the stock character count; the rules below use columns.
     const indentLevel = itemMatch[1].length;
+    const indentColumn = columnAfter(itemMatch[1]);
     const mainContent = itemMatch[5];
     const checked = itemMatch[4].toLowerCase() === "x";
     const contentIndent = taskItemContentIndent(currentLine)!;
@@ -104,8 +135,8 @@ function parseTaskItems(src: string, lexer: BlockLexer): { items: TaskItemToken[
         continue;
       }
       const indent = indentOf(nextLine);
-      if (indent <= indentLevel) break;
-      if (indent < contentIndent && ITEM_INTERRUPTERS.some((pattern) => pattern.test(nextLine.slice(indent)))) break;
+      if (indent <= indentColumn) break;
+      if (indent < contentIndent && ITEM_INTERRUPTERS.some((pattern) => pattern.test(nextLine.trimStart()))) break;
       nestedContent.push(nextLine);
       totalRaw = `${totalRaw}${nextLine}\n`;
       i += 1;
@@ -113,7 +144,7 @@ function parseTaskItems(src: string, lexer: BlockLexer): { items: TaskItemToken[
     let nestedTokens: unknown[] | undefined;
     if (nestedContent.length > 0) {
       // Stock: `nestedLine.slice(indentLevel + 2)`, whatever the line held.
-      const dedented = nestedContent.map((line) => line.slice(Math.min(indentOf(line), contentIndent))).join("\n");
+      const dedented = nestedContent.map((line) => dedent(line, contentIndent)).join("\n");
       if (dedented.trim()) nestedTokens = parseTaskListContent(dedented, lexer);
     }
     items.push({
