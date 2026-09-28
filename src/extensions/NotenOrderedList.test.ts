@@ -392,6 +392,32 @@ describe("setOrderedListStyle", () => {
     expect(selectedOrderedListStyle(inside.state.selection)).toBe("I");
   });
 
+  // Requiring every block to be a textblock refused a rule between them, and
+  // Tiptap's clearNodes lifted a heading out of its quote, splitting it.
+  it.each([
+    // The rule under an item drifts on reload through the stock tokenizer's
+    // one-short dedent (fixed on claude/nested-task-in-ordered-list), so its
+    // stability is not checked here.
+    ["# h\n\n---\n\npara", "h", "para", "a. h\n   ---\nb. para", false],
+    ["> a\n>\n> # h\n>\n> b", "h", "h", "> a\n>\n> a. h\n>\n> b", true],
+    ["# h\n\n```\ncode\n```", "h", "code", "a. h\nb. code", true],
+  ] as const)("wraps %j without lifting or refusing what it can keep", (markdown, fromText, toText, expected, stable) => {
+    const editor = createEditor(markdown);
+    const at = (text: string, end: boolean) => {
+      let found = -1;
+      editor.state.doc.descendants((node, pos) => {
+        if (found === -1 && node.isTextblock && node.textContent === text) found = end ? pos + node.nodeSize - 1 : pos + 1;
+        return found === -1;
+      });
+      return found;
+    };
+    editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, at(fromText, false), at(toText, true))));
+    expect(editor.can().setOrderedListStyle("a")).toBe(true);
+    expect(editor.commands.setOrderedListStyle("a")).toBe(true);
+    expect(markdownOf(editor)).toBe(expected);
+    if (stable) expect(markdownOf(createEditor(expected))).toBe(expected);
+  });
+
   // Clearing a quote, table or list and then failing to wrap left them
   // flattened (a failed chain still dispatches), and can() said true there.
   it("either restyles or leaves the document alone, as can() says (every text selection)", () => {

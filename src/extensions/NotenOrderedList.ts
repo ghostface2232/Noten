@@ -6,7 +6,8 @@ import {
 } from "@tiptap/core";
 import { ListItem, OrderedList, detectMarkerType, getListMarker, markerToStart, toRoman } from "@tiptap/extension-list";
 import type { Node as ProseMirrorNode, NodeType } from "@tiptap/pm/model";
-import { NodeSelection, type Selection, type Transaction } from "@tiptap/pm/state";
+import { EditorState, NodeSelection, type Selection, type Transaction } from "@tiptap/pm/state";
+import { wrapInList } from "@tiptap/pm/schema-list";
 import { StepMap, canJoin } from "@tiptap/pm/transform";
 
 /**
@@ -64,15 +65,25 @@ function targetList(selection: Selection): { node: ProseMirrorNode; pos: number 
   return findParentNodeClosestToPos(selection.$from, isList) ?? null;
 }
 
-// Whether every block the selection covers is a textblock, the only case in
-// which clearing nodes leaves a range that a list can wrap.
-function onlyTextblocks(selection: Selection): boolean {
-  const range = selection.$from.blockRange(selection.$to);
-  if (!range || range.endIndex <= range.startIndex) return false;
-  for (let index = range.startIndex; index < range.endIndex; index++) {
-    if (!range.parent.child(index).isTextblock) return false;
-  }
-  return true;
+// Turn every heading and code block the selection touches into a paragraph,
+// where it stands. Sizes do not change, so positions and the selection hold.
+function textblocksToParagraphs(tr: Transaction): void {
+  const paragraph = tr.doc.type.schema.nodes.paragraph;
+  const { from, to } = tr.selection;
+  tr.doc.nodesBetween(from, to, (node, pos) => {
+    if (!node.isTextblock) return true;
+    if (node.type !== paragraph && paragraph.validContent(node.content)) tr.setNodeMarkup(pos, paragraph);
+    return false;
+  });
+}
+
+// Whether a list wraps the selection once its textblocks are paragraphs,
+// tried on a scratch state so nothing is changed to find out.
+function wrapsAfterParagraphs(tr: Transaction, listType: NodeType, attrs: Record<string, unknown>): boolean {
+  const scratch = EditorState.create({ doc: tr.doc, selection: tr.selection });
+  const trial = scratch.tr;
+  textblocksToParagraphs(trial);
+  return wrapInList(listType, attrs)(scratch.apply(trial));
 }
 
 const ITEM_MARKER = /^[ \t]*(\d+|[A-Za-z]+)[.)]/;
@@ -305,24 +316,29 @@ export const NotenOrderedList = OrderedList.extend({
       ...this.parent?.(),
       setOrderedListStyle:
         (style) =>
-        ({ tr, state, chain, can, commands, dispatch }) => {
+        ({ tr, state, chain, can, dispatch }) => {
           const type = style === "1" ? null : style;
           const list = targetList(tr.selection);
           if (!list) {
             // Not toggleOrderedList: it joins the new list into a numbered one
             // next to it before the style is set, restyling that list too. A
             // heading or code block becomes a paragraph first, as it does there,
-            // but only when every block in the range is a textblock: clearing a
-            // quote, table or list and then failing to wrap left them flattened,
-            // since a failed chain still dispatches. A selected node outside a
-            // list (a rule, an image) is not text to style.
+            // but in place: Tiptap's clearNodes also lifts blocks out of their
+            // quote, flattens quotes, tables and lists, and can then fail to
+            // wrap, and a failed chain still dispatches. Whether the wrap works
+            // is decided on a scratch state, so a refused run changes nothing
+            // and can() gives the same answer. A selected node outside a list
+            // (a rule, an image) is not text to style.
             if (tr.selection instanceof NodeSelection) return false;
             const canWrap = can().wrapInList(this.name, { type });
-            const clearable = !canWrap && onlyTextblocks(tr.selection);
-            if (!dispatch) return canWrap || clearable;
-            if (!canWrap && !clearable) return false;
+            const wrapsAsParagraphs = !canWrap && wrapsAfterParagraphs(tr, this.type, { type });
+            if (!dispatch) return canWrap || wrapsAsParagraphs;
+            if (!canWrap && !wrapsAsParagraphs) return false;
             return chain()
-              .command(() => canWrap || commands.clearNodes())
+              .command(({ tr: chained }) => {
+                if (!canWrap) textblocksToParagraphs(chained);
+                return true;
+              })
               .wrapInList(this.name, { type })
               .command(({ tr: chained }) => {
                 joinSameStyleNeighbours(chained, this.type);
