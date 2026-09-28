@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Editor } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
+import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import TaskList from "@tiptap/extension-task-list";
@@ -35,8 +35,9 @@ afterEach(() => {
 function makeEditor(content: string): Editor {
   editor = new Editor({
     extensions: [
-      StarterKit.configure({ codeBlock: false, underline: false, link: false }),
+      NotenStarterKit.configure({ codeBlock: false, underline: false, link: false }),
       Markdown.configure({ marked: createFastMarked() }),
+      CodeSpanFence,
       Link.configure({ openOnClick: false }),
       MermaidCodeBlock.configure({ lowlight }),
       NotenImage,
