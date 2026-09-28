@@ -84,4 +84,20 @@ describe.each(Object.keys(CODE_BLOCKS))("an indented fence (%s)", (name) => {
   it("round-trips an unindented fence byte for byte", () => {
     expect(save("```ts\nconst a = 1;\n```")).toBe("```ts\nconst a = 1;\n```");
   });
+
+  // marked closed a fence at the other character too (```~~~ after ```), so
+  // that line vanished on the first save and the rest of the code read as
+  // Markdown; see commonMarkFence in fastMarkdownLexer.ts.
+  it.each([
+    ["```\n```~~~\nx\n```", ["```~~~\nx"]],
+    ["~~~\n~~~```\nx\n~~~", ["~~~```\nx"]],
+    ["- n\n  ```\n  ```~~~\n  2. x\n  ```", ["```~~~\n2. x"]],
+    ["- [ ] t\n  ```\n  ```~\n  y\n  ```", ["```~\ny"]],
+    ["> ```\n> ```~\n> x\n> ```", ["```~\nx"]],
+  ])("keeps the line of the other fence character in %j", (markdown, code) => {
+    expect(codeOf(createEditor(markdown).getJSON())).toEqual(code);
+    const first = save(markdown);
+    expect(codeOf(createEditor(first).getJSON())).toEqual(code);
+    expect(save(first)).toBe(first);
+  });
 });

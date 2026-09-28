@@ -169,6 +169,8 @@ describe("block content under an ordered item", () => {
     ["a. n\n   ```\n   b. x\n   ```\nb. m", ["b. x"], 2],
     ["10. n\n    ```\n    11. x\n     12. y\n    ```", ["11. x\n 12. y"], 1],
     ["> 1. n\n>    ```\n>    2. x\n>    ```", ["2. x"], 1],
+    // A line of the other fence character does not close the fence.
+    ["1. n\n   ```\n   ```~~~\n   2. x\n   ```", ["```~~~\n2. x"], 1],
     // Tab indentation, Obsidian's default, counts to the next multiple of 4.
     ["1. a\n\t```\n\tx\n\t2. y\n\t```", ["x\n2. y"], 1],
     // An unclosed fence runs to the end of the item, as marked reads it.

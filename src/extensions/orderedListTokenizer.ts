@@ -91,9 +91,10 @@ function isBlockContentLine(line: string): boolean {
   );
 }
 
-// marked's `fences` rule, which lexes the item's content afterwards: 3+
-// backticks with no backtick after them, or 3+ tildes, after 0-3 spaces,
-// closed by the same fence followed only by more fence characters and spaces.
+// The `fences` rule of the lexer createFastMarked builds, which lexes the
+// item's content afterwards: 3+ backticks with no backtick after them, or 3+
+// tildes, after 0-3 spaces, closed by at least as many of the same character
+// and spaces (CommonMark's closer; see commonMarkFence in fastMarkdownLexer.ts).
 // The fence may follow bullet markers (`- ````), inside a bullet nested in the
 // item; an ordered marker there is text (as Tiptap keeps `- 1. a`), and a
 // nested ordered item tracks its own fences.
@@ -118,7 +119,7 @@ function openFence(line: string): OpenFence | null {
   const match = line.match(FENCE_OPENING);
   if (!match) return null;
   const indent = /[-+*]/.test(match[1]) ? match[1].length : 0;
-  return { indent, closer: new RegExp(`^ {0,3}${match[2]}[~\`]* *$`) };
+  return { indent, closer: new RegExp(`^ {0,3}${match[2]}${match[2][0]}* *$`) };
 }
 
 function interruptsLazyContinuation(line: string): boolean {
