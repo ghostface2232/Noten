@@ -169,6 +169,10 @@ describe("block content under an ordered item", () => {
     ["a. n\n   ```\n   b. x\n   ```\nb. m", ["b. x"], 2],
     ["10. n\n    ```\n    11. x\n     12. y\n    ```", ["11. x\n 12. y"], 1],
     ["> 1. n\n>    ```\n>    2. x\n>    ```", ["2. x"], 1],
+    // Tab indentation, Obsidian's default, counts to the next multiple of 4.
+    ["1. a\n\t```\n\tx\n\t2. y\n\t```", ["x\n2. y"], 1],
+    // An unclosed fence runs to the end of the item, as marked reads it.
+    ["1. a\n   ```\n   code\n   1. nested\n2. b", ["code\n1. nested"], 2],
     // In a bullet nested in the item, where the fence's lines sit deeper.
     ["1. n\n   - ```\n     2. x\n     ```\n2. m", ["2. x"], 2],
     ["1. - ```\n     2. x\n\n     3. y\n     ```\n2. m", ["2. x\n\n3. y"], 2],
@@ -183,6 +187,23 @@ describe("block content under an ordered item", () => {
     const first = save(markdown);
     expect(save(first)).toBe(first);
   });
+
+  // A closing fence left of the item's column reaches marked dedented to it
+  // and closes the block there. Judged by its raw indent, it opened a second
+  // fence, and code after the next item moved between items on every save.
+  it.each(["1. a\n   ```\n   x\n  ```\n   2. y\n   ```\n   z\n   ```", "1. a\n   ```\n   x\n\t```\n   2. y\n   ```\n   z\n   ```"])(
+    "closes the fence of %j where marked does",
+    (markdown) => {
+      const doc = createEditor(markdown).getJSON();
+      const nested = nodesOf(doc, "orderedList")[1];
+      const codeIn = (node: JSONContent | undefined) =>
+        nodesOf(node ?? {}, "codeBlock").map((block) => (block.content ?? []).map((child) => child.text ?? "").join(""));
+      expect(codeIn(doc)).toEqual(["x", "z"]);
+      expect(codeIn(nested)).toEqual(["z"]);
+      const first = save(markdown);
+      expect(save(first)).toBe(first);
+    },
+  );
 
   // Only as long as a closing fence of the same kind: the ``` line is code.
   // (Saving it back needs a fence longer than that line, which is the code

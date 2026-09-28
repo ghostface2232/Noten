@@ -36,8 +36,10 @@
 // (0-3 columns past its content column, the marker line included, by marked's
 // `fences` rule) now holds every line indented to the content column until
 // its closing fence, so such a line is code; a fence after bullet markers, in
-// a bullet nested in the item, holds the lines at that bullet's column. A line left of the column ends
-// the item as before, fence or not: CommonMark continues no fence lazily.
+// a bullet nested in the item, holds the lines at that bullet's column. A
+// marker-shaped line left of the column is still a new item, as CommonMark
+// reads it; where the fence closes follows marked, which gets every content
+// line dedented to the column.
 // Without a fence, the lines an item takes are unchanged, and a list with no
 // indented continuation lines and no block on a marker line tokenizes exactly
 // as before; `orderedListTokenizer.test.ts` compares both with the stock one.
@@ -102,6 +104,13 @@ interface OpenFence {
   // content starts: 0 in the item itself, the bullets' width in a bullet.
   indent: number;
   closer: RegExp;
+}
+
+// Width in columns, a tab running to the next multiple of 4.
+function columnWidth(text: string): number {
+  let width = 0;
+  for (const character of text) width = character === "\t" ? width + 4 - (width % 4) : width + 1;
+  return width;
 }
 
 /** The fence a content line (dedented to the item's column) opens, or null. */
@@ -212,8 +221,13 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
     while (nextLineIndex < lines.length) {
       const nextLine = lines[nextLineIndex];
       const leadingWhitespace = nextLine.length - nextLine.trimStart().length;
+      // Whether a marker-shaped line is code rather than an item is read as
+      // CommonMark reads it: at or past the fence's column, a tab running to
+      // the next multiple of 4 (Obsidian indents with tabs).
       const inFence =
-        fence !== null && nextLine.trim() !== "" && leadingWhitespace >= contentIndent + fence.indent;
+        fence !== null &&
+        nextLine.trim() !== "" &&
+        columnWidth(nextLine.slice(0, leadingWhitespace)) >= contentIndent + fence.indent;
       if (!inFence && nextLine.match(ORDERED_LIST_ITEM_REGEX)) break;
       if (nextLine.trim() === "") {
         itemLines.push(nextLine);
@@ -231,9 +245,14 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
         itemContentLines.push(nextLine);
         nextLineIndex += 1;
       }
-      // A line left of the fence's content ends its container, and the fence.
+      // Where the fence closes is read as marked will read it: every line
+      // here reaches marked dedented to the item's column, so a line left of
+      // that column is code or the closing fence all the same. Judging it by
+      // its raw indent opened a second fence at a closer 2 spaces in, and the
+      // item's later lines moved on every save. A line left of a nested
+      // bullet's column ends that bullet, and its fence.
       const text = itemContentLines[itemContentLines.length - 1];
-      if (fence && inFence) {
+      if (fence && columnWidth(text.slice(0, text.length - text.trimStart().length)) >= fence.indent) {
         if (fence.closer.test(text.slice(fence.indent))) fence = null;
       } else {
         fence = openFence(text);
