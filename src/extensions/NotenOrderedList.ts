@@ -32,9 +32,10 @@ declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     notenOrderedList: {
       /**
-       * Give the innermost list around the selection this marker style,
-       * converting a bullet or task list, or wrap the selection in a new
-       * list of that style when it is in none.
+       * Give a selected list, else the innermost list around the selection,
+       * this marker style, converting a bullet or task list; or wrap the
+       * selection in a new list of that style when it is in none. Refuses a
+       * selected node outside a list and a table cell.
        */
       setOrderedListStyle: (style: OrderedListStyle) => ReturnType;
     };
@@ -49,7 +50,10 @@ export function orderedListStyleOf(node: ProseMirrorNode): OrderedListStyle {
     : "1";
 }
 
-/** The style of the innermost list around the selection, or null when that list is not ordered. */
+/**
+ * The style of the list setOrderedListStyle would restyle (a selected list,
+ * else the innermost one around the selection), or null when it is not ordered.
+ */
 export function selectedOrderedListStyle(selection: Selection): OrderedListStyle | null {
   const list = targetList(selection);
   return list?.node.type.name === "orderedList" ? orderedListStyleOf(list.node) : null;
