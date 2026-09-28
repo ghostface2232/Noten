@@ -183,6 +183,17 @@ const useStyles = makeStyles({
     fontVariantNumeric: "tabular-nums",
     color: tokens.colorNeutralForeground3,
   },
+  // The style items stay radio items for screen readers, but show the
+  // current style by background and weight, laid out like the heading menu's
+  // plain items, rather than a checkmark whose slot indents every item. The
+  // weight tells it apart from the hover background, which is nearly the same.
+  listStyleCheckmark: {
+    display: "none",
+  },
+  listStyleCurrent: {
+    backgroundColor: "var(--ui-active-bg)",
+    fontWeight: tokens.fontWeightSemibold,
+  },
   headingBtn: {
     width: "64px",
     minWidth: "64px",
@@ -647,7 +658,13 @@ function EditorToolbarImpl({
                   <MenuPopover className={styles.popoverSurface}>
                     <MenuList>
                       {ORDERED_LIST_STYLES.map((style) => (
-                        <MenuItemRadio key={style} name="listStyle" value={style}>
+                        <MenuItemRadio
+                          key={style}
+                          name="listStyle"
+                          value={style}
+                          checkmark={{ className: styles.listStyleCheckmark }}
+                          className={style === state.orderedListStyle ? styles.listStyleCurrent : undefined}
+                        >
                           <span className={styles.listStyleSample}>{LIST_STYLE_SAMPLE[style]}</span>
                           {i(LIST_STYLE_LABEL[style])}
                         </MenuItemRadio>
