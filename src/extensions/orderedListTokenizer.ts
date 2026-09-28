@@ -1,5 +1,6 @@
 // @tiptap/extension-list's orderedList Markdown tokenizer, transcribed with
-// two changes to how an item's block content is dedented.
+// two changes to how an item's block content is dedented and one to how its
+// first line is read.
 //
 // The stock `collectOrderedListItems` strips `indent + marker.length + 1`
 // columns from each line under an item, one short of its content column
@@ -19,9 +20,17 @@
 // (marker, delimiter and 1-4 following spaces; 5 or more count as 1), which is
 // where the listItem serializer writes it (`alignNestedToPrefix`), and the
 // block is then dedented by the indent its lines share instead of trimming
-// the first line alone (`dedentBlock`). Which lines an item
-// takes is unchanged, so the cut rules in boundedBlockTokenizers.ts still
-// hold, and a list with no indented continuation lines tokenizes exactly as
+// the first line alone (`dedentBlock`).
+// The stock `splitItemContent` also always read the text after the marker as
+// a paragraph, so `1. - [ ] t1` became the text `- [ ] t1` (saved as
+// `- \[ \] t1`), `1. > q` the text `&gt; q`, and a fence on the marker line a
+// paragraph that swallowed its first code line. A marker line whose text opens a
+// bullet or task list, a heading, a fence, a quote or a thematic break now
+// starts the item's block content, as marked reads a bullet item's first
+// line. An ordered marker there stays text, as Tiptap keeps `- 1. a` for a
+// bullet item. Which lines an item takes is unchanged, so the cut rules in
+// boundedBlockTokenizers.ts still hold, and a list with no indented
+// continuation lines and no block on a marker line tokenizes exactly as
 // before; `orderedListTokenizer.test.ts` compares both with the stock one.
 // Re-transcribe on an @tiptap/extension-list upgrade, or drop this file if
 // the upstream dedent is fixed.
@@ -73,7 +82,21 @@ function interruptsLazyContinuation(line: string): boolean {
   return Object.values(PARAGRAPH_INTERRUPTERS).some((pattern) => pattern.test(line));
 }
 
+// The third change: blocks the text after an item's marker can open.
+function opensBlockOnMarkerLine(content: string): boolean {
+  return (
+    PARAGRAPH_INTERRUPTERS.bulletItem.test(content) ||
+    PARAGRAPH_INTERRUPTERS.heading.test(content) ||
+    PARAGRAPH_INTERRUPTERS.codeFence.test(content) ||
+    PARAGRAPH_INTERRUPTERS.thematicBreak.test(content) ||
+    /^>/.test(content)
+  );
+}
+
 function splitItemContent(contentLines: string[]): { paragraphLines: string[]; blockLines: string[] } {
+  if (contentLines.length > 0 && opensBlockOnMarkerLine(contentLines[0])) {
+    return { paragraphLines: [], blockLines: contentLines };
+  }
   const paragraphLines: string[] = [];
   const blockLines: string[] = [];
   let reachedBlockBoundary = false;

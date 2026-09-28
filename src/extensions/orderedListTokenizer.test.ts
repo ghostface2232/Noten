@@ -120,6 +120,40 @@ describe("block content under an ordered item", () => {
     expect(save(save(markdown))).toBe(markdown);
   });
 
+  // The stock tokenizer read the text after the marker as a paragraph whatever
+  // it held: `- [ ] t1` there lost its checkbox (saved as `- \[ \] t1`).
+  it.each([
+    ["1. - [ ] t1\n   - [x] t2\n2. m", [false, true]],
+    ["1. - [x] t1\n2. m", [true]],
+    ["10. - [ ] t1\n    - [x] t2", [false, true]],
+    ["a. - [ ] t1\n   - [x] t2", [false, true]],
+    ["1. - [ ] t1\n   - [x] t2\n\n   para\n2. m", [false, true]],
+  ] as const)("reads the task list on the marker line of %j", (markdown, checked) => {
+    const editor = createEditor(markdown);
+    expect(nodesOf(editor.getJSON(), "taskItem").map((task) => task.attrs?.checked)).toEqual(checked);
+    expect(nodesOf(editor.getJSON(), "text").some((text) => text.text?.includes("["))).toBe(false);
+    expect(editor.getMarkdown().trimEnd()).toBe(markdown);
+  });
+
+  it.each([
+    ["1. > q\n   > r\n2. m", "blockquote"],
+    ["1. # h", "heading"],
+    ["1. ```\n   c\n   ```", "codeBlock"],
+    ["1. ---", "horizontalRule"],
+    ["1. - a\n   - b", "bulletList"],
+  ])("reads the block on the marker line of %j", (markdown, type) => {
+    const item = nodesOf(createEditor(markdown).getJSON(), "listItem")[0];
+    expect(item.content?.[0].type).toBe(type);
+    expect(save(markdown)).toBe(markdown);
+  });
+
+  // Tiptap keeps `- 1. a` as a bullet item's text; an ordered one does too.
+  it("keeps an ordered marker on the marker line as text", () => {
+    const item = nodesOf(createEditor("1. 2. x").getJSON(), "listItem")[0];
+    expect(item.content?.map((child) => child.type)).toEqual(["paragraph"]);
+    expect(save("1. 2. x")).toBe("1. 2. x");
+  });
+
   it("reads the content column the way CommonMark does", () => {
     expect(orderedItemContentIndent("1. x")).toBe(3);
     expect(orderedItemContentIndent("10. x")).toBe(4);
@@ -139,10 +173,11 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
   };
   const helpers = () => manager.createTokenizerHelpers(manager.createLexer());
 
-  // Only the dedent of indented continuation lines differs, so the lines a
-  // list takes (`raw`, which boundedBlockTokenizers.ts's cut rules are argued
-  // against) always match, and so does the whole token when no line under an
-  // item is indented content.
+  // Only the dedent of indented continuation lines and the reading of a block
+  // on a marker line differ, so the lines a list takes (`raw`, which
+  // boundedBlockTokenizers.ts's cut rules are argued against) always match,
+  // and so does the whole token when no line under an item is indented
+  // content and no marker line holds a block.
   it("consumes the same lines, and matches exactly without indented content (seeded fuzz)", () => {
     let seed = 11;
     const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
@@ -151,15 +186,21 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
       "1. one", "2. two", "10. ten", "a. letter", "iv. roman", "1) paren", "1.  wide",
       "   1. nested", "   - [ ] task", "   - [x] done", "   - bullet", "   > quote", "   ```", "   code",
       "      deep", "    four", " one space", "lazy text", "", "- bullet", "# heading", "> quote",
+      "1. - [ ] first task", "2. > quoted", "3. ```", "   2. - bullet",
     ];
+    const blockOnMarkerLine = /^\s*[0-9A-Za-z]+[.)]\s+(?:[-+*]\s|#|>|```)/;
     let compared = 0;
     for (let n = 0; n < 1500; n++) {
       const src = Array.from({ length: 1 + Math.floor(random() * 8) }, () => pick(lines)).join("\n");
       const expected = stock(src, [], helpers() as never) as { raw?: string } | undefined;
       const actual = tokenizeOrderedList(src, [], helpers());
       expect(actual?.raw, JSON.stringify(src)).toBe(expected?.raw);
-      const consumed = (expected?.raw ?? "").split("\n").slice(1);
-      if (!consumed.some((line) => /^\s/.test(line) && line.trim() !== "" && orderedItemContentIndent(line) === null)) {
+      const rawLines = (expected?.raw ?? "").split("\n");
+      const consumed = rawLines.slice(1);
+      if (
+        !consumed.some((line) => /^\s/.test(line) && line.trim() !== "" && orderedItemContentIndent(line) === null) &&
+        !rawLines.some((line) => blockOnMarkerLine.test(line))
+      ) {
         expect(JSON.parse(JSON.stringify(actual ?? null)), JSON.stringify(src)).toEqual(
           JSON.parse(JSON.stringify(expected ?? null)),
         );
