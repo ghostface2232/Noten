@@ -6,7 +6,6 @@ import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
-import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
@@ -19,6 +18,7 @@ import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
 import WikiLink from "./WikiLink";
 import { NotenImage } from "./NotenImage";
 import { NotenTable } from "./NotenTable";
+import NotenTaskList from "./NotenTaskList";
 import { normalizeFragmentHref } from "../utils/headingSlug";
 import { isSafeLinkHref } from "../utils/linkHref";
 
@@ -56,7 +56,7 @@ function createMarkdownEditor(content: string): Editor {
       Placeholder.configure({ placeholder: "Start writing" }),
       Typography,
       Underline,
-      TaskList,
+      NotenTaskList,
       TaskItem.configure({ nested: true }),
       NotenTable.configure({
         resizable: true,

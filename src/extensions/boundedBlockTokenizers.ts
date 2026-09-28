@@ -79,6 +79,10 @@ function boundLines(
 //      column 0: the inner loop's lookahead sees indent 0 and breaks on the
 //      blank line, which the outer loop then rejects.
 // In both cases the truncated input ends at the same index by exhaustion.
+// Noten's transcription (taskListTokenizer.ts) keeps both stops: it ends an
+// item at every line not indented past the marker, and after a blank line at
+// every line short of the item's content column, which a column-0 line always
+// is; it otherwise ends items earlier, never later, than the stock one.
 const TASK_ITEM = /^\s*[-+*]\s+\[[ xX]\]\s/;
 
 function boundTaskList(src: string): string {
