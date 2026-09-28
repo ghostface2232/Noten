@@ -121,9 +121,13 @@ function alphaValue(marker: string): number {
   return lower.length === 1 ? value(0) : value(0) * 26 + value(1);
 }
 
+// As Tiptap reads the marker: three or more roman letters that are not a
+// numeral (`iiii`, `mid`, `Civil`) read as a numbered item, so they must not
+// split a numbered list, or the save would read back as a different list.
 function markerKind(marker: string): "number" | "lower" | "upper" {
-  if (/^\d/.test(marker)) return "number";
-  return marker === marker.toLowerCase() ? "lower" : "upper";
+  const type = detectMarkerType(marker);
+  if (type === undefined) return "number";
+  return type === "a" || type === "i" ? "lower" : "upper";
 }
 
 function isRoman(marker: string): boolean {

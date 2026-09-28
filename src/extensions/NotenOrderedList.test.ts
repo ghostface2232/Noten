@@ -177,6 +177,20 @@ describe("NotenOrderedList Markdown", () => {
     expect(listSegmentStarts(["a", "A"])).toEqual([0, 1]);
     expect(listSegmentStarts(["1", null, "a"])).toEqual([0, 2]);
     expect(listSegmentStarts([])).toEqual([0]);
+    // Tiptap reads these as numbered items.
+    expect(listSegmentStarts(["1", "IIII", "mid", "Civil", "2"])).toEqual([0]);
+  });
+
+  it.each(["1. x\nIIII. y", "1. x\nmid. y", "iiii. x\n1. y", "Civil. a\n1) b"])(
+    "saves %j the same on every reload",
+    (markdown) => {
+      const first = markdownOf(createEditor(markdown));
+      expect(markdownOf(createEditor(first))).toBe(first);
+    },
+  );
+
+  it("still separates letters from numbers", () => {
+    expect(listSegmentStarts(["1", "a", "b", "iv", "I"])).toEqual([0, 1, 3, 4]);
   });
 
   // Loading and saving twice must give the same Markdown as once: a list that
