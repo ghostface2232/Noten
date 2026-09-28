@@ -221,13 +221,52 @@ describe("NotenOrderedList Markdown", () => {
     expect(listSegmentStarts(["1", "a", "b", "iv", "I"])).toEqual([0, 1, 3, 4]);
   });
 
+  // A word that reads as a marker (`PS.`, `im.`, `MIX.`) joined the list
+  // above and was renumbered, deleting it on save.
+  it.each([
+    ["A. Buy milk\nB. Call mom\n\nPS. do not forget", "A. Buy milk\nB. Call mom\n\nPS. do not forget"],
+    ["A. Buy milk\nB. Call mom\nPS. do not forget", "A. Buy milk\nB. Call mom\n\nPS. do not forget"],
+    ["a. x\nim. y", "a. x\n\nim. y"],
+    ["I. x\nMIX. y", "I. x\n\nMIX. y"],
+    ["i. x\nii. y\niv. z", "i. x\nii. y\n\niv. z"],
+    ["c. x\nok. y", "c. x\n\nok. y"],
+    ["A. x\nB. y\nPS. z\nE. w", "A. x\nB. y\n\nPS. z\n\nE. w"],
+    ["1. p\n   A. x\n   B. y\n\n   PS. z\n2. q", "1. p\n   A. x\n   B. y\n   PS. z\n2. q"],
+  ])("keeps a marker word after a list: %j", (markdown, saved) => {
+    const first = markdownOf(createEditor(markdown));
+    expect(first).toBe(saved);
+    expect(markdownOf(createEditor(first))).toBe(first);
+  });
+
+  // A skip of one letter or number still continues the list, and a list's
+  // own next marker, one letter or two, still joins it.
+  it.each([
+    ["1. x\n5. y", "1. x\n2. y"],
+    ["a. x\nb. y\nf. z", "a. x\nb. y\nc. z"],
+    ["z. x\naa. y\nab. z", "z. x\naa. y\nab. z"],
+    ["PS. x\nPT. y", "PS. x\nPT. y"],
+    ["h. x\ni. y\nj. z", "h. x\ni. y\nj. z"],
+  ])("still continues %j", (markdown, saved) => {
+    expect(markdownOf(createEditor(markdown))).toBe(saved);
+  });
+
+  it("starts a list at a marker word", () => {
+    expect(listSegmentStarts(["A", "B", "PS"])).toEqual([0, 2]);
+    expect(listSegmentStarts(["A", "B", "PS", "E"])).toEqual([0, 2, 3]);
+    expect(listSegmentStarts(["I", "MIX"])).toEqual([0, 1]);
+    expect(listSegmentStarts(["i", "ii", "iv"])).toEqual([0, 2]);
+    expect(listSegmentStarts(["a", "b", "f"])).toEqual([0]);
+    expect(listSegmentStarts(["z", "aa", "ab"])).toEqual([0]);
+    expect(listSegmentStarts(["aa", "b"])).toEqual([0, 1]);
+  });
+
   // Loading and saving twice must give the same Markdown as once: a list that
   // splits or merges differently on each reading rewrites markers every save.
   it("saves mixed-marker lists stably across reloads (seeded fuzz)", () => {
     let seed = 7;
     const random = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
     const pick = <T,>(values: readonly T[]) => values[Math.floor(random() * values.length)];
-    const markers = ["1.", "2.", "10.", "a.", "b.", "c.", "h.", "i.", "ii.", "v.", "vi.", "x.", "A.", "B.", "I.", "II.", "V."];
+    const markers = ["1.", "2.", "10.", "a.", "b.", "c.", "h.", "i.", "ii.", "v.", "vi.", "x.", "A.", "B.", "I.", "II.", "V.", "PS.", "im.", "aa.", "MIX."];
     const indents = ["", "", "   ", "      "];
     for (let n = 0; n < 300; n++) {
       // In a quote, later lines may drop the `>` (lazy continuation).

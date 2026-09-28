@@ -207,13 +207,22 @@ function alphaMarker(position: number): string {
  * of another kind (numbers, lowercase, uppercase), or of the same case but
  * the other letter style: a roman numeral that is not the next letter of a
  * letter list (`i.` after `a.` `b.`, but not after `h.`), or in a roman list
- * a non-roman letter or a single letter that is not its next numeral (`V.`
- * after `I.` is a letter list, the editor's own reading of a lone `V.`). An
- * item whose marker cannot be read never splits.
+ * any marker that is not its next numeral (`V.` after `I.` is a letter list,
+ * the editor's own reading of a lone `V.`). An item whose marker cannot be
+ * read never splits.
+ *
+ * A multi-letter marker that is not the next one is a word more often than a
+ * skipped item (`PS.`, `OK.`, `im.`, `MIX.`), and renumbering it deleted the
+ * word: `A.` `B.` then `PS. do not forget` was saved as `C. do not forget`.
+ * It starts a new list instead, which is how a lone `PS. x` already reads, so
+ * it keeps its spelling. In a letter list begun by such a marker, a letter
+ * that is not the next one starts a new list too, or `E.` after `PS.` would
+ * be renumbered from it (`PT.`). A skipped single letter in a letter list
+ * (`f.` after `a.` `b.`), like a skipped number, still continues the list.
  */
 export function listSegmentStarts(markers: readonly (string | null)[]): number[] {
   const starts = [0];
-  let first: string | null = null;
+  let first = null as string | null;
   // Letter style, once known: a lone roman letter waits for the second item.
   let letters: "alpha" | "roman" | null = null;
   let count = 0;
@@ -230,11 +239,10 @@ export function listSegmentStarts(markers: readonly (string | null)[]): number[]
       other = markerKind(marker) !== markerKind(first);
       if (!other && markerKind(first) !== "number") {
         letters ??= alphaAttrsForAmbiguousMarkers(first, marker) ? "alpha" : "roman";
+        const next = letters === "alpha" ? alphaMarker(alphaValue(first) + count) : toRoman(markerToStart(first) + count);
         other =
-          letters === "alpha"
-            ? isRoman(marker) && marker.toLowerCase() !== alphaMarker(alphaValue(first) + count)
-            : !isRoman(marker) ||
-              (marker.length === 1 && marker.toLowerCase() !== toRoman(markerToStart(first) + count));
+          marker.toLowerCase() !== next &&
+          (letters === "roman" || isRoman(marker) || marker.length > 1 || first.length > 1);
       }
     }
     if (other) {
