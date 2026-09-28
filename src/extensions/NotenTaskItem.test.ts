@@ -1,9 +1,13 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { Editor } from "@tiptap/core";
+import { Editor, type JSONContent } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import TaskList from "@tiptap/extension-task-list";
 import type { Locale } from "../hooks/useSettings";
 import { createNotenTaskItem } from "./NotenTaskItem";
+import { Markdown } from "@tiptap/markdown";
+import { createFastMarked } from "./fastMarkdownLexer";
+import { NotenStarterKit } from "./CodeSpanFence";
+import NotenTaskList from "./NotenTaskList";
 
 let editor: Editor | null = null;
 afterEach(() => {
@@ -47,5 +51,38 @@ describe("NotenTaskItem checkbox labels", () => {
     editor!.commands.insertContentAt(childEnd, " more");
     const labels = [...editor!.view.dom.querySelectorAll("input[type=checkbox]")].map((box) => box.getAttribute("aria-label"));
     expect(labels).toEqual(["Task: Parent", "Task: Child more"]);
+  });
+});
+
+describe("NotenTaskItem Markdown parse", () => {
+  // marked lexes a list item's content outside its top level, where a
+  // paragraph is a `text` token: the stock parse put it in the task item as
+  // bare text, which the schema does not allow, and dropped the blank line.
+  it.each(["- a\n  - [x] b\n    c", "- a\n  - [x] b\n\n    c\n- d"])("wraps bare text of %j in a paragraph", (markdown) => {
+    const load = (content: string) =>
+      new Editor({
+        element: document.createElement("div"),
+        extensions: [
+          NotenStarterKit.configure({ underline: false, link: false }),
+          Markdown.configure({ marked: createFastMarked() }),
+          NotenTaskList,
+          createNotenTaskItem(() => "en"),
+        ],
+        content,
+        contentType: "markdown",
+      } as ConstructorParameters<typeof Editor>[0]);
+    const editor = load(markdown);
+    try {
+      expect(() => editor.state.doc.check()).not.toThrow();
+      const task = (editor.getJSON() as JSONContent).content?.[0].content?.[0].content?.[1].content?.[0];
+      expect(task?.content?.map((child) => child.type)).toEqual(["paragraph", "paragraph"]);
+      const saved = editor.getMarkdown();
+      expect(saved).toContain("- [x] b\n  \n    c");
+      const reloaded = load(saved);
+      expect(reloaded.getMarkdown()).toBe(saved);
+      reloaded.destroy();
+    } finally {
+      editor.destroy();
+    }
   });
 });

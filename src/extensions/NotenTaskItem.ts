@@ -2,6 +2,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import TaskItem from "@tiptap/extension-task-item";
 import type { Locale } from "../hooks/useSettings";
 import { t } from "../i18n";
+import { normalizeListItemContent } from "./NotenListItem";
 
 /**
  * The checkbox's accessible name, taken from the item's own first paragraph.
@@ -18,9 +19,25 @@ export function taskCheckboxLabel(node: ProseMirrorNode, locale: Locale): string
   return t("task.checkbox", locale).replace("{text}", () => text);
 }
 
+type ParseTaskItem = NonNullable<typeof TaskItem.config.parseMarkdown>;
+
+/**
+ * The stock parse, with a bare text node among the item's blocks wrapped in a
+ * paragraph. marked lexes a list item's content outside its top level, where
+ * a paragraph comes out as a `text` token, so a task list nested in a bullet
+ * item (`- a` / `  - [x] b` / `    c`) put `c` beside the item's blocks as
+ * bare text. The schema does not allow that, so edits there could throw, and
+ * a blank line before it was lost on save.
+ */
+export const parseTaskItemMarkdown: ParseTaskItem = function (this: unknown, token, helpers) {
+  const parsed = TaskItem.config.parseMarkdown!.call(this, token, helpers);
+  if (!parsed || Array.isArray(parsed) || !("type" in parsed) || parsed.type !== "taskItem") return parsed;
+  return { ...parsed, content: normalizeListItemContent(parsed.content ?? []) };
+};
+
 /** TaskItem as Noten configures it; `getLocale` is read on every label update. */
 export function createNotenTaskItem(getLocale: () => Locale) {
-  return TaskItem.configure({
+  return TaskItem.extend({ parseMarkdown: parseTaskItemMarkdown }).configure({
     nested: true,
     a11y: { checkboxLabel: (node) => taskCheckboxLabel(node, getLocale()) },
   });
