@@ -6,7 +6,7 @@ import TaskItem from "@tiptap/extension-task-item";
 import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
-import { selectedOrderedListStyle } from "./NotenOrderedList";
+import { alphaAttrsForAmbiguousMarkers, selectedOrderedListStyle } from "./NotenOrderedList";
 
 const editors: Editor[] = [];
 afterEach(() => {
@@ -65,6 +65,32 @@ describe("NotenOrderedList Markdown", () => {
     "- bullet\n  a. alpha\n  b. beta",
   ])("keeps %j byte for byte", (markdown) => {
     expect(markdownOf(createEditor(markdown))).toBe(markdown);
+  });
+
+  // Tiptap reads `c`, `d`, `i`, `l`, `m`, `v`, `x` as roman first; the second
+  // marker used to be rewritten on save (`c. / d.` became `c. / ci.`).
+  it.each([
+    "c. x\nd. y",
+    "C. x\nD. y",
+    "d. x\ne. y",
+    "i. x\nj. y",
+    "l. x\nm. y",
+    "v. x\nw. y",
+    "h. x\ni. y\nj. z",
+    "1. top\n   c. x\n   d. y",
+  ])("keeps a letter list starting on an ambiguous letter: %j", (markdown) => {
+    const first = markdownOf(createEditor(markdown));
+    expect(first).toBe(markdown);
+    expect(markdownOf(createEditor(first))).toBe(markdown);
+  });
+
+  it("reads a lone ambiguous letter as a letter, except i", () => {
+    expect(createEditor("c. x").getJSON().content?.[0].attrs).toMatchObject({ type: "a", start: 3 });
+    expect(createEditor("i. x").getJSON().content?.[0].attrs).toMatchObject({ type: "i", start: 1 });
+    expect(alphaAttrsForAmbiguousMarkers("x", null)).toEqual({ type: "a", start: 24 });
+    expect(alphaAttrsForAmbiguousMarkers("I", "II")).toBeNull();
+    expect(alphaAttrsForAmbiguousMarkers("I", "J")).toEqual({ type: "A", start: 9 });
+    expect(alphaAttrsForAmbiguousMarkers("iv", null)).toBeNull();
   });
 
   it("marks each styled list for the stylesheet, and leaves numbered lists bare", () => {

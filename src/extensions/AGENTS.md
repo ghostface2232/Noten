@@ -57,6 +57,7 @@ Chromium's per-keystroke and per-IME-composition cost grows with the whole conte
 
 - `NotenOrderedList` (`NotenOrderedList.ts`) replaces the stock ordered list through `NotenStarterKit`. The marker style is the stock `type` attribute (`a`, `A`, `i`, `I`, null for numbers), which `@tiptap/extension-list` already reads from and writes to Markdown (`a.`, `iv.`); Noten adds the display, the `setOrderedListStyle` command (toolbar chevron, `/` letter and roman lists) and a `a. `/`B. `/`i. ` input rule. The command restyles the innermost list around the selection, converting it if it is a bullet or task list, never the list around that.
 - An ordered list shows the markers its Markdown holds. `renderHTML` adds `data-list-style` and the stylesheet styles that, not `ol[type]`: HTML matches `type` case-insensitively in selectors, so `[type="a"]` also matches `A`. Nesting does not restyle a numbered list; it once showed nested `1.` lists as letters. `src/styles/tiptap-editor.test.ts` checks the computed marker of each style.
+- A single ambiguous first letter (`c.`, `d.`, `l.`, `m.`, `v.`, `x.`) is a letter, not a roman numeral as the stock reading has it, unless the second item reads as roman (`alphaAttrsForAmbiguousMarkers`); the stock reading saved `c.` `d.` back as `c.` `ci.`. Re-check it against `@tiptap/extension-list` on an upgrade.
 
 ## Task Lists
 
