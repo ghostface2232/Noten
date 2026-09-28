@@ -1,7 +1,10 @@
 // @tiptap/extension-list's orderedList Markdown tokenizer, transcribed with
-// two changes to how an item's block content is dedented, one to how its
-// first line is read, and one to which markers start an item (see
-// matchOrderedItem).
+// these changes: two to how an item's block content is dedented, one to how
+// its first line is read, one to how fences in an item are read, one to which
+// items a list keeps, one to which markers start an item (see
+// matchOrderedItem), one to which lines end it (see
+// interruptsLazyContinuation), and a cap on how deep it nests (see
+// buildNestedStructure).
 //
 // The stock `collectOrderedListItems` strips `indent + marker.length + 1`
 // columns from each line under an item, one short of its content column
@@ -41,13 +44,15 @@
 // the lines at that bullet's column. A marker-shaped line left of the column
 // is still a new item, as CommonMark reads it; where the fence closes follows
 // that lexer, which gets every content line dedented to the column.
-// Last, `buildNestedStructure` dropped items less indented than their group's
-// first; see its comment.
+// The stock `buildNestedStructure` also dropped items less indented than
+// their group's first; see its comment.
 // Without a fence, the lines an item takes are unchanged except at a marker
-// detectMarkerType cannot read, and a list with no indented continuation
-// lines, no block on a marker line and no item left of its group's first
-// tokenizes exactly as before; `orderedListTokenizer.test.ts` compares both
-// with the stock one.
+// detectMarkerType cannot read and at an unindented quote line the item does
+// not hold, and on the lines it takes a list with no indented continuation
+// lines, no block on a marker line, no item left of its group's first and no
+// line with a marker detectMarkerType cannot read, nested no deeper than the
+// cap, tokenizes exactly as before; `orderedListTokenizer.test.ts` compares
+// both with the stock one.
 // With one, a column-0 line still meets the same branch as before, which is
 // what the cut rule in boundedBlockTokenizers.ts relies on.
 // Re-transcribe on an @tiptap/extension-list upgrade, or drop this file if
@@ -67,7 +72,17 @@ interface ListItemLine {
   content: string;
   contentLines: string[];
   raw: string;
+  /** Where `raw` starts and ends in the tokenizer's `src`. */
+  srcStart: number;
+  srcEnd: number;
 }
+
+/**
+ * How many levels of nesting one ordered list token builds. Past it, deeper
+ * items are siblings at the deepest level, so their text stays and the list
+ * reads the same on the next load.
+ */
+export const MAX_ORDERED_LIST_DEPTH = 100;
 
 const ORDERED_LIST_ITEM_REGEX = new RegExp(`^(\\s*)(${ORDERED_LIST_MARKER_PATTERN})([.)])\\s+(.*)$`);
 const INDENTED_LINE_REGEX = /^\s/;
@@ -143,8 +158,26 @@ function openFence(line: string): OpenFence | null {
   return { indent, closer: new RegExp(`^ {0,3}${match[2]}${match[2][0]}* *$`) };
 }
 
-function interruptsLazyContinuation(line: string): boolean {
-  return Object.values(PARAGRAPH_INTERRUPTERS).some((pattern) => pattern.test(line));
+/**
+ * Whether an unindented line ends the item instead of continuing its
+ * paragraph lazily.
+ *
+ * The seventh change: a block quote does, as it interrupts a paragraph in
+ * CommonMark. The stock list left it out, so an item took every line after it
+ * into its block content, where a quote re-lexed its list through this
+ * tokenizer (marked's blockquote → createFastMarked's `list` fallback), which
+ * took the rest again: `> a. x` / `foo y` repeated nested one quote deeper per
+ * repetition, was saved that deep, and overflowed the stack at a few hundred.
+ * Not where the item holds such a line (`holdsQuoteLine`): inside a fence
+ * open in the item it is code the lexer keeps in the fence (`>>> print(1)`, a
+ * `>>>>>>>` conflict marker), and after a quote line of the item it continues
+ * that quote. Ending the item there emptied the fence, and its indented
+ * closer opened a fence that held the rest of the note on every save.
+ */
+function interruptsLazyContinuation(line: string, holdsQuoteLine: boolean): boolean {
+  return (
+    (!holdsQuoteLine && line.startsWith(">")) || Object.values(PARAGRAPH_INTERRUPTERS).some((pattern) => pattern.test(line))
+  );
 }
 
 // The third change: blocks the text after an item's marker can open.
@@ -218,10 +251,26 @@ function dedentBlock(lines: string[]): string {
     .trimEnd();
 }
 
+/**
+ * How many of `lines` the list starting at the first takes. Each step of the
+ * walk reads only the line it is on and the lines before it, so a walk that
+ * stops before the last of `lines` stops at the same line on any longer
+ * input; boundedBlockTokenizers.ts relies on that.
+ */
+export function orderedListLineCount(lines: string[]): number {
+  return collectOrderedListItems(lines)[1];
+}
+
 function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
   const listItems: ListItemLine[] = [];
   let currentLineIndex = 0;
   let consumed = 0;
+  let offset = 0;
+  const lineStarts = lines.map((line) => {
+    const start = offset;
+    offset += line.length + 1;
+    return start;
+  });
   while (currentLineIndex < lines.length) {
     const line = lines[currentLineIndex];
     const match = matchOrderedItem(line);
@@ -262,7 +311,9 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
         itemContentLines.push(nextLine.slice(Math.min(leadingWhitespace, contentIndent)));
         nextLineIndex += 1;
       } else {
-        if (sawBlankLine || interruptsLazyContinuation(nextLine)) break;
+        const holdsQuoteLine =
+          fence !== null || itemContentLines[itemContentLines.length - 1].trimStart().startsWith(">");
+        if (sawBlankLine || interruptsLazyContinuation(nextLine, holdsQuoteLine)) break;
         itemLines.push(nextLine);
         itemContentLines.push(nextLine);
         nextLineIndex += 1;
@@ -287,6 +338,8 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
       content: itemContentLines.join("\n").trim(),
       contentLines: itemContentLines,
       raw: itemLines.join("\n"),
+      srcStart: lineStarts[currentLineIndex],
+      srcEnd: lineStarts[nextLineIndex - 1] + lines[nextLineIndex - 1].length,
     });
     consumed = nextLineIndex;
     currentLineIndex = nextLineIndex;
@@ -305,42 +358,52 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
 // group's base nests, where CommonMark goes by the parent's content column:
 // under `1. a` / `   2. b` / `      3. c`, `    4. d` is a sibling of `c` here
 // and of `b` in CommonMark. Every item is kept either way.
-function buildNestedStructure(items: ListItemLine[], baseIndent: number, lexer: BlockLexer): unknown[] {
+//
+// The eighth change: nesting is capped, and a nested list's `raw` is a slice
+// of `src`. Every deeper indent nests, so a list indented one more space per
+// item nested once per item; Tiptap parses nested lists recursively, and past
+// a few hundred levels (about 300 on a cold start) the note did not open. The
+// stock `raw`, the nested items' lines joined, copied every deeper line once
+// per level: a 1,500-level staircase held gigabytes of strings. A slice of
+// `src` is the same string and shares its memory. `items[from..to)` is one
+// level's run of items, the first of which sets its base indent.
+function buildNestedStructure(
+  items: ListItemLine[],
+  from: number,
+  to: number,
+  depth: number,
+  src: string,
+  lexer: BlockLexer,
+): unknown[] {
   const result: unknown[] = [];
-  let currentIndex = 0;
-  while (currentIndex < items.length) {
+  const baseIndent = items[from].indent;
+  const nests = depth + 1 < MAX_ORDERED_LIST_DEPTH;
+  let currentIndex = from;
+  while (currentIndex < to) {
     const item = items[currentIndex];
-    if (item.indent <= baseIndent) {
-      const { paragraphLines, blockLines } = splitItemContent(item.contentLines);
-      const mainText = paragraphLines.join("\n").trim();
-      const tokens: unknown[] = [];
-      if (mainText) tokens.push({ type: "paragraph", raw: mainText, tokens: lexer.inlineTokens(mainText) });
-      // The second change: the stock `blockLines.join("\n").trim()` strips the
-      // first line's indent only; see dedentBlock.
-      const additionalContent = dedentBlock(blockLines);
-      if (additionalContent) tokens.push(...lexer.blockTokens(additionalContent));
-      let lookAheadIndex = currentIndex + 1;
-      const nestedItems: ListItemLine[] = [];
-      while (lookAheadIndex < items.length && items[lookAheadIndex].indent > baseIndent) {
-        nestedItems.push(items[lookAheadIndex]);
-        lookAheadIndex += 1;
-      }
-      if (nestedItems.length > 0) {
-        const nestedListItems = buildNestedStructure(nestedItems, nestedItems[0].indent, lexer);
-        tokens.push({
-          type: "list",
-          ordered: true,
-          start: nestedItems[0].number,
-          typeMarker: nestedItems[0].type,
-          items: nestedListItems,
-          raw: nestedItems.map((nestedItem) => nestedItem.raw).join("\n"),
-        });
-      }
-      result.push({ type: "list_item", raw: item.raw, tokens });
-      currentIndex = lookAheadIndex;
-    } else {
-      currentIndex += 1;
+    const { paragraphLines, blockLines } = splitItemContent(item.contentLines);
+    const mainText = paragraphLines.join("\n").trim();
+    const tokens: unknown[] = [];
+    if (mainText) tokens.push({ type: "paragraph", raw: mainText, tokens: lexer.inlineTokens(mainText) });
+    // The second change: the stock `blockLines.join("\n").trim()` strips the
+    // first line's indent only; see dedentBlock.
+    const additionalContent = dedentBlock(blockLines);
+    if (additionalContent) tokens.push(...lexer.blockTokens(additionalContent));
+    let lookAheadIndex = currentIndex + 1;
+    while (nests && lookAheadIndex < to && items[lookAheadIndex].indent > baseIndent) lookAheadIndex += 1;
+    if (lookAheadIndex > currentIndex + 1) {
+      const first = items[currentIndex + 1];
+      tokens.push({
+        type: "list",
+        ordered: true,
+        start: first.number,
+        typeMarker: first.type,
+        items: buildNestedStructure(items, currentIndex + 1, lookAheadIndex, depth + 1, src, lexer),
+        raw: src.slice(first.srcStart, items[lookAheadIndex - 1].srcEnd),
+      });
     }
+    result.push({ type: "list_item", raw: item.raw, tokens });
+    currentIndex = lookAheadIndex;
   }
   return result;
 }
@@ -350,8 +413,7 @@ export function tokenizeOrderedList(src: string, _tokens: unknown[], lexer: Bloc
   const lines = src.split("\n");
   const [listItems, consumed] = collectOrderedListItems(lines);
   if (listItems.length === 0) return undefined;
-  const items = buildNestedStructure(listItems, listItems[0].indent, lexer);
-  if (items.length === 0) return undefined;
+  const items = buildNestedStructure(listItems, 0, listItems.length, 0, src, lexer);
   return {
     type: "list",
     ordered: true,

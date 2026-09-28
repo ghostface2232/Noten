@@ -103,6 +103,7 @@ const LINES = [
   "1. one", "2) two", "10. ten", "  1. nested one", "a. alpha", "B) beta", "iv. roman", "xii) roman2",
   "ab. two letters", "abc. three letters", "1.no space", "Mr. Smith said", "I) interrupt", "(216) 555-1234",
   "Fig. 1 caption", "Vol. 2", "1a. x", "ABC) x", "Dr. Smith", "Vim. is great", "IIII. four", "  St. nested",
+  ">>> print(1)", "   > ```", "1. > quoted item",
   "paragraph text", "Another line", "lazy continuation", "   indented text", "\tindented tab",
   "", "", "", "   ", "\t", " ", " 　 ",
   "# Heading", "## Sub", "```", "```ts", "~~~", "$$", "$$ x", "> quote", "---", "***",
@@ -110,10 +111,12 @@ const LINES = [
   "text with | pipe", "[[wiki link]]", "**bold** start",
 ];
 
-// Items to the stock ordered-list tokenizer and text to Noten's, whose item
-// test the ordered-list cut rule uses: with the stock kit the bound may stop
-// short at them, so its runs leave them out.
-const STOCK_ONLY_ITEM = /^\s*(?:Mr|Dr|St|Vim|IIII)[.)]\s/m;
+// Lines the ordered-list cut rule stops at, by Noten's item and interrupter
+// tests, where the stock tokenizer reads on: markers it cannot read (items to
+// the stock one, text to Noten's) and unindented quote lines (lazy text to
+// the stock one). With the stock kit the bound may stop short at them, so its
+// runs leave them out; the Noten kit's runs keep them.
+const STOCK_READS_ON = /^(?:\s*(?:Mr|Dr|St|Vim|IIII)[.)]\s|>)/m;
 
 function randomDoc(rand: () => number, lineCount: number, crlf: boolean, lines = LINES): string {
   const out: string[] = [];
@@ -132,7 +135,7 @@ describe.each(Object.keys(EXTENSION_SETS))("bounded block tokenizers (%s)", (set
     reference: makeEditor(referenceMarked, EXTENSION_SETS[setName]),
   };
   const bounded = instances.bounded;
-  const pool = setName === "stock" ? LINES.filter((line) => !STOCK_ONLY_ITEM.test(line)) : LINES;
+  const pool = setName === "stock" ? LINES.filter((line) => !STOCK_READS_ON.test(line)) : LINES;
 
   it("match the unbounded tokenizers on hand-written boundary cases", () => {
     const cases = [
@@ -164,7 +167,7 @@ describe.each(Object.keys(EXTENSION_SETS))("bounded block tokenizers (%s)", (set
       "\n",
       "\n\n",
     ];
-    for (const md of cases) if (setName !== "stock" || !STOCK_ONLY_ITEM.test(md)) expectEquivalent(instances, md);
+    for (const md of cases) if (setName !== "stock" || !STOCK_READS_ON.test(md)) expectEquivalent(instances, md);
   });
 
   it("match the unbounded tokenizers on fuzzed documents", () => {
@@ -190,6 +193,12 @@ describe.each(Object.keys(EXTENSION_SETS))("bounded block tokenizers (%s)", (set
     expect(__test.boundTaskList(`plain paragraph${tail}`)).toBe("plain paragraph");
     expect(__test.boundTaskList(`- [ ] a\n- bullet${tail}`)).toBe("- [ ] a");
     expect(__test.boundOrderedList(`1. a\n# heading${tail}`)).toBe("1. a");
+    expect(__test.boundOrderedList(`1. a\n> quote${tail}`)).toBe("1. a");
+    // A fence the item closed no longer holds a quote line.
+    expect(__test.boundOrderedList("1. ```\n   ```\n> q\np\n".repeat(1000))).toBe("1. ```\n   ```");
+    // A list longer than the first window, which then doubles.
+    const long = Array.from({ length: 100 }, (_, i) => `${i + 1}. item`).join("\n");
+    expect(__test.boundOrderedList(`${long}\n# heading${tail}`)).toBe(long);
     expect(__test.boundTable(`a | b\nnot a separator${tail}`)).toBe("a | b\nnot a separator");
     expect(__test.boundTaskList(`- [ ] a\n- [ ] b${tail}`)).toBe("- [ ] a\n- [ ] b");
     expect(__test.boundOrderedList(`plain paragraph${tail}`)).toBe("plain paragraph");
@@ -212,11 +221,15 @@ describe.each(Object.keys(EXTENSION_SETS))("bounded block tokenizers (%s)", (set
       // Items to the stock pattern, text to Noten's tokenizer.
       unreadableMarkers: "Dr. Smith said hello.\n\nMr. Jones replied.\n\n".repeat(10000),
       listThenUnreadable: "1. item\n\nDr. Smith said hello.\n\n".repeat(10000),
+      // A quote after a fence the item closed ends the list.
+      closedFenceThenQuote: "1. ```\n   ```\n> q\np\n".repeat(8000),
     };
     for (const [name, md] of Object.entries(shapes)) {
       const started = performance.now();
       bounded.markdown!.parse(md);
       expect(performance.now() - started, name).toBeLessThan(5000);
     }
-  });
+    // Each shape has its own limit; together they passed the 5 s test default
+    // on CI.
+  }, 60_000);
 });

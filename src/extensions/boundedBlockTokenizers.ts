@@ -20,9 +20,10 @@
 // A wrapper is chosen by the tokenizer's name. The `orderedList` rule is
 // argued against Noten's transcription (orderedListTokenizer.ts), which
 // `NotenStarterKit` registers under the stock name; with the stock tokenizer
-// it can stop short, since that one also takes lines like "Dr. Smith".
+// it can stop short, since that one also takes lines like "Dr. Smith" and
+// reads on through an unindented quote line.
 
-import { isOrderedItemLine } from "./orderedListTokenizer";
+import { isOrderedItemLine, orderedListLineCount } from "./orderedListTokenizer";
 
 type BlockTokenizer = (this: unknown, src: string, tokens: unknown[]) => unknown;
 type StartFn = (this: unknown, src: string) => number | void;
@@ -44,31 +45,6 @@ const STARTS_WITH_SPACE = /^\s/;
  */
 function cutBefore(src: string, lineStart: number): string {
   return lineStart <= 0 ? "" : src.slice(0, lineStart - 1);
-}
-
-/**
- * Walk lines until `isCut(line, index, previousBlank)` asks to stop, returning
- * the prefix before that line. Each call is O(length of the returned prefix +
- * the stopping line).
- */
-function boundLines(
-  src: string,
-  isCut: (line: string, index: number, previousBlank: boolean) => boolean,
-): string {
-  let start = 0;
-  let index = 0;
-  let previousBlank = false;
-  while (start <= src.length) {
-    const nl = src.indexOf("\n", start);
-    const end = nl < 0 ? src.length : nl;
-    const line = src.slice(start, end);
-    if (isCut(line, index, previousBlank)) return cutBefore(src, start);
-    if (nl < 0) break;
-    previousBlank = BLANK.test(line);
-    start = nl + 1;
-    index++;
-  }
-  return src;
 }
 
 // taskList → @tiptap/core `parseIndentedBlocks` with itemPattern
@@ -122,46 +98,38 @@ function boundTaskList(src: string): string {
 // real pattern accepts matches this one, so "does not match" is conclusive.
 export const MAYBE_ORDERED_ITEM = /^\s*[0-9A-Za-z]+[.)]\s/;
 
-// Copied verbatim from @tiptap/extension-list's PARAGRAPH_INTERRUPTERS.
-const LAZY_INTERRUPTERS = [
-  /^#{1,6}(?:\s|$)/,
-  /^[-+*]\s+/,
-  /^(?:```|~~~)/,
-  /^\$\$/,
-  /^(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$/,
-];
-
-// orderedList → `collectOrderedListItems(src.split("\n"))`.
+// orderedList → `collectOrderedListItems(src.split("\n"))` in Noten's
+// transcription (orderedListTokenizer.ts).
 //
 // A first line that is not an item yields no list, so one line suffices.
-// Afterwards, a non-blank line at column 0 that is not an item ends the list
-// without being consumed when either
-//  (a) it directly follows a blank line, which was consumed into the current
-//      item and set its `sawBlankLine`; or
-//  (b) it is a lazy-continuation interrupter (heading, bullet, fence, math
-//      block, break):
-// the inner loop's lazy-continuation branch breaks there and the outer loop
-// rejects the line. The truncated input stops at the same index by
-// exhaustion, and `raw` is `lines.slice(0, consumed)`, identical in both.
-// Noten's transcription (orderedListTokenizer.ts) keeps both stops. Its fence
-// tracking holds only lines indented to an item's content column, so a
-// column-0 line always takes the branches above; the blank line before (a)
-// still sets the current item's `sawBlankLine`. A fence only turns indented
-// marker-shaped lines from items into code, which moves where items begin
-// and can end the list earlier (a lazy line after a closed fence in an item
-// that saw a blank line), never later.
-// The item test must be the transcription's own, exact (`isOrderedItemLine`):
-// the stock pattern also accepts "Dr. Smith", which it reads as text, so such
-// a first line did not end the input at once and such a line after a blank
-// line was no cut. Each paragraph in a run of them then handed the tokenizer
-// the rest of the run, quadratic in its length.
+// Otherwise the bound runs the tokenizer's own walk (`orderedListLineCount`)
+// over a window of lines that doubles until the walk stops inside it. Each
+// step of the walk reads only the line it is on and the lines before it, so a
+// walk that stops inside the window stops at the same line on the whole
+// input, and the lines it took yield the same token, `raw` included. The
+// work is proportional to the lines the list takes, within a factor of two.
+// Cut rules argued from outside the walk could not see its state without
+// copying it: a quote line ends an item unless a fence is open in it or its
+// last line is a quote, and a guess that kept the quote cut off once any
+// fence had been seen (the walk had closed it) made every list in a run of
+// `1. ```` / `   ```` / `> q` blocks split the rest of the document again.
+// The walk is the transcription's; the stock tokenizer, which also reads
+// lines like "Dr. Smith" as items and reads on through an unindented quote
+// line, can take more lines than the prefix holds.
 function boundOrderedList(src: string): string {
-  return boundLines(src, (line, index, previousBlank) => {
-    if (index === 0) return false;
-    if (index === 1 && !isOrderedItemLine(src.slice(0, src.indexOf("\n")))) return true;
-    if (BLANK.test(line) || STARTS_WITH_SPACE.test(line) || isOrderedItemLine(line)) return false;
-    return previousBlank || LAZY_INTERRUPTERS.some((pattern) => pattern.test(line));
-  });
+  const firstEnd = src.indexOf("\n");
+  if (firstEnd < 0) return src;
+  if (!isOrderedItemLine(src.slice(0, firstEnd))) return src.slice(0, firstEnd);
+  for (let window = 32; ; window *= 2) {
+    let end = -1;
+    for (let n = 0; n < window; n++) {
+      end = src.indexOf("\n", end + 1);
+      if (end < 0) return src;
+    }
+    const lines = src.slice(0, end).split("\n");
+    const taken = orderedListLineCount(lines);
+    if (taken < lines.length) return lines.slice(0, taken).join("\n");
+  }
 }
 
 // table.start reads only lines[0], lines[1], and whether a second line exists.

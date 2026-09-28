@@ -6,7 +6,12 @@ import TaskItem from "@tiptap/extension-task-item";
 import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
-import { isOrderedItemLine, orderedItemContentIndent, tokenizeOrderedList } from "./orderedListTokenizer";
+import {
+  MAX_ORDERED_LIST_DEPTH,
+  isOrderedItemLine,
+  orderedItemContentIndent,
+  tokenizeOrderedList,
+} from "./orderedListTokenizer";
 
 const editors: Editor[] = [];
 afterAll(() => {
@@ -301,6 +306,99 @@ describe("markers detectMarkerType cannot read", () => {
   });
 });
 
+describe("a quote line after an item", () => {
+  const depth = (node: JSONContent): number => 1 + Math.max(0, ...(node.content ?? []).map(depth));
+
+  // A quote interrupts the item's paragraph. The stock tokenizer took it and
+  // every line after it into the item, and a quote re-lexed its list through
+  // this tokenizer, so each repetition nested one quote deeper.
+  it.each([
+    ["1. x\n> q", "1. x\n\n> q"],
+    ["1. x\n>q", "1. x\n\n> q"],
+    ["a. x\nfoo\n> q\nbar", "a. x\nfoo\n\n> q\n> bar"],
+    ["1. x\n   > q", "1. x\n   > q"],
+  ])("ends the list in %j", (markdown, saved) => {
+    const first = save(markdown);
+    expect(first).toBe(saved);
+    expect(save(first)).toBe(first);
+  });
+
+  // Where the item holds the line (in a fence open in it, or after a quote
+  // line of it), it stays: ending the item emptied the fence, and its
+  // indented closer opened a fence that held the rest of the note.
+  it.each([
+    [
+      "1. Run:\n   ```py\n>>> print(1)\n1\n   ```\n2. Done\n\n# Next section\n\ntext",
+      "1. Run:\n   ```py\n   >>> print(1)\n   1\n   ```\n2. Done\n\n# Next section\n\ntext",
+    ],
+    ["1. a\n   ```\n   x\n>>>>>>> branch\n   ```\n2. b", "1. a\n   ```\n   x\n   >>>>>>> branch\n   ```\n2. b"],
+    ["1. a\n   > ```\n> x\n   > ```\n2. b", "1. a\n   > ```\n   > x\n   > ```\n2. b"],
+    ["1. > q\n> r\n2. s", "1. > q\n   > r\n2. s"],
+    ["1. x\n   > q\n> r\n2. y", "1. x\n   > q\n   > r\n2. y"],
+  ])("keeps a quote line the item holds in %j", (markdown, saved) => {
+    const first = save(markdown);
+    expect(first).toBe(saved);
+    expect(save(first)).toBe(first);
+  });
+
+  it.each(["foo y", "Dr. y"])("keeps a quote alternating with %j lines flat", (lazy) => {
+    const markdown = `> a. x\n${lazy}\n`.repeat(3);
+    expect(depth(createEditor(markdown).getJSON())).toBe(depth(createEditor("> a. x").getJSON()));
+    // The quote's lists are written apart, and join into one list on the next
+    // load, as a quote with `1.` items always has.
+    const settled = save(save(markdown));
+    expect(save(settled)).toBe(settled);
+    expect(settled.split(lazy).length - 1).toBe(3);
+  });
+
+  it.each(["foo y", "Dr. y"])("opens a quote alternating with %j lines a thousand times", (lazy) => {
+    const doc = createEditor(`> a. x\n${lazy}\n`.repeat(1000)).getJSON();
+    expect(depth(doc)).toBe(depth(createEditor("> a. x").getJSON()));
+    expect(nodesOf(doc, "text").filter((text) => text.text?.includes(lazy))).toHaveLength(1000);
+  });
+});
+
+describe("deep nesting", () => {
+  const listDepth = (node: JSONContent): number =>
+    (node.type === "orderedList" ? 1 : 0) + Math.max(0, ...(node.content ?? []).map(listDepth));
+  const paragraphs = (doc: JSONContent) =>
+    nodesOf(doc, "paragraph").map((node) => (node.content ?? []).map((child) => child.text ?? "").join(""));
+  const staircase = (levels: number, step: number) =>
+    Array.from({ length: levels }, (_, i) => `${" ".repeat(i * step)}1. x${i}`).join("\n");
+
+  // Every deeper indent nests, and Tiptap parses nested lists recursively:
+  // past a few hundred levels the parse overflowed the stack.
+  it.each([1, 3])("opens a list indented %i more space(s) per item, flattened past the cap", (step) => {
+    const levels = MAX_ORDERED_LIST_DEPTH * 6;
+    const doc = createEditor(staircase(levels, step)).getJSON();
+    expect(listDepth(doc)).toBe(MAX_ORDERED_LIST_DEPTH);
+    expect(paragraphs(doc)).toEqual(Array.from({ length: levels }, (_, i) => `x${i}`));
+    const first = save(staircase(levels, step));
+    expect(save(first)).toBe(first);
+  }, 60_000);
+
+  it("keeps a list nested as deep as the cap byte for byte", () => {
+    const markdown = staircase(MAX_ORDERED_LIST_DEPTH, 3);
+    expect(listDepth(createEditor(markdown).getJSON())).toBe(MAX_ORDERED_LIST_DEPTH);
+    expect(save(markdown)).toBe(markdown);
+  });
+
+  // Each nested list's `raw` joined its items' lines, a new copy of every
+  // deeper line per level: about 200 MB per tokenization here.
+  it("holds each line once in a list nested up to the cap", () => {
+    const manager = createEditor("").markdown as unknown as {
+      createLexer(): unknown;
+      createTokenizerHelpers(lexer: unknown): Parameters<typeof tokenizeOrderedList>[2];
+    };
+    const src = staircase(2000, 1);
+    const kept: unknown[] = [];
+    const before = process.memoryUsage().heapUsed;
+    for (let n = 0; n < 3; n++) kept.push(tokenizeOrderedList(src, [], manager.createTokenizerHelpers(manager.createLexer())));
+    expect(process.memoryUsage().heapUsed - before).toBeLessThan(150e6);
+    expect(kept.every(Boolean)).toBe(true);
+  }, 60_000);
+});
+
 describe("tokenizeOrderedList against the stock tokenizer", () => {
   const stock = OrderedList.config.markdownTokenizer!.tokenize;
   const manager = createEditor("").markdown as unknown as {
@@ -357,8 +455,19 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
         continue;
       }
       sameLines++;
-      const expected = stock(src, [], helpers() as never) as { raw?: string } | undefined;
       const actual = tokenizeOrderedList(src, [], helpers());
+      // An unindented quote line ends the list unless it follows a quote line
+      // of the item, where the stock tokenizer took it lazily into the item;
+      // it is compared up to the first one that ends it. (No sample here has
+      // a fence, which holds such lines too.)
+      const endsList = (line: string, index: number, all: string[]) =>
+        line.startsWith(">") && !(all[index - 1] ?? "").trimStart().replace(/^[0-9A-Za-z]+[.)]\s+/, "").startsWith(">");
+      const taken = (actual?.raw ?? "").split("\n");
+      expect(taken.some(endsList), JSON.stringify(src)).toBe(false);
+      const srcLines = src.split("\n");
+      const quote = srcLines.findIndex(endsList);
+      const upToQuote = quote < 0 ? src : srcLines.slice(0, quote).join("\n");
+      const expected = stock(upToQuote, [], helpers() as never) as { raw?: string } | undefined;
       expect(actual?.raw, JSON.stringify(src)).toBe(expected?.raw);
       const rawLines = (expected?.raw ?? "").split("\n");
       const consumed = rawLines.slice(1);
@@ -378,7 +487,7 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
         compared++;
       }
     }
-    expect(sameLines).toBeGreaterThan(700);
+    expect(sameLines).toBeGreaterThan(650);
     expect(compared).toBeGreaterThan(90);
   });
 });
