@@ -175,9 +175,8 @@ function openFence(line: string): OpenFence | null {
  * closer opened a fence that held the rest of the note on every save.
  */
 function interruptsLazyContinuation(line: string, holdsQuoteLine: boolean): boolean {
-  return (
-    (!holdsQuoteLine && line.startsWith(">")) || Object.values(PARAGRAPH_INTERRUPTERS).some((pattern) => pattern.test(line))
-  );
+  if (!holdsQuoteLine && line.startsWith(">")) return true;
+  return Object.values(PARAGRAPH_INTERRUPTERS).some((pattern) => pattern.test(line));
 }
 
 // The third change: blocks the text after an item's marker can open.
