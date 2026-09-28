@@ -93,6 +93,32 @@ describe("NotenOrderedList Markdown", () => {
     expect(alphaAttrsForAmbiguousMarkers("iv", null)).toBeNull();
   });
 
+  // Tiptap's tokenizer takes every following item line into the first list, so
+  // a letter list after a numbered one (blank line between, as saved) came back
+  // as one numbered list and its `a.` was saved as `3.`.
+  it.each([
+    "1. one\n2. two\n\na. x\nb. y",
+    "a. x\nb. y\n\n1. one",
+    "a. x\n\nA. y",
+    "i. x\n\n1. y\n\nI. z",
+    "1. one\n   a. sub\n2. two\n\na. x",
+    "a. x\nb. y\n\ni. one\nii. two",
+    "i. one\nii. two\n\na. x",
+    "c. x\n\ni. y",
+    "A. x\nB. y\n\nI. z",
+  ])("keeps a change of marker kind at the top level as separate lists: %j", (markdown) => {
+    const first = markdownOf(createEditor(markdown));
+    expect(first).toBe(markdown);
+    expect(markdownOf(createEditor(first))).toBe(markdown);
+  });
+
+  it("keeps a letter list whose markers run into roman letters as one list", () => {
+    const markdown = "h. x\ni. y\nj. z\nk. w\nl. v\nm. u";
+    const editor = createEditor(markdown);
+    expect(editor.getJSON().content?.filter((node) => node.type === "orderedList")).toHaveLength(1);
+    expect(markdownOf(editor)).toBe(markdown);
+  });
+
   it("marks each styled list for the stylesheet, and leaves numbered lists bare", () => {
     const html = createEditor("a. one\n   I. sub\n\ntext\n\n1. n").getHTML();
     expect(html).toContain('<ol type="a" data-list-style="lower-alpha">');

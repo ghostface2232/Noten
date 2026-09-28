@@ -1,5 +1,5 @@
 import { findParentNodeClosestToPos, wrappingInputRule, type JSONContent } from "@tiptap/core";
-import { OrderedList } from "@tiptap/extension-list";
+import { OrderedList, detectMarkerType } from "@tiptap/extension-list";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type { Selection } from "@tiptap/pm/state";
 
@@ -102,6 +102,75 @@ function alphaValue(marker: string): number {
   return lower.length === 1 ? value(0) : value(0) * 26 + value(1);
 }
 
+// Same as @tiptap/extension-list's ORDERED_LIST_ITEM_REGEX.
+const ORDERED_ITEM = /^(\s*)(\d+|[ivxlcdmIVXLCDM]+|[a-zA-Z]{1,2})[.)]\s+/;
+
+function markerKind(marker: string): "number" | "lower" | "upper" {
+  if (/^\d/.test(marker)) return "number";
+  return marker === marker.toLowerCase() ? "lower" : "upper";
+}
+
+function isRoman(marker: string): boolean {
+  const type = detectMarkerType(marker);
+  return type === "i" || type === "I";
+}
+
+// Tiptap's letter marker for a 1-based position: a-z, then aa, ab, ...
+function alphaMarker(position: number): string {
+  const letter = (index: number) => String.fromCharCode(97 + index);
+  if (position <= 26) return letter(position - 1);
+  return letter(Math.floor((position - 1) / 26) - 1) + letter((position - 1) % 26);
+}
+
+/**
+ * The prefix of `src` that holds only the list its first line starts.
+ *
+ * The stock tokenizer takes every following item line into one list, across
+ * blank lines and changes of marker, and restyles them all after the first.
+ * The serializer writes adjacent lists a blank line apart, so a numbered list
+ * followed by a letter list reloaded as one numbered list and saved the
+ * letters as numbers. An item at the list's own indent starts a new list
+ * when its marker is of another kind (numbers, lowercase, uppercase), or of
+ * the same case but the other letter style: a roman numeral that is not the
+ * next letter of a letter list (`i.` after `a.` `b.`, but not after `h.`),
+ * or a non-roman letter in a roman list. Nested lists keep the stock reading.
+ */
+export function cutAtMarkerKindChange(src: string): string {
+  const firstEnd = src.indexOf("\n");
+  const first = (firstEnd < 0 ? src : src.slice(0, firstEnd)).match(ORDERED_ITEM);
+  if (!first || firstEnd < 0) return src;
+  const indent = first[1].length;
+  const firstMarker = first[2];
+  const kind = markerKind(firstMarker);
+  // Letter style, once known: a lone roman letter waits for the second item.
+  let letters: "alpha" | "roman" | null =
+    kind === "number" ? null : !isRoman(firstMarker) ? "alpha" : firstMarker.length > 1 ? "roman" : null;
+  let items = 1;
+  let start = firstEnd + 1;
+  while (start <= src.length) {
+    const nl = src.indexOf("\n", start);
+    const line = src.slice(start, nl < 0 ? src.length : nl);
+    const item = line.match(ORDERED_ITEM);
+    if (item && item[1].length <= indent) {
+      const marker = item[2];
+      if (markerKind(marker) !== kind) return src.slice(0, start - 1);
+      if (kind !== "number") {
+        letters ??= alphaAttrsForAmbiguousMarkers(firstMarker, marker) ? "alpha" : "roman";
+        const expected = alphaMarker(alphaValue(firstMarker) + items);
+        const other =
+          letters === "alpha" ? isRoman(marker) && marker.toLowerCase() !== expected : !isRoman(marker);
+        if (other) return src.slice(0, start - 1);
+      }
+      items++;
+    }
+    if (nl < 0) break;
+    start = nl + 1;
+  }
+  return src;
+}
+
+const stockTokenizer = OrderedList.config.markdownTokenizer!;
+
 // `a. `, `B. `, `i. `, `I. ` at the start of a textblock. Multi-letter
 // markers are left alone: `ii. ` or `iv. ` typed as prose is likelier than a
 // list meant to start there, and the toolbar sets any style.
@@ -119,6 +188,11 @@ export const NotenOrderedList = OrderedList.extend({
     const parsed = OrderedList.config.parseMarkdown?.call(this, token, helpers);
     if (!parsed || Array.isArray(parsed)) return parsed ?? [];
     return disambiguate(parsed, token as { items?: unknown[] });
+  },
+
+  markdownTokenizer: {
+    ...stockTokenizer,
+    tokenize: (src, tokens, lexer) => stockTokenizer.tokenize(cutAtMarkerKindChange(src), tokens, lexer),
   },
 
   addCommands() {
