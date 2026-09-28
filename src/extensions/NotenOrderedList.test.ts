@@ -391,6 +391,33 @@ describe("setOrderedListStyle", () => {
     expect(selectedOrderedListStyle(inside.state.selection)).toBe("I");
   });
 
+  // Clearing a quote, table or list and then failing to wrap left them
+  // flattened (a failed chain still dispatches), and can() said true there.
+  it("either restyles or leaves the document alone, as can() says (every text selection)", () => {
+    const markdown = "| h1 | h2 |\n| --- | --- |\n| c1 | c2 |\n\n> q1\n\n# head\n\n```\ncode\n```\n\npara\n\n- b1\n- b2";
+    const editor = createEditor(markdown);
+    const original = editor.state.doc;
+    const positions: number[] = [];
+    original.descendants((node, pos) => {
+      if (node.isTextblock) positions.push(pos + 1, pos + node.nodeSize - 1);
+    });
+    let checked = 0;
+    for (const from of positions) {
+      for (const to of positions) {
+        if (to < from) continue;
+        editor.commands.setContent(markdown, { contentType: "markdown" } as never);
+        editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, from, to)));
+        const before = editor.state.doc;
+        const can = editor.can().setOrderedListStyle("a");
+        const ran = editor.commands.setOrderedListStyle("a");
+        expect(ran, `${from}-${to}`).toBe(can);
+        if (!ran) expect(editor.state.doc.eq(before), `${from}-${to}`).toBe(true);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(50);
+  });
+
   it("answers can() the way running it goes for text selections", () => {
     for (const markdown of ["para", "# heading", "- [ ] task", "- bullet", "1. n"]) {
       const editor = createEditor(markdown);

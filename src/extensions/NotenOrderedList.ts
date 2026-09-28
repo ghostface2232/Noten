@@ -64,6 +64,17 @@ function targetList(selection: Selection): { node: ProseMirrorNode; pos: number 
   return findParentNodeClosestToPos(selection.$from, isList) ?? null;
 }
 
+// Whether every block the selection covers is a textblock, the only case in
+// which clearing nodes leaves a range that a list can wrap.
+function onlyTextblocks(selection: Selection): boolean {
+  const range = selection.$from.blockRange(selection.$to);
+  if (!range || range.endIndex <= range.startIndex) return false;
+  for (let index = range.startIndex; index < range.endIndex; index++) {
+    if (!range.parent.child(index).isTextblock) return false;
+  }
+  return true;
+}
+
 const ITEM_MARKER = /^[ \t]*(\d+|[A-Za-z]+)[.)]/;
 
 function itemMarker(item: unknown): string | null {
@@ -300,15 +311,18 @@ export const NotenOrderedList = OrderedList.extend({
           if (!list) {
             // Not toggleOrderedList: it joins the new list into a numbered one
             // next to it before the style is set, restyling that list too. A
-            // heading or code block becomes a paragraph first, as it does there.
-            // A dry run cannot clear nodes, so it answers as clearing would. A
-            // selected node outside a list (a rule, an image) is not text to
-            // style: wrapping it clears nodes and can still fail after that,
-            // and a failed chain dispatches anyway.
+            // heading or code block becomes a paragraph first, as it does there,
+            // but only when every block in the range is a textblock: clearing a
+            // quote, table or list and then failing to wrap left them flattened,
+            // since a failed chain still dispatches. A selected node outside a
+            // list (a rule, an image) is not text to style.
             if (tr.selection instanceof NodeSelection) return false;
-            if (!dispatch) return true;
+            const canWrap = can().wrapInList(this.name, { type });
+            const clearable = !canWrap && onlyTextblocks(tr.selection);
+            if (!dispatch) return canWrap || clearable;
+            if (!canWrap && !clearable) return false;
             return chain()
-              .command(() => can().wrapInList(this.name, { type }) || commands.clearNodes())
+              .command(() => canWrap || commands.clearNodes())
               .wrapInList(this.name, { type })
               .command(({ tr: chained }) => {
                 joinSameStyleNeighbours(chained, this.type);
