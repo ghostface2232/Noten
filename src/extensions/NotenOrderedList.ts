@@ -1,10 +1,18 @@
-import { findParentNodeClosestToPos, wrappingInputRule, type JSONContent } from "@tiptap/core";
+import {
+  findParentNodeClosestToPos,
+  wrappingInputRule,
+  type JSONContent,
+} from "@tiptap/core";
 import { OrderedList, detectMarkerType, markerToStart, toRoman } from "@tiptap/extension-list";
 import type { Node as ProseMirrorNode, NodeType } from "@tiptap/pm/model";
-import type { Selection, Transaction } from "@tiptap/pm/state";
+import { EditorState, NodeSelection, type Selection, type Transaction } from "@tiptap/pm/state";
+import { wrapInList } from "@tiptap/pm/schema-list";
 import { StepMap, canJoin } from "@tiptap/pm/transform";
 import { normalizeListItemContent } from "./NotenListItem";
 import { tokenizeOrderedList } from "./orderedListTokenizer";
+
+// NotenListItem writes this list's markers; both live in NotenListItem.ts.
+export { NotenListItem, listItemMarker } from "./NotenListItem";
 
 /**
  * The marker styles an ordered list can carry, as HTML `<ol type>` values.
@@ -28,9 +36,10 @@ declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     notenOrderedList: {
       /**
-       * Give the innermost list around the selection this marker style,
-       * converting a bullet or task list, or wrap the selection in a new
-       * list of that style when it is in none.
+       * Give a selected list, else the innermost list around the selection,
+       * this marker style, converting a bullet or task list; or wrap the
+       * selection in a new list of that style when it is in none. Refuses a
+       * selected node outside a list and a table cell.
        */
       setOrderedListStyle: (style: OrderedListStyle) => ReturnType;
     };
@@ -45,10 +54,55 @@ export function orderedListStyleOf(node: ProseMirrorNode): OrderedListStyle {
     : "1";
 }
 
-/** The style of the innermost list around the selection, or null when that list is not ordered. */
+/**
+ * The style of the list setOrderedListStyle would restyle (a selected list,
+ * else the innermost one around the selection), or null when it is not ordered.
+ */
 export function selectedOrderedListStyle(selection: Selection): OrderedListStyle | null {
-  const list = findParentNodeClosestToPos(selection.$from, isList);
+  const list = targetList(selection);
   return list?.node.type.name === "orderedList" ? orderedListStyleOf(list.node) : null;
+}
+
+/**
+ * The list a style applies to: a selected list node itself, else the
+ * innermost list around the selection's start, which includes a selected
+ * image or table inside a list.
+ */
+function targetList(selection: Selection): { node: ProseMirrorNode; pos: number } | null {
+  if (selection instanceof NodeSelection && isList(selection.node)) return { node: selection.node, pos: selection.from };
+  return findParentNodeClosestToPos(selection.$from, isList) ?? null;
+}
+
+// Whether the selection starts inside a table cell; a CellSelection (what
+// prosemirror-tables makes of a selected table) starts in its first cell.
+function inTableCell(selection: Selection): boolean {
+  const { $from } = selection;
+  for (let depth = $from.depth; depth > 0; depth--) {
+    const role = $from.node(depth).type.spec.tableRole;
+    if (role === "cell" || role === "header_cell") return true;
+  }
+  return false;
+}
+
+// Turn every heading and code block the selection touches into a paragraph,
+// where it stands. Sizes do not change, so positions and the selection hold.
+function textblocksToParagraphs(tr: Transaction): void {
+  const paragraph = tr.doc.type.schema.nodes.paragraph;
+  const { from, to } = tr.selection;
+  tr.doc.nodesBetween(from, to, (node, pos) => {
+    if (!node.isTextblock) return true;
+    if (node.type !== paragraph && paragraph.validContent(node.content)) tr.setNodeMarkup(pos, paragraph);
+    return false;
+  });
+}
+
+// Whether a list wraps the selection once its textblocks are paragraphs,
+// tried on a scratch state so nothing is changed to find out.
+function wrapsAfterParagraphs(tr: Transaction, listType: NodeType, attrs: Record<string, unknown>): boolean {
+  const scratch = EditorState.create({ doc: tr.doc, selection: tr.selection });
+  const trial = scratch.tr;
+  textblocksToParagraphs(trial);
+  return wrapInList(listType, attrs)(scratch.apply(trial));
 }
 
 const ITEM_MARKER = /^[ \t]*(\d+|[A-Za-z]+)[.)]/;
@@ -135,9 +189,13 @@ function alphaValue(marker: string): number {
   return lower.length === 1 ? value(0) : value(0) * 26 + value(1);
 }
 
+// As Tiptap reads the marker: three or more roman letters that are not a
+// numeral (`iiii`, `mid`, `Civil`) read as a numbered item, so they must not
+// split a numbered list, or the save would read back as a different list.
 function markerKind(marker: string): "number" | "lower" | "upper" {
-  if (/^\d/.test(marker)) return "number";
-  return marker === marker.toLowerCase() ? "lower" : "upper";
+  const type = detectMarkerType(marker);
+  if (type === undefined) return "number";
+  return type === "a" || type === "i" ? "lower" : "upper";
 }
 
 function isRoman(marker: string): boolean {
@@ -163,8 +221,10 @@ function alphaMarker(position: number): string {
  * saved the letters as numbers. An item starts a new list when its marker is
  * of another kind (numbers, lowercase, uppercase), or of the same case but
  * the other letter style: a roman numeral that is not the next letter of a
- * letter list (`i.` after `a.` `b.`, but not after `h.`), or a non-roman
- * letter in a roman list. An item whose marker cannot be read never splits.
+ * letter list (`i.` after `a.` `b.`, but not after `h.`), or in a roman list
+ * a non-roman letter or a single letter that is not its next numeral (`V.`
+ * after `I.` is a letter list, the editor's own reading of a lone `V.`). An
+ * item whose marker cannot be read never splits.
  */
 export function listSegmentStarts(markers: readonly (string | null)[]): number[] {
   const starts = [0];
@@ -188,7 +248,8 @@ export function listSegmentStarts(markers: readonly (string | null)[]): number[]
         other =
           letters === "alpha"
             ? isRoman(marker) && marker.toLowerCase() !== alphaMarker(alphaValue(first) + count)
-            : !isRoman(marker);
+            : !isRoman(marker) ||
+              (marker.length === 1 && marker.toLowerCase() !== toRoman(markerToStart(first) + count));
       }
     }
     if (other) {
@@ -201,12 +262,30 @@ export function listSegmentStarts(markers: readonly (string | null)[]): number[]
   return starts;
 }
 
+export const MAX_LIST_SEGMENTS = 10_000;
+
 // `a. `, `B. `, `i. `, `I. ` at the start of a textblock. Multi-letter
 // markers are left alone: `ii. ` or `iv. ` typed as prose is likelier than a
 // list meant to start there, and the toolbar sets any style.
 const LETTER_INPUT = /^([a-zA-Z])\.\s$/;
 
 export const NotenOrderedList = OrderedList.extend({
+  addAttributes() {
+    const attributes = (this.parent?.() ?? {}) as Record<string, object>;
+    return {
+      ...attributes,
+      // Pasted HTML can carry any `start`, and one below 1 broke the list on
+      // save; Tiptap already reads and writes 0 as 1 (`start || 1`).
+      start: {
+        ...attributes.start,
+        parseHTML: (element: HTMLElement) => {
+          const start = parseInt(element.getAttribute("start") ?? "", 10);
+          return Number.isNaN(start) ? 1 : Math.max(start, 1);
+        },
+      },
+    };
+  },
+
   renderHTML({ node, HTMLAttributes }) {
     const rendered = this.parent?.({ node, HTMLAttributes }) as ["ol", Record<string, unknown>, 0];
     const style = LIST_STYLE_TYPE[HTMLAttributes.type as keyof typeof LIST_STYLE_TYPE];
@@ -226,21 +305,25 @@ export const NotenOrderedList = OrderedList.extend({
     const stock = OrderedList.config.parseMarkdown!;
     const items = (token as { items?: unknown[] }).items ?? [];
     const markers = items.map(itemMarker);
-    const starts = listSegmentStarts(markers);
+    let starts = listSegmentStarts(markers);
+    // Tiptap spreads a nested list's parse result into call arguments
+    // (`content.push(...)`), so 140,000 lists from one token (`a.`/`A.`
+    // alternating 70,000 times) overflowed the stack, about 124,000 arguments
+    // in V8, and the note would not open. Past the cap the token stays one
+    // list, as the stock reading has it: every item takes the first item's
+    // style, so the other markers are rewritten on save, but the note opens.
+    if (starts.length > MAX_LIST_SEGMENTS) starts = [0];
     const lists: JSONContent[] = [];
     starts.forEach((start, index) => {
       const end = starts[index + 1] ?? items.length;
       const first = markers[start];
-      // The token's own start and style describe its first item only.
-      const segment =
-        index === 0
-          ? { ...token, items: items.slice(start, end) }
-          : {
-              ...token,
-              items: items.slice(start, end),
-              start: first ? markerToStart(first) : 1,
-              typeMarker: first ? detectMarkerType(first) : undefined,
-            };
+      // Each segment's start and style come from its own first marker. The
+      // token's describe its first raw item, which for a nested list the stock
+      // reading may have dropped (an item indented deeper than its siblings),
+      // so the first segment could take a style its markers do not have.
+      const segment = first
+        ? { ...token, items: items.slice(start, end), start: markerToStart(first), typeMarker: detectMarkerType(first) }
+        : { ...token, items: items.slice(start, end), ...(index === 0 ? {} : { start: 1, typeMarker: undefined }) };
       const parsed = stock.call(this, segment as typeof token, helpers);
       for (const list of Array.isArray(parsed) ? parsed : [parsed]) {
         if (list) lists.push(disambiguate(withValidItems(list), markers.slice(start, end)));
@@ -254,17 +337,32 @@ export const NotenOrderedList = OrderedList.extend({
       ...this.parent?.(),
       setOrderedListStyle:
         (style) =>
-        ({ tr, state, chain, can, commands, dispatch }) => {
+        ({ tr, state, chain, can, dispatch }) => {
           const type = style === "1" ? null : style;
-          const list = findParentNodeClosestToPos(tr.selection.$from, isList);
+          const list = targetList(tr.selection);
           if (!list) {
             // Not toggleOrderedList: it joins the new list into a numbered one
             // next to it before the style is set, restyling that list too. A
-            // heading or code block becomes a paragraph first, as it does there.
-            // A dry run cannot clear nodes, so it answers as clearing would.
-            if (!dispatch) return true;
+            // heading or code block becomes a paragraph first, as it does there,
+            // but in place: Tiptap's clearNodes also lifts blocks out of their
+            // quote, flattens quotes, tables and lists, and can then fail to
+            // wrap, and a failed chain still dispatches. Whether the wrap works
+            // is decided on a scratch state, so a refused run changes nothing
+            // and can() gives the same answer. A selected node outside a list
+            // (a rule, an image) is not text to style.
+            if (tr.selection instanceof NodeSelection) return false;
+            // A GFM cell holds one line, so a list in it is saved as its text
+            // (`| a. c1 |`) and reads back as a paragraph for good.
+            if (inTableCell(tr.selection)) return false;
+            const canWrap = can().wrapInList(this.name, { type });
+            const wrapsAsParagraphs = !canWrap && wrapsAfterParagraphs(tr, this.type, { type });
+            if (!dispatch) return canWrap || wrapsAsParagraphs;
+            if (!canWrap && !wrapsAsParagraphs) return false;
             return chain()
-              .command(() => can().wrapInList(this.name, { type }) || commands.clearNodes())
+              .command(({ tr: chained }) => {
+                if (!canWrap) textblocksToParagraphs(chained);
+                return true;
+              })
               .wrapInList(this.name, { type })
               .command(({ tr: chained }) => {
                 joinSameStyleNeighbours(chained, this.type);
@@ -274,7 +372,10 @@ export const NotenOrderedList = OrderedList.extend({
           }
           if (!dispatch) return true;
           if (list.node.type === this.type) {
-            tr.setNodeMarkup(list.pos, undefined, { ...list.node.attrs, type });
+            // Letters and roman numerals start at 1; a `0.` list restyled keeps
+            // its items' order from there.
+            const start = type && (list.node.attrs.start as number) < 1 ? 1 : list.node.attrs.start;
+            tr.setNodeMarkup(list.pos, undefined, { ...list.node.attrs, type, start });
             return true;
           }
           // A bullet or task list becomes an ordered list in place. Tiptap's

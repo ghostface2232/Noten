@@ -1,4 +1,4 @@
-import type { JSONContent } from "@tiptap/core";
+import { renderNestedMarkdownContent, type JSONContent } from "@tiptap/core";
 import { ListItem, getListMarker } from "@tiptap/extension-list";
 
 type ParseListItem = NonNullable<typeof ListItem.config.parseMarkdown>;
@@ -15,11 +15,33 @@ function columnWidth(text: string): number {
   return width;
 }
 
-// The stock listItem renderer's marker.
+// The last position a letter marker can spell: Tiptap reads and writes one
+// or two letters, `zz` being 702.
+const MAX_LETTER_POSITION = 26 * 27;
+
+/**
+ * The stock marker for a list item, except that a letter list's items past
+ * `zz.` are numbered. Tiptap has no letter marker there and wrote
+ * `undefineda.`, `undefinedb.`, ..., which reads back as text of item 702: a
+ * letter list of over 702 items (a toolbar restyle of a long list, or the
+ * one-list fallback of a token past MAX_LIST_SEGMENTS) lost its items on save.
+ * Numbered, they read back as a numbered list continuing at 703.
+ */
+export function listItemMarker(type: unknown, index: number): string {
+  const position = index + 1;
+  // Below 1 no letter or roman marker exists (Tiptap threw on `A` and wrote
+  // `undefined.` or `.`), and a negative number is no marker either: all
+  // read back as plain paragraphs. `0.` is the lowest marker Markdown has.
+  if (position < 1) return `${Math.max(position, 0)}. `;
+  if ((type === "a" || type === "A") && position > MAX_LETTER_POSITION) return `${position}. `;
+  return getListMarker(type as string | undefined, index, ". ");
+}
+
+// The item's marker: the stock one but for `listItemMarker`.
 function itemPrefix(ctx: RenderContext): string {
   if (ctx?.parentType !== "orderedList") return "- ";
-  const attrs = ctx.meta?.parentAttrs as { start?: number; type?: string } | undefined;
-  return getListMarker(attrs?.type, (attrs?.start || 1) - 1 + (ctx.index || 0), ". ");
+  const attrs = ctx.meta?.parentAttrs as { start?: number; type?: unknown } | undefined;
+  return listItemMarker(attrs?.type, (attrs?.start || 1) - 1 + (ctx.index || 0));
 }
 
 const INLINE_TYPES = new Set(["text", "hardBreak"]);
@@ -102,7 +124,10 @@ export const parseListItemMarkdown: ParseListItem = function (this: unknown, tok
 export const renderListItemMarkdown: RenderListItem = function (this: unknown, node, h, ctx) {
   const content: JSONContent[] = Array.isArray(node.content) ? node.content : [];
   const lead = isEmptyParagraph(content[0]) && content[1] && content[1].type !== "paragraph" ? 1 : 0;
-  if (!content[lead] || content[lead].type === "paragraph") return ListItem.config.renderMarkdown!.call(this, node, h, ctx);
+  // The stock renderer, transcribed; only the marker differs.
+  if (!content[lead] || content[lead].type === "paragraph") {
+    return renderNestedMarkdownContent(node, h, itemPrefix, ctx, { alignNestedToPrefix: ctx?.parentType === "orderedList" });
+  }
   // From here on renderNestedMarkdownContent, transcribed, but for the lead
   // block's later lines.
   const ordered = ctx?.parentType === "orderedList";

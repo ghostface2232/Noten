@@ -1,12 +1,35 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { Editor, type JSONContent } from "@tiptap/core";
-import { TextSelection } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection } from "@tiptap/pm/state";
+import { CellSelection } from "@tiptap/pm/tables";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
+import { TableRow } from "@tiptap/extension-table-row";
+import { TableCell } from "@tiptap/extension-table-cell";
+import { TableHeader } from "@tiptap/extension-table-header";
+import MermaidCodeBlock from "./MermaidCodeBlock";
+import { common, createLowlight } from "lowlight";
+import { NotenTable } from "./NotenTable";
 import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
-import { alphaAttrsForAmbiguousMarkers, listSegmentStarts, selectedOrderedListStyle } from "./NotenOrderedList";
+import {
+  MAX_LIST_SEGMENTS,
+  alphaAttrsForAmbiguousMarkers,
+  listItemMarker,
+  listSegmentStarts,
+  selectedOrderedListStyle,
+} from "./NotenOrderedList";
+
+function nodesOf(doc: JSONContent, type: string): JSONContent[] {
+  const out: JSONContent[] = [];
+  const visit = (node: JSONContent) => {
+    if (node.type === type) out.push(node);
+    node.content?.forEach(visit);
+  };
+  visit(doc);
+  return out;
+}
 
 const editors: Editor[] = [];
 afterEach(() => {
@@ -21,6 +44,11 @@ function createEditor(markdown: string | JSONContent): Editor {
       CodeSpanFence,
       TaskList,
       TaskItem.configure({ nested: true }),
+      MermaidCodeBlock.configure({ lowlight: createLowlight(common) }),
+      NotenTable,
+      TableRow,
+      TableCell,
+      TableHeader,
     ],
     content: markdown,
     contentType: typeof markdown === "string" ? "markdown" : "json",
@@ -124,6 +152,10 @@ describe("NotenOrderedList Markdown", () => {
     "i. one\nii. two\n\na. x",
     "c. x\n\ni. y",
     "A. x\nB. y\n\nI. z",
+    // A lone letter list after a roman one merged into it: `V.` saved as `II.`.
+    "I. para\n\nV. x",
+    "i. intro\n\nx. ten",
+    "iv. four\nv. five\n\nc. letter",
   ])("keeps a change of marker kind at the top level as separate lists: %j", (markdown) => {
     const first = markdownOf(createEditor(markdown));
     expect(first).toBe(markdown);
@@ -144,14 +176,49 @@ describe("NotenOrderedList Markdown", () => {
     );
   });
 
+  // One list per segment, spread by Tiptap into call arguments, overflowed the
+  // stack for a long nested run (`a.`/`A.` alternating 70,000 times).
+  it("opens a nested run with more segments than the cap as one list", () => {
+    const run = "  a. x\n  A. y\n".repeat(MAX_LIST_SEGMENTS / 2 + 1);
+    const lists = (markdown: string) => nodesOf(createEditor(markdown).getJSON(), "orderedList").length;
+    expect(lists(`- outer\n${run}`)).toBe(1);
+    expect(lists("- outer\n" + "  a. x\n  A. y\n".repeat(50))).toBe(100);
+    expect(() => createEditor("- outer\n" + "  a. x\n  A. y\n".repeat(70_000))).not.toThrow();
+  }, 60_000);
+
   it("finds list boundaries from markers alone", () => {
     expect(listSegmentStarts(["1", "2", "a", "b", "3"])).toEqual([0, 2, 4]);
     expect(listSegmentStarts(["a", "b", "i", "ii"])).toEqual([0, 2]);
     expect(listSegmentStarts(["h", "i", "j"])).toEqual([0]);
     expect(listSegmentStarts(["v", "vi", "a"])).toEqual([0, 2]);
+    expect(listSegmentStarts(["iv", "v", "vi", "x"])).toEqual([0, 3]);
+    expect(listSegmentStarts(["ix", "x", "xi"])).toEqual([0]);
     expect(listSegmentStarts(["a", "A"])).toEqual([0, 1]);
     expect(listSegmentStarts(["1", null, "a"])).toEqual([0, 2]);
     expect(listSegmentStarts([])).toEqual([0]);
+    // Tiptap reads these as numbered items.
+    expect(listSegmentStarts(["1", "IIII", "mid", "Civil", "2"])).toEqual([0]);
+  });
+
+  it.each([
+    "1. x\nIIII. y",
+    "1. x\nmid. y",
+    "iiii. x\n1. y",
+    "Civil. a\n1) b",
+    // The stock reading drops `x. deep` (indented past its siblings) but kept
+    // its style on the nested token, so the first segment became roman.
+    "1. top\n      x. deep\n   1. y\n   a. z",
+    "ab. item 1\n      iiii) item 2\n  A) item 3\n  3) item 4",
+  ])(
+    "saves %j the same on every reload",
+    (markdown) => {
+      const first = markdownOf(createEditor(markdown));
+      expect(markdownOf(createEditor(first))).toBe(first);
+    },
+  );
+
+  it("still separates letters from numbers", () => {
+    expect(listSegmentStarts(["1", "a", "b", "iv", "I"])).toEqual([0, 1, 3, 4]);
   });
 
   // Loading and saving twice must give the same Markdown as once: a list that
@@ -179,7 +246,8 @@ describe("NotenOrderedList Markdown", () => {
       expect(twice, JSON.stringify(lines.join("\n"))).toBe(once);
       while (editors.length > 0) editors.pop()!.destroy();
     }
-  });
+    // 600 editors: about 2.5 s alone, past the 5 s default under a full run.
+  }, 30_000);
 
   it("keeps a letter list whose markers run into roman letters as one list", () => {
     const markdown = "h. x\ni. y\nj. z\nk. w\nl. v\nm. u";
@@ -193,6 +261,60 @@ describe("NotenOrderedList Markdown", () => {
     expect(html).toContain('<ol type="a" data-list-style="lower-alpha">');
     expect(html).toContain('<ol type="I" data-list-style="upper-roman">');
     expect(html).toContain("<ol><li><p>n</p></li></ol>");
+  });
+});
+
+describe("letter lists past zz", () => {
+  // Tiptap has no letter marker past `zz` (702) and wrote `undefineda.`,
+  // which reads back as text of item 702, so the items were lost.
+  it("numbers the items past 702 and keeps every item across saves", () => {
+    const count = 705;
+    const editor = createEditor(Array.from({ length: count }, (_, k) => `${k + 1}. item ${k + 1}`).join("\n"));
+    caretAt(editor, "item 1");
+    editor.commands.setOrderedListStyle("a");
+    const first = markdownOf(editor);
+    expect(first).not.toContain("undefined");
+    const lines = first.split("\n");
+    expect(lines[701]).toBe("zz. item 702");
+    expect(lines[702]).toBe("703. item 703");
+    const reloaded = createEditor(first);
+    const texts = nodesOf(reloaded.getJSON(), "paragraph").map((p) => p.content?.[0]?.text);
+    expect(texts).toEqual(Array.from({ length: count }, (_, k) => `item ${k + 1}`));
+    expect(markdownOf(createEditor(markdownOf(reloaded)))).toBe(markdownOf(reloaded));
+  });
+
+  // `<ol type="A" start="-2">` pasted as HTML (parsed here as insertContent
+  // does) made saving throw, and `type="a" start="-1"` wrote `undefined. x`,
+  // which reads back as a paragraph.
+  it.each([
+    ['<ol type="A" start="-2"><li><p>x</p></li><li><p>y</p></li></ol>', "A. x\nB. y"],
+    ['<ol type="a" start="-1"><li><p>x</p></li></ol>', "a. x"],
+    ['<ol start="-3"><li><p>x</p></li></ol>', "1. x"],
+  ])("keeps a list pasted as %s with a negative start", (html, markdown) => {
+    const editor = createEditor("");
+    editor.commands.insertContent(html);
+    expect(() => markdownOf(editor)).not.toThrow();
+    expect(markdownOf(editor)).toBe(markdown);
+    expect(nodesOf(createEditor(markdownOf(editor)).getJSON(), "orderedList")).toHaveLength(1);
+  });
+
+  it("starts a list below 1 at 1 when restyled to letters", () => {
+    const item = (text: string) => ({ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+    const editor = createEditor({ type: "doc", content: [{ type: "orderedList", attrs: { start: -2 }, content: [item("x"), item("y")] }] });
+    caretAt(editor, "x");
+    editor.commands.setOrderedListStyle("a");
+    expect(editor.getJSON().content?.[0].attrs?.start).toBe(1);
+    expect(markdownOf(editor)).toBe("a. x\nb. y");
+  });
+
+  it("marks the positions each style can spell", () => {
+    expect(listItemMarker("A", -3)).toBe("0. ");
+    expect(listItemMarker("i", -1)).toBe("0. ");
+    expect(listItemMarker(null, -1)).toBe("0. ");
+    expect(listItemMarker("a", 701)).toBe("zz. ");
+    expect(listItemMarker("A", 702)).toBe("703. ");
+    expect(listItemMarker("i", 999)).toBe("m. ");
+    expect(listItemMarker(null, 4)).toBe("5. ");
   });
 });
 
@@ -269,7 +391,109 @@ describe("setOrderedListStyle", () => {
     expect(markdownOf(editor)).toBe(markdown);
   });
 
-  it("answers can() the way running it goes", () => {
+  it("refuses a selected node outside a list without touching the document", () => {
+    const editor = createEditor("a\n\n---\n\nb");
+    editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, 3)));
+    expect(editor.can().setOrderedListStyle("a")).toBe(false);
+    expect(editor.commands.setOrderedListStyle("a")).toBe(false);
+    expect(markdownOf(editor)).toBe("a\n\n---\n\nb");
+  });
+
+  // Refusing every NodeSelection also blocked restyling the list around a
+  // selected image or table, while the toolbar showed that list's style.
+  it("restyles a selected list, or the list around a selected node", () => {
+    const whole = createEditor("1. x\n   - y\n2. z");
+    whole.view.dispatch(whole.state.tr.setSelection(NodeSelection.create(whole.state.doc, 0)));
+    expect(selectedOrderedListStyle(whole.state.selection)).toBe("1");
+    expect(whole.commands.setOrderedListStyle("a")).toBe(true);
+    expect(markdownOf(whole)).toBe("a. x\n   - y\nb. z");
+
+    const inside = createEditor("a. text\n\n   ---\nb. two");
+    let rule = -1;
+    inside.state.doc.descendants((node, pos) => {
+      if (node.type.name === "horizontalRule") rule = pos;
+    });
+    inside.view.dispatch(inside.state.tr.setSelection(NodeSelection.create(inside.state.doc, rule)));
+    expect(selectedOrderedListStyle(inside.state.selection)).toBe("a");
+    expect(inside.can().setOrderedListStyle("I")).toBe(true);
+    expect(inside.commands.setOrderedListStyle("I")).toBe(true);
+    expect(selectedOrderedListStyle(inside.state.selection)).toBe("I");
+  });
+
+  // Requiring every block to be a textblock refused a rule between them, and
+  // Tiptap's clearNodes lifted a heading out of its quote, splitting it.
+  it.each([
+    // The rule under an item drifts on reload through the stock tokenizer's
+    // one-short dedent (fixed on claude/nested-task-in-ordered-list), so its
+    // stability is not checked here.
+    ["# h\n\n---\n\npara", "h", "para", "a. h\n   ---\nb. para", false],
+    ["> a\n>\n> # h\n>\n> b", "h", "h", "> a\n>\n> a. h\n>\n> b", true],
+    ["# h\n\n```\ncode\n```", "h", "code", "a. h\nb. code", true],
+  ] as const)("wraps %j without lifting or refusing what it can keep", (markdown, fromText, toText, expected, stable) => {
+    const editor = createEditor(markdown);
+    const at = (text: string, end: boolean) => {
+      let found = -1;
+      editor.state.doc.descendants((node, pos) => {
+        if (found === -1 && node.isTextblock && node.textContent === text) found = end ? pos + node.nodeSize - 1 : pos + 1;
+        return found === -1;
+      });
+      return found;
+    };
+    editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, at(fromText, false), at(toText, true))));
+    expect(editor.can().setOrderedListStyle("a")).toBe(true);
+    expect(editor.commands.setOrderedListStyle("a")).toBe(true);
+    expect(markdownOf(editor)).toBe(expected);
+    if (stable) expect(markdownOf(createEditor(expected))).toBe(expected);
+  });
+
+  it("refuses a table cell, whose Markdown cannot hold a list", () => {
+    const markdown = "| h1 | h2 |\n| --- | --- |\n| c1 | c2 |";
+    const caret = createEditor(markdown);
+    caretAt(caret, "c1");
+    const before = caret.state.doc;
+    expect(caret.can().setOrderedListStyle("a")).toBe(false);
+    expect(caret.commands.setOrderedListStyle("a")).toBe(false);
+    expect(caret.state.doc.eq(before)).toBe(true);
+
+    const whole = createEditor(markdown);
+    const cells: number[] = [];
+    whole.state.doc.descendants((node, pos) => {
+      if (node.type.spec.tableRole === "cell" || node.type.spec.tableRole === "header_cell") cells.push(pos);
+    });
+    whole.view.dispatch(whole.state.tr.setSelection(CellSelection.create(whole.state.doc, cells[0], cells[cells.length - 1])));
+    const wholeBefore = whole.state.doc;
+    expect(whole.commands.setOrderedListStyle("I")).toBe(false);
+    expect(whole.state.doc.eq(wholeBefore)).toBe(true);
+  });
+
+  // Clearing a quote, table or list and then failing to wrap left them
+  // flattened (a failed chain still dispatches), and can() said true there.
+  it("either restyles or leaves the document alone, as can() says (every text selection)", () => {
+    const markdown = "| h1 | h2 |\n| --- | --- |\n| c1 | c2 |\n\n> q1\n\n# head\n\n```\ncode\n```\n\npara\n\n- b1\n- b2";
+    const editor = createEditor(markdown);
+    const original = editor.state.doc;
+    const positions: number[] = [];
+    original.descendants((node, pos) => {
+      if (node.isTextblock) positions.push(pos + 1, pos + node.nodeSize - 1);
+    });
+    let checked = 0;
+    for (const from of positions) {
+      for (const to of positions) {
+        if (to < from) continue;
+        editor.commands.setContent(markdown, { contentType: "markdown" } as never);
+        editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, from, to)));
+        const before = editor.state.doc;
+        const can = editor.can().setOrderedListStyle("a");
+        const ran = editor.commands.setOrderedListStyle("a");
+        expect(ran, `${from}-${to}`).toBe(can);
+        if (!ran) expect(editor.state.doc.eq(before), `${from}-${to}`).toBe(true);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(50);
+  });
+
+  it("answers can() the way running it goes for text selections", () => {
     for (const markdown of ["para", "# heading", "- [ ] task", "- bullet", "1. n"]) {
       const editor = createEditor(markdown);
       caretAt(editor, markdown.replace(/^(# |- \[ \] |- |1\. )/, ""));
