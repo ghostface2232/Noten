@@ -53,6 +53,11 @@ Chromium's per-keystroke and per-IME-composition cost grows with the whole conte
 - On insert, images are capped to 560px width via `clampImageDimensions`. Height is always `auto` in CSS — only width is set in px, to prevent aspect-ratio distortion on narrow viewports.
 - `createImageNodeView` owns resize handles, drag reorder (6px `pointerdown` threshold → `startReorder()`, single undo step), context menu, and asset-source rendering. Ctrl+C on a selected image copies the image blob, not HTML.
 
+## Ordered Lists
+
+- `NotenOrderedList` (`NotenOrderedList.ts`) replaces the stock ordered list through `NotenStarterKit`. The marker style is the stock `type` attribute (`a`, `A`, `i`, `I`, null for numbers), which `@tiptap/extension-list` already reads from and writes to Markdown (`a.`, `iv.`); Noten adds the display, the `setOrderedListStyle` command (toolbar chevron, `/` letter and roman lists) and a `a. `/`B. `/`i. ` input rule. The command restyles the innermost list around the selection, converting it if it is a bullet or task list, never the list around that.
+- An ordered list shows the markers its Markdown holds. `renderHTML` adds `data-list-style` and the stylesheet styles that, not `ol[type]`: HTML matches `type` case-insensitively in selectors, so `[type="a"]` also matches `A`. Nesting does not restyle a numbered list; it once showed nested `1.` lists as letters. `src/styles/tiptap-editor.test.ts` checks the computed marker of each style.
+
 ## Task Lists
 
 - TaskItem (since Tiptap 3.31) writes each checkbox's accessible name into both its `aria-label` and a visually hidden span in its label, on creation and on every update of the item and of each task item above it. Tiptap's default name is `node.textContent`, the item's whole subtree, so every ancestor's span held all of its descendants' text: laid out in Chromium, 1 MiB list notes took up to 1.7x as long to lay out and a keystroke deep in a large nested list cost hundreds of milliseconds.

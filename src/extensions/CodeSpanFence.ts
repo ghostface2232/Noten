@@ -1,6 +1,7 @@
 import { Extension, type Editor, type JSONContent } from "@tiptap/core";
 import { Code } from "@tiptap/extension-code";
 import StarterKit from "@tiptap/starter-kit";
+import { NotenOrderedList } from "./NotenOrderedList";
 
 // Inline code whose text holds a backtick needs a longer fence: CommonMark
 // closes a code span at the first backtick run as long as the opener, so the
@@ -110,11 +111,17 @@ export const NotenCode = Code.extend({
   },
 });
 
+const NOTEN_REPLACEMENTS: Record<string, { configure(options: never): unknown }> = {
+  code: NotenCode,
+  orderedList: NotenOrderedList,
+};
+
 export const NotenStarterKit = StarterKit.extend({
   addExtensions() {
-    return (this.parent?.() ?? []).map((extension) =>
-      extension.name === "code" ? NotenCode.configure(extension.options) : extension,
-    );
+    return (this.parent?.() ?? []).map((extension) => {
+      const replacement = NOTEN_REPLACEMENTS[extension.name];
+      return replacement ? (replacement.configure(extension.options as never) as typeof extension) : extension;
+    });
   },
 });
 

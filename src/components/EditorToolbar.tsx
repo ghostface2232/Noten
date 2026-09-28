@@ -8,6 +8,7 @@ import {
   MenuPopover,
   MenuList,
   MenuItem,
+  MenuItemRadio,
   Popover,
   PopoverTrigger,
   PopoverSurface,
@@ -38,6 +39,11 @@ import {
 } from "@fluentui/react-icons";
 import { pickAndInsertImage } from "../extensions/ImageDrop";
 import { insertMermaidCodeBlock } from "../extensions/mermaidCommands";
+import {
+  ORDERED_LIST_STYLES,
+  selectedOrderedListStyle,
+  type OrderedListStyle,
+} from "../extensions/NotenOrderedList";
 import { t } from "../i18n";
 import type { Editor } from "@tiptap/react";
 import type { Locale } from "../hooks/useSettings";
@@ -131,6 +137,22 @@ const useStyles = makeStyles({
     fontWeight: 500,
     ...pressableButton,
   },
+  listStyleBtn: {
+    minWidth: "14px",
+    width: "14px",
+    height: "28px",
+    padding: "0",
+    marginLeft: "-2px",
+    borderRadius: "6px",
+    border: "none",
+    ...pressableButton,
+  },
+  listStyleSample: {
+    display: "inline-block",
+    minWidth: "72px",
+    fontVariantNumeric: "tabular-nums",
+    color: tokens.colorNeutralForeground3,
+  },
   headingBtn: {
     width: "64px",
     minWidth: "64px",
@@ -167,6 +189,22 @@ const useStyles = makeStyles({
     animationFillMode: "backwards",
   },
 });
+
+const LIST_STYLE_SAMPLE: Record<OrderedListStyle, string> = {
+  "1": "1. 2. 3.",
+  a: "a. b. c.",
+  A: "A. B. C.",
+  i: "i. ii. iii.",
+  I: "I. II. III.",
+};
+
+const LIST_STYLE_LABEL = {
+  "1": "listStyle.decimal",
+  a: "listStyle.lowerAlpha",
+  A: "listStyle.upperAlpha",
+  i: "listStyle.lowerRoman",
+  I: "listStyle.upperRoman",
+} as const satisfies Record<OrderedListStyle, Parameters<typeof t>[0]>;
 
 const TABLE_PICKER_ROWS = 6;
 const TABLE_PICKER_COLS = 8;
@@ -286,6 +324,7 @@ function readToolbarState(editor: Editor | null) {
     code: active("code"),
     bulletList: active("bulletList"),
     orderedList: active("orderedList"),
+    orderedListStyle: editor ? selectedOrderedListStyle(editor.state.selection) : null,
     taskList: active("taskList"),
     blockquote: active("blockquote"),
     codeBlock: active("codeBlock"),
@@ -547,6 +586,33 @@ function EditorToolbarImpl({
               {tb(i("tool.orderedList"), <TextNumberListLtrRegular />,
                 () => editor?.chain().focus().toggleOrderedList().run(),
                 state.orderedList)}
+              <Menu
+                checkedValues={{ listStyle: state.orderedListStyle ? [state.orderedListStyle] : [] }}
+                onCheckedValueChange={(_, data) => {
+                  const style = data.checkedItems[0] as OrderedListStyle | undefined;
+                  if (style) editor?.chain().focus().setOrderedListStyle(style).run();
+                }}
+              >
+                <MenuTrigger disableButtonEnhancement>
+                  <Tooltip content={i("tool.orderedListStyle")} relationship="label">
+                    <Button
+                      appearance="subtle"
+                      icon={<ChevronDownRegular fontSize={12} />}
+                      className={styles.listStyleBtn}
+                    />
+                  </Tooltip>
+                </MenuTrigger>
+                <MenuPopover className={styles.popoverSurface}>
+                  <MenuList>
+                    {ORDERED_LIST_STYLES.map((style) => (
+                      <MenuItemRadio key={style} name="listStyle" value={style}>
+                        <span className={styles.listStyleSample}>{LIST_STYLE_SAMPLE[style]}</span>
+                        {i(LIST_STYLE_LABEL[style])}
+                      </MenuItemRadio>
+                    ))}
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
               {tb(i("tool.taskList"), <TaskListLtrRegular />,
                 () => editor?.chain().focus().toggleTaskList().run(),
                 state.taskList)}

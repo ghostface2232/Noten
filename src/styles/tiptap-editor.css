@@ -295,9 +295,14 @@
 .ProseMirror ul { list-style-type: disc; }
 .ProseMirror ul ul { list-style-type: circle; }
 .ProseMirror ul ul ul { list-style-type: square; }
+/* An ordered list shows the markers its Markdown holds: nesting does not
+   restyle a numbered list, since `1.` saved under an `a.` on screen would
+   surprise every other Markdown reader. NotenOrderedList sets the attribute. */
 .ProseMirror ol { list-style-type: decimal; }
-.ProseMirror ol ol { list-style-type: lower-alpha; }
-.ProseMirror ol ol ol { list-style-type: lower-roman; }
+.ProseMirror ol[data-list-style="lower-alpha"] { list-style-type: lower-alpha; }
+.ProseMirror ol[data-list-style="upper-alpha"] { list-style-type: upper-alpha; }
+.ProseMirror ol[data-list-style="lower-roman"] { list-style-type: lower-roman; }
+.ProseMirror ol[data-list-style="upper-roman"] { list-style-type: upper-roman; }
 
 .ProseMirror ul[data-type="taskList"] {
   list-style: none;
