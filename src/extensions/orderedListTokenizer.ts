@@ -28,10 +28,21 @@
 // bullet or task list, a heading, a fence, a quote or a thematic break now
 // starts the item's block content, as marked reads a bullet item's first
 // line. An ordered marker there stays text, as Tiptap keeps `- 1. a` for a
-// bullet item. Which lines an item takes is unchanged, so the cut rules in
-// boundedBlockTokenizers.ts still hold, and a list with no indented
-// continuation lines and no block on a marker line tokenizes exactly as
-// before; `orderedListTokenizer.test.ts` compares both with the stock one.
+// bullet item.
+// Last, the stock loop took every line shaped like an ordered marker as a new
+// item, inside a fenced code block too: under `1. n`, a fence holding the line
+// `   2. x` lost that line to a nested item, and its closing fence opened a
+// second, empty code block. A fence opened in the item's own content
+// (0-3 columns past its content column, the marker line included, by marked's
+// `fences` rule) now holds every line indented to the content column until
+// its closing fence, so such a line is code; a fence after bullet markers, in
+// a bullet nested in the item, holds the lines at that bullet's column. A line left of the column ends
+// the item as before, fence or not: CommonMark continues no fence lazily.
+// Without a fence, the lines an item takes are unchanged, and a list with no
+// indented continuation lines and no block on a marker line tokenizes exactly
+// as before; `orderedListTokenizer.test.ts` compares both with the stock one.
+// With one, a column-0 line still meets the same branch as before, which is
+// what the cut rule in boundedBlockTokenizers.ts relies on.
 // Re-transcribe on an @tiptap/extension-list upgrade, or drop this file if
 // the upstream dedent is fixed.
 
@@ -76,6 +87,29 @@ function isBlockContentLine(line: string): boolean {
     PARAGRAPH_INTERRUPTERS.codeFence.test(trimmedLine) ||
     PARAGRAPH_INTERRUPTERS.blockMath.test(trimmedLine)
   );
+}
+
+// marked's `fences` rule, which lexes the item's content afterwards: 3+
+// backticks with no backtick after them, or 3+ tildes, after 0-3 spaces,
+// closed by the same fence followed only by more fence characters and spaces.
+// The fence may follow bullet markers (`- ````), inside a bullet nested in the
+// item; an ordered marker there is text (as Tiptap keeps `- 1. a`), and a
+// nested ordered item tracks its own fences.
+const FENCE_OPENING = /^( {0,3}(?:[-+*] {1,4})*)(`{3,}(?=[^`]*$)|~{3,})/;
+
+interface OpenFence {
+  // Columns past the item's content column where the fence's container
+  // content starts: 0 in the item itself, the bullets' width in a bullet.
+  indent: number;
+  closer: RegExp;
+}
+
+/** The fence a content line (dedented to the item's column) opens, or null. */
+function openFence(line: string): OpenFence | null {
+  const match = line.match(FENCE_OPENING);
+  if (!match) return null;
+  const indent = /[-+*]/.test(match[1]) ? match[1].length : 0;
+  return { indent, closer: new RegExp(`^ {0,3}${match[2]}[~\`]* *$`) };
 }
 
 function interruptsLazyContinuation(line: string): boolean {
@@ -173,16 +207,21 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
     // The first change: the stock tokenizer used
     // `indentLevel + marker.length + 1`, one column short.
     const contentIndent = orderedItemContentIndent(line)!;
+    // The fourth change: a fence open in the item's content.
+    let fence = openFence(content);
     while (nextLineIndex < lines.length) {
       const nextLine = lines[nextLineIndex];
-      if (nextLine.match(ORDERED_LIST_ITEM_REGEX)) break;
+      const leadingWhitespace = nextLine.length - nextLine.trimStart().length;
+      const inFence =
+        fence !== null && nextLine.trim() !== "" && leadingWhitespace >= contentIndent + fence.indent;
+      if (!inFence && nextLine.match(ORDERED_LIST_ITEM_REGEX)) break;
       if (nextLine.trim() === "") {
         itemLines.push(nextLine);
         itemContentLines.push("");
         sawBlankLine = true;
         nextLineIndex += 1;
+        continue;
       } else if (nextLine.match(INDENTED_LINE_REGEX)) {
-        const leadingWhitespace = nextLine.length - nextLine.trimStart().length;
         itemLines.push(nextLine);
         itemContentLines.push(nextLine.slice(Math.min(leadingWhitespace, contentIndent)));
         nextLineIndex += 1;
@@ -191,6 +230,13 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
         itemLines.push(nextLine);
         itemContentLines.push(nextLine);
         nextLineIndex += 1;
+      }
+      // A line left of the fence's content ends its container, and the fence.
+      const text = itemContentLines[itemContentLines.length - 1];
+      if (fence && inFence) {
+        if (fence.closer.test(text.slice(fence.indent))) fence = null;
+      } else {
+        fence = openFence(text);
       }
     }
     listItems.push({

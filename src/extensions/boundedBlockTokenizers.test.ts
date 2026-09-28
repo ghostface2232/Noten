@@ -94,6 +94,9 @@ function mulberry32(seed: number): () => number {
 const LINES = [
   "- [ ] task", "- [x] done", "* [X] star task", "+ [ ] plus task", "  - [ ] nested task", "    - [x] deep task",
   " - [x] one-space task", "   - [ ] three-space task", "-  [ ] wide task", " one-space text", " # indented heading",
+  // Fences in ordered items, and marker-shaped lines inside them.
+  "1. ```", "2. ~~~js", "   ```", "   ````", "   ~~~", "   2. in code", "   b) in code", "      3. deeper in code",
+  " 2. shallow in code", "2. in code at column 0", "   - ```", "     2. in bullet code", "     ```",
   "\t- [ ] tab task", "- [] not a task", "-[ ] no space", "- plain bullet", "  - nested bullet", "* star bullet",
   "1. one", "2) two", "10. ten", "  1. nested one", "a. alpha", "B) beta", "iv. roman", "xii) roman2",
   "ab. two letters", "abc. three letters", "1.no space", "Mr. Smith said", "I) interrupt", "(216) 555-1234",
@@ -142,6 +145,10 @@ describe.each(Object.keys(EXTENSION_SETS))("bounded block tokenizers (%s)", (set
       "- [ ] a\r\n- [x] b\r\n\r\ntext\r\n",
       "- [ ] a\n x\n - [x] b\n\n after\ntext",
       "- [ ] a\n # heading\n- [ ] b",
+      "1. n\n\n   ```\n   2. x\n   ```\n2. m\n\ntext",
+      "1. ```\n   2. x\n\n   3. y\n   ```\nlazy\n\ntext",
+      "1. n\n   ~~~\n2. x\n   ~~~\n# heading",
+      "1. n\n   ````\n   ```\n   2. x\n   ````\n\ntext",
       "-  [ ] a\n  - [ ] b\n\n   c\nd",
       "1. one\r\n\r\ntext\r\n",
       "- [ ] a\n \ntext",

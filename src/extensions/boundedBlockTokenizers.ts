@@ -136,6 +136,13 @@ const LAZY_INTERRUPTERS = [
 // the inner loop's lazy-continuation branch breaks there and the outer loop
 // rejects the line. The truncated input stops at the same index by
 // exhaustion, and `raw` is `lines.slice(0, consumed)`, identical in both.
+// Noten's transcription (orderedListTokenizer.ts) keeps both stops. Its fence
+// tracking holds only lines indented to an item's content column, so a
+// column-0 line always takes the branches above; the blank line before (a)
+// still sets the current item's `sawBlankLine`. A fence only turns indented
+// marker-shaped lines from items into code, which moves where items begin
+// and can end the list earlier (a lazy line after a closed fence in an item
+// that saw a blank line), never later.
 // Copied verbatim from @tiptap/extension-list's ORDERED_LIST_ITEM_REGEX, for the
 // first line, where an exact verdict lets non-items like "Fig. 1" end the
 // input at once instead of scanning on to the next cut.

@@ -158,6 +158,54 @@ describe("block content under an ordered item", () => {
     expect(save("1. 2. x")).toBe("1. 2. x");
   });
 
+  // A code line shaped like a marker started a new item: the code block was
+  // emptied, the line became a nested item, and the closing fence a second
+  // empty code block.
+  it.each([
+    ["1. n\n\n   ```\n   2. x\n   ```\n2. m", ["2. x"], 2],
+    ["1. ```\n   2. x\n   ```\n2. m", ["2. x"], 2],
+    ["1. n\n   ~~~\n   2) x\n   ~~~\n2. m", ["2) x"], 2],
+    ["1. n\n   ```js\n   2. x\n\n   3. y\n   ```\n2. m", ["2. x\n\n3. y"], 2],
+    ["a. n\n   ```\n   b. x\n   ```\nb. m", ["b. x"], 2],
+    ["10. n\n    ```\n    11. x\n     12. y\n    ```", ["11. x\n 12. y"], 1],
+    ["> 1. n\n>    ```\n>    2. x\n>    ```", ["2. x"], 1],
+    // In a bullet nested in the item, where the fence's lines sit deeper.
+    ["1. n\n   - ```\n     2. x\n     ```\n2. m", ["2. x"], 2],
+    ["1. - ```\n     2. x\n\n     3. y\n     ```\n2. m", ["2. x\n\n3. y"], 2],
+    ["1. n\n   - - ~~~\n       2. x\n       ~~~", ["2. x"], 1],
+  ] as const)("keeps the marker-shaped code lines of %j in the code", (markdown, code, items) => {
+    const doc = createEditor(markdown).getJSON();
+    const blocks = nodesOf(doc, "codeBlock").map((node) => (node.content ?? []).map((child) => child.text ?? "").join(""));
+    expect(blocks).toEqual(code);
+    expect(nodesOf(doc, "orderedList")).toHaveLength(1);
+    // The outer list's own items; nested bullets have theirs.
+    expect(nodesOf(doc, "orderedList")[0].content).toHaveLength(items);
+    const first = save(markdown);
+    expect(save(first)).toBe(first);
+  });
+
+  // Only as long as a closing fence of the same kind: the ``` line is code.
+  // (Saving it back needs a fence longer than that line, which is the code
+  // block renderer's job, not the tokenizer's.)
+  it("keeps a shorter fence line inside a longer fence as code", () => {
+    const doc = createEditor("1. n\n   ````\n   ```\n   2. x\n   ````").getJSON();
+    const blocks = nodesOf(doc, "codeBlock").map((node) => (node.content ?? []).map((child) => child.text ?? "").join(""));
+    expect(blocks).toEqual(["```\n2. x"]);
+    expect(nodesOf(doc, "listItem")).toHaveLength(1);
+  });
+
+  // After the fence closes, a marker line is an item again (nested here).
+  // The fence holds only lines at its content column: a fence cannot
+  // be continued lazily, so a line left of it ends the item there.
+  it.each([
+    ["1. n\n\n   ```\n2. x\n   ```", 2],
+    ["1. n\n   ```\n   2. x\n   ```\n   3. y", 2],
+    ["1. n\n   - ```\n   2. x", 2],
+  ] as const)("still reads the items outside the fence of %j", (markdown, items) => {
+    const ordered = nodesOf(createEditor(markdown).getJSON(), "orderedList").flatMap((list) => list.content ?? []);
+    expect(ordered).toHaveLength(items);
+  });
+
   it("reads the content column the way CommonMark does", () => {
     expect(orderedItemContentIndent("1. x")).toBe(3);
     expect(orderedItemContentIndent("10. x")).toBe(4);
@@ -177,11 +225,12 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
   };
   const helpers = () => manager.createTokenizerHelpers(manager.createLexer());
 
-  // Only the dedent of indented continuation lines and the reading of a block
-  // on a marker line differ, so the lines a list takes (`raw`, which
-  // boundedBlockTokenizers.ts's cut rules are argued against) always match,
-  // and so does the whole token when no line under an item is indented
-  // content and no marker line holds a block.
+  // Without a fence, only the dedent of indented continuation lines and the
+  // reading of a block on a marker line differ, so the lines a list takes
+  // (`raw`) match, and so does the whole token when no line under an item is
+  // indented content and no marker line holds a block. A fence changes which
+  // lines are items, and with them the lines taken; the bounding is checked
+  // on fenced input in boundedBlockTokenizers.test.ts instead.
   it("consumes the same lines, and matches exactly without indented content (seeded fuzz)", () => {
     let seed = 11;
     const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
@@ -194,8 +243,11 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
     ];
     const blockOnMarkerLine = /^\s*[0-9A-Za-z]+[.)]\s+(?:[-+*]\s|#|>|```)/;
     let compared = 0;
+    let sameLines = 0;
     for (let n = 0; n < 1500; n++) {
       const src = Array.from({ length: 1 + Math.floor(random() * 8) }, () => pick(lines)).join("\n");
+      if (/```|~~~/.test(src)) continue;
+      sameLines++;
       const expected = stock(src, [], helpers() as never) as { raw?: string } | undefined;
       const actual = tokenizeOrderedList(src, [], helpers());
       expect(actual?.raw, JSON.stringify(src)).toBe(expected?.raw);
@@ -211,6 +263,7 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
         compared++;
       }
     }
+    expect(sameLines).toBeGreaterThan(700);
     expect(compared).toBeGreaterThan(300);
   });
 });
