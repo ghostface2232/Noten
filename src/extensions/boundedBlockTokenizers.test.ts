@@ -194,6 +194,11 @@ describe.each(Object.keys(EXTENSION_SETS))("bounded block tokenizers (%s)", (set
     expect(__test.boundTaskList(`- [ ] a\n- bullet${tail}`)).toBe("- [ ] a");
     expect(__test.boundOrderedList(`1. a\n# heading${tail}`)).toBe("1. a");
     expect(__test.boundOrderedList(`1. a\n> quote${tail}`)).toBe("1. a");
+    // A fence the item closed no longer holds a quote line.
+    expect(__test.boundOrderedList("1. ```\n   ```\n> q\np\n".repeat(1000))).toBe("1. ```\n   ```");
+    // A list longer than the first window, which then doubles.
+    const long = Array.from({ length: 100 }, (_, i) => `${i + 1}. item`).join("\n");
+    expect(__test.boundOrderedList(`${long}\n# heading${tail}`)).toBe(long);
     expect(__test.boundTable(`a | b\nnot a separator${tail}`)).toBe("a | b\nnot a separator");
     expect(__test.boundTaskList(`- [ ] a\n- [ ] b${tail}`)).toBe("- [ ] a\n- [ ] b");
     expect(__test.boundOrderedList(`plain paragraph${tail}`)).toBe("plain paragraph");
@@ -216,11 +221,15 @@ describe.each(Object.keys(EXTENSION_SETS))("bounded block tokenizers (%s)", (set
       // Items to the stock pattern, text to Noten's tokenizer.
       unreadableMarkers: "Dr. Smith said hello.\n\nMr. Jones replied.\n\n".repeat(10000),
       listThenUnreadable: "1. item\n\nDr. Smith said hello.\n\n".repeat(10000),
+      // A quote after a fence the item closed ends the list.
+      closedFenceThenQuote: "1. ```\n   ```\n> q\np\n".repeat(8000),
     };
     for (const [name, md] of Object.entries(shapes)) {
       const started = performance.now();
       bounded.markdown!.parse(md);
       expect(performance.now() - started, name).toBeLessThan(5000);
     }
-  });
+    // Each shape has its own limit; together they passed the 5 s test default
+    // on CI.
+  }, 60_000);
 });

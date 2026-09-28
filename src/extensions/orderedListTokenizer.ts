@@ -174,7 +174,7 @@ function openFence(line: string): OpenFence | null {
  * that quote. Ending the item there emptied the fence, and its indented
  * closer opened a fence that held the rest of the note on every save.
  */
-export function interruptsLazyContinuation(line: string, holdsQuoteLine = false): boolean {
+function interruptsLazyContinuation(line: string, holdsQuoteLine: boolean): boolean {
   return (
     (!holdsQuoteLine && line.startsWith(">")) || Object.values(PARAGRAPH_INTERRUPTERS).some((pattern) => pattern.test(line))
   );
@@ -249,6 +249,16 @@ function dedentBlock(lines: string[]): string {
     .map((line) => (line.trim() === "" ? "" : line.slice(shared)))
     .join("\n")
     .trimEnd();
+}
+
+/**
+ * How many of `lines` the list starting at the first takes. Each step of the
+ * walk reads only the line it is on and the lines before it, so a walk that
+ * stops before the last of `lines` stops at the same line on any longer
+ * input; boundedBlockTokenizers.ts relies on that.
+ */
+export function orderedListLineCount(lines: string[]): number {
+  return collectOrderedListItems(lines)[1];
 }
 
 function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
