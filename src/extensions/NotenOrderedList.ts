@@ -192,9 +192,8 @@ function alphaValue(marker: string): number {
   return lower.length === 1 ? value(0) : value(0) * 26 + value(1);
 }
 
-// As Tiptap reads the marker: three or more roman letters that are not a
-// numeral (`iiii`, `mid`, `Civil`) read as a numbered item, so they must not
-// split a numbered list, or the save would read back as a different list.
+// As Tiptap reads the marker. The tokenizer only takes markers detectMarkerType
+// can read (orderedListTokenizer.ts), so `undefined` here is a number.
 function markerKind(marker: string): "number" | "lower" | "upper" {
   const type = detectMarkerType(marker);
   if (type === undefined) return "number";

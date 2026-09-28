@@ -16,6 +16,13 @@
 // comments on each cut rule; `boundedBlockTokenizers.test.ts` fuzzes token-tree
 // equivalence against the unwrapped tokenizers. When a Tiptap upgrade changes
 // one of these tokenizers, re-check its cut rule against the new source.
+//
+// A wrapper is chosen by the tokenizer's name. The `orderedList` rule is
+// argued against Noten's transcription (orderedListTokenizer.ts), which
+// `NotenStarterKit` registers under the stock name; with the stock tokenizer
+// it can stop short, since that one also takes lines like "Dr. Smith".
+
+import { isOrderedItemLine } from "./orderedListTokenizer";
 
 type BlockTokenizer = (this: unknown, src: string, tokens: unknown[]) => unknown;
 type StartFn = (this: unknown, src: string) => number | void;
@@ -126,8 +133,8 @@ const LAZY_INTERRUPTERS = [
 
 // orderedList → `collectOrderedListItems(src.split("\n"))`.
 //
-// A first line that cannot be an item yields no list, so one line suffices.
-// Afterwards, a non-blank line at column 0 that cannot be an item ends the list
+// A first line that is not an item yields no list, so one line suffices.
+// Afterwards, a non-blank line at column 0 that is not an item ends the list
 // without being consumed when either
 //  (a) it directly follows a blank line, which was consumed into the current
 //      item and set its `sawBlankLine`; or
@@ -143,16 +150,16 @@ const LAZY_INTERRUPTERS = [
 // marker-shaped lines from items into code, which moves where items begin
 // and can end the list earlier (a lazy line after a closed fence in an item
 // that saw a blank line), never later.
-// Copied verbatim from @tiptap/extension-list's ORDERED_LIST_ITEM_REGEX, for the
-// first line, where an exact verdict lets non-items like "Fig. 1" end the
-// input at once instead of scanning on to the next cut.
-const ORDERED_ITEM = /^(\s*)(\d+|[ivxlcdmIVXLCDM]+|[a-zA-Z]{1,2})([.)])\s+(.*)$/;
-
+// The item test must be the transcription's own, exact (`isOrderedItemLine`):
+// the stock pattern also accepts "Dr. Smith", which it reads as text, so such
+// a first line did not end the input at once and such a line after a blank
+// line was no cut. Each paragraph in a run of them then handed the tokenizer
+// the rest of the run, quadratic in its length.
 function boundOrderedList(src: string): string {
   return boundLines(src, (line, index, previousBlank) => {
     if (index === 0) return false;
-    if (index === 1 && !ORDERED_ITEM.test(src.slice(0, src.indexOf("\n")))) return true;
-    if (BLANK.test(line) || STARTS_WITH_SPACE.test(line) || MAYBE_ORDERED_ITEM.test(line)) return false;
+    if (index === 1 && !isOrderedItemLine(src.slice(0, src.indexOf("\n")))) return true;
+    if (BLANK.test(line) || STARTS_WITH_SPACE.test(line) || isOrderedItemLine(line)) return false;
     return previousBlank || LAZY_INTERRUPTERS.some((pattern) => pattern.test(line));
   });
 }

@@ -1,6 +1,7 @@
 // @tiptap/extension-list's orderedList Markdown tokenizer, transcribed with
-// two changes to how an item's block content is dedented and one to how its
-// first line is read.
+// two changes to how an item's block content is dedented, one to how its
+// first line is read, and one to which markers start an item (see
+// matchOrderedItem).
 //
 // The stock `collectOrderedListItems` strips `indent + marker.length + 1`
 // columns from each line under an item, one short of its content column
@@ -42,10 +43,11 @@
 // that lexer, which gets every content line dedented to the column.
 // Last, `buildNestedStructure` dropped items less indented than their group's
 // first; see its comment.
-// Without a fence, the lines an item takes are unchanged, and a list with no
-// indented continuation lines, no block on a marker line and no item left of
-// its group's first tokenizes exactly as before; `orderedListTokenizer.test.ts`
-// compares both with the stock one.
+// Without a fence, the lines an item takes are unchanged except at a marker
+// detectMarkerType cannot read, and a list with no indented continuation
+// lines, no block on a marker line and no item left of its group's first
+// tokenizes exactly as before; `orderedListTokenizer.test.ts` compares both
+// with the stock one.
 // With one, a column-0 line still meets the same branch as before, which is
 // what the cut rule in boundedBlockTokenizers.ts relies on.
 // Re-transcribe on an @tiptap/extension-list upgrade, or drop this file if
@@ -77,8 +79,24 @@ const PARAGRAPH_INTERRUPTERS = {
   thematicBreak: /^(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$/,
 };
 
+// The sixth change: a marker must be one detectMarkerType can read. The
+// stock pattern takes any run of roman letters (`Vim`, `IIII`, `Civil`) and
+// any one or two letters (`Dr`, `Mr`, `St`) as a marker, detectMarkerType
+// reads those that are not a numeral or a single-case letter pair as nothing,
+// and the item then counts as number 1 without its marker: `Dr. Smith said`
+// was saved as `1. Smith said`. Such a line is text, as it is in CommonMark.
+function matchOrderedItem(line: string): RegExpMatchArray | null {
+  const match = line.match(ORDERED_LIST_ITEM_REGEX);
+  return match && (/^\d+$/.test(match[2]) || detectMarkerType(match[2]) !== undefined) ? match : null;
+}
+
+/** Whether `line` starts an ordered list item. */
+export function isOrderedItemLine(line: string): boolean {
+  return matchOrderedItem(line) !== null;
+}
+
 function isOrderedListMarkerLine(line: string): boolean {
-  return ORDERED_LIST_ITEM_REGEX.test(line.trimStart());
+  return isOrderedItemLine(line.trimStart());
 }
 
 function isBlockContentLine(line: string): boolean {
@@ -172,7 +190,7 @@ function splitItemContent(contentLines: string[]): { paragraphLines: string[]; b
  * count as 1, and an item whose first line is blank takes 1).
  */
 export function orderedItemContentIndent(line: string): number | null {
-  const match = line.match(ORDERED_LIST_ITEM_REGEX);
+  const match = matchOrderedItem(line);
   if (!match) return null;
   const [, indent, marker, , content] = match;
   const spaces = line.length - content.length - indent.length - marker.length - 1;
@@ -206,7 +224,7 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
   let consumed = 0;
   while (currentLineIndex < lines.length) {
     const line = lines[currentLineIndex];
-    const match = line.match(ORDERED_LIST_ITEM_REGEX);
+    const match = matchOrderedItem(line);
     if (!match) break;
     const [, indent, marker, , content] = match;
     const indentLevel = indent.length;
@@ -232,7 +250,7 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
         fence !== null &&
         nextLine.trim() !== "" &&
         columnWidth(nextLine.slice(0, leadingWhitespace)) >= contentIndent + fence.indent;
-      if (!inFence && nextLine.match(ORDERED_LIST_ITEM_REGEX)) break;
+      if (!inFence && isOrderedItemLine(nextLine)) break;
       if (nextLine.trim() === "") {
         itemLines.push(nextLine);
         itemContentLines.push("");
