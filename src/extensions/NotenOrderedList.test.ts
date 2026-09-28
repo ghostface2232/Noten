@@ -283,7 +283,34 @@ describe("letter lists past zz", () => {
     expect(markdownOf(createEditor(markdownOf(reloaded)))).toBe(markdownOf(reloaded));
   });
 
+  // `<ol type="A" start="-2">` pasted as HTML (parsed here as insertContent
+  // does) made saving throw, and `type="a" start="-1"` wrote `undefined. x`,
+  // which reads back as a paragraph.
+  it.each([
+    ['<ol type="A" start="-2"><li><p>x</p></li><li><p>y</p></li></ol>', "A. x\nB. y"],
+    ['<ol type="a" start="-1"><li><p>x</p></li></ol>', "a. x"],
+    ['<ol start="-3"><li><p>x</p></li></ol>', "1. x"],
+  ])("keeps a list pasted as %s with a negative start", (html, markdown) => {
+    const editor = createEditor("");
+    editor.commands.insertContent(html);
+    expect(() => markdownOf(editor)).not.toThrow();
+    expect(markdownOf(editor)).toBe(markdown);
+    expect(nodesOf(createEditor(markdownOf(editor)).getJSON(), "orderedList")).toHaveLength(1);
+  });
+
+  it("starts a list below 1 at 1 when restyled to letters", () => {
+    const item = (text: string) => ({ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+    const editor = createEditor({ type: "doc", content: [{ type: "orderedList", attrs: { start: -2 }, content: [item("x"), item("y")] }] });
+    caretAt(editor, "x");
+    editor.commands.setOrderedListStyle("a");
+    expect(editor.getJSON().content?.[0].attrs?.start).toBe(1);
+    expect(markdownOf(editor)).toBe("a. x\nb. y");
+  });
+
   it("marks the positions each style can spell", () => {
+    expect(listItemMarker("A", -3)).toBe("0. ");
+    expect(listItemMarker("i", -1)).toBe("0. ");
+    expect(listItemMarker(null, -1)).toBe("0. ");
     expect(listItemMarker("a", 701)).toBe("zz. ");
     expect(listItemMarker("A", 702)).toBe("703. ");
     expect(listItemMarker("i", 999)).toBe("m. ");

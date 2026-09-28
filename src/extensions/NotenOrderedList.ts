@@ -263,6 +263,10 @@ const MAX_LETTER_POSITION = 26 * 27;
  */
 export function listItemMarker(type: unknown, index: number): string {
   const position = index + 1;
+  // Below 1 no letter or roman marker exists (Tiptap threw on `A` and wrote
+  // `undefined.` or `.`), and a negative number is no marker either: all
+  // read back as plain paragraphs. `0.` is the lowest marker Markdown has.
+  if (position < 1) return `${Math.max(position, 0)}. `;
   if ((type === "a" || type === "A") && position > MAX_LETTER_POSITION) return `${position}. `;
   return getListMarker(type as string | undefined, index, ". ");
 }
@@ -284,6 +288,22 @@ export const NotenListItem = ListItem.extend({
 });
 
 export const NotenOrderedList = OrderedList.extend({
+  addAttributes() {
+    const attributes = (this.parent?.() ?? {}) as Record<string, object>;
+    return {
+      ...attributes,
+      // Pasted HTML can carry any `start`, and one below 1 broke the list on
+      // save; Tiptap already reads and writes 0 as 1 (`start || 1`).
+      start: {
+        ...attributes.start,
+        parseHTML: (element: HTMLElement) => {
+          const start = parseInt(element.getAttribute("start") ?? "", 10);
+          return Number.isNaN(start) ? 1 : Math.max(start, 1);
+        },
+      },
+    };
+  },
+
   renderHTML({ node, HTMLAttributes }) {
     const rendered = this.parent?.({ node, HTMLAttributes }) as ["ol", Record<string, unknown>, 0];
     const style = LIST_STYLE_TYPE[HTMLAttributes.type as keyof typeof LIST_STYLE_TYPE];
@@ -362,7 +382,10 @@ export const NotenOrderedList = OrderedList.extend({
           }
           if (!dispatch) return true;
           if (list.node.type === this.type) {
-            tr.setNodeMarkup(list.pos, undefined, { ...list.node.attrs, type });
+            // Letters and roman numerals start at 1; a `0.` list restyled keeps
+            // its items' order from there.
+            const start = type && (list.node.attrs.start as number) < 1 ? 1 : list.node.attrs.start;
+            tr.setNodeMarkup(list.pos, undefined, { ...list.node.attrs, type, start });
             return true;
           }
           // A bullet or task list becomes an ordered list in place. Tiptap's
