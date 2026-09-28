@@ -223,16 +223,13 @@ export const NotenOrderedList = OrderedList.extend({
     starts.forEach((start, index) => {
       const end = starts[index + 1] ?? items.length;
       const first = markers[start];
-      // The token's own start and style describe its first item only.
-      const segment =
-        index === 0
-          ? { ...token, items: items.slice(start, end) }
-          : {
-              ...token,
-              items: items.slice(start, end),
-              start: first ? markerToStart(first) : 1,
-              typeMarker: first ? detectMarkerType(first) : undefined,
-            };
+      // Each segment's start and style come from its own first marker. The
+      // token's describe its first raw item, which for a nested list the stock
+      // reading may have dropped (an item indented deeper than its siblings),
+      // so the first segment could take a style its markers do not have.
+      const segment = first
+        ? { ...token, items: items.slice(start, end), start: markerToStart(first), typeMarker: detectMarkerType(first) }
+        : { ...token, items: items.slice(start, end), ...(index === 0 ? {} : { start: 1, typeMarker: undefined }) };
       const parsed = stock.call(this, segment as typeof token, helpers);
       for (const list of Array.isArray(parsed) ? parsed : [parsed]) {
         if (list) lists.push(disambiguate(list, markers.slice(start, end)));

@@ -187,7 +187,16 @@ describe("NotenOrderedList Markdown", () => {
     expect(listSegmentStarts(["1", "IIII", "mid", "Civil", "2"])).toEqual([0]);
   });
 
-  it.each(["1. x\nIIII. y", "1. x\nmid. y", "iiii. x\n1. y", "Civil. a\n1) b"])(
+  it.each([
+    "1. x\nIIII. y",
+    "1. x\nmid. y",
+    "iiii. x\n1. y",
+    "Civil. a\n1) b",
+    // The stock reading drops `x. deep` (indented past its siblings) but kept
+    // its style on the nested token, so the first segment became roman.
+    "1. top\n      x. deep\n   1. y\n   a. z",
+    "ab. item 1\n      iiii) item 2\n  A) item 3\n  3) item 4",
+  ])(
     "saves %j the same on every reload",
     (markdown) => {
       const first = markdownOf(createEditor(markdown));
