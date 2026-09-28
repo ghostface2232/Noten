@@ -29,20 +29,23 @@
 // starts the item's block content, as marked reads a bullet item's first
 // line. An ordered marker there stays text, as Tiptap keeps `- 1. a` for a
 // bullet item.
-// Last, the stock loop took every line shaped like an ordered marker as a new
+// The stock loop also took every line shaped like an ordered marker as a new
 // item, inside a fenced code block too: under `1. n`, a fence holding the line
 // `   2. x` lost that line to a nested item, and its closing fence opened a
 // second, empty code block. A fence opened in the item's own content
-// (0-3 columns past its content column, the marker line included, by marked's
-// `fences` rule) now holds every line indented to the content column until
-// its closing fence, so such a line is code; a fence after bullet markers, in
-// a bullet nested in the item, holds the lines at that bullet's column. A
-// marker-shaped line left of the column is still a new item, as CommonMark
-// reads it; where the fence closes follows marked, which gets every content
-// line dedented to the column.
+// (0-3 columns past its content column, the marker line included, by the
+// `fences` rule of the lexer createFastMarked builds) now holds every line
+// indented to the content column until its closing fence, so such a line is
+// code; a fence after bullet markers, in a bullet nested in the item, holds
+// the lines at that bullet's column. A marker-shaped line left of the column
+// is still a new item, as CommonMark reads it; where the fence closes follows
+// that lexer, which gets every content line dedented to the column.
+// Last, `buildNestedStructure` dropped items less indented than their group's
+// first; see its comment.
 // Without a fence, the lines an item takes are unchanged, and a list with no
-// indented continuation lines and no block on a marker line tokenizes exactly
-// as before; `orderedListTokenizer.test.ts` compares both with the stock one.
+// indented continuation lines, no block on a marker line and no item left of
+// its group's first tokenizes exactly as before; `orderedListTokenizer.test.ts`
+// compares both with the stock one.
 // With one, a column-0 line still meets the same branch as before, which is
 // what the cut rule in boundedBlockTokenizers.ts relies on.
 // Re-transcribe on an @tiptap/extension-list upgrade, or drop this file if
@@ -279,7 +282,11 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
 // `      2. b` / `   3. c` under `1. a`) was consumed, since its line is in
 // the token's `raw`, but never parsed: it vanished on the first save. Here a
 // group's base is its first item's indent and an item at or left of it is a
-// sibling, as CommonMark reads a later item indented 0-3 spaces.
+// sibling. At the top level that is CommonMark's reading of a later item
+// indented 0-3 spaces. A nested item keeps the stock rule, deeper than its
+// group's base nests, where CommonMark goes by the parent's content column:
+// under `1. a` / `   2. b` / `      3. c`, `    4. d` is a sibling of `c` here
+// and of `b` in CommonMark. Every item is kept either way.
 function buildNestedStructure(items: ListItemLine[], baseIndent: number, lexer: BlockLexer): unknown[] {
   const result: unknown[] = [];
   let currentIndex = 0;

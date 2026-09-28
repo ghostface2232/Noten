@@ -317,10 +317,11 @@ export const NotenOrderedList = OrderedList.extend({
     starts.forEach((start, index) => {
       const end = starts[index + 1] ?? items.length;
       const first = markers[start];
-      // Each segment's start and style come from its own first marker. The
-      // token's describe its first raw item, which for a nested list the stock
-      // reading may have dropped (an item indented deeper than its siblings),
-      // so the first segment could take a style its markers do not have.
+      // Each segment's start and style come from its own first marker rather
+      // than the token's, which describe the first raw item of the whole run;
+      // the stock reading also dropped a nested list's first item when it was
+      // indented deeper than its siblings (orderedListTokenizer.ts keeps it
+      // now), leaving the token's style on markers that did not have it.
       const segment = first
         ? { ...token, items: items.slice(start, end), start: markerToStart(first), typeMarker: detectMarkerType(first) }
         : { ...token, items: items.slice(start, end), ...(index === 0 ? {} : { start: 1, typeMarker: undefined }) };
