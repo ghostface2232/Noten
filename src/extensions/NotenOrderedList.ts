@@ -3,6 +3,7 @@ import { OrderedList, detectMarkerType, markerToStart, toRoman } from "@tiptap/e
 import type { Node as ProseMirrorNode, NodeType } from "@tiptap/pm/model";
 import type { Selection, Transaction } from "@tiptap/pm/state";
 import { StepMap, canJoin } from "@tiptap/pm/transform";
+import { tokenizeOrderedList } from "./orderedListTokenizer";
 
 /**
  * The marker styles an ordered list can carry, as HTML `<ol type>` values.
@@ -197,6 +198,14 @@ export const NotenOrderedList = OrderedList.extend({
     const rendered = this.parent?.({ node, HTMLAttributes }) as ["ol", Record<string, unknown>, 0];
     const style = LIST_STYLE_TYPE[HTMLAttributes.type as keyof typeof LIST_STYLE_TYPE];
     return style ? ["ol", { ...rendered[1], "data-list-style": style }, 0] : rendered;
+  },
+
+  // Stock except for the column continuation lines are dedented to; see
+  // orderedListTokenizer.ts. Keeps the stock name, so boundedBlockTokenizers.ts
+  // still bounds it and fastMarkdownLexer.ts's blockquote fallback finds it.
+  markdownTokenizer: {
+    ...OrderedList.config.markdownTokenizer!,
+    tokenize: tokenizeOrderedList as NonNullable<typeof OrderedList.config.markdownTokenizer>["tokenize"],
   },
 
   parseMarkdown(token, helpers) {
