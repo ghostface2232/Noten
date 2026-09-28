@@ -221,8 +221,9 @@ function alphaMarker(position: number): string {
  * It starts a new list instead, which is how a lone `PS. x` already reads, so
  * it keeps its spelling. In a letter list begun by such a marker, a letter
  * that is not the next one starts a new list too, or `E.` after `PS.` would
- * be renumbered from it (`PT.`). A skipped single letter in a letter list
- * (`f.` after `a.` `b.`), like a skipped number, still continues the list.
+ * be renumbered from it (`PT.`). A skipped single letter that is not a
+ * numeral (`f.` after `a.` `b.`, where `d.` splits), like a skipped number,
+ * still continues the list.
  */
 export function listSegmentStarts(markers: readonly (string | null)[]): number[] {
   const starts = [0];

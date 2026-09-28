@@ -285,10 +285,14 @@ describe("NotenOrderedList Markdown", () => {
     },
   );
 
-  // Every list Noten writes must read back as the lists it wrote.
+  // A list Noten writes, a paragraph apart from the next, must read back as
+  // the same lists with the same items and Markdown. A lone item at a marker
+  // that reads both ways (`cc.`, `v.`) may come back in the other style; its
+  // Markdown is the same.
   it("reads back every ordered list it saves (seeded fuzz)", () => {
     let seed = 13;
-    const random = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    // Math.imul keeps the product exact; a plain product passes 2^53.
+    const random = () => (seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296;
     const pick = <T,>(values: readonly T[]) => values[Math.floor(random() * values.length)];
     const starts = [1, 2, 9, 26, 27, 28, 81, 87, 200, 334, 350, 400, 500, 690];
     const list = (depth: number): JSONContent => {
