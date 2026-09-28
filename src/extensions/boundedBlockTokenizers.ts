@@ -20,7 +20,8 @@
 // A wrapper is chosen by the tokenizer's name. The `orderedList` rule is
 // argued against Noten's transcription (orderedListTokenizer.ts), which
 // `NotenStarterKit` registers under the stock name; with the stock tokenizer
-// it can stop short, since that one also takes lines like "Dr. Smith".
+// it can stop short, since that one also takes lines like "Dr. Smith" and
+// reads on through an unindented quote line.
 
 import { interruptsLazyContinuation, isOrderedItemLine } from "./orderedListTokenizer";
 
@@ -147,12 +148,24 @@ export const MAYBE_ORDERED_ITEM = /^\s*[0-9A-Za-z]+[.)]\s/;
 // a first line did not end the input at once and such a line after a blank
 // line was no cut. Each paragraph in a run of them then handed the tokenizer
 // the rest of the run, quadratic in its length.
+// A quote line interrupts only where the item does not hold it: outside a
+// fence open in the item, and not right after a quote line of the item. This
+// bound tracks neither, so a quote line is no cut (b) once any line so far
+// could open a fence, or right after a line holding `>` anywhere (a quote on
+// a marker line included); either only makes the prefix longer.
+const MAYBE_FENCE = /```|~~~/;
+
 function boundOrderedList(src: string): string {
+  let fenceSeen = false;
+  let previousQuote = false;
   return boundLines(src, (line, index, previousBlank) => {
+    const holdsQuoteLine = fenceSeen || previousQuote;
+    fenceSeen ||= MAYBE_FENCE.test(line);
+    previousQuote = line.includes(">");
     if (index === 0) return false;
     if (index === 1 && !isOrderedItemLine(src.slice(0, src.indexOf("\n")))) return true;
     if (BLANK.test(line) || STARTS_WITH_SPACE.test(line) || isOrderedItemLine(line)) return false;
-    return previousBlank || interruptsLazyContinuation(line);
+    return previousBlank || interruptsLazyContinuation(line, holdsQuoteLine);
   });
 }
 

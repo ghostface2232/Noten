@@ -103,6 +103,7 @@ const LINES = [
   "1. one", "2) two", "10. ten", "  1. nested one", "a. alpha", "B) beta", "iv. roman", "xii) roman2",
   "ab. two letters", "abc. three letters", "1.no space", "Mr. Smith said", "I) interrupt", "(216) 555-1234",
   "Fig. 1 caption", "Vol. 2", "1a. x", "ABC) x", "Dr. Smith", "Vim. is great", "IIII. four", "  St. nested",
+  ">>> print(1)", "   > ```", "1. > quoted item",
   "paragraph text", "Another line", "lazy continuation", "   indented text", "\tindented tab",
   "", "", "", "   ", "\t", " ", " 　 ",
   "# Heading", "## Sub", "```", "```ts", "~~~", "$$", "$$ x", "> quote", "---", "***",

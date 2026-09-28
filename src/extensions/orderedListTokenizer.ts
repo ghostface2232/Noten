@@ -1,6 +1,7 @@
 // @tiptap/extension-list's orderedList Markdown tokenizer, transcribed with
-// two changes to how an item's block content is dedented, one to how its
-// first line is read, one to which markers start an item (see
+// these changes: two to how an item's block content is dedented, one to how
+// its first line is read, one to how fences in an item are read, one to which
+// items a list keeps, one to which markers start an item (see
 // matchOrderedItem), one to which lines end it (see
 // interruptsLazyContinuation), and a cap on how deep it nests (see
 // buildNestedStructure).
@@ -43,14 +44,15 @@
 // the lines at that bullet's column. A marker-shaped line left of the column
 // is still a new item, as CommonMark reads it; where the fence closes follows
 // that lexer, which gets every content line dedented to the column.
-// Last, `buildNestedStructure` dropped items less indented than their group's
-// first; see its comment.
+// The stock `buildNestedStructure` also dropped items less indented than
+// their group's first; see its comment.
 // Without a fence, the lines an item takes are unchanged except at a marker
-// detectMarkerType cannot read and at an unindented quote line, and on the
-// lines it takes a list with no indented continuation lines, no block on a
-// marker line and no item left of its group's first, nested no deeper than
-// the cap, tokenizes exactly as before; `orderedListTokenizer.test.ts`
-// compares both with the stock one.
+// detectMarkerType cannot read and at an unindented quote line the item does
+// not hold, and on the lines it takes a list with no indented continuation
+// lines, no block on a marker line, no item left of its group's first and no
+// line with a marker detectMarkerType cannot read, nested no deeper than the
+// cap, tokenizes exactly as before; `orderedListTokenizer.test.ts` compares
+// both with the stock one.
 // With one, a column-0 line still meets the same branch as before, which is
 // what the cut rule in boundedBlockTokenizers.ts relies on.
 // Re-transcribe on an @tiptap/extension-list upgrade, or drop this file if
@@ -166,9 +168,16 @@ function openFence(line: string): OpenFence | null {
  * tokenizer (marked's blockquote → createFastMarked's `list` fallback), which
  * took the rest again: `> a. x` / `foo y` repeated nested one quote deeper per
  * repetition, was saved that deep, and overflowed the stack at a few hundred.
+ * Not where the item holds such a line (`holdsQuoteLine`): inside a fence
+ * open in the item it is code the lexer keeps in the fence (`>>> print(1)`, a
+ * `>>>>>>>` conflict marker), and after a quote line of the item it continues
+ * that quote. Ending the item there emptied the fence, and its indented
+ * closer opened a fence that held the rest of the note on every save.
  */
-export function interruptsLazyContinuation(line: string): boolean {
-  return line.startsWith(">") || Object.values(PARAGRAPH_INTERRUPTERS).some((pattern) => pattern.test(line));
+export function interruptsLazyContinuation(line: string, holdsQuoteLine = false): boolean {
+  return (
+    (!holdsQuoteLine && line.startsWith(">")) || Object.values(PARAGRAPH_INTERRUPTERS).some((pattern) => pattern.test(line))
+  );
 }
 
 // The third change: blocks the text after an item's marker can open.
@@ -292,7 +301,9 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
         itemContentLines.push(nextLine.slice(Math.min(leadingWhitespace, contentIndent)));
         nextLineIndex += 1;
       } else {
-        if (sawBlankLine || interruptsLazyContinuation(nextLine)) break;
+        const holdsQuoteLine =
+          fence !== null || itemContentLines[itemContentLines.length - 1].trimStart().startsWith(">");
+        if (sawBlankLine || interruptsLazyContinuation(nextLine, holdsQuoteLine)) break;
         itemLines.push(nextLine);
         itemContentLines.push(nextLine);
         nextLineIndex += 1;

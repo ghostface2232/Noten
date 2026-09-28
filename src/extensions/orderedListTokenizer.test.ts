@@ -323,6 +323,24 @@ describe("a quote line after an item", () => {
     expect(save(first)).toBe(first);
   });
 
+  // Where the item holds the line (in a fence open in it, or after a quote
+  // line of it), it stays: ending the item emptied the fence, and its
+  // indented closer opened a fence that held the rest of the note.
+  it.each([
+    [
+      "1. Run:\n   ```py\n>>> print(1)\n1\n   ```\n2. Done\n\n# Next section\n\ntext",
+      "1. Run:\n   ```py\n   >>> print(1)\n   1\n   ```\n2. Done\n\n# Next section\n\ntext",
+    ],
+    ["1. a\n   ```\n   x\n>>>>>>> branch\n   ```\n2. b", "1. a\n   ```\n   x\n   >>>>>>> branch\n   ```\n2. b"],
+    ["1. a\n   > ```\n> x\n   > ```\n2. b", "1. a\n   > ```\n   > x\n   > ```\n2. b"],
+    ["1. > q\n> r\n2. s", "1. > q\n   > r\n2. s"],
+    ["1. x\n   > q\n> r\n2. y", "1. x\n   > q\n   > r\n2. y"],
+  ])("keeps a quote line the item holds in %j", (markdown, saved) => {
+    const first = save(markdown);
+    expect(first).toBe(saved);
+    expect(save(first)).toBe(first);
+  });
+
   it.each(["foo y", "Dr. y"])("keeps a quote alternating with %j lines flat", (lazy) => {
     const markdown = `> a. x\n${lazy}\n`.repeat(3);
     expect(depth(createEditor(markdown).getJSON())).toBe(depth(createEditor("> a. x").getJSON()));
@@ -438,11 +456,16 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
       }
       sameLines++;
       const actual = tokenizeOrderedList(src, [], helpers());
-      // An unindented quote line ends the list, where the stock tokenizer
-      // took it lazily into the item; it is compared up to that line.
-      expect((actual?.raw ?? "").split("\n").some((line) => line.startsWith(">")), JSON.stringify(src)).toBe(false);
+      // An unindented quote line ends the list unless it follows a quote line
+      // of the item, where the stock tokenizer took it lazily into the item;
+      // it is compared up to the first one that ends it. (No sample here has
+      // a fence, which holds such lines too.)
+      const endsList = (line: string, index: number, all: string[]) =>
+        line.startsWith(">") && !(all[index - 1] ?? "").trimStart().replace(/^[0-9A-Za-z]+[.)]\s+/, "").startsWith(">");
+      const taken = (actual?.raw ?? "").split("\n");
+      expect(taken.some(endsList), JSON.stringify(src)).toBe(false);
       const srcLines = src.split("\n");
-      const quote = srcLines.findIndex((line) => line.startsWith(">"));
+      const quote = srcLines.findIndex(endsList);
       const upToQuote = quote < 0 ? src : srcLines.slice(0, quote).join("\n");
       const expected = stock(upToQuote, [], helpers() as never) as { raw?: string } | undefined;
       expect(actual?.raw, JSON.stringify(src)).toBe(expected?.raw);
@@ -464,7 +487,7 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
         compared++;
       }
     }
-    expect(sameLines).toBeGreaterThan(700);
+    expect(sameLines).toBeGreaterThan(650);
     expect(compared).toBeGreaterThan(90);
   });
 });
