@@ -33,25 +33,32 @@ function itemPrefix(ctx: RenderContext): string {
  * item at its first code line. Such an item's first line stays on the marker
  * line, as CommonMark reads it; paragraph-first items are left to the stock
  * renderer, byte for byte.
+ *
+ * Every child is rendered once. Rendering the first child again beside the
+ * stock renderer's own pass doubled the work at each level of `- - - a`
+ * nesting, 2^depth in all.
  */
 export const renderListItemMarkdown: RenderListItem = function (this: unknown, node, h, ctx) {
-  const stock = ListItem.config.renderMarkdown!;
-  const output = stock.call(this, node, h, ctx);
-  const first = node.content?.[0];
-  if (!first || first.type === "paragraph") return output;
+  const [first, ...children] = Array.isArray(node.content) ? node.content : [];
+  if (!first || first.type === "paragraph") return ListItem.config.renderMarkdown!.call(this, node, h, ctx);
+  // From here on renderNestedMarkdownContent, transcribed, but for the first
+  // child's later lines.
   const prefix = itemPrefix(ctx);
-  const rendered = h.renderChildren([first]);
-  // Anything else means the stock renderer changed shape; keep its output.
-  if (!rendered.includes("\n") || !output.startsWith(prefix + rendered)) return output;
   const configured = h.indent("");
   const width = columnWidth(prefix);
-  // The indent the stock renderer gives the item's later children.
+  // The stock `alignNestedToPrefix` is set for ordered items only.
   const indentLine = (line: string) =>
     ctx?.parentType === "orderedList"
       ? (columnWidth(configured) >= width ? configured : " ".repeat(width)) + line
       : h.indent(line);
-  const [head, ...rest] = rendered.split("\n");
-  return prefix + [head, ...rest.map(indentLine)].join("\n") + output.slice(prefix.length + rendered.length);
+  const [head, ...rest] = h.renderChildren([first]).split("\n");
+  let output = prefix + [head, ...rest.map(indentLine)].join("\n");
+  children.forEach((child, index) => {
+    const rendered = h.renderChild?.(child, index + 1) ?? h.renderChildren([child]);
+    if (rendered === undefined || rendered === null) return;
+    output += (child.type === "paragraph" ? "\n\n" : "\n") + rendered.split("\n").map(indentLine).join("\n");
+  });
+  return output;
 };
 
 export const NotenListItem = ListItem.extend({

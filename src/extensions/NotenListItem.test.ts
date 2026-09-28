@@ -79,6 +79,22 @@ describe("a list item whose first child is not a paragraph", () => {
     );
   });
 
+  // Only the first child's later lines differ from the stock renderer.
+  it("renders the rest of the item as the stock list item does", () => {
+    const noten = createEditor("- # h\n\n  para\n  - x\n1. > q\n\n   ```\n   c\n   ```");
+    const stock = createEditor(noten.getJSON(), StarterKit);
+    expect(noten.getMarkdown()).toBe(stock.getMarkdown());
+  });
+
+  // Rendering the first child twice per level made this 2^depth.
+  it("renders deep nesting in linear time", () => {
+    const markdown = `${"- ".repeat(40)}a`;
+    const editor = createEditor(markdown);
+    const started = performance.now();
+    expect(editor.getMarkdown().trimEnd()).toBe(markdown);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
   it("keeps a task list's checkboxes through two saves", () => {
     const second = save(save("1.\n   - [ ] t1\n   - [x] t2"));
     const tasks = nodesOf(createEditor(second).getJSON(), "taskItem");
