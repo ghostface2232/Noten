@@ -6,7 +6,7 @@ import TaskItem from "@tiptap/extension-task-item";
 import { Markdown } from "@tiptap/markdown";
 import { createFastMarked } from "./fastMarkdownLexer";
 import CodeSpanFence, { NotenStarterKit } from "./CodeSpanFence";
-import { orderedItemContentIndent, tokenizeOrderedList } from "./orderedListTokenizer";
+import { isOrderedItemLine, orderedItemContentIndent, tokenizeOrderedList } from "./orderedListTokenizer";
 
 const editors: Editor[] = [];
 afterAll(() => {
@@ -243,6 +243,8 @@ describe("block content under an ordered item", () => {
     // parent content column, which would make `d` a sibling of `b`; kept all
     // the same.
     ["1. a\n   2. b\n      3. c\n    4. d", "1. a\n   2. b\n      3. c\n      4. d"],
+    // A no-break space indents too, and the item after it keeps its marker.
+    ["\u00a0a. x\n1. y", "a. x\n\n1. y"],
   ])("keeps every item of %j", (markdown, saved) => {
     const first = save(markdown);
     expect(first).toBe(saved);
@@ -257,6 +259,45 @@ describe("block content under an ordered item", () => {
     expect(orderedItemContentIndent("1.      x")).toBe(3);
     expect(orderedItemContentIndent("1.    ")).toBe(3);
     expect(orderedItemContentIndent("not an item")).toBeNull();
+  });
+});
+
+describe("markers detectMarkerType cannot read", () => {
+  // The stock pattern took any run of roman letters and any letter pair as a
+  // marker; one that is neither a numeral nor a single-case pair made the
+  // line item 1 and deleted the word.
+  it.each([
+    ["Vim. is great", "Vim. is great"],
+    ["IIII. four", "IIII. four"],
+    ["Civil. War", "Civil. War"],
+    ["Vim) is great", "Vim) is great"],
+    ["Dr. Smith is here", "Dr. Smith is here"],
+    ["Mr. Brown", "Mr. Brown"],
+    ["No. 5 is best", "No. 5 is best"],
+    ["> Vim. is great", "> Vim. is great"],
+    ["# Head\nVim. y", "# Head\n\nVim. y"],
+    ["1. x\nVim. y", "1. x\nVim. y"],
+    ["1. x\n\nDr. y", "1. x\n\nDr. y"],
+    ["1. x\n2. y\nCivil. z", "1. x\n2. y\nCivil. z"],
+    ["1. x\n   Vim. y", "1. x\nVim. y"],
+    ["a. x\nCivil. y", "a. x\nCivil. y"],
+    ["1. first\n2. second\n\nDr. Smith called.", "1. first\n2. second\n\nDr. Smith called."],
+    ["iiii. x\n1. y", "iiii. x\n\n1. y"],
+  ])("keeps the word in %j", (markdown, saved) => {
+    const first = save(markdown);
+    expect(first).toBe(saved);
+    expect(save(first)).toBe(first);
+  });
+
+  it.each(["1. x", "10) x", "a. x", "ab. x", "IV. x", "xii. x", "MIX. x", "im. x"])("still reads %j as an item", (markdown) => {
+    expect(nodesOf(createEditor(markdown).getJSON(), "orderedList")).toHaveLength(1);
+  });
+
+  it("tells items from text by their marker", () => {
+    expect(isOrderedItemLine("  iv. x")).toBe(true);
+    expect(isOrderedItemLine("Dr. x")).toBe(false);
+    expect(isOrderedItemLine("Vim. x")).toBe(false);
+    expect(orderedItemContentIndent("Civil. x")).toBeNull();
   });
 });
 
@@ -283,7 +324,10 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
       "   1. nested", "   - [ ] task", "   - [x] done", "   - bullet", "   > quote", "   ```", "   code",
       "      deep", "    four", " one space", "lazy text", "", "- bullet", "# heading", "> quote",
       "1. - [ ] first task", "2. > quoted", "3. ```", "   2. - bullet",
+      "Dr. prose", "Vim. prose", "   Mr. indented prose",
     ];
+    // Lines only the stock tokenizer reads as items.
+    const unreadable = /^\s*(Dr|Vim|Mr)\./;
     const blockOnMarkerLine = /^\s*[0-9A-Za-z]+[.)]\s+(?:[-+*]\s|#|>|```)/;
     // Items in the list token and the ordered lists nested in its items.
     const countItems = (token: unknown): number => {
@@ -303,6 +347,15 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
     for (let n = 0; n < 1500; n++) {
       const src = Array.from({ length: 1 + Math.floor(random() * 8) }, () => pick(lines)).join("\n");
       if (/```|~~~/.test(src)) continue;
+      if (src.split("\n").some((line) => unreadable.test(line))) {
+        // Each is text here: no line of the list's `raw` starts an item unless
+        // it is an item of the token.
+        const actual = tokenizeOrderedList(src, [], helpers());
+        const taken = (actual?.raw ?? "").split("\n");
+        const items = taken.filter((line) => !unreadable.test(line) && /^\s*\w+[.)]\s/.test(line));
+        expect(countItems(actual), JSON.stringify(src)).toBe(items.length);
+        continue;
+      }
       sameLines++;
       const expected = stock(src, [], helpers() as never) as { raw?: string } | undefined;
       const actual = tokenizeOrderedList(src, [], helpers());
@@ -314,6 +367,7 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
       const itemLines = rawLines.filter((line) => orderedItemContentIndent(line) !== null).length;
       expect(countItems(actual), JSON.stringify(src)).toBe(itemLines);
       if (
+        expected &&
         countItems(expected) === itemLines &&
         !consumed.some((line) => /^\s/.test(line) && line.trim() !== "" && orderedItemContentIndent(line) === null) &&
         !rawLines.some((line) => blockOnMarkerLine.test(line))
@@ -325,6 +379,6 @@ describe("tokenizeOrderedList against the stock tokenizer", () => {
       }
     }
     expect(sameLines).toBeGreaterThan(700);
-    expect(compared).toBeGreaterThan(300);
+    expect(compared).toBeGreaterThan(90);
   });
 });
