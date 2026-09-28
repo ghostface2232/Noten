@@ -79,6 +79,10 @@ function boundLines(
 //      column 0: the inner loop's lookahead sees indent 0 and breaks on the
 //      blank line, which the outer loop then rejects.
 // In both cases the truncated input ends at the same index by exhaustion.
+// Noten's transcription (taskListTokenizer.ts) keeps both stops: it ends an
+// item at every line not indented past the marker, and after a blank line at
+// every line short of the item's content column, which a column-0 line always
+// is; it otherwise ends items earlier, never later, than the stock one.
 const TASK_ITEM = /^\s*[-+*]\s+\[[ xX]\]\s/;
 
 function boundTaskList(src: string): string {
@@ -132,6 +136,13 @@ const LAZY_INTERRUPTERS = [
 // the inner loop's lazy-continuation branch breaks there and the outer loop
 // rejects the line. The truncated input stops at the same index by
 // exhaustion, and `raw` is `lines.slice(0, consumed)`, identical in both.
+// Noten's transcription (orderedListTokenizer.ts) keeps both stops. Its fence
+// tracking holds only lines indented to an item's content column, so a
+// column-0 line always takes the branches above; the blank line before (a)
+// still sets the current item's `sawBlankLine`. A fence only turns indented
+// marker-shaped lines from items into code, which moves where items begin
+// and can end the list earlier (a lazy line after a closed fence in an item
+// that saw a blank line), never later.
 // Copied verbatim from @tiptap/extension-list's ORDERED_LIST_ITEM_REGEX, for the
 // first line, where an exact verdict lets non-items like "Fig. 1" end the
 // input at once instead of scanning on to the next cut.

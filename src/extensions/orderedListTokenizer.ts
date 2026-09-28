@@ -1,5 +1,6 @@
 // @tiptap/extension-list's orderedList Markdown tokenizer, transcribed with
-// two changes to how an item's block content is dedented.
+// two changes to how an item's block content is dedented and one to how its
+// first line is read.
 //
 // The stock `collectOrderedListItems` strips `indent + marker.length + 1`
 // columns from each line under an item, one short of its content column
@@ -19,10 +20,31 @@
 // (marker, delimiter and 1-4 following spaces; 5 or more count as 1), which is
 // where the listItem serializer writes it (`alignNestedToPrefix`), and the
 // block is then dedented by the indent its lines share instead of trimming
-// the first line alone (`dedentBlock`). Which lines an item
-// takes is unchanged, so the cut rules in boundedBlockTokenizers.ts still
-// hold, and a list with no indented continuation lines tokenizes exactly as
-// before; `orderedListTokenizer.test.ts` compares both with the stock one.
+// the first line alone (`dedentBlock`).
+// The stock `splitItemContent` also always read the text after the marker as
+// a paragraph, so `1. - [ ] t1` became the text `- [ ] t1` (saved as
+// `- \[ \] t1`), `1. > q` the text `&gt; q`, and a fence on the marker line a
+// paragraph that swallowed its first code line. A marker line whose text opens a
+// bullet or task list, a heading, a fence, a quote or a thematic break now
+// starts the item's block content, as marked reads a bullet item's first
+// line. An ordered marker there stays text, as Tiptap keeps `- 1. a` for a
+// bullet item.
+// Last, the stock loop took every line shaped like an ordered marker as a new
+// item, inside a fenced code block too: under `1. n`, a fence holding the line
+// `   2. x` lost that line to a nested item, and its closing fence opened a
+// second, empty code block. A fence opened in the item's own content
+// (0-3 columns past its content column, the marker line included, by marked's
+// `fences` rule) now holds every line indented to the content column until
+// its closing fence, so such a line is code; a fence after bullet markers, in
+// a bullet nested in the item, holds the lines at that bullet's column. A
+// marker-shaped line left of the column is still a new item, as CommonMark
+// reads it; where the fence closes follows marked, which gets every content
+// line dedented to the column.
+// Without a fence, the lines an item takes are unchanged, and a list with no
+// indented continuation lines and no block on a marker line tokenizes exactly
+// as before; `orderedListTokenizer.test.ts` compares both with the stock one.
+// With one, a column-0 line still meets the same branch as before, which is
+// what the cut rule in boundedBlockTokenizers.ts relies on.
 // Re-transcribe on an @tiptap/extension-list upgrade, or drop this file if
 // the upstream dedent is fixed.
 
@@ -69,11 +91,56 @@ function isBlockContentLine(line: string): boolean {
   );
 }
 
+// The `fences` rule of the lexer createFastMarked builds, which lexes the
+// item's content afterwards: 3+ backticks with no backtick after them, or 3+
+// tildes, after 0-3 spaces, closed by at least as many of the same character
+// and spaces (CommonMark's closer; see commonMarkFence in fastMarkdownLexer.ts).
+// The fence may follow bullet markers (`- ````), inside a bullet nested in the
+// item; an ordered marker there is text (as Tiptap keeps `- 1. a`), and a
+// nested ordered item tracks its own fences.
+const FENCE_OPENING = /^( {0,3}(?:[-+*] {1,4})*)(`{3,}(?=[^`]*$)|~{3,})/;
+
+interface OpenFence {
+  // Columns past the item's content column where the fence's container
+  // content starts: 0 in the item itself, the bullets' width in a bullet.
+  indent: number;
+  closer: RegExp;
+}
+
+// Width in columns, a tab running to the next multiple of 4.
+function columnWidth(text: string): number {
+  let width = 0;
+  for (const character of text) width = character === "\t" ? width + 4 - (width % 4) : width + 1;
+  return width;
+}
+
+/** The fence a content line (dedented to the item's column) opens, or null. */
+function openFence(line: string): OpenFence | null {
+  const match = line.match(FENCE_OPENING);
+  if (!match) return null;
+  const indent = /[-+*]/.test(match[1]) ? match[1].length : 0;
+  return { indent, closer: new RegExp(`^ {0,3}${match[2]}${match[2][0]}* *$`) };
+}
+
 function interruptsLazyContinuation(line: string): boolean {
   return Object.values(PARAGRAPH_INTERRUPTERS).some((pattern) => pattern.test(line));
 }
 
+// The third change: blocks the text after an item's marker can open.
+function opensBlockOnMarkerLine(content: string): boolean {
+  return (
+    PARAGRAPH_INTERRUPTERS.bulletItem.test(content) ||
+    PARAGRAPH_INTERRUPTERS.heading.test(content) ||
+    PARAGRAPH_INTERRUPTERS.codeFence.test(content) ||
+    PARAGRAPH_INTERRUPTERS.thematicBreak.test(content) ||
+    /^>/.test(content)
+  );
+}
+
 function splitItemContent(contentLines: string[]): { paragraphLines: string[]; blockLines: string[] } {
+  if (contentLines.length > 0 && opensBlockOnMarkerLine(contentLines[0])) {
+    return { paragraphLines: [], blockLines: contentLines };
+  }
   const paragraphLines: string[] = [];
   const blockLines: string[] = [];
   let reachedBlockBoundary = false;
@@ -150,16 +217,26 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
     // The first change: the stock tokenizer used
     // `indentLevel + marker.length + 1`, one column short.
     const contentIndent = orderedItemContentIndent(line)!;
+    // The fourth change: a fence open in the item's content.
+    let fence = openFence(content);
     while (nextLineIndex < lines.length) {
       const nextLine = lines[nextLineIndex];
-      if (nextLine.match(ORDERED_LIST_ITEM_REGEX)) break;
+      const leadingWhitespace = nextLine.length - nextLine.trimStart().length;
+      // Whether a marker-shaped line is code rather than an item is read as
+      // CommonMark reads it: at or past the fence's column, a tab running to
+      // the next multiple of 4 (Obsidian indents with tabs).
+      const inFence =
+        fence !== null &&
+        nextLine.trim() !== "" &&
+        columnWidth(nextLine.slice(0, leadingWhitespace)) >= contentIndent + fence.indent;
+      if (!inFence && nextLine.match(ORDERED_LIST_ITEM_REGEX)) break;
       if (nextLine.trim() === "") {
         itemLines.push(nextLine);
         itemContentLines.push("");
         sawBlankLine = true;
         nextLineIndex += 1;
+        continue;
       } else if (nextLine.match(INDENTED_LINE_REGEX)) {
-        const leadingWhitespace = nextLine.length - nextLine.trimStart().length;
         itemLines.push(nextLine);
         itemContentLines.push(nextLine.slice(Math.min(leadingWhitespace, contentIndent)));
         nextLineIndex += 1;
@@ -168,6 +245,18 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
         itemLines.push(nextLine);
         itemContentLines.push(nextLine);
         nextLineIndex += 1;
+      }
+      // Where the fence closes is read as marked will read it: every line
+      // here reaches marked dedented to the item's column, so a line left of
+      // that column is code or the closing fence all the same. Judging it by
+      // its raw indent opened a second fence at a closer 2 spaces in, and the
+      // item's later lines moved on every save. A line left of a nested
+      // bullet's column ends that bullet, and its fence.
+      const text = itemContentLines[itemContentLines.length - 1];
+      if (fence && columnWidth(text.slice(0, text.length - text.trimStart().length)) >= fence.indent) {
+        if (fence.closer.test(text.slice(fence.indent))) fence = null;
+      } else {
+        fence = openFence(text);
       }
     }
     listItems.push({
@@ -184,12 +273,19 @@ function collectOrderedListItems(lines: string[]): [ListItemLine[], number] {
   return [listItems, consumed];
 }
 
+// The fifth change: the stock loop kept only items at exactly `baseIndent`
+// and skipped the rest, and a nested group's base was its smallest indent.
+// An item less indented than its group's first (` 1. a` / `2. b`, or
+// `      2. b` / `   3. c` under `1. a`) was consumed, since its line is in
+// the token's `raw`, but never parsed: it vanished on the first save. Here a
+// group's base is its first item's indent and an item at or left of it is a
+// sibling, as CommonMark reads a later item indented 0-3 spaces.
 function buildNestedStructure(items: ListItemLine[], baseIndent: number, lexer: BlockLexer): unknown[] {
   const result: unknown[] = [];
   let currentIndex = 0;
   while (currentIndex < items.length) {
     const item = items[currentIndex];
-    if (item.indent === baseIndent) {
+    if (item.indent <= baseIndent) {
       const { paragraphLines, blockLines } = splitItemContent(item.contentLines);
       const mainText = paragraphLines.join("\n").trim();
       const tokens: unknown[] = [];
@@ -205,11 +301,7 @@ function buildNestedStructure(items: ListItemLine[], baseIndent: number, lexer: 
         lookAheadIndex += 1;
       }
       if (nestedItems.length > 0) {
-        const nestedListItems = buildNestedStructure(
-          nestedItems,
-          Math.min(...nestedItems.map((nestedItem) => nestedItem.indent)),
-          lexer,
-        );
+        const nestedListItems = buildNestedStructure(nestedItems, nestedItems[0].indent, lexer);
         tokens.push({
           type: "list",
           ordered: true,

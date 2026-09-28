@@ -4,27 +4,37 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import TaskList from "@tiptap/extension-task-list";
+import type { AnyExtension } from "@tiptap/core";
 import TaskItem from "@tiptap/extension-task-item";
 import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { createFastMarked } from "./fastMarkdownLexer";
+import { NotenStarterKit } from "./CodeSpanFence";
+import NotenTaskList from "./NotenTaskList";
 import { __test } from "./boundedBlockTokenizers";
 
-// The bounded tokenizers must be observationally identical to Tiptap's own:
-// same token tree (marked advances by each token's `raw`, so any difference in
-// what a tokenizer consumed shows up here) and same parsed document. The
-// reference instance is createFastMarked WITHOUT the bounding, so the only
-// variable is the bounding itself.
+// The bounded tokenizers must be observationally identical to the ones they
+// wrap: same token tree (marked advances by each token's `raw`, so any
+// difference in what a tokenizer consumed shows up here) and same parsed
+// document. The reference instance is createFastMarked WITHOUT the bounding,
+// so the only variable is the bounding itself. Tiptap's tokenizers and
+// Noten's transcriptions of them (orderedListTokenizer.ts,
+// taskListTokenizer.ts) are both checked, since the cut rules must hold for
+// each.
+
+const EXTENSION_SETS: Record<string, () => AnyExtension[]> = {
+  stock: () => [StarterKit, TaskList],
+  noten: () => [NotenStarterKit.configure({ underline: false, link: false }), NotenTaskList],
+};
 
 const editors: Editor[] = [];
-function makeEditor(marked: unknown): Editor {
+function makeEditor(marked: unknown, set: () => AnyExtension[]): Editor {
   const editor = new Editor({
     extensions: [
-      StarterKit,
+      ...set(),
       Markdown.configure({ marked: marked as any }),
-      TaskList,
       TaskItem.configure({ nested: true }),
       Table,
       TableRow,
@@ -36,11 +46,6 @@ function makeEditor(marked: unknown): Editor {
   return editor;
 }
 afterAll(() => editors.forEach((e) => e.destroy()));
-
-const boundedMarked = createFastMarked();
-const referenceMarked = createFastMarked({ boundBlockTokenizers: false });
-const bounded = makeEditor(boundedMarked);
-const reference = makeEditor(referenceMarked);
 
 function tokens(marked: unknown, md: string) {
   return JSON.parse(JSON.stringify((marked as Marked).lexer(md)));
@@ -55,7 +60,14 @@ function outcome<T>(run: () => T): { ok: T } | { error: string } {
   }
 }
 
-function expectEquivalent(md: string) {
+interface Instances {
+  boundedMarked: unknown;
+  referenceMarked: unknown;
+  bounded: Editor;
+  reference: Editor;
+}
+
+function expectEquivalent({ boundedMarked, referenceMarked, bounded, reference }: Instances, md: string) {
   const expected = outcome(() => tokens(referenceMarked, md));
   const actual = outcome(() => tokens(boundedMarked, md));
   if ("error" in expected !== "error" in actual) {
@@ -81,6 +93,10 @@ function mulberry32(seed: number): () => number {
 // lazy continuations, interrupters, and table rows/separators.
 const LINES = [
   "- [ ] task", "- [x] done", "* [X] star task", "+ [ ] plus task", "  - [ ] nested task", "    - [x] deep task",
+  " - [x] one-space task", "   - [ ] three-space task", "-  [ ] wide task", " one-space text", " # indented heading",
+  // Fences in ordered items, and marker-shaped lines inside them.
+  "1. ```", "2. ~~~js", "   ```", "   ````", "   ~~~", "   2. in code", "   b) in code", "      3. deeper in code",
+  " 2. shallow in code", "2. in code at column 0", "   - ```", "     2. in bullet code", "     ```",
   "\t- [ ] tab task", "- [] not a task", "-[ ] no space", "- plain bullet", "  - nested bullet", "* star bullet",
   "1. one", "2) two", "10. ten", "  1. nested one", "a. alpha", "B) beta", "iv. roman", "xii) roman2",
   "ab. two letters", "abc. three letters", "1.no space", "Mr. Smith said", "I) interrupt", "(216) 555-1234",
@@ -99,7 +115,17 @@ function randomDoc(rand: () => number, lineCount: number, crlf: boolean): string
   return rand() < 0.5 ? `${doc}\n` : doc;
 }
 
-describe("bounded block tokenizers", () => {
+describe.each(Object.keys(EXTENSION_SETS))("bounded block tokenizers (%s)", (setName) => {
+  const boundedMarked = createFastMarked();
+  const referenceMarked = createFastMarked({ boundBlockTokenizers: false });
+  const instances: Instances = {
+    boundedMarked,
+    referenceMarked,
+    bounded: makeEditor(boundedMarked, EXTENSION_SETS[setName]),
+    reference: makeEditor(referenceMarked, EXTENSION_SETS[setName]),
+  };
+  const bounded = instances.bounded;
+
   it("match the unbounded tokenizers on hand-written boundary cases", () => {
     const cases = [
       "- [ ] a\n- [x] b\n\nparagraph",
@@ -117,19 +143,26 @@ describe("bounded block tokenizers", () => {
       "| x \\| y | z |\n|---|---|\n| 1 | 2 |",
       "para\n| a | b |\n|---|---|",
       "- [ ] a\r\n- [x] b\r\n\r\ntext\r\n",
+      "- [ ] a\n x\n - [x] b\n\n after\ntext",
+      "- [ ] a\n # heading\n- [ ] b",
+      "1. n\n\n   ```\n   2. x\n   ```\n2. m\n\ntext",
+      "1. ```\n   2. x\n\n   3. y\n   ```\nlazy\n\ntext",
+      "1. n\n   ~~~\n2. x\n   ~~~\n# heading",
+      "1. n\n   ````\n   ```\n   2. x\n   ````\n\ntext",
+      "-  [ ] a\n  - [ ] b\n\n   c\nd",
       "1. one\r\n\r\ntext\r\n",
       "- [ ] a\n \ntext",
       "",
       "\n",
       "\n\n",
     ];
-    for (const md of cases) expectEquivalent(md);
+    for (const md of cases) expectEquivalent(instances, md);
   });
 
   it("match the unbounded tokenizers on fuzzed documents", () => {
     const rand = mulberry32(0x5eed);
     for (let i = 0; i < 1500; i++) {
-      expectEquivalent(randomDoc(rand, 1 + Math.floor(rand() * 40), rand() < 0.15));
+      expectEquivalent(instances, randomDoc(rand, 1 + Math.floor(rand() * 40), rand() < 0.15));
     }
   });
 
@@ -140,7 +173,7 @@ describe("bounded block tokenizers", () => {
     const rand = mulberry32(0xb1a4c);
     for (let i = 0; i < 1500; i++) {
       const lines = Array.from({ length: 1 + Math.floor(rand() * 40) }, () => nonBlank[Math.floor(rand() * nonBlank.length)]);
-      expectEquivalent(lines.join("\n"));
+      expectEquivalent(instances, lines.join("\n"));
     }
   });
 

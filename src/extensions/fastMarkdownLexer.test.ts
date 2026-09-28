@@ -164,6 +164,41 @@ describe("createFastMarked", () => {
   });
 });
 
+// marked 17 closes a fence at the opening fence followed by any mix of
+// backticks and tildes; CommonMark only at the same character. The instance
+// takes CommonMark's closer and must otherwise lex every fence as marked does.
+describe("fences close on their own character", () => {
+  const instance = createFastMarked();
+  const lex = (md: string) => JSON.parse(JSON.stringify(instance.lexer(md)));
+  const codeTexts = (md: string) =>
+    (instance.lexer(md) as { type: string; text?: string }[]).filter((token) => token.type === "code").map((token) => token.text);
+  // A line marked would take as a closer but CommonMark would not.
+  const MIXED_CLOSER = /^ {0,3}(?:`{3,}[`~]*~|~{3,}[`~]*`)[`~]* *$/m;
+
+  it.each([
+    ["```\n```~~~\nx\n```", ["```~~~\nx"]],
+    ["```js\n```~\n```", ["```~"]],
+    ["~~~\n~~~```\nx\n~~~", ["~~~```\nx"]],
+    ["  ```\n  ```~\n  a\n  ```", ["```~\na"]],
+    ["```\n```~~~", ["```~~~"]],
+  ])("keeps the mixed line of %j as code", (markdown, code) => {
+    expect(codeTexts(markdown)).toEqual(code);
+  });
+
+  it("lexes every other fence exactly as stock marked (seeded fuzz)", () => {
+    const rand = mulberry32(0xfe4ce);
+    const lines = ["```", "```js", "````", "~~~", "~~~~", "  ```", "   ~~~", "    ```", "```~~~", "~~~```", "```~", "``` ", "code", "", "- item", "> quote", "`x`"];
+    let compared = 0;
+    for (let i = 0; i < 3000; i++) {
+      const md = Array.from({ length: 1 + Math.floor(rand() * 8) }, () => lines[Math.floor(rand() * lines.length)]).join("\n");
+      if (MIXED_CLOSER.test(md)) continue;
+      expect(lex(md), JSON.stringify(md)).toEqual(stockTokens(md));
+      compared++;
+    }
+    expect(compared).toBeGreaterThan(1000);
+  });
+});
+
 describe("Markdown extension integration", () => {
   let editors: Editor[] = [];
   afterEach(() => {

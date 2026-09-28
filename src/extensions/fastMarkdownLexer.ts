@@ -348,6 +348,9 @@ export function createFastMarked({ boundBlockTokenizers = true, rememberInlineSt
   // too and the built-in result is unchanged.
   instance.use({
     tokenizer: {
+      fences(src: string) {
+        return commonMarkFence(src, this as unknown as FenceTokenizer);
+      },
       list(src: string) {
         if (!orderedListTokenizer || (this as any).rules.block.list.test(src) || !MAYBE_ORDERED_ITEM.test(src)) {
           return false;
@@ -357,6 +360,64 @@ export function createFastMarked({ boundBlockTokenizers = true, rememberInlineSt
     },
   });
   return instance as unknown as typeof marked;
+}
+
+interface FenceTokenizer {
+  rules: { block: { fences: RegExp }; inline: { anyPunctuation: RegExp } };
+}
+
+// marked's `fences` rule with CommonMark's closing fence: the opening fence's
+// own character only, at least as long, then spaces. marked 17 accepts any
+// mix of backticks and tildes after the opening fence (`\1[~`]*`).
+const COMMONMARK_FENCES = {
+  "`": /^ {0,3}(`{3,}(?=[^`\n]*(?:\n|$)))([^\n]*)(?:\n|$)(?:|([\s\S]*?)(?:\n|$))(?: {0,3}\1`* *(?=\n|$)|$)/,
+  "~": /^ {0,3}(~{3,})([^\n]*)(?:\n|$)(?:|([\s\S]*?)(?:\n|$))(?: {0,3}\1~* *(?=\n|$)|$)/,
+};
+const MIXED_FENCE_CHARACTERS = /`[^\n]*~|~[^\n]*`/;
+
+// marked's indentCodeCompensation, which it applies to backtick fences only.
+function compensateBacktickIndent(raw: string, text: string): string {
+  const indent = raw.match(/^(\s+)(?:```)/)?.[1];
+  if (indent === undefined) return text;
+  return text
+    .split("\n")
+    .map((line) => {
+      const leading = line.match(/^\s+/)?.[0];
+      return leading !== undefined && leading.length >= indent.length ? line.slice(indent.length) : line;
+    })
+    .join("\n");
+}
+
+/**
+ * A fence marked would close at a line holding the other fence character
+ * (```~~~ after ```, ~~~``` after ~~~), read with CommonMark's closer
+ * instead; false (marked's own token) for every other fence.
+ *
+ * CommonMark keeps such a line as code. marked ended the block there and
+ * dropped the line, and the code after it read as Markdown, so a note holding
+ * one lost that line and the rest of the block on the first save, at the top
+ * level, in list items and in quotes alike. The token is built the way
+ * marked's `fences` tokenizer builds it, so it differs only in where the block
+ * ends.
+ */
+function commonMarkFence(src: string, tokenizer: FenceTokenizer): Tokens.Code | false {
+  const stock = tokenizer.rules.block.fences.exec(src);
+  if (!stock) return false;
+  const lines = stock[0].replace(/\n$/, "").split("\n");
+  const last = lines[lines.length - 1];
+  // Only when marked's match ended at such a closer, not at the end of input.
+  const closedByMixed =
+    lines.length > 1 && last.trimStart().startsWith(stock[1]) && /^ {0,3}[`~]+ *$/.test(last) && MIXED_FENCE_CHARACTERS.test(last);
+  if (!closedByMixed) return false;
+  const match = COMMONMARK_FENCES[stock[1][0] as "`" | "~"].exec(src);
+  if (!match) return false;
+  const raw = match[0];
+  return {
+    type: "code",
+    raw,
+    lang: match[2] ? match[2].trim().replace(tokenizer.rules.inline.anyPunctuation, "$1") : match[2],
+    text: compensateBacktickIndent(raw, match[3] ?? ""),
+  };
 }
 
 // Tiptap's Underline starts with `src.indexOf("++")`; give it the equivalent
