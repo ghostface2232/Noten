@@ -267,6 +267,15 @@ describe("NotenOrderedList Markdown", () => {
     expect(listSegmentStarts(["aa", "b"])).toEqual([0, 1]);
   });
 
+  // A roman list begun by a single letter keeps a skipped numeral, and a
+  // letter list begun by a pair keeps a single letter, each as a new list.
+  it.each([
+    ["v. x\nvi. y\nviii. z", "v. x\nvi. y\n\nviii. z"],
+    ["aa. x\nb. y", "aa. x\n\nb. y"],
+  ])("keeps the markers of %j", (markdown, saved) => {
+    expect(markdownOf(createEditor(markdown))).toBe(saved);
+  });
+
   // A letter list from item 81 on starts at `cc.`, which also reads as roman
   // 200: the reload split its later items off, and before that rewrote them.
   it.each(["cc. t0\ncd. t1\nce. t2", "ml. a\nmm. b", "LV. a\nLW. b", "1. top\n   ci. a\n   cj. b"])(
