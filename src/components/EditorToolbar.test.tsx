@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Profiler } from "react";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
 import type { Editor as ReactEditor } from "@tiptap/react";
 import { EditorToolbar } from "./EditorToolbar";
+import { NotenStarterKit } from "../extensions/CodeSpanFence";
 
 let active: Editor | null = null;
 
@@ -25,8 +26,8 @@ afterEach(() => {
 const noop = () => {};
 
 /** Renders the toolbar and counts its commits. */
-function setup(content: string) {
-  const editor = new Editor({ extensions: [StarterKit], content });
+function setup(content: string, extensions = [StarterKit]) {
+  const editor = new Editor({ extensions, content });
   active = editor;
   const commits = { n: 0 };
   const ui = (outlineOpen: boolean) => (
@@ -56,6 +57,32 @@ async function transact(run: () => void) {
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
   });
 }
+
+describe("EditorToolbar numbered list split button", () => {
+  it("toggles the list with its left half and picks a style from its right half", async () => {
+    const { editor } = setup("<p>alpha</p>", [NotenStarterKit]);
+    await transact(() => editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 2))));
+
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Numbered list" })); });
+    expect(editor.isActive("orderedList")).toBe(true);
+
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Numbered list style" })); });
+    const items = await screen.findAllByRole("menuitemradio");
+    expect(items.map((item) => item.textContent)).toEqual([
+      "1. 2. 3.Numbers",
+      "a. b. c.Lowercase letters",
+      "A. B. C.Uppercase letters",
+      "i. ii. iii.Lowercase roman numerals",
+      "I. II. III.Uppercase roman numerals",
+    ]);
+    expect(items[0].getAttribute("aria-checked")).toBe("true");
+    await act(async () => { fireEvent.click(items[1]); });
+    expect(editor.getAttributes("orderedList").type).toBe("a");
+
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Numbered list" })); });
+    expect(editor.isActive("orderedList")).toBe(false);
+  });
+});
 
 describe("EditorToolbar re-renders", () => {
   it("does not re-render for typing that leaves its state unchanged", async () => {

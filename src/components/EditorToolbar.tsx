@@ -13,6 +13,7 @@ import {
   PopoverTrigger,
   PopoverSurface,
   makeStyles,
+  mergeClasses,
   tokens,
 } from "@fluentui/react-components";
 import {
@@ -137,15 +138,44 @@ const useStyles = makeStyles({
     fontWeight: 500,
     ...pressableButton,
   },
-  listStyleBtn: {
-    minWidth: "14px",
-    width: "14px",
+  // The numbered list's split button: one 6px-rounded control of the tool
+  // buttons' height. Hovering either half lights the whole control with the
+  // tool buttons' hover shade, and the half under the pointer a step darker,
+  // so it reads as one button with two targets (toggle, style menu).
+  split: {
+    display: "inline-flex",
+    alignItems: "center",
+    height: "28px",
+    borderRadius: "6px",
+    transitionProperty: "background-color",
+    transitionDuration: MOTION_DURATION_BASE,
+    ":hover": {
+      backgroundColor: tokens.colorSubtleBackgroundHover,
+    },
+  },
+  splitActive: {
+    backgroundColor: "var(--ui-active-bg)",
+  },
+  splitHalf: {
     height: "28px",
     padding: "0",
-    marginLeft: "-2px",
-    borderRadius: "6px",
     border: "none",
     ...pressableButton,
+    ":hover": {
+      backgroundColor: "var(--ui-active-bg)",
+    },
+    ":hover:active": {
+      backgroundColor: "var(--ui-active-bg)",
+    },
+  },
+  splitPrimary: {
+    minWidth: "28px",
+    borderRadius: "6px 0 0 6px",
+  },
+  splitMenu: {
+    minWidth: "16px",
+    width: "16px",
+    borderRadius: "0 6px 6px 0",
   },
   listStyleSample: {
     display: "inline-block",
@@ -363,6 +393,7 @@ function EditorToolbarImpl({
 }: EditorToolbarProps) {
   const styles = useStyles();
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
+  const [orderedListGroup, setOrderedListGroup] = useState<HTMLDivElement | null>(null);
 
   const gridRef = useRef<HTMLDivElement>(null);
   const toolsRef = useRef<HTMLDivElement>(null);
@@ -583,36 +614,48 @@ function EditorToolbarImpl({
               {tb(i("tool.bulletList"), <TextBulletListRegular />,
                 () => editor?.chain().focus().toggleBulletList().run(),
                 state.bulletList)}
-              {tb(i("tool.orderedList"), <TextNumberListLtrRegular />,
-                () => editor?.chain().focus().toggleOrderedList().run(),
-                state.orderedList)}
-              <Menu
-                checkedValues={{ listStyle: state.orderedListStyle ? [state.orderedListStyle] : [] }}
-                onCheckedValueChange={(_, data) => {
-                  const style = data.checkedItems[0] as OrderedListStyle | undefined;
-                  if (style) editor?.chain().focus().setOrderedListStyle(style).run();
-                }}
+              <div
+                ref={setOrderedListGroup}
+                className={mergeClasses(styles.split, state.orderedList && styles.splitActive)}
               >
-                <MenuTrigger disableButtonEnhancement>
-                  <Tooltip content={i("tool.orderedListStyle")} relationship="label">
-                    <Button
-                      appearance="subtle"
-                      icon={<ChevronDownRegular fontSize={12} />}
-                      className={styles.listStyleBtn}
-                    />
-                  </Tooltip>
-                </MenuTrigger>
-                <MenuPopover className={styles.popoverSurface}>
-                  <MenuList>
-                    {ORDERED_LIST_STYLES.map((style) => (
-                      <MenuItemRadio key={style} name="listStyle" value={style}>
-                        <span className={styles.listStyleSample}>{LIST_STYLE_SAMPLE[style]}</span>
-                        {i(LIST_STYLE_LABEL[style])}
-                      </MenuItemRadio>
-                    ))}
-                  </MenuList>
-                </MenuPopover>
-              </Menu>
+                <Tooltip content={i("tool.orderedList")} relationship="label">
+                  <Button
+                    appearance="subtle"
+                    icon={<TextNumberListLtrRegular />}
+                    className={mergeClasses(styles.splitHalf, styles.splitPrimary)}
+                    onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+                  />
+                </Tooltip>
+                <Menu
+                  checkedValues={{ listStyle: state.orderedListStyle ? [state.orderedListStyle] : [] }}
+                  onCheckedValueChange={(_, data) => {
+                    const style = data.checkedItems[0] as OrderedListStyle | undefined;
+                    if (style) editor?.chain().focus().setOrderedListStyle(style).run();
+                  }}
+                  // Open under the whole control, not just its arrow.
+                  positioning={{ target: orderedListGroup, position: "below", align: "start" }}
+                >
+                  <MenuTrigger disableButtonEnhancement>
+                    <Tooltip content={i("tool.orderedListStyle")} relationship="label">
+                      <Button
+                        appearance="subtle"
+                        icon={<ChevronDownRegular fontSize={12} />}
+                        className={mergeClasses(styles.splitHalf, styles.splitMenu)}
+                      />
+                    </Tooltip>
+                  </MenuTrigger>
+                  <MenuPopover className={styles.popoverSurface}>
+                    <MenuList>
+                      {ORDERED_LIST_STYLES.map((style) => (
+                        <MenuItemRadio key={style} name="listStyle" value={style}>
+                          <span className={styles.listStyleSample}>{LIST_STYLE_SAMPLE[style]}</span>
+                          {i(LIST_STYLE_LABEL[style])}
+                        </MenuItemRadio>
+                      ))}
+                    </MenuList>
+                  </MenuPopover>
+                </Menu>
+              </div>
               {tb(i("tool.taskList"), <TaskListLtrRegular />,
                 () => editor?.chain().focus().toggleTaskList().run(),
                 state.taskList)}
