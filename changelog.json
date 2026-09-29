@@ -1,32 +1,22 @@
 {
   "ko": [
-    "노트 폴더에 저장하지 못한 편집을 이 PC에 따로 보관했다가, 다음에 Noten을 실행할 때 복구합니다. 그 사이 노트가 다른 곳에서 바뀌었다면 덮어쓰지 않고 .conflicts 폴더에 보관합니다.",
-    "메타데이터 파일 하나를 읽지 못하면 라이브러리 전체가 열리지 않거나 저장되지 않던 문제를 고쳤습니다. 이제 그 노트만 건너뛰고 나중에 다시 시도합니다.",
-    "저장에 계속 실패하면 창을 닫을 수 없던 문제를 고쳤습니다. 처음에는 원인을 알려 주고, 곧바로 다시 닫으면 변경 사항을 버리고 닫을지 묻습니다. 심각한 오류도 이제 앱 화면에서 알려 줍니다.",
-    "아직 읽지 못한 노트를 빈 노트로 오인해 지우거나 덮어쓸 수 있던 경로를 막았습니다.",
-    "창을 여러 개 띄운 상태에서, 한 창에서 이름을 붙인 빈 노트가 다른 창에서 영구 삭제될 수 있던 문제를 고쳤습니다.",
-    "$ 기호가 들어간 제목으로 이름을 바꾸면 그 노트를 링크하던 다른 노트의 본문이 손상되던 문제를 고쳤습니다.",
-    "시계가 틀린 기기에서 버린 노트가 14일이 되기 전에 다른 기기에서 영구 삭제될 수 있던 문제를 고쳤습니다. 휴지통의 남은 일수도 실제 삭제 시점에 맞춰 표시합니다.",
-    "동기화 폴더에서 다른 기기의 삭제가 되돌려지거나, 다른 기기에서 복원 중인 노트의 본문이 사라질 수 있던 문제를 고쳤습니다.",
-    "노트 폴더를 기본값으로 되돌릴 때 기본 폴더에 남아 있던 노트를 묻지 않고 지우던 문제를 고쳤습니다. 이제 병합할지 교체할지 묻고, 어느 경우에도 .conflicts 보관함은 지우지 않습니다.",
-    "노트 폴더를 옮겼다가 원래 폴더로 되돌아온 뒤, 다음 실행에서 노트가 모두 사라진 것처럼 보일 수 있던 문제를 고쳤습니다.",
-    "그룹을 맨 위로 여러 번 옮기면 다른 기기에서 순서가 어긋나고 다시 옮겨도 고쳐지지 않던 문제를 고쳤습니다.",
-    "노트가 많은 동기화 폴더에서 입력하는 동안 폴더 전체를 반복해 다시 읽던 부하를 없앴고, 사이드바 검색도 더 가벼워졌습니다.",
-    "창을 여러 개 쓸 때 불필요한 충돌 사본이 .conflicts 폴더에 쌓이던 문제를 줄였습니다."
+    "번호 목록에 알파벳(a. A.)과 로마 숫자(i. I.) 스타일을 추가했습니다. 툴바의 번호 목록 버튼 옆 화살표, / 메뉴, 또는 `a. ` 처럼 입력해서 고를 수 있습니다.",
+    "번호 목록 안의 작업 목록, 코드 블록, 이어지는 문단이 저장할 때 사라지거나 저장할 때마다 한 칸씩 밀리던 문제를 고쳤습니다. 들여쓰기가 서로 다른 항목도 더는 사라지지 않습니다.",
+    "문장 끝의 PS. OK. 같은 단어를 목록 번호로 읽어 지우거나 번호를 다시 매기던 문제를 고쳤습니다.",
+    "목록이나 인용을 아주 깊게 중첩한 노트가 열리지 않던 문제를 고쳤습니다.",
+    "코드 블록 안에 ``` 줄이 있으면 저장 후 블록이 끊기던 문제와, 세 칸 이하로 들여쓴 코드 블록이 사라지던 문제를 고쳤습니다.",
+    "백틱이 들어간 인라인 코드와 표 셀이 다른 Markdown 앱에서도 깨지지 않게 저장합니다. 표나 문장 중간의 <img> 이미지가 사라지던 문제도 고쳤습니다.",
+    "편집 카드가 창 가장자리에서 띄워져 떠 있는 모양이 되었고, 상태 표시줄 배경을 카드와 맞췄습니다.",
+    "정보 탭의 변경 내용이 패널 높이에 맞춰 스크롤되고, 가장자리가 흐려집니다. 창보다 긴 URL도 줄바꿈됩니다."
   ],
   "en": [
-    "Edits that could not be saved to the notes folder are now kept on this PC and restored the next time Noten starts. If the note changed elsewhere in the meantime, the edit goes to the .conflicts folder instead of overwriting it.",
-    "One unreadable metadata file no longer stops the whole library from loading or saving. That note is skipped and retried later.",
-    "A window that kept failing to save could not be closed. The first attempt now explains why, and trying again right away offers to close and discard the changes. Serious errors now also appear in the app.",
-    "Closed paths that could delete or overwrite a note Noten had not read yet, mistaking it for an empty one.",
-    "With several windows open, an empty note you named in one window could be permanently deleted from another. Fixed.",
-    "Renaming a note to a title containing $ corrupted the text of notes that linked to it. Fixed.",
-    "A note deleted on a machine with a wrong clock could be permanently purged elsewhere before its 14 days were up. Fixed, and the trash now shows days left by when the note will actually be purged.",
-    "In a synced folder, another device's deletion could be undone, and a note being restored on another device could lose its text. Fixed.",
-    "Resetting the notes folder to the default deleted notes already in the default folder without asking. It now asks whether to merge or replace, and never deletes the .conflicts archive.",
-    "After moving the notes folder and then moving back, all notes could appear to be gone on the next launch. Fixed.",
-    "Dragging a group to the top many times could put the groups out of order on other devices, and dragging again did not fix it. Fixed.",
-    "Typing in a large synced library no longer rereads the whole folder over and over, and sidebar search is lighter.",
-    "Using several windows no longer piles up needless conflict copies in the .conflicts folder."
+    "Numbered lists now come in letter (a. A.) and roman numeral (i. I.) styles. Pick one from the arrow beside the numbered-list button, the / menu, or by typing a. at the start of a line.",
+    "Task lists, code blocks and follow-on paragraphs inside a numbered list no longer vanish or drift one column right on every save. Items indented differently from the first are no longer dropped.",
+    "A word such as PS. or OK. at the start of a line was read as a list marker, so it was deleted or renumbered. Fixed.",
+    "A note with very deeply nested lists or quotes no longer fails to open.",
+    "A line of ``` inside a code block no longer cuts the block short after saving, and a code block indented by up to three spaces is no longer deleted.",
+    "Inline code containing backticks and table cells now save in a form other Markdown apps read correctly. Images written as <img> in a table or mid-sentence no longer disappear.",
+    "The editor card now floats inside the window, and the status bar matches the card's background.",
+    "The About tab's changelog scrolls within the panel with faded edges, and a URL wider than the window now wraps."
   ]
 }
