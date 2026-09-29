@@ -53,8 +53,6 @@
 // line with a marker detectMarkerType cannot read, nested no deeper than the
 // cap, tokenizes exactly as before; `orderedListTokenizer.test.ts` compares
 // both with the stock one.
-// With one, a column-0 line still meets the same branch as before, which is
-// what the cut rule in boundedBlockTokenizers.ts relies on.
 // Re-transcribe on an @tiptap/extension-list upgrade, or drop this file if
 // the upstream dedent is fixed.
 
@@ -253,8 +251,8 @@ function dedentBlock(lines: string[]): string {
 /**
  * How many of `lines` the list starting at the first takes. Each step of the
  * walk reads only the line it is on and the lines before it, so a walk that
- * stops before the last of `lines` stops at the same line on any longer
- * input; boundedBlockTokenizers.ts relies on that.
+ * takes fewer than all of `lines` takes the same lines on any input that
+ * begins with them; boundedBlockTokenizers.ts relies on that.
  */
 export function orderedListLineCount(lines: string[]): number {
   return collectOrderedListItems(lines)[1];

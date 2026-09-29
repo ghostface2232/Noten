@@ -12,16 +12,17 @@
 // the original is proven to stop at (or before) without consuming it. The
 // tokenizer then sees exactly the lines it would have looked at, so its token —
 // including `raw`, which marked uses to advance — is identical, while the work
-// per call is bounded by the construct it actually parses. The proofs are the
-// comments on each cut rule; `boundedBlockTokenizers.test.ts` fuzzes token-tree
-// equivalence against the unwrapped tokenizers. When a Tiptap upgrade changes
-// one of these tokenizers, re-check its cut rule against the new source.
+// per call is bounded by the construct it actually parses. For `taskList` and
+// `table` the proofs are the comments on each cut rule; `orderedList` runs
+// the tokenizer's own line walk instead (see boundOrderedList).
+// `boundedBlockTokenizers.test.ts` fuzzes token-tree equivalence against the
+// unwrapped tokenizers. When a Tiptap upgrade changes one of these
+// tokenizers, re-check its bound against the new source.
 //
-// A wrapper is chosen by the tokenizer's name. The `orderedList` rule is
-// argued against Noten's transcription (orderedListTokenizer.ts), which
+// A wrapper is chosen by the tokenizer's name. The `orderedList` bound is
+// Noten's transcription's walk (orderedListTokenizer.ts), which
 // `NotenStarterKit` registers under the stock name; with the stock tokenizer
-// it can stop short, since that one also takes lines like "Dr. Smith" and
-// reads on through an unindented quote line.
+// it can stop short (see boundOrderedList).
 
 import { isOrderedItemLine, orderedListLineCount } from "./orderedListTokenizer";
 
@@ -103,26 +104,27 @@ export const MAYBE_ORDERED_ITEM = /^\s*[0-9A-Za-z]+[.)]\s/;
 //
 // A first line that is not an item yields no list, so one line suffices.
 // Otherwise the bound runs the tokenizer's own walk (`orderedListLineCount`)
-// over a window of lines that doubles until the walk stops inside it. Each
-// step of the walk reads only the line it is on and the lines before it, so a
-// walk that stops inside the window stops at the same line on the whole
-// input, and the lines it took yield the same token, `raw` included. The
-// work is proportional to the lines the list takes, within a factor of two.
-// Cut rules argued from outside the walk could not see its state without
-// copying it: a quote line ends an item unless a fence is open in it or its
-// last line is a quote, and a guess that kept the quote cut off once any
-// fence had been seen (the walk had closed it) made every list in a run of
-// `1. ```` / `   ```` / `> q` blocks split the rest of the document again.
-// The walk is the transcription's; the stock tokenizer, which also reads
-// lines like "Dr. Smith" as items and reads on through an unindented quote
-// line, can take more lines than the prefix holds.
+// over a span of lines that doubles, from FIRST_SPAN_LINES, until the walk
+// stops inside it. Each step of the walk reads only the line it is on and the
+// lines before it, so a walk that stops inside the span stops at the same
+// line on the whole input, and the lines it took yield the same token, `raw`
+// included. The walk's own state (a fence open in an item, a quote line the
+// item holds) decides where a list ends, and no rule read from outside the
+// walk could follow it without copying it. The work is linear: the spans
+// walked add up to less than four times the lines the list takes, and never
+// fewer than FIRST_SPAN_LINES lines. The walk is the transcription's; the
+// stock tokenizer, which also reads lines like "Dr. Smith" as items, reads
+// on through an unindented quote line and reads marker-shaped lines in a
+// fence as items, can take more lines than the prefix holds.
+const FIRST_SPAN_LINES = 32;
+
 function boundOrderedList(src: string): string {
   const firstEnd = src.indexOf("\n");
   if (firstEnd < 0) return src;
   if (!isOrderedItemLine(src.slice(0, firstEnd))) return src.slice(0, firstEnd);
-  for (let window = 32; ; window *= 2) {
+  for (let span = FIRST_SPAN_LINES; ; span *= 2) {
     let end = -1;
-    for (let n = 0; n < window; n++) {
+    for (let n = 0; n < span; n++) {
       end = src.indexOf("\n", end + 1);
       if (end < 0) return src;
     }
