@@ -251,6 +251,11 @@ const useStyles = makeStyles({
     minHeight: 0,
     paddingTop: "12px",
   },
+  // Only a changelog may shrink. A status row squeezed beside the bundled list
+  // (the error text shows with it) would spill its text over the footer.
+  aboutItemFixed: {
+    flexShrink: 0,
+  },
   changelogScroll: {
     flex: "0 1 auto",
     minHeight: 0,
@@ -891,7 +896,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     updaterState.status === "downloading" ||
                     updaterState.status === "ready" ||
                     updaterState.status === "error") && (
-                  <div className={mergeClasses(settingItemClass(styles), styles.aboutItem)}>
+                  <div className={mergeClasses(settingItemClass(styles), styles.aboutItem, updaterState.status !== "available" && styles.aboutItemFixed)}>
                     {updaterState.status === "available" && (
                       <div style={{ display: "flex", flexDirection: "column", gap: "6px", flex: "0 1 auto", minHeight: 0 }}>
                         <span style={{ fontSize: "15px", fontWeight: 500, paddingTop: "6px", flexShrink: 0 }}>
