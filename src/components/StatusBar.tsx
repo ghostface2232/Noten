@@ -13,7 +13,7 @@ const useStyles = makeStyles({
     height: "24px",
     overflow: "hidden",
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground3,
+    backgroundColor: tokens.colorNeutralBackground1,
     transitionProperty: "height, border-top-color, background-color",
     transitionDuration: MOTION_DURATION_SLOW,
     transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",

@@ -91,6 +91,7 @@
 
   --shell-sidebar-width: 260px;
   --shell-card-gap: 6px;
+  --shell-card-inset: 6px;
 
   --editor-font-family-sans: "Pretendard JP", system-ui, sans-serif;
   --editor-font-family-mono: "JetBrains Mono", "Pretendard JP", ui-monospace, monospace;
