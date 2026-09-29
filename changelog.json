@@ -6,7 +6,7 @@
     "목록이나 인용을 아주 깊게 중첩한 노트가 열리지 않던 문제를 고쳤습니다.",
     "코드 블록 안에 ``` 줄이 있으면 저장 후 블록이 끊기던 문제와, 세 칸 이하로 들여쓴 코드 블록이 사라지던 문제를 고쳤습니다.",
     "백틱이 들어간 인라인 코드와 표 셀이 다른 Markdown 앱에서도 깨지지 않게 저장합니다. 표나 문장 중간의 <img> 이미지가 사라지던 문제도 고쳤습니다.",
-    "편집 카드가 창 가장자리에서 띄워져 떠 있는 모양이 되었고, 상태 표시줄 배경을 카드와 맞췄습니다.",
+    "편집 영역을 창 가장자리에서 띄워 네 모서리가 모두 둥근 플로팅 카드 모양으로 바꾸고, 상태 표시줄 배경도 카드에 맞췄습니다.",
     "정보 탭의 변경 내용이 패널 높이에 맞춰 스크롤되고, 가장자리가 흐려집니다. 창보다 긴 URL도 줄바꿈됩니다."
   ],
   "en": [
@@ -16,7 +16,7 @@
     "A note with very deeply nested lists or quotes no longer fails to open.",
     "A line of ``` inside a code block no longer cuts the block short after saving, and a code block indented by up to three spaces is no longer deleted.",
     "Inline code containing backticks and table cells now save in a form other Markdown apps read correctly. Images written as <img> in a table or mid-sentence no longer disappear.",
-    "The editor card now floats inside the window, and the status bar matches the card's background.",
+    "The editor is now a floating card, inset from the window edges with all four corners rounded, and the status bar matches the card's background.",
     "The About tab's changelog scrolls within the panel with faded edges, and a URL wider than the window now wraps."
   ]
 }
