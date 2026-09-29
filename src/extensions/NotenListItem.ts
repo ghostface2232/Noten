@@ -17,7 +17,7 @@ function columnWidth(text: string): number {
 
 // The last position a letter marker can spell: Tiptap reads and writes one
 // or two letters, `zz` being 702.
-const MAX_LETTER_POSITION = 26 * 27;
+export const MAX_LETTER_POSITION = 26 * 27;
 
 /**
  * The stock marker for a list item, except that a letter list's items past

@@ -137,6 +137,13 @@ describe("NotenOrderedList Markdown", () => {
     expect(alphaAttrsForAmbiguousMarkers("I", "II")).toBeNull();
     expect(alphaAttrsForAmbiguousMarkers("I", "J")).toEqual({ type: "A", start: 9 });
     expect(alphaAttrsForAmbiguousMarkers("iv", null)).toBeNull();
+    // A letter pair that is also a numeral: the second item decides, and
+    // alone it stays a numeral.
+    expect(alphaAttrsForAmbiguousMarkers("cc", "cd")).toEqual({ type: "a", start: 81 });
+    expect(alphaAttrsForAmbiguousMarkers("LV", "LW")).toEqual({ type: "A", start: 334 });
+    expect(alphaAttrsForAmbiguousMarkers("cc", "cci")).toBeNull();
+    expect(alphaAttrsForAmbiguousMarkers("cc", null)).toBeNull();
+    expect(alphaAttrsForAmbiguousMarkers("iv", "v")).toBeNull();
   });
 
   // Tiptap's tokenizer takes every following item line into the first list, so
@@ -227,13 +234,111 @@ describe("NotenOrderedList Markdown", () => {
     expect(listSegmentStarts(["1", "a", "b", "iv", "I"])).toEqual([0, 1, 3, 4]);
   });
 
+  // A word that reads as a marker (`PS.`, `im.`, `MIX.`) joined the list
+  // above and was renumbered, deleting it on save.
+  it.each([
+    ["A. Buy milk\nB. Call mom\n\nPS. do not forget", "A. Buy milk\nB. Call mom\n\nPS. do not forget"],
+    ["A. Buy milk\nB. Call mom\nPS. do not forget", "A. Buy milk\nB. Call mom\n\nPS. do not forget"],
+    ["a. x\nim. y", "a. x\n\nim. y"],
+    ["I. x\nMIX. y", "I. x\n\nMIX. y"],
+    ["i. x\nii. y\niv. z", "i. x\nii. y\n\niv. z"],
+    ["c. x\nok. y", "c. x\n\nok. y"],
+    ["A. x\nB. y\nPS. z\nE. w", "A. x\nB. y\n\nPS. z\n\nE. w"],
+    ["1. p\n   A. x\n   B. y\n\n   PS. z\n2. q", "1. p\n   A. x\n   B. y\n   PS. z\n2. q"],
+  ])("keeps a marker word after a list: %j", (markdown, saved) => {
+    const first = markdownOf(createEditor(markdown));
+    expect(first).toBe(saved);
+    expect(markdownOf(createEditor(first))).toBe(first);
+  });
+
+  // A skip of one letter or number still continues the list, and a list's
+  // own next marker, one letter or two, still joins it.
+  it.each([
+    ["1. x\n5. y", "1. x\n2. y"],
+    ["a. x\nb. y\nf. z", "a. x\nb. y\nc. z"],
+    ["z. x\naa. y\nab. z", "z. x\naa. y\nab. z"],
+    ["PS. x\nPT. y", "PS. x\nPT. y"],
+    ["h. x\ni. y\nj. z", "h. x\ni. y\nj. z"],
+  ])("still continues %j", (markdown, saved) => {
+    expect(markdownOf(createEditor(markdown))).toBe(saved);
+  });
+
+  it("starts a list at a marker word", () => {
+    expect(listSegmentStarts(["A", "B", "PS"])).toEqual([0, 2]);
+    expect(listSegmentStarts(["A", "B", "PS", "E"])).toEqual([0, 2, 3]);
+    expect(listSegmentStarts(["I", "MIX"])).toEqual([0, 1]);
+    expect(listSegmentStarts(["i", "ii", "iv"])).toEqual([0, 2]);
+    expect(listSegmentStarts(["a", "b", "f"])).toEqual([0]);
+    expect(listSegmentStarts(["z", "aa", "ab"])).toEqual([0]);
+    expect(listSegmentStarts(["aa", "b"])).toEqual([0, 1]);
+  });
+
+  // A roman list begun by a single letter keeps a skipped numeral, and a
+  // letter list begun by a pair keeps a single letter, each as a new list.
+  it.each([
+    ["v. x\nvi. y\nviii. z", "v. x\nvi. y\n\nviii. z"],
+    ["aa. x\nb. y", "aa. x\n\nb. y"],
+  ])("keeps the markers of %j", (markdown, saved) => {
+    expect(markdownOf(createEditor(markdown))).toBe(saved);
+  });
+
+  // A letter list from item 81 on starts at `cc.`, which also reads as roman
+  // 200: the reload split its later items off, and before that rewrote them.
+  it.each(["cc. t0\ncd. t1\nce. t2", "ml. a\nmm. b", "LV. a\nLW. b", "1. top\n   ci. a\n   cj. b"])(
+    "reads a letter list starting on a numeral pair as letters: %j",
+    (markdown) => {
+      expect(markdownOf(createEditor(markdown))).toBe(markdown);
+    },
+  );
+
+  // A list Noten writes, a paragraph apart from the next, must read back as
+  // the same lists with the same items and Markdown. A lone item at a marker
+  // that reads both ways (`cc.`, `v.`) may come back in the other style; its
+  // Markdown is the same.
+  it("reads back every ordered list it saves (seeded fuzz)", () => {
+    let seed = 13;
+    // Math.imul keeps the product exact; a plain product passes 2^53.
+    const random = () => (seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296;
+    const pick = <T,>(values: readonly T[]) => values[Math.floor(random() * values.length)];
+    const starts = [1, 2, 9, 26, 27, 28, 81, 87, 200, 334, 350, 400, 500, 690];
+    const list = (depth: number): JSONContent => {
+      const type = pick([null, "a", "A", "i", "I"]);
+      const count = 1 + Math.floor(random() * 4);
+      // Past `zz.` (702) a letter list is numbered, which reads back as a second list.
+      const start = Math.min(random() < 0.5 ? pick(starts) : 1 + Math.floor(random() * 690), 703 - count);
+      const items = Array.from({ length: count }, (_, i) => ({
+        type: "listItem",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: `t${depth}${i}` }] },
+          ...(depth === 0 && random() < 0.3 ? [list(1)] : []),
+        ],
+      }));
+      return { type: "orderedList", attrs: { type, start }, content: items };
+    };
+    const shape = (editor: Editor) =>
+      nodesOf(editor.getJSON(), "orderedList").map((node) => node.content?.length ?? 0);
+    for (let n = 0; n < 400; n++) {
+      const blocks: JSONContent[] = [];
+      for (let k = 0, count = 1 + Math.floor(random() * 3); k < count; k++) {
+        if (k > 0) blocks.push({ type: "paragraph", content: [{ type: "text", text: `p${k}` }] });
+        blocks.push(list(0));
+      }
+      const written = createEditor({ type: "doc", content: blocks });
+      const once = markdownOf(written);
+      const reloaded = createEditor(once);
+      expect(markdownOf(reloaded), once).toBe(once);
+      expect(shape(reloaded), once).toEqual(shape(written));
+      while (editors.length > 0) editors.pop()!.destroy();
+    }
+  }, 30_000);
+
   // Loading and saving twice must give the same Markdown as once: a list that
   // splits or merges differently on each reading rewrites markers every save.
   it("saves mixed-marker lists stably across reloads (seeded fuzz)", () => {
     let seed = 7;
     const random = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
     const pick = <T,>(values: readonly T[]) => values[Math.floor(random() * values.length)];
-    const markers = ["1.", "2.", "10.", "a.", "b.", "c.", "h.", "i.", "ii.", "v.", "vi.", "x.", "A.", "B.", "I.", "II.", "V."];
+    const markers = ["1.", "2.", "10.", "a.", "b.", "c.", "h.", "i.", "ii.", "v.", "vi.", "x.", "A.", "B.", "I.", "II.", "V.", "PS.", "im.", "aa.", "MIX."];
     const indents = ["", "", "   ", "      "];
     for (let n = 0; n < 300; n++) {
       // In a quote, later lines may drop the `>` (lazy continuation).
