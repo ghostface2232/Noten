@@ -21,8 +21,10 @@ import { __test } from "./boundedBlockTokenizers";
 // document. The reference instance is createFastMarked WITHOUT the bounding,
 // so the only variable is the bounding itself. Tiptap's tokenizers and
 // Noten's transcriptions of them (orderedListTokenizer.ts,
-// taskListTokenizer.ts) are both checked, since the cut rules must hold for
-// each.
+// taskListTokenizer.ts) are both checked: the task-list and table cut rules
+// must hold for each, and the ordered-list bound, which walks lines as the
+// transcription does, for the stock tokenizer only where the two read lines
+// alike (see STOCK_READS_ON).
 
 const EXTENSION_SETS: Record<string, () => AnyExtension[]> = {
   stock: () => [StarterKit, TaskList],
@@ -111,12 +113,13 @@ const LINES = [
   "text with | pipe", "[[wiki link]]", "**bold** start",
 ];
 
-// Lines the ordered-list cut rule stops at, by Noten's item and interrupter
-// tests, where the stock tokenizer reads on: markers it cannot read (items to
-// the stock one, text to Noten's) and unindented quote lines (lazy text to
-// the stock one). With the stock kit the bound may stop short at them, so its
-// runs leave them out; the Noten kit's runs keep them.
-const STOCK_READS_ON = /^(?:\s*(?:Mr|Dr|St|Vim|IIII)[.)]\s|>)/m;
+// Lines where the ordered-list bound, which walks lines as Noten's tokenizer
+// does, stops before the stock tokenizer: markers it cannot read (items to the
+// stock one, text to Noten's), unindented quote lines (lazy text to the stock
+// one), and fences (Noten's keeps marker-shaped lines in them as code, the
+// stock one reads them as items). With the stock kit the bound may stop short
+// at them, so its runs leave them out; the Noten kit's runs keep them.
+const STOCK_READS_ON = /^(?:\s*(?:Mr|Dr|St|Vim|IIII)[.)]\s|>)|```|~~~/m;
 
 function randomDoc(rand: () => number, lineCount: number, crlf: boolean, lines = LINES): string {
   const out: string[] = [];
@@ -188,6 +191,21 @@ describe.each(Object.keys(EXTENSION_SETS))("bounded block tokenizers (%s)", (set
     }
   });
 
+  // Ordered lists of 20-200 lines, around the bound's first span of 32 lines
+  // and its doublings, drawn from lines that keep a list going, then any
+  // lines at all.
+  it("match the unbounded tokenizers on long ordered lists", () => {
+    const keepsList = [
+      "2. two", "10. ten", "a. alpha", "   1. nested one", "      2. deeper", "   continued text",
+      "lazy continuation", "   - nested bullet", "   > nested quote", "   ```", "   2. in code", "\tindented tab", "",
+    ].filter((line) => setName !== "stock" || !STOCK_READS_ON.test(line));
+    const rand = mulberry32(0x10e6);
+    for (let i = 0; i < 300; i++) {
+      const list = Array.from({ length: 20 + Math.floor(rand() * 180) }, () => keepsList[Math.floor(rand() * keepsList.length)]);
+      expectEquivalent(instances, ["1. start", ...list, randomDoc(rand, 1 + Math.floor(rand() * 10), false, pool)].join("\n"));
+    }
+  }, 60_000);
+
   it("hand each tokenizer only the construct it can parse", () => {
     const tail = "\n\nnext paragraph".repeat(1000);
     expect(__test.boundTaskList(`plain paragraph${tail}`)).toBe("plain paragraph");
@@ -229,7 +247,7 @@ describe.each(Object.keys(EXTENSION_SETS))("bounded block tokenizers (%s)", (set
       bounded.markdown!.parse(md);
       expect(performance.now() - started, name).toBeLessThan(5000);
     }
-    // Each shape has its own limit; together they passed the 5 s test default
+    // Each shape has its own limit; together they exceeded the 5 s test default
     // on CI.
   }, 60_000);
 });
