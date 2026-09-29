@@ -301,6 +301,13 @@ const useStyles = makeStyles({
   changelogBullet: {
     flexShrink: 0,
   },
+  // A flex item will not shrink below its longest word, and the list hides
+  // horizontal overflow, so a URL, path or hash wider than the pane (a line
+  // may run to 300 characters) would be clipped out of reach.
+  changelogText: {
+    minWidth: 0,
+    overflowWrap: "anywhere",
+  },
   sliderRow: {
     display: "flex",
     flexDirection: "column",
@@ -450,7 +457,7 @@ function ChangelogList({ lines }: { lines: string[] }) {
       {lines.map((line, index) => (
         <li key={index} className={styles.changelogItem}>
           <span aria-hidden="true" className={styles.changelogBullet}>·</span>
-          <span>{line}</span>
+          <span className={styles.changelogText}>{line}</span>
         </li>
       ))}
     </ul>
