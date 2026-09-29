@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import {
   Button,
   Dialog,
@@ -40,7 +40,7 @@ import {
   Pin20Regular,
 } from "@fluentui/react-icons";
 import { getVersion } from "@tauri-apps/api/app";
-import { MOTION_DURATION_FAST, MOTION_DURATION_MEDIUM, pressableButton } from "../styles/interactions";
+import { MOTION_DURATION_FAST, MOTION_DURATION_MEDIUM, MOTION_DURATION_SLOWER, pressableButton } from "../styles/interactions";
 import { t } from "../i18n";
 import { changelogLines, getBundledChangelog, parseChangelogNotes } from "../utils/changelog";
 import type { UpdaterState } from "../hooks/useUpdater";
@@ -235,6 +235,67 @@ const useStyles = makeStyles({
     animationDuration: MOTION_DURATION_MEDIUM,
     animationTimingFunction: "ease",
   },
+  // The About tab's column lets the changelog shrink into whatever height the
+  // header and footer leave, so a long list scrolls inside its own box instead
+  // of pushing the footer out of the panel.
+  aboutMain: {
+    display: "flex",
+    flexDirection: "column",
+    flex: "0 1 auto",
+    minHeight: 0,
+  },
+  aboutItem: {
+    display: "flex",
+    flexDirection: "column",
+    flex: "0 1 auto",
+    minHeight: 0,
+    paddingTop: "12px",
+  },
+  changelogScroll: {
+    flex: "0 1 auto",
+    minHeight: 0,
+    overflowX: "hidden",
+    overflowY: "auto",
+    marginTop: 0,
+    marginBottom: 0,
+    paddingTop: "6px",
+    paddingBottom: "6px",
+    paddingLeft: 0,
+    paddingRight: "8px",
+    listStyleType: "none",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+    fontSize: "13px",
+    color: tokens.colorNeutralForeground3,
+    lineHeight: "1.6",
+    // Same edge fades as the sidebar lists: the bottom one shows while more
+    // lines sit below, the top one once the list has scrolled off its start.
+    // The mask is attached only while the list overflows (see ChangelogList).
+    "--changelog-mask-top": "0px",
+    "--changelog-mask-bottom": "0px",
+    "&[data-mask-active='true']": {
+      maskImage: "linear-gradient(to bottom, transparent, black var(--changelog-mask-top), black calc(100% - var(--changelog-mask-bottom)), transparent)",
+    },
+    transitionProperty: "--changelog-mask-top, --changelog-mask-bottom",
+    transitionDuration: MOTION_DURATION_SLOWER,
+    transitionTimingFunction: "ease",
+    "&[data-scroll-top='false']": {
+      "--changelog-mask-top": "24px",
+    },
+    "&[data-scroll-bottom='false']": {
+      "--changelog-mask-bottom": "24px",
+    },
+  },
+  // Wrapped lines hang under the text, not under the bullet, so each entry
+  // still reads as one block.
+  changelogItem: {
+    display: "flex",
+    gap: "6px",
+  },
+  changelogBullet: {
+    flexShrink: 0,
+  },
   sliderRow: {
     display: "flex",
     flexDirection: "column",
@@ -335,12 +396,45 @@ function settingItemClass(
 }
 
 function ChangelogList({ lines }: { lines: string[] }) {
+  const styles = useStyles();
+  const scrollRef = useRef<HTMLUListElement>(null);
+  const [atTop, setAtTop] = useState(true);
+  const [atBottom, setAtBottom] = useState(true);
+
+  // Measured on mount and on every size change, not only on scroll, so a list
+  // that overflows on first paint shows its bottom fade before any scrolling.
+  const measure = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setAtTop(el.scrollTop <= 0);
+    setAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 1);
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [measure, lines]);
+
   return (
-    <div style={{ fontSize: "13px", color: tokens.colorNeutralForeground3, lineHeight: "1.6" }}>
+    <ul
+      ref={scrollRef}
+      className={styles.changelogScroll}
+      onScroll={measure}
+      data-scroll-top={atTop ? "true" : "false"}
+      data-scroll-bottom={atBottom ? "true" : "false"}
+      data-mask-active={!atTop || !atBottom ? "true" : "false"}
+    >
       {lines.map((line, index) => (
-        <div key={index}>· {line}</div>
+        <li key={index} className={styles.changelogItem}>
+          <span aria-hidden="true" className={styles.changelogBullet}>·</span>
+          <span>{line}</span>
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }
 
@@ -737,9 +831,9 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
             )}
 
             {tab === "about" && (
-              <div className={styles.section} style={{ justifyContent: "space-between", height: "100%" }}>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "18px" }}>
+              <div className={styles.section} style={{ justifyContent: "space-between", height: "100%", gap: "14px" }}>
+                <div className={styles.aboutMain}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "18px", flexShrink: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                       <img
                         src="/Noten_icon.png"
@@ -788,7 +882,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   </div>
 
                   {!updateAvailable && (
-                  <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
+                  <div className={mergeClasses(settingItemClass(styles), styles.aboutItem)}>
                     <ChangelogList lines={changelogLines(getBundledChangelog(), locale)} />
                   </div>
                   )}
@@ -797,18 +891,16 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     updaterState.status === "downloading" ||
                     updaterState.status === "ready" ||
                     updaterState.status === "error") && (
-                  <div className={settingItemClass(styles)} style={{ paddingTop: "18px" }}>
+                  <div className={mergeClasses(settingItemClass(styles), styles.aboutItem)}>
                     {updaterState.status === "available" && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <span style={{ fontSize: "15px", fontWeight: 500 }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px", flex: "0 1 auto", minHeight: 0 }}>
+                        <span style={{ fontSize: "15px", fontWeight: 500, paddingTop: "6px", flexShrink: 0 }}>
                           {i("about.available")}: v{updaterState.version}
                         </span>
                         {incomingChangelog ? (
-                          <div style={{ maxHeight: "160px", overflow: "auto" }}>
-                            <ChangelogList lines={changelogLines(incomingChangelog, locale)} />
-                          </div>
+                          <ChangelogList lines={changelogLines(incomingChangelog, locale)} />
                         ) : updaterState.body ? (
-                          <div style={{ fontSize: "13px", color: tokens.colorNeutralForeground3, lineHeight: "1.6", whiteSpace: "pre-wrap", maxHeight: "160px", overflow: "auto" }}>
+                          <div style={{ fontSize: "13px", color: tokens.colorNeutralForeground3, lineHeight: "1.6", whiteSpace: "pre-wrap", flex: "0 1 auto", minHeight: 0, overflow: "auto", paddingTop: "6px", paddingBottom: "6px" }}>
                             {updaterState.body}
                           </div>
                         ) : null}
@@ -839,7 +931,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   )}
                 </div>
 
-                <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, marginBottom: "-4px" }}>
+                <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, marginBottom: "-4px", flexShrink: 0 }}>
                   {i("about.copyright")}
                 </div>
               </div>
