@@ -919,7 +919,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                         {incomingChangelog ? (
                           <ChangelogList lines={changelogLines(incomingChangelog, locale)} />
                         ) : updaterState.body ? (
-                          <div style={{ fontSize: "13px", color: tokens.colorNeutralForeground3, lineHeight: "1.6", whiteSpace: "pre-wrap", flex: "0 1 auto", minHeight: 0, overflow: "auto", paddingTop: "6px", paddingBottom: "6px" }}>
+                          <div style={{ fontSize: "13px", color: tokens.colorNeutralForeground3, lineHeight: "1.6", whiteSpace: "pre-wrap", flex: "0 1 auto", minHeight: 0, overflow: "auto", paddingTop: "6px", paddingBottom: "6px", paddingRight: "8px" }}>
                             {updaterState.body}
                           </div>
                         ) : null}
