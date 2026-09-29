@@ -400,6 +400,9 @@ function settingItemClass(
   return mergeClasses(styles.settingItem, isFirst && styles.settingItemFirst);
 }
 
+// The mask's stops fade over MOTION_DURATION_SLOWER (300ms).
+const MASK_FADE_OUT_MS = 320;
+
 function ChangelogList({ lines }: { lines: string[] }) {
   const styles = useStyles();
   const scrollRef = useRef<HTMLUListElement>(null);
@@ -424,6 +427,17 @@ function ChangelogList({ lines }: { lines: string[] }) {
     return () => ro.disconnect();
   }, [measure, lines]);
 
+  // As in the sidebar, the mask attaches at once but detaches only after the
+  // stops have faded out, so it does not pop off mid-fade when a wider panel
+  // stops the list overflowing.
+  const maskNeeded = !atTop || !atBottom;
+  const [maskActive, setMaskActive] = useState(false);
+  useEffect(() => {
+    if (maskNeeded) { setMaskActive(true); return; }
+    const timer = window.setTimeout(() => setMaskActive(false), MASK_FADE_OUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [maskNeeded]);
+
   return (
     <ul
       ref={scrollRef}
@@ -431,7 +445,7 @@ function ChangelogList({ lines }: { lines: string[] }) {
       onScroll={measure}
       data-scroll-top={atTop ? "true" : "false"}
       data-scroll-bottom={atBottom ? "true" : "false"}
-      data-mask-active={!atTop || !atBottom ? "true" : "false"}
+      data-mask-active={maskActive ? "true" : "false"}
     >
       {lines.map((line, index) => (
         <li key={index} className={styles.changelogItem}>
