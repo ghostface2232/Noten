@@ -203,19 +203,25 @@ describe("NotenOrderedList Markdown", () => {
     expect(listSegmentStarts(["a", "A"])).toEqual([0, 1]);
     expect(listSegmentStarts(["1", null, "a"])).toEqual([0, 2]);
     expect(listSegmentStarts([])).toEqual([0]);
-    // Tiptap reads these as numbered items.
-    expect(listSegmentStarts(["1", "IIII", "mid", "Civil", "2"])).toEqual([0]);
   });
 
+  // Words the stock tokenizer took as markers it could not read, deleting them.
+  it.each(["1. x\nIIII. y", "1. x\nmid. y", "iiii. x\n1. y", "Civil. a\n1) b"])(
+    "keeps the words of %j across reloads",
+    (markdown) => {
+      const first = markdownOf(createEditor(markdown));
+      expect(markdownOf(createEditor(first))).toBe(first);
+      for (const word of ["IIII.", "mid.", "iiii.", "Civil."].filter((w) => markdown.includes(w))) {
+        expect(first).toContain(word);
+      }
+    },
+  );
+
   it.each([
-    "1. x\nIIII. y",
-    "1. x\nmid. y",
-    "iiii. x\n1. y",
-    "Civil. a\n1) b",
     // The stock reading drops `x. deep` (indented past its siblings) but kept
     // its style on the nested token, so the first segment became roman.
     "1. top\n      x. deep\n   1. y\n   a. z",
-    "ab. item 1\n      iiii) item 2\n  A) item 3\n  3) item 4",
+    "ab. item 1\n      4) item 2\n  A) item 3\n  3) item 4",
   ])(
     "saves %j the same on every reload",
     (markdown) => {

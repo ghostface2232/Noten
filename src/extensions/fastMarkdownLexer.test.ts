@@ -164,6 +164,70 @@ describe("createFastMarked", () => {
   });
 });
 
+// marked 17 closes a fence at the opening fence followed by any mix of
+// backticks and tildes; CommonMark only at the same character. The instance
+// takes CommonMark's closer and must otherwise lex every fence as marked does.
+describe("fences close on their own character", () => {
+  const instance = createFastMarked();
+  const lex = (md: string) => JSON.parse(JSON.stringify(instance.lexer(md)));
+  const codeTexts = (md: string) =>
+    (instance.lexer(md) as { type: string; text?: string }[]).filter((token) => token.type === "code").map((token) => token.text);
+  // A line marked would take as a closer but CommonMark would not.
+  const MIXED_CLOSER = /^ {0,3}(?:`{3,}[`~]*~|~{3,}[`~]*`)[`~]* *$/m;
+
+  it.each([
+    ["```\n```~~~\nx\n```", ["```~~~\nx"]],
+    ["```js\n```~\n```", ["```~"]],
+    ["~~~\n~~~```\nx\n~~~", ["~~~```\nx"]],
+    ["  ```\n  ```~\n  a\n  ```", ["```~\na"]],
+    ["```\n```~~~", ["```~~~"]],
+  ])("keeps the mixed line of %j as code", (markdown, code) => {
+    expect(codeTexts(markdown)).toEqual(code);
+  });
+
+  it("lexes every other fence exactly as stock marked (seeded fuzz)", () => {
+    const rand = mulberry32(0xfe4ce);
+    const lines = ["```", "```js", "````", "~~~", "~~~~", "  ```", "   ~~~", "    ```", "```~~~", "~~~```", "```~", "``` ", "code", "", "- item", "> quote", "`x`"];
+    let compared = 0;
+    for (let i = 0; i < 3000; i++) {
+      const md = Array.from({ length: 1 + Math.floor(rand() * 8) }, () => lines[Math.floor(rand() * lines.length)]).join("\n");
+      if (MIXED_CLOSER.test(md)) continue;
+      expect(lex(md), JSON.stringify(md)).toEqual(stockTokens(md));
+      compared++;
+    }
+    expect(compared).toBeGreaterThan(1000);
+  });
+
+  // Where the override does act: the tokens still cover the input exactly,
+  // and no fence ends at a line of the other character unless that line is
+  // the block's own last code line (a fence left open at the end).
+  it("never closes a fence at a line of the other character (seeded fuzz)", () => {
+    const rand = mulberry32(0xc105e);
+    const lines = ["```", "```js", "````", "~~~", "  ```", "```~~~", "~~~```", "```~", "   ~~~`", "code", "", "# heading", "- item"];
+    const mixed = /^ {0,3}(?:`{3,}[`~]*~|~{3,}[`~]*`)[`~]* *$/;
+    let exercised = 0;
+    for (let i = 0; i < 3000; i++) {
+      const md = Array.from({ length: 1 + Math.floor(rand() * 8) }, () => lines[Math.floor(rand() * lines.length)]).join("\n");
+      if (!md.split("\n").some((line) => mixed.test(line))) continue;
+      exercised++;
+      const tokens = instance.lexer(md) as { type: string; raw: string; text?: string }[];
+      expect(tokens.map((token) => token.raw).join(""), JSON.stringify(md)).toBe(md);
+      for (const token of tokens.filter((t) => t.type === "code" && /^ {0,3}[`~]{3}/.test(t.raw))) {
+        // A one-line block's line is its opening fence (`~~~```` opens with
+        // the info string ```), not a closer.
+        const rawLines = token.raw.replace(/\n$/, "").split("\n");
+        const last = rawLines[rawLines.length - 1];
+        if (rawLines.length > 1 && mixed.test(last)) expect(token.text?.split("\n").pop()?.trim(), JSON.stringify(md)).toBe(last.trim());
+      }
+    }
+    expect(exercised).toBeGreaterThan(1000);
+  });
+
+  it("leaves a fence the other character does not close open to the end", () => {
+    expect(codeTexts("```\na\n```~~~\n\n# H\npara")).toEqual(["a\n```~~~\n\n# H\npara"]);
+  });
+});
+
 describe("Markdown extension integration", () => {
   let editors: Editor[] = [];
   afterEach(() => {

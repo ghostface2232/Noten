@@ -577,3 +577,31 @@ describe("contract: customName only ever turns on", () => {
     expect(calls.length).toBeGreaterThanOrEqual(sites);
   });
 });
+
+describe("contract: the editor parses Markdown through Noten's list and code-block fixes", () => {
+  // Each replaces a stock Tiptap parse or render that lost content on save
+  // (src/extensions/AGENTS.md). The Markdown tests build their own editors,
+  // so reverting the editor to a stock extension would pass all of them.
+  const editorSource = () => read(resolve(SRC_ROOT, "components/TiptapEditor.tsx"));
+
+  it("TiptapEditor uses NotenTaskList, NotenStarterKit and MermaidCodeBlock, not their stock bases", () => {
+    const text = editorSource();
+    expect(text).toMatch(/^\s*NotenTaskList,$/m);
+    expect(text).not.toMatch(/from "@tiptap\/extension-task-list"/);
+    expect(text).toMatch(/^\s*NotenStarterKit\.configure\(/m);
+    expect(text).not.toMatch(/from "@tiptap\/starter-kit"/);
+    expect(text).toMatch(/^\s*MermaidCodeBlock\.configure\(/m);
+  });
+
+  it("NotenStarterKit swaps in the list item, ordered list and code block", () => {
+    const text = read(resolve(SRC_ROOT, "extensions/CodeSpanFence.ts"));
+    const replacements = text.match(/const NOTEN_REPLACEMENTS[\s\S]*?\n\};/)?.[0] ?? "";
+    for (const entry of ["listItem: NotenListItem", "orderedList: NotenOrderedList", "codeBlock: NotenCodeBlock"]) {
+      expect(replacements).toContain(entry);
+    }
+  });
+
+  it("MermaidCodeBlock parses with parseCodeBlockMarkdown", () => {
+    expect(read(resolve(SRC_ROOT, "extensions/MermaidCodeBlock.ts"))).toMatch(/^\s*parseMarkdown: parseCodeBlockMarkdown,$/m);
+  });
+});

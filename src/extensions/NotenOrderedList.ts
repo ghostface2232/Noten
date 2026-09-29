@@ -1,15 +1,18 @@
 import {
   findParentNodeClosestToPos,
-  renderNestedMarkdownContent,
   wrappingInputRule,
   type JSONContent,
 } from "@tiptap/core";
-import { ListItem, OrderedList, detectMarkerType, getListMarker, markerToStart, toRoman } from "@tiptap/extension-list";
+import { OrderedList, detectMarkerType, markerToStart, toRoman } from "@tiptap/extension-list";
 import type { Node as ProseMirrorNode, NodeType } from "@tiptap/pm/model";
 import { EditorState, NodeSelection, type Selection, type Transaction } from "@tiptap/pm/state";
 import { wrapInList } from "@tiptap/pm/schema-list";
 import { StepMap, canJoin } from "@tiptap/pm/transform";
+import { MAX_LETTER_POSITION, normalizeListItemContent } from "./NotenListItem";
 import { tokenizeOrderedList } from "./orderedListTokenizer";
+
+// NotenListItem writes this list's markers; both live in NotenListItem.ts.
+export { NotenListItem, listItemMarker } from "./NotenListItem";
 
 /**
  * The marker styles an ordered list can carry, as HTML `<ol type>` values.
@@ -102,7 +105,10 @@ function wrapsAfterParagraphs(tr: Transaction, listType: NodeType, attrs: Record
   return wrapInList(listType, attrs)(scratch.apply(trial));
 }
 
-const ITEM_MARKER = /^[ \t]*(\d+|[A-Za-z]+)[.)]/;
+// `\s`, as the tokenizer indents: an item indented with a no-break space had
+// no marker here, so it could not split its list and a `1.` after it was
+// saved as the next letter.
+const ITEM_MARKER = /^\s*(\d+|[A-Za-z]+)[.)]/;
 
 function itemMarker(item: unknown): string | null {
   const raw = (item as { raw?: unknown } | null)?.raw;
@@ -150,6 +156,18 @@ function disambiguate(parsed: JSONContent, markers: readonly (string | null)[]):
   };
 }
 
+// The stock parse builds each item itself (`parseListItems`), not through
+// the listItem extension, so NotenListItem's parse never sees them; see
+// normalizeListItemContent.
+function withValidItems(list: JSONContent): JSONContent {
+  return {
+    ...list,
+    content: list.content?.map((item) =>
+      item.type === "listItem" ? { ...item, content: normalizeListItemContent(item.content ?? []) } : item,
+    ),
+  };
+}
+
 function isList(node: ProseMirrorNode): boolean {
   return (node.type.spec.group ?? "").split(" ").includes("list");
 }
@@ -178,9 +196,8 @@ function alphaValue(marker: string): number {
   return lower.length === 1 ? value(0) : value(0) * 26 + value(1);
 }
 
-// As Tiptap reads the marker: three or more roman letters that are not a
-// numeral (`iiii`, `mid`, `Civil`) read as a numbered item, so they must not
-// split a numbered list, or the save would read back as a different list.
+// As Tiptap reads the marker. The tokenizer only takes markers detectMarkerType
+// can read (orderedListTokenizer.ts), so `undefined` here is a number.
 function markerKind(marker: string): "number" | "lower" | "upper" {
   const type = detectMarkerType(marker);
   if (type === undefined) return "number";
@@ -270,44 +287,6 @@ export const MAX_LIST_SEGMENTS = 10_000;
 // list meant to start there, and the toolbar sets any style.
 const LETTER_INPUT = /^([a-zA-Z])\.\s$/;
 
-// The last position a letter marker can spell: Tiptap reads and writes one
-// or two letters, `zz` being 702.
-const MAX_LETTER_POSITION = 26 * 27;
-
-/**
- * The stock marker for a list item, except that a letter list's items past
- * `zz.` are numbered. Tiptap has no letter marker there and wrote
- * `undefineda.`, `undefinedb.`, ..., which reads back as text of item 702: a
- * letter list of over 702 items (a toolbar restyle of a long list, or the
- * one-list fallback of a token past MAX_LIST_SEGMENTS) lost its items on save.
- * Numbered, they read back as a numbered list continuing at 703.
- */
-export function listItemMarker(type: unknown, index: number): string {
-  const position = index + 1;
-  // Below 1 no letter or roman marker exists (Tiptap threw on `A` and wrote
-  // `undefined.` or `.`), and a negative number is no marker either: all
-  // read back as plain paragraphs. `0.` is the lowest marker Markdown has.
-  if (position < 1) return `${Math.max(position, 0)}. `;
-  if ((type === "a" || type === "A") && position > MAX_LETTER_POSITION) return `${position}. `;
-  return getListMarker(type as string | undefined, index, ". ");
-}
-
-export const NotenListItem = ListItem.extend({
-  // Transcribed from the stock renderMarkdown; only the marker differs.
-  renderMarkdown: (node, h, ctx) =>
-    renderNestedMarkdownContent(
-      node,
-      h,
-      (context) => {
-        if (context.parentType !== "orderedList") return "- ";
-        const attrs = context.meta?.parentAttrs as { start?: number; type?: unknown } | undefined;
-        return listItemMarker(attrs?.type, (attrs?.start || 1) - 1 + (context.index || 0));
-      },
-      ctx,
-      { alignNestedToPrefix: ctx?.parentType === "orderedList" },
-    ),
-});
-
 export const NotenOrderedList = OrderedList.extend({
   addAttributes() {
     const attributes = (this.parent?.() ?? {}) as Record<string, object>;
@@ -356,16 +335,17 @@ export const NotenOrderedList = OrderedList.extend({
     starts.forEach((start, index) => {
       const end = starts[index + 1] ?? items.length;
       const first = markers[start];
-      // Each segment's start and style come from its own first marker. The
-      // token's describe its first raw item, which for a nested list the stock
-      // reading may have dropped (an item indented deeper than its siblings),
-      // so the first segment could take a style its markers do not have.
+      // Each segment's start and style come from its own first marker rather
+      // than the token's, which describe the first raw item of the whole run;
+      // the stock reading also dropped a nested list's first item when it was
+      // indented deeper than its siblings (orderedListTokenizer.ts keeps it
+      // now), leaving the token's style on markers that did not have it.
       const segment = first
         ? { ...token, items: items.slice(start, end), start: markerToStart(first), typeMarker: detectMarkerType(first) }
         : { ...token, items: items.slice(start, end), ...(index === 0 ? {} : { start: 1, typeMarker: undefined }) };
       const parsed = stock.call(this, segment as typeof token, helpers);
       for (const list of Array.isArray(parsed) ? parsed : [parsed]) {
-        if (list) lists.push(disambiguate(list, markers.slice(start, end)));
+        if (list) lists.push(disambiguate(withValidItems(list), markers.slice(start, end)));
       }
     });
     return lists.length === 1 ? lists[0] : lists;
