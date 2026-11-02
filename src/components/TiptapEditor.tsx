@@ -46,6 +46,7 @@ import TextContextMenu, {
 } from "../extensions/TextContextMenu";
 import { SearchHighlight } from "../extensions/SearchHighlight";
 import FocusMode, { syncFocusModeState } from "../extensions/FocusMode";
+import { announceDocumentSwap } from "../extensions/documentSwap";
 import OffscreenBlocks from "../extensions/OffscreenBlocks";
 import IncrementalMarkdown from "../extensions/IncrementalMarkdown";
 import { NotenImage } from "../extensions/NotenImage";
@@ -955,6 +956,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       // so an older inactive session cannot leave the focus-mode CSS without
       // an active-block decoration (and vice versa).
       syncFocusModeState(editor, focusMode);
+      announceDocumentSwap(editor);
 
       dirtyRef.current = false;
 
