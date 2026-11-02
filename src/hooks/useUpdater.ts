@@ -7,7 +7,7 @@ import { runAutoUpdate, runManualInstall, type AutoUpdateOutcome, type UpdateAct
 import { logNotenError } from "../utils/crashLog";
 import { NotenError } from "../utils/notenError";
 import { readAutoUpdateAllowed } from "./useSettings";
-import { drainPeerWindows } from "./useUpdateDrainSync";
+import { drainPeerWindows, holdAndDrainPeerWindows } from "./useUpdateDrainSync";
 
 export type UpdateStatus =
   | "idle"
@@ -36,21 +36,27 @@ export interface AutoUpdateGates {
 const readActivity = () => invoke<UpdateActivity>("update_activity");
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/**
- * @param beforeInstallRef Runs immediately before the installer does, and is
- *   awaited. Tauri's quiet install mode ends the process from inside
- *   `install`, so the window never gets its close event and the drain that
- *   guards it never runs — an unsaved edit simply went with the process. This
- *   is the last point at which anything can be persisted, so it belongs inside
- *   the hook rather than at a call site a later caller could forget. Resolves
- *   true when every unsaved edit is on disk or journalled.
- * @param mayInstall False while this window is in a state a restart must not
- *   interrupt (loading, a migration, an export). Both install paths wait on it.
- */
-export function useUpdater(
-  beforeInstallRef: RefObject<(() => Promise<boolean>) | null>,
-  mayInstall: () => boolean,
-) {
+export interface UpdaterParams {
+  /**
+   * Runs immediately before the installer does, and is awaited. Tauri's quiet
+   * install mode ends the process from inside `install`, so the window never
+   * gets its close event and the drain that guards it never runs — an unsaved
+   * edit simply went with the process. This is the last point at which
+   * anything can be persisted, so it belongs inside the hook rather than at a
+   * call site a later caller could forget. Resolves true when every unsaved
+   * edit is on disk or journalled.
+   */
+  drainRef: RefObject<(() => Promise<boolean>) | null>;
+  /** Holds this window's input for the install's last step; null when it cannot. */
+  holdInputRef: RefObject<(() => (() => void) | null) | null>;
+  /**
+   * False while this window is in a state a restart must not interrupt
+   * (loading, a migration, an export). Both install paths wait on it.
+   */
+  mayInstall: () => boolean;
+}
+
+export function useUpdater({ drainRef: beforeInstallRef, holdInputRef, mayInstall }: UpdaterParams) {
   const [state, setState] = useState<UpdaterState>({
     status: "idle",
     version: null,
@@ -124,6 +130,26 @@ export function useUpdater(
     return own === true && peers;
   }, [beforeInstallRef]);
 
+  // The install's last step. Every window holds its input first and drains
+  // again, so an edit made after the first drain is either saved now or never
+  // made: from here to the process ending, nothing can change a document.
+  // Resolves the release when every window confirmed, else null, released.
+  const holdAndDrainAllWindows = useCallback(async (): Promise<(() => Promise<void>) | null> => {
+    const releaseOwn = holdInputRef.current?.() ?? null;
+    if (!releaseOwn) return null;
+    const [own, peers] = await Promise.all([
+      beforeInstallRef.current?.().catch(() => false),
+      holdAndDrainPeerWindows(),
+    ]);
+    const release = async () => {
+      releaseOwn();
+      await peers.release();
+    };
+    if (own === true && peers.ok) return release;
+    await release();
+    return null;
+  }, [beforeInstallRef, holdInputRef]);
+
   // A user-driven install. It waits on no pause in their input, because they
   // just asked for it, but it does wait for every window's edits to be safe.
   const installNow = useCallback(async () => {
@@ -140,6 +166,7 @@ export function useUpdater(
         mayInstall,
         activity: readActivity,
         drain: drainAllWindows,
+        holdAndDrain: holdAndDrainAllWindows,
         install: () => update.install(),
         sleep,
         now: () => performance.now(),
@@ -155,7 +182,7 @@ export function useUpdater(
     } finally {
       installingRef.current = false;
     }
-  }, [download, drainAllWindows, mayInstall]);
+  }, [download, drainAllWindows, holdAndDrainAllWindows, mayInstall]);
 
   const restartApp = useCallback(async () => {
     // On Windows "ready" means a download waiting for the user to be idle, not
@@ -187,6 +214,7 @@ export function useUpdater(
       activity: readActivity,
       now: () => performance.now(),
       drain: drainAllWindows,
+      holdAndDrain: holdAndDrainAllWindows,
       install: async () => {
         try {
           await updateRef.current?.install();
@@ -200,7 +228,7 @@ export function useUpdater(
         void logNotenError(new NotenError("AUTO_UPDATE_FAILED", "recoverable", `autoUpdate: ${outcome}`, { cause }));
       },
     })
-  ), [download, drainAllWindows, findUpdate, mayInstall]);
+  ), [download, drainAllWindows, findUpdate, holdAndDrainAllWindows, mayInstall]);
 
   return { state, checkForUpdate, installUpdate: installNow, restartApp, startAutoUpdate };
 }

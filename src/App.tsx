@@ -90,6 +90,7 @@ import { libraryStore } from "./utils/libraryStore";
 import { emitDocUpdated } from "./hooks/useWindowSync";
 import { exportAsMarkdown, exportAsPdf } from "./utils/exportHandlers";
 import { holdOffUpdate, updateHeldOff } from "./utils/updateHold";
+import { holdInput } from "./utils/updateInputHold";
 import { clearManagedNotesData, clearMigratedSource, hasExistingNotenData, migrateNotesDir } from "./utils/migrateNotesDir";
 import { writeMigrationJournal, type MigrationCleanupMode } from "./utils/migrationJournal";
 import { recoverPendingMigration } from "./utils/migrationCleanup";
@@ -298,7 +299,9 @@ function App() {
     () => mayInstallUpdateRef.current && !migrationInProgress && !updateHeldOff(),
     [],
   );
-  const updater = useUpdater(beforeUpdateInstallRef, mayInstallUpdate);
+  // Filled in below, once the editor exists.
+  const holdUpdateInputRef = useRef<(() => (() => void) | null) | null>(null);
+  const updater = useUpdater({ drainRef: beforeUpdateInstallRef, holdInputRef: holdUpdateInputRef, mayInstall: mayInstallUpdate });
   const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDarkFromMatchMedia);
   const isDarkMode = settings.themeMode === "system"
     ? systemPrefersDark
@@ -397,7 +400,7 @@ function App() {
   }, [settings.themeMode]);
 
   autoUpdateEnabledRef.current = settings.autoUpdate;
-  useUpdateDrainSync({ drainRef: beforeUpdateInstallRef, mayInstall: mayInstallUpdate });
+  useUpdateDrainSync({ drainRef: beforeUpdateInstallRef, holdInputRef: holdUpdateInputRef, mayInstall: mayInstallUpdate });
   useEffect(() => {
     if (!settingsLoaded || startupUpdateCheckStartedRef.current) return;
     startupUpdateCheckStartedRef.current = true;
@@ -581,6 +584,19 @@ function App() {
     const manifestOk = (await flushManifestRef.current?.().catch(() => false)) ?? true;
     const bodiesSafe = await journalPendingEdits();
     return manifestOk && bodiesSafe && !hasUnsaveableChanges();
+  };
+  holdUpdateInputRef.current = () => {
+    const editor = tiptapRef.current?.getEditor() ?? null;
+    return holdInput(editor && {
+      isComposing: () => editor.view.composing,
+      lockDocument: () => {
+        // The guard the editor already uses for a note that is not ready; set
+        // directly, because the handle's setEditable also resets dirty state.
+        const wasReadonly = editor.storage.readonlyGuard.readonly;
+        editor.storage.readonlyGuard.readonly = true;
+        return () => { editor.storage.readonlyGuard.readonly = wasReadonly; };
+      },
+    });
   };
   mayInstallUpdateRef.current = notesDirReady && !isLoading && notesDirConflict === null;
   notifyActiveDocRef.current = notifyActiveDoc;

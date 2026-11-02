@@ -617,6 +617,11 @@ describe("contract: an automatic update waits for the user to stop", () => {
     const app = read(resolve(SRC_ROOT, "App.tsx"));
     expect(app).not.toContain("updater.installUpdate()");
     expect(app).toContain("useUpdateDrainSync({");
+    // The last drain runs with input held in every window, so nothing typed
+    // between it and the process ending can be lost.
+    expect(app).toContain("holdUpdateInputRef.current =");
+    expect(hook).toContain("holdAndDrain: holdAndDrainAllWindows");
+    expect(hook.split("holdAndDrain: holdAndDrainAllWindows").length - 1).toBe(2);
   });
 });
 

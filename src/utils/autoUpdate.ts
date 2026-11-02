@@ -43,6 +43,11 @@ export interface AutoUpdatePort {
   now: () => number;
   /** Resolves true only when every unsaved edit is on disk or journalled. */
   drain: () => Promise<boolean>;
+  /**
+   * Holds every window's input, then drains again. Resolves the release once
+   * every window confirmed; null when one did not, already released.
+   */
+  holdAndDrain: () => Promise<(() => Promise<void>) | null>;
   install: () => Promise<void>;
   sleep: (ms: number) => Promise<void>;
   reportFailure: (outcome: AutoUpdateOutcome, cause: unknown) => void;
@@ -101,9 +106,14 @@ export async function runAutoUpdate(port: AutoUpdatePort): Promise<AutoUpdateOut
   for (;;) {
     if (!port.isEnabled()) return giveUp("cancelled");
     if (await isIdle()) {
+      // Read before the drains, so nothing slow sits between the last idle
+      // check and the install.
+      if (!(await port.isStillAllowed().catch(() => false))) return giveUp("cancelled");
       // A keystroke during the drain fails it as well as a folder outage does,
       // so this keeps trying, but slowly: an outage should not mean a full
-      // drain and its error logging every few seconds.
+      // drain and its error logging every few seconds. This drain does the
+      // slow work with input still live; the held one below normally finds
+      // nothing left to write.
       if (!(await port.drain().catch(() => false))) {
         await port.sleep(AUTO_UPDATE_DRAIN_RETRY_MS);
         continue;
@@ -111,12 +121,21 @@ export async function runAutoUpdate(port: AutoUpdatePort): Promise<AutoUpdateOut
       // The drain can take a while on a cloud folder, and a keystroke during
       // it is exactly what this wait exists to respect.
       if (port.isEnabled() && await isIdle()) {
-        if (!(await port.isStillAllowed().catch(() => false))) return giveUp("cancelled");
-        try {
-          await port.install();
-          return "installed";
-        } catch (err) {
-          return giveUp("install-failed", err);
+        const release = await port.holdAndDrain().catch(() => null);
+        if (release) {
+          // Input held since before the last drain: whatever this reading
+          // sees, no edit was made that the drain missed. Any input it does
+          // see was swallowed by the hold and means the user is back.
+          if (port.isEnabled() && await isIdle()) {
+            try {
+              await port.install();
+              return "installed";
+            } catch (err) {
+              await release().catch(() => {});
+              return giveUp("install-failed", err);
+            }
+          }
+          await release().catch(() => {});
         }
       }
     }
@@ -137,6 +156,8 @@ export interface ManualInstallPort {
   activity: () => Promise<UpdateActivity>;
   /** Resolves true only when every unsaved edit is on disk or journalled. */
   drain: () => Promise<boolean>;
+  /** As in AutoUpdatePort. */
+  holdAndDrain: () => Promise<(() => Promise<void>) | null>;
   install: () => Promise<void>;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
@@ -152,16 +173,23 @@ export interface ManualInstallPort {
  */
 export async function runManualInstall(port: ManualInstallPort): Promise<ManualInstallOutcome> {
   const deadline = port.now() + MANUAL_INSTALL_WAIT_MS;
+  const ready = async () => port.mayInstall()
+    && !(await port.activity().then((a) => a.exporting, () => true));
   for (;;) {
-    const ready = port.mayInstall()
-      && !(await port.activity().then((a) => a.exporting, () => true))
-      && (await port.drain().catch(() => false));
-    if (ready) {
-      try {
-        await port.install();
-        return "installed";
-      } catch {
-        return "install-failed";
+    if (await ready() && await port.drain().catch(() => false)) {
+      const release = await port.holdAndDrain().catch(() => null);
+      if (release) {
+        // An export started from a click before the hold took effect.
+        if (await ready()) {
+          try {
+            await port.install();
+            return "installed";
+          } catch {
+            await release().catch(() => {});
+            return "install-failed";
+          }
+        }
+        await release().catch(() => {});
       }
     }
     if (port.now() >= deadline) return "blocked";
