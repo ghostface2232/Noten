@@ -214,6 +214,17 @@ describe("useUpdateDrainSync", () => {
     expect(holdState.held).toBe(0);
   });
 
+  it("lets go on its own when its held drain hangs and the requester is gone", async () => {
+    vi.useFakeTimers();
+    await mount(() => new Promise<boolean>(() => {}));
+
+    const acks = await requestDrain("second", true);
+    expect(holdState.held).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(PEER_DRAIN_TIMEOUT_MS); });
+    expect(holdState.held).toBe(0);
+    expect(acks.map((a) => a.ok)).toEqual([false]);
+  });
+
   it("lets go when the window unmounts", async () => {
     const view = await mount(async () => true);
 

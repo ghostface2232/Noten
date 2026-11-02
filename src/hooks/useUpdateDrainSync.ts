@@ -152,12 +152,23 @@ export function useUpdateDrainSync(params: UpdateDrainSyncParams) {
         if (holdInput) {
           const release = holdInputRef.current?.() ?? null;
           if (release) {
-            let expiry: ReturnType<typeof setTimeout> | undefined;
+            // Armed before the drain, and the drain is bounded here as well:
+            // the requester's timeout and release die with its webview, so
+            // nothing outside this window may be what ends the hold.
+            let expiry = setTimeout(() => releaseHold(drainId), PEER_DRAIN_TIMEOUT_MS + PEER_HOLD_EXPIRY_MS);
             held.set(drainId, () => { clearTimeout(expiry); release(); });
-            // Armed only after the answer goes out; see PEER_HOLD_EXPIRY_MS.
-            ok = mayInstall() && (await drainRef.current?.().catch(() => false)) === true;
-            if (ok && held.has(drainId)) expiry = setTimeout(() => releaseHold(drainId), PEER_HOLD_EXPIRY_MS);
-            else releaseHold(drainId);
+            let drainTimer: ReturnType<typeof setTimeout> | undefined;
+            ok = mayInstall() && (await Promise.race([
+              drainRef.current?.().catch(() => false) ?? Promise.resolve(false),
+              new Promise<boolean>((resolve) => { drainTimer = setTimeout(() => resolve(false), PEER_DRAIN_TIMEOUT_MS); }),
+            ]).finally(() => clearTimeout(drainTimer))) === true;
+            if (ok && held.has(drainId)) {
+              // Restarted at the answer; see PEER_HOLD_EXPIRY_MS.
+              clearTimeout(expiry);
+              expiry = setTimeout(() => releaseHold(drainId), PEER_HOLD_EXPIRY_MS);
+            } else {
+              releaseHold(drainId);
+            }
           } else {
             ok = false;
           }
