@@ -18,6 +18,7 @@ Noten's privacy posture is "your notes never leave the disk," and it should stay
 
 - Release builds register `tauri-plugin-single-instance` first, so a second launch exits before it opens a window and the running process opens one instead (`open_window_for_second_launch`, which mirrors `openNewWindow`). A second process was invisible to everything that coordinates windows: the update drain and input hold, cross-window sync, and the recovery journal, whose records are keyed by window label (both processes' first window is `main`, and each process's orphan sweep would treat the other's live records as its own). Keep it the first plugin.
 - The lock is a named mutex keyed by the identifier, so a bench build (`com.noten.bench`) runs beside the real app. Debug builds skip the plugin: they share `com.noten.app` with the installed app, and a dev run would only open a window in it.
+- Known gap: an elevated Noten and a normal one do not see each other. A normal launch beside an elevated instance cannot open its mutex (access denied, which the plugin does not treat as "already running") and runs as a second process; an elevated launch beside a normal one has its `WM_COPYDATA` dropped by UIPI and opens nothing. Running Noten elevated is not a supported setup, so this is documented rather than worked around.
 - The callback runs on the main thread inside a window message, and building a webview window there deadlocks on Windows, so the window is built from a spawned thread.
 
 ## PDF Export (print_to_pdf)
