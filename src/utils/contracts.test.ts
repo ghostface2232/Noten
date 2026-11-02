@@ -569,14 +569,18 @@ describe("contract: unsaved edits get a last chance before the process ends", ()
   // the window never receives its close event and the drain that guards it
   // never runs — an unsaved edit simply went with the process. The hook must
   // await something before the installer, and App must supply it.
-  it("useUpdater awaits a beforeInstall hook before downloadAndInstall", () => {
+  it("useUpdater awaits a beforeInstall hook between the download and the install", () => {
     const src = read(resolve(SRC_ROOT, "hooks/useUpdater.ts"));
+    const downloadIdx = src.indexOf("await download()");
     const beforeIdx = src.indexOf("beforeInstallRef?.current?.()");
     // The call, not the JSDoc above it that also names the method.
-    const installIdx = src.indexOf("update.downloadAndInstall(");
-    expect(beforeIdx).toBeGreaterThan(-1);
-    expect(installIdx).toBeGreaterThan(-1);
-    expect(beforeIdx).toBeLessThan(installIdx);
+    const installIdx = src.indexOf("update.install(");
+    expect(downloadIdx).toBeGreaterThan(-1);
+    expect(beforeIdx).toBeGreaterThan(downloadIdx);
+    expect(installIdx).toBeGreaterThan(beforeIdx);
+    // A combined call drains before the download, so everything typed while it
+    // runs goes with the process.
+    expect(src).not.toContain("downloadAndInstall(");
   });
 
   it("App supplies that hook and it journals, not just flushes", () => {
@@ -592,6 +596,16 @@ describe("contract: unsaved edits get a last chance before the process ends", ()
     // cover them either.
     expect(body).toContain("flushManifestRef");
     expect(body).toContain("journalPendingEdits");
+  });
+});
+
+describe("contract: an automatic update waits for the user to stop", () => {
+  it("the only automatic install is the one behind the idle gate", () => {
+    const hook = read(resolve(SRC_ROOT, "hooks/useUpdater.ts"));
+    expect(hook).toContain("runAutoUpdate({");
+    expect(hook).toContain('invoke<number>("auto_update_idle_ms")');
+    const app = read(resolve(SRC_ROOT, "App.tsx"));
+    expect(app).not.toContain("updater.installUpdate()");
   });
 });
 

@@ -21,7 +21,7 @@ import {
 import { getCurrentWindow, Effect, LogicalSize } from "@tauri-apps/api/window";
 import { useMarkdownState } from "./hooks/useMarkdownState";
 import { getCurrentMarkdown, useFileSystem } from "./hooks/useFileSystem";
-import { saveManifest, flushPersistence, sortNotes, useNotesLoader, getNotesDir, getDefaultNotesDir, setNotesDir, restoreNotesDir, resetNotesDir, setMigrationInProgress } from "./hooks/useNotesLoader";
+import { saveManifest, flushPersistence, sortNotes, useNotesLoader, getNotesDir, getDefaultNotesDir, setNotesDir, restoreNotesDir, resetNotesDir, migrationInProgress, setMigrationInProgress } from "./hooks/useNotesLoader";
 import { useAutoSave, type FlushResult } from "./hooks/useAutoSave";
 import { useNoteGroups } from "./hooks/useNoteGroups";
 import { useSettings, type ParagraphSpacing } from "./hooks/useSettings";
@@ -289,7 +289,9 @@ function App() {
   // Filled in below, once useAutoSave exists. The updater's quiet install
   // ends the process without a close event, so this is the last chance to get
   // unsaved edits onto disk or into the recovery journal.
-  const beforeUpdateInstallRef = useRef<(() => Promise<void>) | null>(null);
+  const beforeUpdateInstallRef = useRef<(() => Promise<boolean>) | null>(null);
+  const autoUpdateEnabledRef = useRef(false);
+  const mayAutoInstallRef = useRef(false);
   const updater = useUpdater(beforeUpdateInstallRef);
   const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDarkFromMatchMedia);
   const isDarkMode = settings.themeMode === "system"
@@ -388,11 +390,19 @@ function App() {
     };
   }, [settings.themeMode]);
 
+  autoUpdateEnabledRef.current = settings.autoUpdate;
   useEffect(() => {
-    if (startupUpdateCheckStartedRef.current) return;
+    if (!settingsLoaded || startupUpdateCheckStartedRef.current) return;
     startupUpdateCheckStartedRef.current = true;
-    void updater.checkForUpdate();
-  }, [updater.checkForUpdate]);
+    if (autoUpdateEnabledRef.current) {
+      void updater.startAutoUpdate({
+        isEnabled: () => autoUpdateEnabledRef.current,
+        mayInstall: () => mayAutoInstallRef.current && !migrationInProgress,
+      });
+    } else {
+      void updater.checkForUpdate();
+    }
+  }, [settingsLoaded, updater.checkForUpdate, updater.startAutoUpdate]);
 
   const [notesDirReady, setNotesDirReady] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -562,9 +572,11 @@ function App() {
     await flushAutoSave().catch(() => {});
     await awaitInFlightSaves().catch(() => {});
     await flushPendingSnapshots().catch(() => {});
-    await flushManifestRef.current?.().catch(() => {});
-    await journalPendingEdits();
+    const manifestOk = (await flushManifestRef.current?.().catch(() => false)) ?? true;
+    const bodiesSafe = await journalPendingEdits();
+    return manifestOk && bodiesSafe && !hasUnsaveableChanges();
   };
+  mayAutoInstallRef.current = notesDirReady && !isLoading && notesDirConflict === null;
   notifyActiveDocRef.current = notifyActiveDoc;
   cancelDocSaveRef.current = cancelDocSave;
 

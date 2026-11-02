@@ -39,6 +39,8 @@ export interface Settings {
    * was restarted while focus mode was on.
    */
   outlineOpenBeforeFocus: boolean;
+  /** Check at the first launch after each Windows logon and install unattended. */
+  autoUpdate: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -58,6 +60,7 @@ const DEFAULTS: Settings = {
   outlinePanelOpen: false,
   focusModeEnabled: false,
   outlineOpenBeforeFocus: false,
+  autoUpdate: true,
 };
 
 // First-run locale seed: with no settings file on disk yet, follow the OS/
@@ -130,6 +133,7 @@ function parseSettings(raw: string): Settings {
     outlineOpenBeforeFocus: typeof parsed.outlineOpenBeforeFocus === "boolean"
       ? parsed.outlineOpenBeforeFocus
       : DEFAULTS.outlineOpenBeforeFocus,
+    autoUpdate: typeof parsed.autoUpdate === "boolean" ? parsed.autoUpdate : DEFAULTS.autoUpdate,
   };
 }
 

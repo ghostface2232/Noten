@@ -112,6 +112,26 @@ function seedSettingsFile(overrides: Record<string, unknown>) {
   refs.files.set(SETTINGS_PATH, JSON.stringify({ locale: "ko", ...overrides }));
 }
 
+describe("useSettings — autoUpdate", () => {
+  it("is on for a settings file that predates it", async () => {
+    seedSettingsFile({});
+    const result = await mountSettings();
+    expect(result.current.settings.autoUpdate).toBe(true);
+  });
+
+  it("keeps a user's choice to turn it off", async () => {
+    seedSettingsFile({ autoUpdate: false });
+    const result = await mountSettings();
+    expect(result.current.settings.autoUpdate).toBe(false);
+  });
+
+  it("falls back to on when the field holds non-boolean garbage", async () => {
+    seedSettingsFile({ autoUpdate: "no" });
+    const result = await mountSettings();
+    expect(result.current.settings.autoUpdate).toBe(true);
+  });
+});
+
 describe("useSettings — v0.3.0 boolean fields (outlinePanelOpen, focusModeEnabled, outlineOpenBeforeFocus)", () => {
   it("loads persisted true values", async () => {
     seedSettingsFile({

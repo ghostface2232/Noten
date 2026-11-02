@@ -234,6 +234,11 @@ const dict = {
   "settings.spellcheck": { en: "Spelling & grammar indicators", ko: "맞춤법 및 문법 표시" },
   "settings.persistColorFilter": { en: "Keep color filter after restart", ko: "재시작 후 색상 필터 유지" },
   "settings.tab.about": { en: "About", ko: "정보" },
+  "about.autoUpdate": { en: "Automatic updates", ko: "자동 업데이트" },
+  "about.autoUpdate.desc": {
+    en: "Checks the first time Noten opens after you sign in to Windows, then installs and restarts while you are away from the keyboard and mouse.",
+    ko: "Windows 로그온 후 Noten을 처음 열 때 확인하고, 키보드와 마우스를 쓰지 않는 동안 설치한 뒤 다시 시작합니다.",
+  },
   "about.checkUpdate": { en: "Check for updates", ko: "업데이트 확인" },
   "about.checking": { en: "Checking for updates...", ko: "업데이트를 확인하는 중..." },
   "about.checkingShort": { en: "Checking...", ko: "확인 중..." },

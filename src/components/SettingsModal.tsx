@@ -907,6 +907,19 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     )}
                   </div>
 
+                  <div className={mergeClasses(settingItemClass(styles), styles.aboutItemFixed)}>
+                    <div className={styles.row}>
+                      <Label className={styles.label}>{i("about.autoUpdate")}</Label>
+                      <Switch
+                        checked={settings.autoUpdate}
+                        onChange={(_, data) => onUpdate("autoUpdate", data.checked)}
+                      />
+                    </div>
+                    <div style={{ fontSize: "12px", color: tokens.colorNeutralForeground3, marginTop: "4px", lineHeight: "1.5" }}>
+                      {i("about.autoUpdate.desc")}
+                    </div>
+                  </div>
+
                   {!updateAvailable && (
                   <div className={mergeClasses(settingItemClass(styles), styles.aboutItem)}>
                     <ChangelogList lines={changelogLines(getBundledChangelog(), locale)} />
