@@ -1,16 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { holdInput, inputHeld, type HoldableEditor } from "./updateInputHold";
 
-function editor(composing = false) {
-  const state = { locked: 0, composing };
-  const handle: HoldableEditor = {
-    isComposing: () => state.composing,
-    lockDocument: () => {
-      state.locked++;
-      return () => { state.locked--; };
-    },
-  };
-  return { state, handle };
+function editor(composing = false): HoldableEditor {
+  return { isComposing: () => composing };
 }
 
 function dispatch(type: string, target: EventTarget = document.body) {
@@ -25,8 +17,7 @@ function dispatch(type: string, target: EventTarget = document.body) {
 
 describe("holdInput", () => {
   it("swallows editing input while held and lets it through once released", () => {
-    const { handle } = editor();
-    const release = holdInput(handle)!;
+    const release = holdInput(editor())!;
 
     for (const type of ["keydown", "beforeinput", "paste", "drop", "pointerdown", "click"]) {
       expect(dispatch(type)).toEqual({ reached: false, prevented: true });
@@ -38,27 +29,27 @@ describe("holdInput", () => {
     expect(dispatch("keydown")).toEqual({ reached: true, prevented: false });
   });
 
-  it("locks the document for the first hold and unlocks it after the last", () => {
-    const { state, handle } = editor();
-    const first = holdInput(handle)!;
-    const second = holdInput(handle)!;
-    expect(state.locked).toBe(1);
+  it("moves focus out of the field for the hold and puts it back after the last release", () => {
+    const field = document.createElement("textarea");
+    document.body.appendChild(field);
+    field.focus();
+    const first = holdInput(editor())!;
+    const second = holdInput(editor())!;
+    expect(document.activeElement).toBe(document.body);
 
     first();
     first();
     expect(inputHeld()).toBe(true);
-    expect(state.locked).toBe(1);
+    expect(document.activeElement).toBe(document.body);
     second();
     expect(inputHeld()).toBe(false);
-    expect(state.locked).toBe(0);
+    expect(document.activeElement).toBe(field);
+    field.remove();
   });
 
   it("refuses during an IME composition the document has not received", () => {
-    const { state, handle } = editor(true);
-
-    expect(holdInput(handle)).toBeNull();
+    expect(holdInput(editor(true))).toBeNull();
     expect(inputHeld()).toBe(false);
-    expect(state.locked).toBe(0);
   });
 
   it("still holds DOM input in a window with no editor", () => {

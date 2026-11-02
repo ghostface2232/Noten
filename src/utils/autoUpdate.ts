@@ -88,13 +88,15 @@ export async function runAutoUpdate(port: AutoUpdatePort): Promise<AutoUpdateOut
     return giveUp("download-failed", err);
   }
 
-  // Noten having been the active window at any point in this idle stretch
-  // counts, not just at this reading: another app taking focus by itself is no
-  // input, and the user may still be reading the note behind it.
+  // Noten having been the active window at any reading in this idle stretch
+  // counts, not just this one: another app taking focus by itself is no input,
+  // and the user may still be reading the note behind it. Readings are one
+  // poll apart, so a focus change in the stretch's first seconds can slip by.
   let foregroundSeenAt = Number.NEGATIVE_INFINITY;
   const isIdle = async () => {
     if (!port.mayInstall()) return false;
-    const activity = await port.activity();
+    const activity = await port.activity().catch(() => null);
+    if (!activity) return false;
     const now = port.now();
     if (activity.foreground) foregroundSeenAt = now;
     if (activity.exporting) return false;
@@ -126,16 +128,21 @@ export async function runAutoUpdate(port: AutoUpdatePort): Promise<AutoUpdateOut
           // Input held since before the last drain: whatever this reading
           // sees, no edit was made that the drain missed. Any input it does
           // see was swallowed by the hold and means the user is back.
-          if (port.isEnabled() && await isIdle()) {
-            try {
+          let installError: unknown = null;
+          let installed = false;
+          try {
+            if (port.isEnabled() && await isIdle()) {
               await port.install();
+              installed = true;
               return "installed";
-            } catch (err) {
-              await release().catch(() => {});
-              return giveUp("install-failed", err);
             }
+          } catch (err) {
+            installError = err ?? new Error("install failed");
+          } finally {
+            // On Windows a successful install has already ended the process.
+            if (!installed) await release().catch(() => {});
           }
-          await release().catch(() => {});
+          if (installError) return giveUp("install-failed", installError);
         }
       }
     }
@@ -179,17 +186,19 @@ export async function runManualInstall(port: ManualInstallPort): Promise<ManualI
     if (await ready() && await port.drain().catch(() => false)) {
       const release = await port.holdAndDrain().catch(() => null);
       if (release) {
-        // An export started from a click before the hold took effect.
-        if (await ready()) {
-          try {
+        let installed = false;
+        try {
+          // An export started from a click before the hold took effect.
+          if (await ready()) {
             await port.install();
+            installed = true;
             return "installed";
-          } catch {
-            await release().catch(() => {});
-            return "install-failed";
           }
+        } catch {
+          return "install-failed";
+        } finally {
+          if (!installed) await release().catch(() => {});
         }
-        await release().catch(() => {});
       }
     }
     if (port.now() >= deadline) return "blocked";

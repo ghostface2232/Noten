@@ -587,16 +587,7 @@ function App() {
   };
   holdUpdateInputRef.current = () => {
     const editor = tiptapRef.current?.getEditor() ?? null;
-    return holdInput(editor && {
-      isComposing: () => editor.view.composing,
-      lockDocument: () => {
-        // The guard the editor already uses for a note that is not ready; set
-        // directly, because the handle's setEditable also resets dirty state.
-        const wasReadonly = editor.storage.readonlyGuard.readonly;
-        editor.storage.readonlyGuard.readonly = true;
-        return () => { editor.storage.readonlyGuard.readonly = wasReadonly; };
-      },
-    });
+    return holdInput(editor && { isComposing: () => editor.view.composing });
   };
   mayInstallUpdateRef.current = notesDirReady && !isLoading && notesDirConflict === null;
   notifyActiveDocRef.current = notifyActiveDoc;

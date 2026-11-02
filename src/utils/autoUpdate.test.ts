@@ -375,3 +375,21 @@ describe("the install's last step holds input", () => {
     expect(install).not.toHaveBeenCalled();
   });
 });
+
+describe("the hold is always released when the install does not happen", () => {
+  it("releases and keeps waiting when the last activity reading fails", async () => {
+    const reads = [() => Promise.resolve(idle(AUTO_UPDATE_IDLE_MS)), () => Promise.resolve(idle(AUTO_UPDATE_IDLE_MS)),
+      () => Promise.reject(new Error("ipc")), () => Promise.resolve(idle(AUTO_UPDATE_IDLE_MS))];
+    const { port: p, calls } = port({ activity: () => next(reads)() });
+
+    expect(await runAutoUpdate(p)).toBe("installed");
+    expect(calls).toEqual(["download", "drain", "hold", "release", "sleep", "drain", "hold", "install"]);
+  });
+
+  it("a requested install releases the hold when the installer fails", async () => {
+    const { port: p, calls } = manualPort({ install: async () => { throw new Error("bad signature"); } });
+
+    expect(await runManualInstall(p)).toBe("install-failed");
+    expect(calls).toEqual(["drain", "hold", "release"]);
+  });
+});

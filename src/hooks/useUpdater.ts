@@ -7,7 +7,7 @@ import { runAutoUpdate, runManualInstall, type AutoUpdateOutcome, type UpdateAct
 import { logNotenError } from "../utils/crashLog";
 import { NotenError } from "../utils/notenError";
 import { readAutoUpdateAllowed } from "./useSettings";
-import { drainPeerWindows, holdAndDrainPeerWindows } from "./useUpdateDrainSync";
+import { drainPeerWindows, holdAndDrainPeerWindows, PEER_DRAIN_TIMEOUT_MS } from "./useUpdateDrainSync";
 
 export type UpdateStatus =
   | "idle"
@@ -137,10 +137,16 @@ export function useUpdater({ drainRef: beforeInstallRef, holdInputRef, mayInstal
   const holdAndDrainAllWindows = useCallback(async (): Promise<(() => Promise<void>) | null> => {
     const releaseOwn = holdInputRef.current?.() ?? null;
     if (!releaseOwn) return null;
-    const [own, peers] = await Promise.all([
-      beforeInstallRef.current?.().catch(() => false),
-      holdAndDrainPeerWindows(),
-    ]);
+    // Bounded like the peers' answers: a write stuck on a cloud folder must not
+    // keep this window's input held, and the peers start their 60-second
+    // expiry when they answer, so finishing within 15 seconds keeps every
+    // window held until the install call.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ownDrain = Promise.race([
+      beforeInstallRef.current?.().catch(() => false) ?? Promise.resolve(false),
+      new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), PEER_DRAIN_TIMEOUT_MS); }),
+    ]).finally(() => clearTimeout(timer));
+    const [own, peers] = await Promise.all([ownDrain, holdAndDrainPeerWindows()]);
     const release = async () => {
       releaseOwn();
       await peers.release();

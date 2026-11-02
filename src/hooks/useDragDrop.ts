@@ -2,6 +2,7 @@ import { useEffect, type RefObject } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
 import { insertImagesAtPosition, isImagePath } from "../extensions/ImageDrop";
+import { inputHeld } from "../utils/updateInputHold";
 
 const MARKDOWN_FILE_PATTERN = /\.(md|markdown|mdx|txt)$/i;
 
@@ -26,6 +27,9 @@ export function useDragDrop({
 
     void getCurrentWindow().onDragDropEvent(async ({ payload }) => {
       if (disposed || payload.type !== "drop") return;
+      // Native drops bypass the DOM, so the install's input hold cannot
+      // swallow them; an import would be cut short by the installer.
+      if (inputHeld()) return;
 
       const markdownPaths = payload.paths.filter((path) => MARKDOWN_FILE_PATTERN.test(path));
       const imagePaths = payload.paths.filter((path) => isImagePath(path));
