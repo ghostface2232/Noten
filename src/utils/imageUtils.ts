@@ -7,7 +7,7 @@ export function bytesToDataUrl(bytes: Uint8Array, mimeType: string): string {
   return `data:${mimeType};base64,${btoa(parts.join(""))}`;
 }
 
-export function dataUrlToUint8Array(dataUrl: string): Uint8Array {
+export function dataUrlToUint8Array(dataUrl: string): Uint8Array<ArrayBuffer> {
   const base64 = dataUrl.split(",")[1];
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);

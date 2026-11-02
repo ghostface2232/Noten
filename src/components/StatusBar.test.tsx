@@ -3,8 +3,12 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
-import { TextSelection } from "@tiptap/pm/state";
+import { EditorState, TextSelection } from "@tiptap/pm/state";
+import { undoDepth } from "@tiptap/pm/history";
 import type { Editor as ReactEditor } from "@tiptap/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { announceDocumentSwap } from "../extensions/documentSwap";
 import { STATS_MAX_WAIT_MS, STATS_SETTLE_MS, StatusBar } from "./StatusBar";
 
 let active: Editor | null = null;
@@ -32,6 +36,54 @@ function status(editor: Editor, hidden = false) {
     </FluentProvider>
   );
 }
+
+/** Swaps the document as openDocument does: a new EditorState, no transaction. */
+function swapDocument(editor: Editor, text: string) {
+  const doc = editor.schema.nodeFromJSON({
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+  });
+  editor.view.updateState(EditorState.create({ doc, plugins: editor.state.plugins }));
+}
+
+describe("StatusBar after a document swap", () => {
+  it("shows the new note's counts once the swap is announced", async () => {
+    const editor = makeEditor();
+    render(status(editor));
+    await waitFor(() => expect(screen.getByText(/^9/)).toBeTruthy());
+
+    swapDocument(editor, "twelve chars");
+    act(() => { announceDocumentSwap(editor); });
+
+    await waitFor(() => expect(screen.getByText(/^12/)).toBeTruthy());
+  });
+
+  it("announces without editing the note or adding an undo step", async () => {
+    const editor = makeEditor();
+    act(() => { editor.view.dispatch(editor.state.tr.insertText("!", 6)); });
+    const doc = editor.state.doc;
+    const depth = undoDepth(editor.state);
+    const onUpdate = vi.fn();
+    editor.on("update", onUpdate);
+
+    announceDocumentSwap(editor);
+
+    expect(editor.state.doc).toBe(doc);
+    expect(undoDepth(editor.state)).toBe(depth);
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("is announced by openDocument after every way it replaces the document", () => {
+    const source = readFileSync(resolve(__dirname, "TiptapEditor.tsx"), "utf8");
+    const open = source.slice(source.indexOf("const openDocument = useCallback"));
+    const body = open.slice(0, open.indexOf("const invalidateDocumentSession"));
+    const announced = body.indexOf("announceDocumentSwap(editor)");
+    expect(announced).toBeGreaterThan(body.lastIndexOf("updateState("));
+    expect(announced).toBeGreaterThan(body.lastIndexOf("setContent("));
+    // The session cache keeps editor.state, so it must hold the announced one.
+    expect(announced).toBeLessThan(body.lastIndexOf("touchDocumentSession(resolvedKey"));
+  });
+});
 
 describe("StatusBar subscriptions and document work", () => {
   it("does not subscribe while hidden and refreshes when shown", async () => {

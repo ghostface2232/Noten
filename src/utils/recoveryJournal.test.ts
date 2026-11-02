@@ -37,6 +37,47 @@ beforeEach(() => {
   fs.seedDir(APP_DATA);
 });
 
+describe("recoveryJournal — concurrent writers of one record", () => {
+  // Losing focus can flush twice at once (focus change and page hidden). Both
+  // writes share `<record>.json.tmp`, so the first rename took the file out
+  // from under the second, which logged a fatal save failure with nothing wrong.
+  it("lets overlapping writes both succeed, with the last call's body on disk", async () => {
+    const results = await Promise.allSettled([
+      writeRecoveryRecord(fs, APP_DATA, LABEL, record({ content: "first", editSerial: 1 })),
+      writeRecoveryRecord(fs, APP_DATA, LABEL, record({ content: "second", editSerial: 2 })),
+    ]);
+
+    expect(results.map((r) => r.status)).toEqual(["fulfilled", "fulfilled"]);
+    const found = await readRecoveryRecords(fs, APP_DATA, LABEL);
+    expect(found.map((r) => r.content)).toEqual(["second"]);
+    const names = (await fs.readDir(recoveryLabelDirFor(APP_DATA, LABEL))).map((e) => e.name);
+    expect(names).toEqual([`${NOTE_ID}.json`]);
+  });
+
+  it("does not let an earlier write land after a later clear", async () => {
+    await Promise.all([
+      writeRecoveryRecord(fs, APP_DATA, LABEL, record()),
+      clearRecoveryRecord(fs, APP_DATA, LABEL, NOTE_ID),
+    ]);
+
+    expect(await readRecoveryRecords(fs, APP_DATA, LABEL)).toEqual([]);
+  });
+
+  it("still runs the next write after one fails", async () => {
+    const faulty = wrapWithFaults(fs);
+    const path = recoveryRecordPathFor(APP_DATA, LABEL, NOTE_ID);
+    faulty.injectFault({ op: "rename", path: `${path}.tmp`, throwError: new Error("EBUSY"), times: 1 });
+
+    const results = await Promise.allSettled([
+      writeRecoveryRecord(faulty, APP_DATA, LABEL, record({ content: "first" })),
+      writeRecoveryRecord(faulty, APP_DATA, LABEL, record({ content: "second" })),
+    ]);
+
+    expect(results.map((r) => r.status)).toEqual(["rejected", "fulfilled"]);
+    expect((await readRecoveryRecords(fs, APP_DATA, LABEL)).map((r) => r.content)).toEqual(["second"]);
+  });
+});
+
 describe("recoveryJournal — round trip", () => {
   it("writes a record and reads it back", async () => {
     await writeRecoveryRecord(fs, APP_DATA, LABEL, record());

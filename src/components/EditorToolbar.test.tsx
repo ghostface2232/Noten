@@ -87,6 +87,8 @@ describe("EditorToolbar numbered list split button", () => {
 describe("EditorToolbar re-renders", () => {
   it("does not re-render for typing that leaves its state unchanged", async () => {
     const { editor, commits } = setup("<p>alpha</p>");
+    // Fluent commits once more shortly after mount, with or without an edit.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
     // The first edit makes undo available: one render.
     await transact(() => editor.view.dispatch(editor.state.tr.insertText("x", 3)));
     const after = commits.n;

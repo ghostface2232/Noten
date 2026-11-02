@@ -21,7 +21,7 @@ This document is the high-level map of the current repository. Keep it concise: 
 | `public/` | Static app icon and bundled editor fonts. |
 | `docs/` | Maintained project documentation and dated review reports. |
 | `.github/workflows/` | Windows CI and tag-triggered signed release automation. |
-| Root config files | npm/Vite/TypeScript/Vitest/ESLint configuration and the Rust helper workspace. |
+| Root config files | npm/Vite/TypeScript/Vitest configuration and the Rust helper workspace. |
 
 `node_modules/`, `dist/`, `target/`, `src-tauri/target/`, generated Tauri schemas, copied helper resources, and embedded installer payloads are build products rather than source architecture.
 

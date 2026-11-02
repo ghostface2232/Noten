@@ -104,7 +104,7 @@ npm run tauri:dev
 npm run check
 ```
 
-`npm run tauri:dev` prepares `maintenance-helper.exe` in Tauri resources and then starts `tauri dev`. `npm run check` runs typecheck, lint, and tests.
+`npm run tauri:dev` prepares `maintenance-helper.exe` in Tauri resources and then starts `tauri dev`. `npm run check` runs typecheck and tests.
 
 Treat `.\scripts\build-release.ps1` as a local smoke test only. Real release installers are built and signed by GitHub Actions after a `v*` tag is pushed.
 
