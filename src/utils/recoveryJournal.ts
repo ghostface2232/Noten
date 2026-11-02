@@ -87,6 +87,22 @@ function isRecoveryRecord(value: unknown): value is RecoveryRecord {
   );
 }
 
+const recordTails = new Map<string, Promise<void>>();
+
+/** Runs operations on one record in call order. Writers share the fixed
+ *  `<record>.json.tmp`, and a lifecycle flush can overlap another (focus loss
+ *  and page hidden fire together), so the first rename took the file from under
+ *  the second. Clears queue too, or a write in flight lands after its clear and
+ *  leaves a record for an edit that is already durable. */
+function runExclusiveOnRecord<T>(path: string, run: () => Promise<T>): Promise<T> {
+  const result = (recordTails.get(path) ?? Promise.resolve()).then(run);
+  const tail = result.then(() => {}, () => {}).then(() => {
+    if (recordTails.get(path) === tail) recordTails.delete(path);
+  });
+  recordTails.set(path, tail);
+  return result;
+}
+
 export async function writeRecoveryRecord(
   fs: FileSystem,
   appDataDir: string,
@@ -95,16 +111,19 @@ export async function writeRecoveryRecord(
 ): Promise<void> {
   if (!isValidWindowLabel(windowLabel) || !isValidNoteId(record.docId)) return;
   const dir = recoveryLabelDirFor(appDataDir, windowLabel);
-  await fs.mkdir(dir, { recursive: true }).catch(() => {});
-  await atomicWriteText(
-    fs,
-    recoveryRecordPathFor(appDataDir, windowLabel, record.docId),
-    JSON.stringify(record),
-    // Fail closed: a record that silently degraded to a non-atomic write is
-    // exactly the one that can be found truncated, and the caller treats a
-    // successful write as permission to stop protecting the edit.
-    { failClosed: true },
-  );
+  const path = recoveryRecordPathFor(appDataDir, windowLabel, record.docId);
+  await runExclusiveOnRecord(path, async () => {
+    await fs.mkdir(dir, { recursive: true }).catch(() => {});
+    await atomicWriteText(
+      fs,
+      path,
+      JSON.stringify(record),
+      // Fail closed: a record that silently degraded to a non-atomic write is
+      // exactly the one that can be found truncated, and the caller treats a
+      // successful write as permission to stop protecting the edit.
+      { failClosed: true },
+    );
+  });
 }
 
 /** Every readable record for one window label. An unparseable or truncated
@@ -144,10 +163,12 @@ export async function clearRecoveryRecord(
   docId: string,
 ): Promise<void> {
   if (!isValidWindowLabel(windowLabel) || !isValidNoteId(docId)) return;
-  try {
-    const path = recoveryRecordPathFor(appDataDir, windowLabel, docId);
-    if (await fs.exists(path)) await fs.remove(path);
-  } catch { /* best-effort: a stale record costs one extra recovery check */ }
+  const path = recoveryRecordPathFor(appDataDir, windowLabel, docId);
+  await runExclusiveOnRecord(path, async () => {
+    try {
+      if (await fs.exists(path)) await fs.remove(path);
+    } catch { /* best-effort: a stale record costs one extra recovery check */ }
+  });
 }
 
 /** Window labels that have a recovery directory. Only `main` reopens under the
