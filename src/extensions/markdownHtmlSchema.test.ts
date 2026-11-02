@@ -121,23 +121,19 @@ describe("markdownHtmlSchema", () => {
     expect(schemas.size).toBe(1);
   });
 
-  it("loads a note full of sized images faster than rebuilding the schema per image", () => {
+  it("does not rebuild the schema per image in a note full of sized images, as the stock method does", () => {
     const img = '<img src=".assets/n/a.png" alt="a" width="560" height="315" />';
     const markdown = `${img}\n\n`.repeat(100) + "| a | b |\n| --- | --- |\n" + `| ${img} | t |\n`.repeat(100);
-    const time = (run: () => unknown) => {
-      let best = Infinity;
-      for (let i = 0; i < 3; i++) {
-        const t = performance.now();
-        run();
-        best = Math.min(best, performance.now() - t);
-      }
-      return best;
+    const schemasBuilt = (run: () => unknown) => {
+      const fromSchema = vi.spyOn(DOMParser, "fromSchema");
+      run();
+      const schemas = new Set(fromSchema.mock.calls.map(([schema]) => schema));
+      fromSchema.mockRestore();
+      return schemas.size;
     };
-    load(markdown);
-    const cached = time(() => load(markdown));
-    const stock = time(() => withStock(() => load(markdown)));
-    // Relative, so machine speed does not matter. In Chromium the gap is ~9x;
-    // jsdom's per-document selector setup, absent in WebView2, narrows it here.
-    expect(stock / cached).toBeGreaterThan(1.5);
+    // Counted, not timed: under jsdom the time gap is dominated by its
+    // per-document selector setup, absent in WebView2 (bench/ measures it there).
+    expect(schemasBuilt(() => load(markdown))).toBe(1);
+    expect(schemasBuilt(() => withStock(() => load(markdown)))).toBeGreaterThanOrEqual(200);
   }, 60_000);
 });

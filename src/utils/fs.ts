@@ -39,7 +39,7 @@ export interface RemoveOptions {
 export interface FileSystem {
   readTextFile(path: string): Promise<string>;
   writeTextFile(path: string, content: string): Promise<void>;
-  readFile(path: string): Promise<Uint8Array>;
+  readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   writeFile(path: string, data: Uint8Array): Promise<void>;
   mkdir(path: string, options?: MkdirOptions): Promise<void>;
   remove(path: string, options?: RemoveOptions): Promise<void>;

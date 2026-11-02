@@ -12,7 +12,7 @@ export interface DocumentImageContext {
 }
 
 export interface ImageBinaryPayload {
-  bytes: Uint8Array;
+  bytes: Uint8Array<ArrayBuffer>;
   mime: string;
 }
 
@@ -47,7 +47,7 @@ function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
+async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return toHex(new Uint8Array(digest));
 }

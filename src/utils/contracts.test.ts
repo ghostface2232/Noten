@@ -3,11 +3,10 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, join, relative } from "node:path";
 
 // Project-specific contract tests. These are NOT exhaustive — they enforce a
-// handful of invariants from recent regressions that ESLint cannot easily
-// express (cross-file call-shape rules, presence of named constants, etc.).
+// handful of invariants from recent regressions (cross-file call-shape rules,
+// presence of named constants, bypassed null checks, etc.).
 //
 // Style: grep over source text. Cheap to add, cheap to maintain, low ceremony.
-// If a check needs real AST analysis, prefer adding an ESLint rule instead.
 
 const SRC_ROOT = resolve(__dirname, "..");
 
@@ -26,6 +25,80 @@ function walk(dir: string, out: string[] = []): string[] {
 function read(path: string): string {
   return readFileSync(path, "utf8");
 }
+
+/** Source text without comments, so a rule can match code across line breaks. */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
+function lineOf(source: string, index: number): number {
+  return source.slice(0, index).split("\n").length;
+}
+
+describe("contract: FileStat.mtime / birthtime nullability is not bypassed", () => {
+  // `mtime: null` is a real state (OneDrive placeholders, see
+  // fs.fault.test-utils.ts). Handle the unknown case explicitly; reconcileFolder.ts
+  // holds the canonical pattern. Tests are exempt: their mocks return a concrete Date.
+  const BYPASS_RE = /\.(?:mtime|birthtime)\s*(?:!(?!=)|as\b)/g;
+
+  it("recognizes the bypass forms and leaves null checks alone", () => {
+    const matches = (code: string) => stripComments(code).match(BYPASS_RE) !== null;
+    for (const code of ["stat.mtime!", "stat?.birthtime!.getTime()", "stat.mtime\n  !", "stat.mtime as Date", "stat.birthtime as unknown"]) {
+      expect(matches(code), code).toBe(true);
+    }
+    for (const code of ["stat.mtime != null", "stat.mtime !== null", "stat.mtime ?? null", "// stat.mtime!", "/* stat.mtime as Date */", "const asOf = stat.mtime"]) {
+      expect(matches(code), code).toBe(false);
+    }
+  });
+
+  it("no source file casts away or asserts past the null", () => {
+    const violations: string[] = [];
+    for (const file of walk(SRC_ROOT)) {
+      const source = stripComments(read(file));
+      for (const match of source.matchAll(BYPASS_RE)) {
+        violations.push(`${file}:${lineOf(source, match.index)} (comment-stripped): ${match[0]}`);
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
+});
+
+describe("contract: durable writers route through atomicWriteText", () => {
+  // Raw writes leave readers exposed to half-written files when AV/OneDrive
+  // interrupts the operation. The list is explicit so that adding a durable
+  // writer takes an obvious edit here. The bare `writeTextFile(...)` form is
+  // how migrateImageAssets.ts once bypassed the gate.
+  const DURABLE_WRITERS = [
+    "utils/metadataIO.ts",
+    "utils/groupsIO.ts",
+    "utils/conflictFileDetector.ts",
+    "utils/migrateImageAssets.ts",
+    "utils/recoveryJournal.ts",
+    "utils/trashRetention.ts",
+  ];
+  const RAW_WRITE_RE = /\bwriteTextFile\s*(?:\?\.\s*)?\(/g;
+
+  it("recognizes raw writes and leaves atomicWriteText alone", () => {
+    const matches = (code: string) => stripComments(code).match(RAW_WRITE_RE) !== null;
+    for (const code of ["fs.writeTextFile(path, text)", "writeTextFile(path, text)", "fs.writeTextFile\n  (path, text)", "fs.writeTextFile?.(path, text)"]) {
+      expect(matches(code), code).toBe(true);
+    }
+    for (const code of ["atomicWriteText(fs, path, text)", "import { writeTextFile } from 'x'", "// fs.writeTextFile(path)"]) {
+      expect(matches(code), code).toBe(false);
+    }
+  });
+
+  it("no durable writer calls writeTextFile directly", () => {
+    const violations: string[] = [];
+    for (const name of DURABLE_WRITERS) {
+      const source = stripComments(read(join(SRC_ROOT, name)));
+      for (const match of source.matchAll(RAW_WRITE_RE)) {
+        violations.push(`${name}:${lineOf(source, match.index)} (comment-stripped): ${match[0]}`);
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
+});
 
 describe("contract: setNotesDir / resetNotesDir callers pass reconcile state", () => {
   // Regression: src/App.tsx:206-218 (commit f8f7b58). The settings-driven

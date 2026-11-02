@@ -37,7 +37,7 @@ function getDocumentContext(editor: Editor): DocumentImageContext {
 
 async function buildImageAttributesFromBinary(
   editor: Editor,
-  bytes: Uint8Array,
+  bytes: Uint8Array<ArrayBuffer>,
   mime: string,
 ): Promise<{ src: string; width: number; height: number }> {
   const context = getDocumentContext(editor);
@@ -83,7 +83,7 @@ function mermaidCodeBlockContent(source: string): Content {
  */
 async function buildNodeFromBinary(
   editor: Editor,
-  bytes: Uint8Array,
+  bytes: Uint8Array<ArrayBuffer>,
   mime: string,
   fileName?: string,
 ): Promise<Content> {
