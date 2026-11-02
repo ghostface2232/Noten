@@ -249,6 +249,12 @@ const dict = {
   "about.downloading": { en: "Downloading...", ko: "다운로드 중..." },
   "about.restart": { en: "Restart to apply update", ko: "재시작하여 업데이트 적용" },
   "about.error": { en: "Unable to check for updates. Please try again later.", ko: "업데이트를 확인할 수 없습니다. 나중에 다시 시도하세요." },
+  "about.installing": { en: "Saving your notes before installing...", ko: "설치 전에 노트를 저장하는 중..." },
+  "about.installError": { en: "Unable to install the update. Please try again later.", ko: "업데이트를 설치할 수 없습니다. 나중에 다시 시도하세요." },
+  "about.installBlocked": {
+    en: "Not installed: a save or export did not finish, so the update was held back to keep your notes safe. Try again once it is done.",
+    ko: "저장이나 내보내기가 끝나지 않아 노트를 보호하려고 설치하지 않았습니다. 작업이 끝난 뒤 다시 시도하세요.",
+  },
   "about.copyright": { en: "© 2026 Mingwan Bae", ko: "© 2026 Mingwan Bae" },
 
   "settings.notesDirectory": { en: "Notes folder", ko: "저장 위치" },

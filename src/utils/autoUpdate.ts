@@ -54,8 +54,8 @@ export interface AutoUpdatePort {
  * app before a pause updates on a later launch; only "no newer version" and a
  * started install use the logon's one check up.
  *
- * Unlike the manual install, this never proceeds past a failed drain: no one
- * asked for this restart, so it must not be the thing that loses an edit.
+ * Like the manual install, this never proceeds past a failed drain; unlike
+ * it, it also waits for the user to stop, since no one asked for this restart.
  */
 export async function runAutoUpdate(port: AutoUpdatePort): Promise<AutoUpdateOutcome> {
   if (!(await port.claim().catch(() => false))) return "not-claimed";
@@ -121,5 +121,50 @@ export async function runAutoUpdate(port: AutoUpdatePort): Promise<AutoUpdateOut
       }
     }
     await port.sleep(AUTO_UPDATE_POLL_MS);
+  }
+}
+
+// A user-driven install waits this long for saves, exports and a blocked
+// folder to settle before it says it could not install.
+export const MANUAL_INSTALL_WAIT_MS = 90_000;
+export const MANUAL_INSTALL_RETRY_MS = 3_000;
+
+export type ManualInstallOutcome = "installed" | "blocked" | "install-failed";
+
+export interface ManualInstallPort {
+  /** False while some window is in a state a restart must not interrupt. */
+  mayInstall: () => boolean;
+  activity: () => Promise<UpdateActivity>;
+  /** Resolves true only when every unsaved edit is on disk or journalled. */
+  drain: () => Promise<boolean>;
+  install: () => Promise<void>;
+  sleep: (ms: number) => Promise<void>;
+  now: () => number;
+}
+
+/**
+ * The install the user asked for. It needs no pause in their input, but it
+ * holds the same line on their data as the automatic path: nothing installs
+ * past a drain that did not confirm every window, or while an export runs.
+ * Asking for an update is not asking to lose an edit, so a save or export in
+ * progress is waited out quietly, and only one that outlasts the wait is
+ * reported.
+ */
+export async function runManualInstall(port: ManualInstallPort): Promise<ManualInstallOutcome> {
+  const deadline = port.now() + MANUAL_INSTALL_WAIT_MS;
+  for (;;) {
+    const ready = port.mayInstall()
+      && !(await port.activity().then((a) => a.exporting, () => true))
+      && (await port.drain().catch(() => false));
+    if (ready) {
+      try {
+        await port.install();
+        return "installed";
+      } catch {
+        return "install-failed";
+      }
+    }
+    if (port.now() >= deadline) return "blocked";
+    await port.sleep(MANUAL_INSTALL_RETRY_MS);
   }
 }

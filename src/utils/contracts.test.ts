@@ -572,14 +572,19 @@ describe("contract: unsaved edits get a last chance before the process ends", ()
   it("useUpdater awaits a beforeInstall hook between the download and the install", () => {
     const src = read(resolve(SRC_ROOT, "hooks/useUpdater.ts"));
     const downloadIdx = src.indexOf("await download()");
-    const drainIdx = src.indexOf("await drainAllWindows()");
-    // The call, not the JSDoc above it that also names the method.
-    const installIdx = src.indexOf("update.install(");
+    const manualIdx = src.indexOf("runManualInstall({");
     expect(downloadIdx).toBeGreaterThan(-1);
-    expect(drainIdx).toBeGreaterThan(downloadIdx);
-    expect(installIdx).toBeGreaterThan(drainIdx);
+    expect(manualIdx).toBeGreaterThan(downloadIdx);
+    // Both install paths drain through the loops that refuse to install past a
+    // drain that did not confirm every window; a manual install that ignored a
+    // failed drain is what this replaced.
+    const manual = src.slice(manualIdx, manualIdx + 400);
+    expect(manual).toContain("drain: drainAllWindows");
+    expect(manual).toContain("update.install()");
+    expect(src.split("update.install(").length - 1).toBe(1);
+    expect(src.split("updateRef.current?.install(").length - 1).toBe(1);
     // The installer ends every window, not just the one that asked.
-    expect(src).toContain("beforeInstallRef?.current?.()");
+    expect(src).toContain("beforeInstallRef.current?.()");
     expect(src).toContain("drainPeerWindows()");
     expect(src).toContain("drain: drainAllWindows");
     // A combined call drains before the download, so everything typed while it

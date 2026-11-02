@@ -3,7 +3,7 @@ import type { RefObject } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { runAutoUpdate, type AutoUpdateOutcome, type UpdateActivity } from "../utils/autoUpdate";
+import { runAutoUpdate, runManualInstall, type AutoUpdateOutcome, type UpdateActivity } from "../utils/autoUpdate";
 import { logNotenError } from "../utils/crashLog";
 import { NotenError } from "../utils/notenError";
 import { readAutoUpdateAllowed } from "./useSettings";
@@ -15,21 +15,26 @@ export type UpdateStatus =
   | "available"
   | "downloading"
   | "ready"
+  | "installing"
   | "upToDate"
   | "error";
+
+export type UpdateError = "check_failed" | "install_failed" | "install_blocked";
 
 export interface UpdaterState {
   status: UpdateStatus;
   version: string | null;
   body: string | null;
   progress: number;
-  error: string | null;
+  error: UpdateError | null;
 }
 
 export interface AutoUpdateGates {
   isEnabled: () => boolean;
-  mayInstall: () => boolean;
 }
+
+const readActivity = () => invoke<UpdateActivity>("update_activity");
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
  * @param beforeInstallRef Runs immediately before the installer does, and is
@@ -39,8 +44,13 @@ export interface AutoUpdateGates {
  *   is the last point at which anything can be persisted, so it belongs inside
  *   the hook rather than at a call site a later caller could forget. Resolves
  *   true when every unsaved edit is on disk or journalled.
+ * @param mayInstall False while this window is in a state a restart must not
+ *   interrupt (loading, a migration, an export). Both install paths wait on it.
  */
-export function useUpdater(beforeInstallRef?: RefObject<(() => Promise<boolean>) | null>) {
+export function useUpdater(
+  beforeInstallRef: RefObject<(() => Promise<boolean>) | null>,
+  mayInstall: () => boolean,
+) {
   const [state, setState] = useState<UpdaterState>({
     status: "idle",
     version: null,
@@ -50,7 +60,9 @@ export function useUpdater(beforeInstallRef?: RefObject<(() => Promise<boolean>)
   });
   const updateRef = useRef<Update | null>(null);
   const downloadedRef = useRef(false);
+  // Once the user has asked, the automatic path stands down for good.
   const manualInstallRef = useRef(false);
+  const installingRef = useRef(false);
 
   const findUpdate = useCallback(async (): Promise<boolean> => {
     setState((s) => ({ ...s, status: "checking", error: null }));
@@ -106,29 +118,44 @@ export function useUpdater(beforeInstallRef?: RefObject<(() => Promise<boolean>)
   // The installer ends the whole process, so this covers every window.
   const drainAllWindows = useCallback(async (): Promise<boolean> => {
     const [own, peers] = await Promise.all([
-      beforeInstallRef?.current?.().catch(() => false),
+      beforeInstallRef.current?.().catch(() => false),
       drainPeerWindows(),
     ]);
     return own === true && peers;
   }, [beforeInstallRef]);
 
-  // A user-driven install. It waits on no pause, because they just asked for it.
+  // A user-driven install. It waits on no pause in their input, because they
+  // just asked for it, but it does wait for every window's edits to be safe.
   const installNow = useCallback(async () => {
     const update = updateRef.current;
-    if (!update) return;
+    if (!update || installingRef.current) return;
     manualInstallRef.current = true;
+    installingRef.current = true;
     try {
+      // The drain runs after the download, because anything typed during the
+      // download has to be covered too.
       if (!downloadedRef.current) await download();
-      // Never let a failure here stop the update; the point is only to give
-      // unsaved work its last chance to reach disk. It runs after the download
-      // because anything typed during the download has to be covered too.
-      await drainAllWindows();
-      await update.install();
-      setState((s) => ({ ...s, status: "ready" }));
+      setState((s) => ({ ...s, status: "installing", error: null }));
+      const outcome = await runManualInstall({
+        mayInstall,
+        activity: readActivity,
+        drain: drainAllWindows,
+        install: () => update.install(),
+        sleep,
+        now: () => performance.now(),
+      });
+      if (outcome === "blocked") {
+        void logNotenError(new NotenError("AUTO_UPDATE_FAILED", "recoverable", "manualInstall: unsaved edits or an export did not settle"));
+        setState((s) => ({ ...s, status: "available", error: "install_blocked" }));
+      } else if (outcome === "install-failed") {
+        setState((s) => ({ ...s, status: "error", error: "install_failed" }));
+      }
     } catch {
       setState((s) => ({ ...s, status: "error", error: "install_failed" }));
+    } finally {
+      installingRef.current = false;
     }
-  }, [download, drainAllWindows]);
+  }, [download, drainAllWindows, mayInstall]);
 
   const restartApp = useCallback(async () => {
     // On Windows "ready" means a download waiting for the user to be idle, not
@@ -155,9 +182,9 @@ export function useUpdater(beforeInstallRef?: RefObject<(() => Promise<boolean>)
         }
       },
       isEnabled: () => gates.isEnabled() && !manualInstallRef.current,
-      mayInstall: gates.mayInstall,
+      mayInstall,
       isStillAllowed: readAutoUpdateAllowed,
-      activity: () => invoke<UpdateActivity>("update_activity"),
+      activity: readActivity,
       now: () => performance.now(),
       drain: drainAllWindows,
       install: async () => {
@@ -168,12 +195,12 @@ export function useUpdater(beforeInstallRef?: RefObject<(() => Promise<boolean>)
           throw err;
         }
       },
-      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      sleep,
       reportFailure: (outcome, cause) => {
         void logNotenError(new NotenError("AUTO_UPDATE_FAILED", "recoverable", `autoUpdate: ${outcome}`, { cause }));
       },
     })
-  ), [download, drainAllWindows, findUpdate]);
+  ), [download, drainAllWindows, findUpdate, mayInstall]);
 
   return { state, checkForUpdate, installUpdate: installNow, restartApp, startAutoUpdate };
 }

@@ -4,8 +4,12 @@ import {
   AUTO_UPDATE_FOREGROUND_IDLE_MS,
   AUTO_UPDATE_IDLE_MS,
   AUTO_UPDATE_POLL_MS,
+  MANUAL_INSTALL_RETRY_MS,
+  MANUAL_INSTALL_WAIT_MS,
   runAutoUpdate,
+  runManualInstall,
   type AutoUpdatePort,
+  type ManualInstallPort,
   type UpdateActivity,
 } from "./autoUpdate";
 
@@ -235,5 +239,83 @@ describe("runAutoUpdate — an unasked restart must not lose an edit", () => {
 
     expect(await runAutoUpdate(p)).toBe("install-failed");
     expect(calls).toEqual(["download", "drain", "settle:false"]);
+  });
+});
+
+function manualPort(overrides: Partial<ManualInstallPort> = {}) {
+  const calls: string[] = [];
+  const c = clock();
+  const base: ManualInstallPort = {
+    mayInstall: () => true,
+    activity: async () => idle(0, true),
+    drain: async () => { calls.push("drain"); return true; },
+    install: async () => { calls.push("install"); },
+    sleep: async (ms) => { calls.push("sleep"); c.advance(ms); },
+    now: c.now,
+  };
+  return { port: { ...base, ...overrides }, calls };
+}
+
+describe("runManualInstall — the user asked, but not to lose an edit", () => {
+  it("installs at once, with no pause in input, once every window is drained", async () => {
+    const { port: p, calls } = manualPort();
+
+    expect(await runManualInstall(p)).toBe("installed");
+    expect(calls).toEqual(["drain", "install"]);
+  });
+
+  it("waits out a save that has not landed yet, then goes ahead on its own", async () => {
+    const results = [false, false, true];
+    const { port: p, calls } = manualPort({ drain: async () => { calls.push("drain"); return results.shift()!; } });
+
+    expect(await runManualInstall(p)).toBe("installed");
+    expect(calls).toEqual(["drain", "sleep", "drain", "sleep", "drain", "install"]);
+  });
+
+  it("waits out an export in this process or a window that must not be interrupted", async () => {
+    const exporting = [true, false, false];
+    const gate = [true, false, true];
+    const { port: p, calls } = manualPort({
+      activity: async () => idle(0, true, exporting.shift()!),
+      mayInstall: () => gate.shift()!,
+    });
+
+    expect(await runManualInstall(p)).toBe("installed");
+    expect(calls).toEqual(["sleep", "sleep", "drain", "install"]);
+  });
+
+  it("reports a drain that never confirms only after the wait, and never installs past it", async () => {
+    const install = vi.fn(async () => {});
+    const sleeps: number[] = [];
+    const c = clock();
+    const { port: p } = manualPort({
+      drain: async () => false,
+      install,
+      now: c.now,
+      sleep: async (ms) => { sleeps.push(ms); c.advance(ms); },
+    });
+
+    expect(await runManualInstall(p)).toBe("blocked");
+    expect(install).not.toHaveBeenCalled();
+    expect(sleeps.every((ms) => ms === MANUAL_INSTALL_RETRY_MS)).toBe(true);
+    expect(sleeps.length * MANUAL_INSTALL_RETRY_MS).toBeGreaterThanOrEqual(MANUAL_INSTALL_WAIT_MS);
+  });
+
+  it("treats a drain that throws, or activity it cannot read, as not ready", async () => {
+    const drains = [() => { throw new Error("EBUSY"); }, () => true];
+    const reads = [() => Promise.reject(new Error("ipc")), () => Promise.resolve(idle(0)), () => Promise.resolve(idle(0))];
+    const { port: p, calls } = manualPort({
+      activity: () => reads.shift()!(),
+      drain: async () => { calls.push("drain"); return drains.shift()!(); },
+    });
+
+    expect(await runManualInstall(p)).toBe("installed");
+    expect(calls).toEqual(["sleep", "drain", "sleep", "drain", "install"]);
+  });
+
+  it("says so when the installer itself fails", async () => {
+    const { port: p } = manualPort({ install: async () => { throw new Error("bad signature"); } });
+
+    expect(await runManualInstall(p)).toBe("install-failed");
   });
 });
