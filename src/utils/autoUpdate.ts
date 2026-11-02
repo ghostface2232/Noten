@@ -2,6 +2,9 @@
 // is what counts as "not in use". Installing restarts the app in front of the
 // user, so it waits for a pause however long that takes.
 export const AUTO_UPDATE_IDLE_MS = 30_000;
+// While a Noten window is the active one the user may be reading it, which
+// produces no input at all, so the pause has to be longer.
+export const AUTO_UPDATE_FOREGROUND_IDLE_MS = 60_000;
 export const AUTO_UPDATE_POLL_MS = 5_000;
 export const AUTO_UPDATE_DRAIN_RETRY_MS = 60_000;
 
@@ -13,6 +16,16 @@ export type AutoUpdateOutcome =
   | "download-failed"
   | "install-failed"
   | "installed";
+
+/** One native reading, so idle time and focus describe the same moment. */
+export interface UpdateActivity {
+  /** Since the last input anywhere in the Windows session; 0 while a mouse button is held. */
+  idleMs: number;
+  /** A Noten window is the active window. */
+  foreground: boolean;
+  /** A PDF export is running in this process. */
+  exporting: boolean;
+}
 
 export interface AutoUpdatePort {
   claim: () => Promise<boolean>;
@@ -26,7 +39,8 @@ export interface AutoUpdatePort {
   mayInstall: () => boolean;
   /** The saved setting, the only place an opt-out from another window reaches. */
   isStillAllowed: () => Promise<boolean>;
-  idleMs: () => Promise<number>;
+  activity: () => Promise<UpdateActivity>;
+  now: () => number;
   /** Resolves true only when every unsaved edit is on disk or journalled. */
   drain: () => Promise<boolean>;
   install: () => Promise<void>;
@@ -69,7 +83,21 @@ export async function runAutoUpdate(port: AutoUpdatePort): Promise<AutoUpdateOut
     return giveUp("download-failed", err);
   }
 
-  const isIdle = async () => port.mayInstall() && (await port.idleMs()) >= AUTO_UPDATE_IDLE_MS;
+  // Noten having been the active window at any point in this idle stretch
+  // counts, not just at this reading: another app taking focus by itself is no
+  // input, and the user may still be reading the note behind it.
+  let foregroundSeenAt = Number.NEGATIVE_INFINITY;
+  const isIdle = async () => {
+    if (!port.mayInstall()) return false;
+    const activity = await port.activity();
+    const now = port.now();
+    if (activity.foreground) foregroundSeenAt = now;
+    if (activity.exporting) return false;
+    const required = foregroundSeenAt >= now - activity.idleMs
+      ? AUTO_UPDATE_FOREGROUND_IDLE_MS
+      : AUTO_UPDATE_IDLE_MS;
+    return activity.idleMs >= required;
+  };
   for (;;) {
     if (!port.isEnabled()) return giveUp("cancelled");
     if (await isIdle()) {

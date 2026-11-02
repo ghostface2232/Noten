@@ -549,7 +549,7 @@ pub fn run() {
             open_windows_emoji_picker,
             auto_update::claim_logon_update_check,
             auto_update::settle_logon_update_check,
-            auto_update::auto_update_idle_ms
+            auto_update::update_activity
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

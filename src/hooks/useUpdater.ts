@@ -3,7 +3,7 @@ import type { RefObject } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { runAutoUpdate, type AutoUpdateOutcome } from "../utils/autoUpdate";
+import { runAutoUpdate, type AutoUpdateOutcome, type UpdateActivity } from "../utils/autoUpdate";
 import { logNotenError } from "../utils/crashLog";
 import { NotenError } from "../utils/notenError";
 import { readAutoUpdateAllowed } from "./useSettings";
@@ -157,7 +157,8 @@ export function useUpdater(beforeInstallRef?: RefObject<(() => Promise<boolean>)
       isEnabled: () => gates.isEnabled() && !manualInstallRef.current,
       mayInstall: gates.mayInstall,
       isStillAllowed: readAutoUpdateAllowed,
-      idleMs: () => invoke<number>("auto_update_idle_ms"),
+      activity: () => invoke<UpdateActivity>("update_activity"),
+      now: () => performance.now(),
       drain: drainAllWindows,
       install: async () => {
         try {

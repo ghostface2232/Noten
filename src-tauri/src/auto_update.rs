@@ -13,7 +13,11 @@ use windows_sys::Win32::Security::{
 };
 use windows_sys::Win32::System::SystemInformation::GetTickCount;
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, GetLastInputInfo, LASTINPUTINFO, VIRTUAL_KEY, VK_LBUTTON, VK_MBUTTON,
+    VK_RBUTTON, VK_XBUTTON1, VK_XBUTTON2,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
 const CLAIMS_DIRNAME: &str = "logon-update-claims";
 
@@ -147,20 +151,36 @@ pub fn release_held_claim() {
     settle_logon_update_check(false);
 }
 
-/// Milliseconds since the last keyboard or mouse input anywhere in this Windows
-/// session, not only in Noten: restarting brings a window forward, which is no
-/// better while the user is typing in another app, and this also sees every
-/// other Noten window and process. Zero when an update must not start.
-#[tauri::command]
-pub fn auto_update_idle_ms() -> u32 {
-    if PDF_EXPORTS_IN_FLIGHT.load(Ordering::SeqCst) > 0 {
-        return 0;
-    }
+/// What the updater weighs before restarting the app. Read in one call so the
+/// three answers describe the same moment.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateActivity {
+    /// Milliseconds since the last keyboard, mouse, pen or touch input anywhere
+    /// in this Windows session, not only in Noten: restarting brings a window
+    /// forward, which is no better while the user is typing in another app.
+    /// Zero while a mouse button is held, because a drag that pauses in place
+    /// reports no input at all.
+    idle_ms: u32,
+    /// Whether a Noten window is the active window. The user may be reading it,
+    /// and reading produces no input.
+    foreground: bool,
+    /// A PDF export is running in this process. It can take a minute with no
+    /// input, and ending the process discards it.
+    exporting: bool,
+}
+
+fn input_idle_ms() -> u32 {
+    const BUTTONS: [VIRTUAL_KEY; 5] = [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2];
     let mut info = LASTINPUTINFO {
         cbSize: size_of::<LASTINPUTINFO>() as u32,
         dwTime: 0,
     };
     unsafe {
+        // The high bit is set while the button is down.
+        if BUTTONS.iter().any(|&button| GetAsyncKeyState(button as i32) < 0) {
+            return 0;
+        }
         if GetLastInputInfo(&mut info) == 0 {
             return 0;
         }
@@ -169,9 +189,32 @@ pub fn auto_update_idle_ms() -> u32 {
     }
 }
 
+/// True when the active window belongs to this process. Message boxes and the
+/// file dialogs are this process's windows too, so they count as Noten.
+fn noten_is_foreground() -> bool {
+    unsafe {
+        let window = GetForegroundWindow();
+        if window.is_null() {
+            return false;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(window, &mut pid);
+        pid == std::process::id()
+    }
+}
+
+#[tauri::command]
+pub fn update_activity() -> UpdateActivity {
+    UpdateActivity {
+        idle_ms: input_idle_ms(),
+        foreground: noten_is_foreground(),
+        exporting: PDF_EXPORTS_IN_FLIGHT.load(Ordering::SeqCst) > 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{auto_update_idle_ms, claim_in, logon_session_key, PdfExportGuard};
+    use super::{claim_in, logon_session_key, update_activity, PdfExportGuard};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -222,8 +265,10 @@ mod tests {
     }
 
     #[test]
-    fn a_running_export_reads_as_not_idle() {
-        let _export = PdfExportGuard::new();
-        assert_eq!(auto_update_idle_ms(), 0);
+    fn a_running_export_is_reported_until_it_ends() {
+        let export = PdfExportGuard::new();
+        assert!(update_activity().exporting);
+        drop(export);
+        assert!(!update_activity().exporting);
     }
 }

@@ -607,7 +607,7 @@ describe("contract: an automatic update waits for the user to stop", () => {
   it("the only automatic install is the one behind the idle gate", () => {
     const hook = read(resolve(SRC_ROOT, "hooks/useUpdater.ts"));
     expect(hook).toContain("runAutoUpdate({");
-    expect(hook).toContain('invoke<number>("auto_update_idle_ms")');
+    expect(hook).toContain('invoke<UpdateActivity>("update_activity")');
     expect(hook).toContain("isStillAllowed: readAutoUpdateAllowed");
     const app = read(resolve(SRC_ROOT, "App.tsx"));
     expect(app).not.toContain("updater.installUpdate()");

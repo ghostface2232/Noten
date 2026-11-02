@@ -1,5 +1,23 @@
 import { describe, it, expect, vi } from "vitest";
-import { AUTO_UPDATE_DRAIN_RETRY_MS, AUTO_UPDATE_IDLE_MS, runAutoUpdate, type AutoUpdatePort } from "./autoUpdate";
+import {
+  AUTO_UPDATE_DRAIN_RETRY_MS,
+  AUTO_UPDATE_FOREGROUND_IDLE_MS,
+  AUTO_UPDATE_IDLE_MS,
+  AUTO_UPDATE_POLL_MS,
+  runAutoUpdate,
+  type AutoUpdatePort,
+  type UpdateActivity,
+} from "./autoUpdate";
+
+function idle(idleMs: number, foreground = false, exporting = false): UpdateActivity {
+  return { idleMs, foreground, exporting };
+}
+
+/** A clock the fake sleep advances, so idle readings line up with time. */
+function clock() {
+  let t = 1_000_000;
+  return { now: () => t, advance: (ms: number) => { t += ms; } };
+}
 
 function port(overrides: Partial<AutoUpdatePort> = {}) {
   const calls: string[] = [];
@@ -11,7 +29,8 @@ function port(overrides: Partial<AutoUpdatePort> = {}) {
     isEnabled: () => true,
     mayInstall: () => true,
     isStillAllowed: async () => true,
-    idleMs: async () => AUTO_UPDATE_IDLE_MS,
+    activity: async () => idle(AUTO_UPDATE_IDLE_MS),
+    now: () => 0,
     drain: async () => { calls.push("drain"); return true; },
     install: async () => { calls.push("install"); },
     sleep: async () => { calls.push("sleep"); },
@@ -68,16 +87,16 @@ describe("runAutoUpdate — one attempt per logon", () => {
 
 describe("runAutoUpdate — never while the user is at the machine", () => {
   it("waits through input and installs only after the idle threshold", async () => {
-    const idle = [0, 12_000, AUTO_UPDATE_IDLE_MS - 1, AUTO_UPDATE_IDLE_MS, AUTO_UPDATE_IDLE_MS];
-    const { port: p, calls } = port({ idleMs: async () => idle.shift()! });
+    const idles = [0, 12_000, AUTO_UPDATE_IDLE_MS - 1, AUTO_UPDATE_IDLE_MS, AUTO_UPDATE_IDLE_MS];
+    const { port: p, calls } = port({ activity: async () => idle(idles.shift()!) });
 
     expect(await runAutoUpdate(p)).toBe("installed");
     expect(calls).toEqual(["download", "sleep", "sleep", "sleep", "drain", "install"]);
   });
 
   it("goes back to waiting when input arrives during the drain", async () => {
-    const idle = [AUTO_UPDATE_IDLE_MS, 0, AUTO_UPDATE_IDLE_MS, AUTO_UPDATE_IDLE_MS];
-    const { port: p, calls } = port({ idleMs: async () => idle.shift()! });
+    const idles = [AUTO_UPDATE_IDLE_MS, 0, AUTO_UPDATE_IDLE_MS, AUTO_UPDATE_IDLE_MS];
+    const { port: p, calls } = port({ activity: async () => idle(idles.shift()!) });
 
     expect(await runAutoUpdate(p)).toBe("installed");
     expect(calls).toEqual(["download", "drain", "sleep", "drain", "install"]);
@@ -93,11 +112,65 @@ describe("runAutoUpdate — never while the user is at the machine", () => {
 
   it("stops waiting and gives the claim back when the toggle is turned off", async () => {
     const enabled = [true, false];
-    const { port: p, calls } = port({ isEnabled: () => enabled.shift()!, idleMs: async () => 0 });
+    const { port: p, calls } = port({ isEnabled: () => enabled.shift()!, activity: async () => idle(0) });
 
     expect(await runAutoUpdate(p)).toBe("cancelled");
     expect(calls).toEqual(["download", "sleep", "settle:false"]);
     expect(p.reportFailure).not.toHaveBeenCalled();
+  });
+});
+
+describe("runAutoUpdate — a Noten window in front", () => {
+  it("waits a full minute of no input while Noten is the active window", async () => {
+    const c = clock();
+    const readings = [AUTO_UPDATE_IDLE_MS, AUTO_UPDATE_FOREGROUND_IDLE_MS - 1, AUTO_UPDATE_FOREGROUND_IDLE_MS, AUTO_UPDATE_FOREGROUND_IDLE_MS];
+    const { port: p, calls } = port({
+      activity: async () => idle(readings.shift()!, true),
+      now: c.now,
+      sleep: async (ms) => { calls.push("sleep"); c.advance(ms); },
+    });
+
+    expect(await runAutoUpdate(p)).toBe("installed");
+    expect(calls).toEqual(["download", "sleep", "sleep", "drain", "install"]);
+  });
+
+  it("keeps the longer wait when another app takes focus without any input", async () => {
+    const c = clock();
+    // In front at the first reading, then a window that raised itself: the
+    // idle stretch began while Noten was the active window.
+    let t = 0;
+    const { port: p, calls } = port({
+      activity: async () => idle(20_000 + t, t === 0),
+      now: c.now,
+      sleep: async (ms) => { calls.push("sleep"); c.advance(ms); t += ms; },
+    });
+
+    expect(await runAutoUpdate(p)).toBe("installed");
+    const waited = calls.filter((x) => x === "sleep").length * AUTO_UPDATE_POLL_MS;
+    expect(20_000 + waited).toBeGreaterThanOrEqual(AUTO_UPDATE_FOREGROUND_IDLE_MS);
+  });
+
+  it("goes back to the background threshold once the user has moved to another app", async () => {
+    const c = clock();
+    // The click that moved focus away is input, so the idle stretch that
+    // follows began with Noten in the background.
+    const readings = [idle(AUTO_UPDATE_IDLE_MS, true), idle(0), idle(AUTO_UPDATE_IDLE_MS), idle(AUTO_UPDATE_IDLE_MS)];
+    const { port: p, calls } = port({
+      activity: async () => readings.shift()!,
+      now: c.now,
+      sleep: async () => { calls.push("sleep"); c.advance(AUTO_UPDATE_IDLE_MS); },
+    });
+
+    expect(await runAutoUpdate(p)).toBe("installed");
+    expect(calls).toEqual(["download", "sleep", "sleep", "drain", "install"]);
+  });
+
+  it("never installs during a PDF export, however idle", async () => {
+    const readings = [idle(10 * AUTO_UPDATE_FOREGROUND_IDLE_MS, false, true), idle(AUTO_UPDATE_IDLE_MS), idle(AUTO_UPDATE_IDLE_MS)];
+    const { port: p, calls } = port({ activity: async () => readings.shift()! });
+
+    expect(await runAutoUpdate(p)).toBe("installed");
+    expect(calls).toEqual(["download", "sleep", "drain", "install"]);
   });
 });
 

@@ -12,7 +12,7 @@ Noten's privacy posture is "your notes never leave the disk," and it should stay
 
 - The logon key is the token's logon id plus that session's logon time from `LsaGetLogonSessionData`; the id alone is unique only until a restart. An elevated launch has its own logon id, so it counts as a new logon.
 - A claim is a marker file made with `create_new` in `logon-update-claims/` under app data, because a second launch is a second process and in-memory state cannot arbitrate between them. The claim stays held until the frontend settles it, and `RunEvent::Exit` gives a held claim back, so closing the app before a pause retries on the next launch. The installer's `std::process::exit` skips that event, which is what keeps the relaunched app from checking again.
-- `auto_update_idle_ms` reads `GetLastInputInfo`, which covers the whole Windows session: every Noten window and process, and other apps, since restarting brings a window forward. It answers 0 during a PDF export, which can run for a minute with no input.
+- `update_activity` reads idle time, focus and export state in one call. Idle time comes from `GetLastInputInfo`, which covers the whole Windows session: every Noten window and other apps, since restarting brings a window forward. It answers 0 while a mouse button is held, because a drag that pauses in place reports no input. `foreground` compares the active window's process with this one, so Noten's own message boxes and file dialogs count. `exporting` is the `PdfExportGuard` count, since an export can run for a minute with no input.
 
 ## PDF Export (print_to_pdf)
 
