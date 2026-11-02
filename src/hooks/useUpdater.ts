@@ -6,6 +6,8 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { runAutoUpdate, type AutoUpdateOutcome } from "../utils/autoUpdate";
 import { logNotenError } from "../utils/crashLog";
 import { NotenError } from "../utils/notenError";
+import { readAutoUpdateAllowed } from "./useSettings";
+import { drainPeerWindows } from "./useUpdateDrainSync";
 
 export type UpdateStatus =
   | "idle"
@@ -101,6 +103,15 @@ export function useUpdater(beforeInstallRef?: RefObject<(() => Promise<boolean>)
     downloadedRef.current = true;
   }, []);
 
+  // The installer ends the whole process, so this covers every window.
+  const drainAllWindows = useCallback(async (): Promise<boolean> => {
+    const [own, peers] = await Promise.all([
+      beforeInstallRef?.current?.().catch(() => false),
+      drainPeerWindows(),
+    ]);
+    return own === true && peers;
+  }, [beforeInstallRef]);
+
   // A user-driven install. It waits on no pause, because they just asked for it.
   const installNow = useCallback(async () => {
     const update = updateRef.current;
@@ -111,13 +122,13 @@ export function useUpdater(beforeInstallRef?: RefObject<(() => Promise<boolean>)
       // Never let a failure here stop the update; the point is only to give
       // unsaved work its last chance to reach disk. It runs after the download
       // because anything typed during the download has to be covered too.
-      await beforeInstallRef?.current?.().catch(() => {});
+      await drainAllWindows();
       await update.install();
       setState((s) => ({ ...s, status: "ready" }));
     } catch {
       setState((s) => ({ ...s, status: "error", error: "install_failed" }));
     }
-  }, [beforeInstallRef, download]);
+  }, [download, drainAllWindows]);
 
   const restartApp = useCallback(async () => {
     // On Windows "ready" means a download waiting for the user to be idle, not
@@ -145,8 +156,9 @@ export function useUpdater(beforeInstallRef?: RefObject<(() => Promise<boolean>)
       },
       isEnabled: () => gates.isEnabled() && !manualInstallRef.current,
       mayInstall: gates.mayInstall,
+      isStillAllowed: readAutoUpdateAllowed,
       idleMs: () => invoke<number>("auto_update_idle_ms"),
-      drain: async () => (await beforeInstallRef?.current?.()) ?? false,
+      drain: drainAllWindows,
       install: async () => {
         try {
           await updateRef.current?.install();
@@ -160,7 +172,7 @@ export function useUpdater(beforeInstallRef?: RefObject<(() => Promise<boolean>)
         void logNotenError(new NotenError("AUTO_UPDATE_FAILED", "recoverable", `autoUpdate: ${outcome}`, { cause }));
       },
     })
-  ), [beforeInstallRef, download, findUpdate]);
+  ), [download, drainAllWindows, findUpdate]);
 
   return { state, checkForUpdate, installUpdate: installNow, restartApp, startAutoUpdate };
 }

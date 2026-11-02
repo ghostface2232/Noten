@@ -101,6 +101,7 @@ import { useFileWatcher } from "./hooks/useFileWatcher";
 import { createReconcileState } from "./utils/reconcileFolder";
 import { useWindowSync } from "./hooks/useWindowSync";
 import { useMigrationSync, broadcastMigrationStarted, broadcastMigrationFinished } from "./hooks/useMigrationSync";
+import { useUpdateDrainSync } from "./hooks/useUpdateDrainSync";
 import { useChromeVisibility } from "./hooks/useChromeVisibility";
 import { useKeyboardShortcuts, type DocSearchFocusTarget } from "./hooks/useKeyboardShortcuts";
 import { useFocusOutlineSync } from "./hooks/useFocusOutlineSync";
@@ -391,18 +392,20 @@ function App() {
   }, [settings.themeMode]);
 
   autoUpdateEnabledRef.current = settings.autoUpdate;
+  const mayAutoInstall = useCallback(() => mayAutoInstallRef.current && !migrationInProgress, []);
+  useUpdateDrainSync({ drainRef: beforeUpdateInstallRef, mayInstall: mayAutoInstall });
   useEffect(() => {
     if (!settingsLoaded || startupUpdateCheckStartedRef.current) return;
     startupUpdateCheckStartedRef.current = true;
     if (autoUpdateEnabledRef.current) {
       void updater.startAutoUpdate({
         isEnabled: () => autoUpdateEnabledRef.current,
-        mayInstall: () => mayAutoInstallRef.current && !migrationInProgress,
+        mayInstall: mayAutoInstall,
       });
     } else {
       void updater.checkForUpdate();
     }
-  }, [settingsLoaded, updater.checkForUpdate, updater.startAutoUpdate]);
+  }, [settingsLoaded, mayAutoInstall, updater.checkForUpdate, updater.startAutoUpdate]);
 
   const [notesDirReady, setNotesDirReady] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);

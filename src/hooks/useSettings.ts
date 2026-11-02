@@ -165,6 +165,20 @@ async function loadSettingsFromFile(): Promise<Settings | null> {
   return parseSettings(raw);
 }
 
+/**
+ * Whether the saved setting still allows an automatic install. Settings changes
+ * reach no other window or process, so the window waiting to install cannot
+ * learn of an opt-out made elsewhere from its own state. An unreadable file
+ * cannot show that the user still wants this.
+ */
+export async function readAutoUpdateAllowed(): Promise<boolean> {
+  try {
+    return (await loadSettingsFromFile())?.autoUpdate === true;
+  } catch {
+    return false;
+  }
+}
+
 export function useSettings() {
   const [settings, setSettingsRaw] = useState<Settings>(DEFAULTS);
   const [isLoaded, setIsLoaded] = useState(false);

@@ -24,6 +24,8 @@ export interface AutoUpdatePort {
   isEnabled: () => boolean;
   /** False while the app is in a state a restart must not interrupt. */
   mayInstall: () => boolean;
+  /** The saved setting, the only place an opt-out from another window reaches. */
+  isStillAllowed: () => Promise<boolean>;
   idleMs: () => Promise<number>;
   /** Resolves true only when every unsaved edit is on disk or journalled. */
   drain: () => Promise<boolean>;
@@ -81,6 +83,7 @@ export async function runAutoUpdate(port: AutoUpdatePort): Promise<AutoUpdateOut
       // The drain can take a while on a cloud folder, and a keystroke during
       // it is exactly what this wait exists to respect.
       if (port.isEnabled() && await isIdle()) {
+        if (!(await port.isStillAllowed().catch(() => false))) return giveUp("cancelled");
         try {
           await port.install();
           return "installed";

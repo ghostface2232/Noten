@@ -572,12 +572,16 @@ describe("contract: unsaved edits get a last chance before the process ends", ()
   it("useUpdater awaits a beforeInstall hook between the download and the install", () => {
     const src = read(resolve(SRC_ROOT, "hooks/useUpdater.ts"));
     const downloadIdx = src.indexOf("await download()");
-    const beforeIdx = src.indexOf("beforeInstallRef?.current?.()");
+    const drainIdx = src.indexOf("await drainAllWindows()");
     // The call, not the JSDoc above it that also names the method.
     const installIdx = src.indexOf("update.install(");
     expect(downloadIdx).toBeGreaterThan(-1);
-    expect(beforeIdx).toBeGreaterThan(downloadIdx);
-    expect(installIdx).toBeGreaterThan(beforeIdx);
+    expect(drainIdx).toBeGreaterThan(downloadIdx);
+    expect(installIdx).toBeGreaterThan(drainIdx);
+    // The installer ends every window, not just the one that asked.
+    expect(src).toContain("beforeInstallRef?.current?.()");
+    expect(src).toContain("drainPeerWindows()");
+    expect(src).toContain("drain: drainAllWindows");
     // A combined call drains before the download, so everything typed while it
     // runs goes with the process.
     expect(src).not.toContain("downloadAndInstall(");
@@ -604,8 +608,10 @@ describe("contract: an automatic update waits for the user to stop", () => {
     const hook = read(resolve(SRC_ROOT, "hooks/useUpdater.ts"));
     expect(hook).toContain("runAutoUpdate({");
     expect(hook).toContain('invoke<number>("auto_update_idle_ms")');
+    expect(hook).toContain("isStillAllowed: readAutoUpdateAllowed");
     const app = read(resolve(SRC_ROOT, "App.tsx"));
     expect(app).not.toContain("updater.installUpdate()");
+    expect(app).toContain("useUpdateDrainSync({");
   });
 });
 

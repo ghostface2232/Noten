@@ -10,6 +10,7 @@ function port(overrides: Partial<AutoUpdatePort> = {}) {
     download: async () => { calls.push("download"); },
     isEnabled: () => true,
     mayInstall: () => true,
+    isStillAllowed: async () => true,
     idleMs: async () => AUTO_UPDATE_IDLE_MS,
     drain: async () => { calls.push("drain"); return true; },
     install: async () => { calls.push("install"); },
@@ -97,6 +98,25 @@ describe("runAutoUpdate — never while the user is at the machine", () => {
     expect(await runAutoUpdate(p)).toBe("cancelled");
     expect(calls).toEqual(["download", "sleep", "settle:false"]);
     expect(p.reportFailure).not.toHaveBeenCalled();
+  });
+});
+
+describe("runAutoUpdate — an opt-out made elsewhere", () => {
+  it("does not install once the saved setting says off, and gives the claim back", async () => {
+    const install = vi.fn(async () => {});
+    const { port: p, calls } = port({ isStillAllowed: async () => false, install });
+
+    expect(await runAutoUpdate(p)).toBe("cancelled");
+    expect(install).not.toHaveBeenCalled();
+    expect(calls).toEqual(["download", "drain", "settle:false"]);
+  });
+
+  it("treats a setting it cannot read as off", async () => {
+    const install = vi.fn(async () => {});
+    const { port: p } = port({ isStillAllowed: async () => { throw new Error("EBUSY"); }, install });
+
+    expect(await runAutoUpdate(p)).toBe("cancelled");
+    expect(install).not.toHaveBeenCalled();
   });
 });
 
