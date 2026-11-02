@@ -98,8 +98,8 @@ async function requestPeers(timeoutMs: number, holdInput: boolean): Promise<Peer
 /**
  * Resolves true only when every other window confirmed its edits are on disk or
  * journalled. A window that cannot answer, including one still starting up, is
- * not confirmed. Events do not cross processes, so a second Noten process is
- * not covered.
+ * not confirmed. Events do not cross processes; the single-instance lock in
+ * release builds is what keeps every window in this one.
  */
 export async function drainPeerWindows(timeoutMs = PEER_DRAIN_TIMEOUT_MS): Promise<boolean> {
   return (await requestPeers(timeoutMs, false)).ok;

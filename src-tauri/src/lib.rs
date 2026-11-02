@@ -527,9 +527,52 @@ fn note_asset_response<R: Runtime>(
     }
 }
 
+/// Opens a window in this process for a second launch of Noten. It mirrors
+/// `openNewWindow` in `src/utils/newWindow.ts`; the frontend shows the window
+/// once its note is loaded.
+#[cfg(not(debug_assertions))]
+fn open_window_for_second_launch<R: Runtime>(app: &AppHandle<R>) {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let app = app.clone();
+    // The callback runs on the main thread inside a window message, and
+    // building a webview window there deadlocks on Windows.
+    std::thread::spawn(move || {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let label = format!("launch-{nanos}-{}", SEQ.fetch_add(1, Ordering::Relaxed));
+        let built = tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::default())
+            .title("Noten")
+            .inner_size(800.0, 600.0)
+            .min_inner_size(800.0, 620.0)
+            .decorations(false)
+            .transparent(true)
+            .visible(false)
+            .build();
+        if let Err(err) = built {
+            eprintln!("failed to open a window for a second launch: {err}");
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // One Noten process per Windows session. A second process would keep its
+    // own save queues and window labels that no drain, cross-window event or
+    // recovery sweep of this one can see (both would journal edits as "main"),
+    // and the update installer ends every process with this binary's name. A
+    // second launch therefore hands over to the running process, which opens
+    // a window as Ctrl+N would. Registered first, so the second process exits
+    // before any window or other plugin starts. Dev builds share the
+    // identifier with the installed app and are left out, or running one would
+    // only open a window in the other.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        open_window_for_second_launch(app);
+    }));
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
