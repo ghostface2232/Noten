@@ -6,3 +6,28 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+  # Grouped so one review covers one week's routine bumps; a major version gets
+  # its own PR. The Tauri CLI refuses a minor version that differs between its
+  # npm packages and the crates, so merge the npm and Cargo Tauri bumps together.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # Pinned: see src/extensions/AGENTS.md before moving past 3.31.
+      - dependency-name: "@tiptap/*"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+
+  - package-ecosystem: cargo
+    directories: ["/", "/src-tauri"]
+    schedule:
+      interval: weekly
+    groups:
+      cargo-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
