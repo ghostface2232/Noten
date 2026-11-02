@@ -47,7 +47,7 @@ vi.mock("../utils/fs", () => ({
   },
 }));
 
-import { useSettings } from "./useSettings";
+import { readAutoUpdateAllowed, useSettings } from "./useSettings";
 
 const SETTINGS_PATH = "/test-appdata/settings.json";
 
@@ -111,6 +111,44 @@ describe("useSettings — update chain serializes back-to-back writes", () => {
 function seedSettingsFile(overrides: Record<string, unknown>) {
   refs.files.set(SETTINGS_PATH, JSON.stringify({ locale: "ko", ...overrides }));
 }
+
+describe("readAutoUpdateAllowed", () => {
+  it("follows what is saved now, not what a window loaded", async () => {
+    seedSettingsFile({ autoUpdate: true });
+    expect(await readAutoUpdateAllowed()).toBe(true);
+
+    seedSettingsFile({ autoUpdate: false });
+    expect(await readAutoUpdateAllowed()).toBe(false);
+  });
+
+  it("does not allow it when the file is missing or corrupt", async () => {
+    refs.files.delete(SETTINGS_PATH);
+    expect(await readAutoUpdateAllowed()).toBe(false);
+
+    refs.files.set(SETTINGS_PATH, "{ not json");
+    expect(await readAutoUpdateAllowed()).toBe(false);
+  });
+});
+
+describe("useSettings — autoUpdate", () => {
+  it("is on for a settings file that predates it", async () => {
+    seedSettingsFile({});
+    const result = await mountSettings();
+    expect(result.current.settings.autoUpdate).toBe(true);
+  });
+
+  it("keeps a user's choice to turn it off", async () => {
+    seedSettingsFile({ autoUpdate: false });
+    const result = await mountSettings();
+    expect(result.current.settings.autoUpdate).toBe(false);
+  });
+
+  it("falls back to on when the field holds non-boolean garbage", async () => {
+    seedSettingsFile({ autoUpdate: "no" });
+    const result = await mountSettings();
+    expect(result.current.settings.autoUpdate).toBe(true);
+  });
+});
 
 describe("useSettings — v0.3.0 boolean fields (outlinePanelOpen, focusModeEnabled, outlineOpenBeforeFocus)", () => {
   it("loads persisted true values", async () => {

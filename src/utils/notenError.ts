@@ -13,6 +13,7 @@ export type NotenErrorCode =
   | "INVALID_NOTE_ID"
   | "WATCH_SETUP_FAILED"
   | "MIGRATION_FAILED"
+  | "AUTO_UPDATE_FAILED"
   | "UNCAUGHT";
 
 export interface NotenErrorContext {

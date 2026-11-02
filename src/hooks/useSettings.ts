@@ -39,6 +39,8 @@ export interface Settings {
    * was restarted while focus mode was on.
    */
   outlineOpenBeforeFocus: boolean;
+  /** Check at the first launch after each Windows logon and install unattended. */
+  autoUpdate: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -58,6 +60,7 @@ const DEFAULTS: Settings = {
   outlinePanelOpen: false,
   focusModeEnabled: false,
   outlineOpenBeforeFocus: false,
+  autoUpdate: true,
 };
 
 // First-run locale seed: with no settings file on disk yet, follow the OS/
@@ -130,6 +133,7 @@ function parseSettings(raw: string): Settings {
     outlineOpenBeforeFocus: typeof parsed.outlineOpenBeforeFocus === "boolean"
       ? parsed.outlineOpenBeforeFocus
       : DEFAULTS.outlineOpenBeforeFocus,
+    autoUpdate: typeof parsed.autoUpdate === "boolean" ? parsed.autoUpdate : DEFAULTS.autoUpdate,
   };
 }
 
@@ -159,6 +163,20 @@ async function loadSettingsFromFile(): Promise<Settings | null> {
   if (!(await exists(path))) return null;
   const raw = await readTextFile(path);
   return parseSettings(raw);
+}
+
+/**
+ * Whether the saved setting still allows an automatic install. Settings changes
+ * reach no other window or process, so the window waiting to install cannot
+ * learn of an opt-out made elsewhere from its own state. An unreadable file
+ * cannot show that the user still wants this.
+ */
+export async function readAutoUpdateAllowed(): Promise<boolean> {
+  try {
+    return (await loadSettingsFromFile())?.autoUpdate === true;
+  } catch {
+    return false;
+  }
 }
 
 export function useSettings() {

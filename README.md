@@ -38,6 +38,7 @@ Download `noten-setup.exe` from [GitHub Releases](https://github.com/ghostface22
 - **Multi-window** - Open notes in separate windows with real-time cross-window sync
 - **Customizable writing** - Light, dark, or system theme; font, wrapping, spacing, spellcheck, sorting, and optional pinned editor chrome
 - **Mica theme** - Native Windows 11 Mica material
+- **Automatic updates** - Checks once after each Windows sign-in and installs on its own while you are away from the keyboard and mouse; turn it off in Settings > About
 - **Export** - Save notes as Markdown or PDF; save Mermaid diagrams as SVG or PNG
 
 ## Tech Stack

@@ -1,3 +1,5 @@
+mod auto_update;
+
 use std::env;
 use std::fs;
 use std::io;
@@ -71,6 +73,7 @@ fn print_temp_stem() -> String {
 
 #[tauri::command]
 async fn print_to_pdf(html: String, output_path: String) -> Result<(), String> {
+    let _hold_off_auto_update = auto_update::PdfExportGuard::new();
     let temp_dir = std::env::temp_dir();
     let stem = print_temp_stem();
     let temp_html = temp_dir.join(format!("{stem}.html"));
@@ -543,7 +546,10 @@ pub fn run() {
             note_image_files,
             toggle_devtools,
             get_windows_app_theme,
-            open_windows_emoji_picker
+            open_windows_emoji_picker,
+            auto_update::claim_logon_update_check,
+            auto_update::settle_logon_update_check,
+            auto_update::auto_update_idle_ms
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -552,8 +558,13 @@ pub fn run() {
             // Mica is applied by tauri.conf.json windowEffects and frontend setEffects().
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_, event| {
+            if let tauri::RunEvent::Exit = event {
+                auto_update::release_held_claim();
+            }
+        });
 }
 
 #[cfg(test)]
