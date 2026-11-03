@@ -317,7 +317,7 @@ function TableInsertButton({ editor, locale, tooltip, buttonClassName, popoverCl
     <Popover
       open={open}
       onOpenChange={(_, data) => setOpen(data.open)}
-      positioning="below"
+      positioning={{ position: "below", overflowBoundaryPadding: 18 }}
       withArrow={false}
       trapFocus={false}
     >
