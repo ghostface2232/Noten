@@ -89,6 +89,8 @@ import { readTextFile } from "@tauri-apps/plugin-fs";
 import { libraryStore } from "./utils/libraryStore";
 import { emitDocUpdated } from "./hooks/useWindowSync";
 import { exportAsMarkdown, exportAsPdf } from "./utils/exportHandlers";
+import { holdOffUpdate, updateHeldOff } from "./utils/updateHold";
+import { holdInput } from "./utils/updateInputHold";
 import { clearManagedNotesData, clearMigratedSource, hasExistingNotenData, migrateNotesDir } from "./utils/migrateNotesDir";
 import { writeMigrationJournal, type MigrationCleanupMode } from "./utils/migrationJournal";
 import { recoverPendingMigration } from "./utils/migrationCleanup";
@@ -292,8 +294,14 @@ function App() {
   // unsaved edits onto disk or into the recovery journal.
   const beforeUpdateInstallRef = useRef<(() => Promise<boolean>) | null>(null);
   const autoUpdateEnabledRef = useRef(false);
-  const mayAutoInstallRef = useRef(false);
-  const updater = useUpdater(beforeUpdateInstallRef);
+  const mayInstallUpdateRef = useRef(false);
+  const mayInstallUpdate = useCallback(
+    () => mayInstallUpdateRef.current && !migrationInProgress && !updateHeldOff(),
+    [],
+  );
+  // Filled in below, once the editor exists.
+  const holdUpdateInputRef = useRef<(() => (() => void) | null) | null>(null);
+  const updater = useUpdater({ drainRef: beforeUpdateInstallRef, holdInputRef: holdUpdateInputRef, mayInstall: mayInstallUpdate });
   const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDarkFromMatchMedia);
   const isDarkMode = settings.themeMode === "system"
     ? systemPrefersDark
@@ -392,20 +400,18 @@ function App() {
   }, [settings.themeMode]);
 
   autoUpdateEnabledRef.current = settings.autoUpdate;
-  const mayAutoInstall = useCallback(() => mayAutoInstallRef.current && !migrationInProgress, []);
-  useUpdateDrainSync({ drainRef: beforeUpdateInstallRef, mayInstall: mayAutoInstall });
+  useUpdateDrainSync({ drainRef: beforeUpdateInstallRef, holdInputRef: holdUpdateInputRef, mayInstall: mayInstallUpdate });
   useEffect(() => {
     if (!settingsLoaded || startupUpdateCheckStartedRef.current) return;
     startupUpdateCheckStartedRef.current = true;
     if (autoUpdateEnabledRef.current) {
       void updater.startAutoUpdate({
         isEnabled: () => autoUpdateEnabledRef.current,
-        mayInstall: mayAutoInstall,
       });
     } else {
       void updater.checkForUpdate();
     }
-  }, [settingsLoaded, mayAutoInstall, updater.checkForUpdate, updater.startAutoUpdate]);
+  }, [settingsLoaded, updater.checkForUpdate, updater.startAutoUpdate]);
 
   const [notesDirReady, setNotesDirReady] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -579,7 +585,11 @@ function App() {
     const bodiesSafe = await journalPendingEdits();
     return manifestOk && bodiesSafe && !hasUnsaveableChanges();
   };
-  mayAutoInstallRef.current = notesDirReady && !isLoading && notesDirConflict === null;
+  holdUpdateInputRef.current = () => {
+    const editor = tiptapRef.current?.getEditor() ?? null;
+    return holdInput(editor && { isComposing: () => editor.view.composing });
+  };
+  mayInstallUpdateRef.current = notesDirReady && !isLoading && notesDirConflict === null;
   notifyActiveDocRef.current = notifyActiveDoc;
   cancelDocSaveRef.current = cancelDocSave;
 
@@ -779,12 +789,12 @@ function App() {
   const handleExportMd = useCallback(() => {
     const name = activeDoc?.fileName ?? "untitled";
     const md = getCurrentMarkdown(tiptapRef);
-    exportAsMarkdown(md, name, locale);
+    void holdOffUpdate(() => exportAsMarkdown(md, name, locale));
   }, [activeDoc?.fileName, locale]);
 
   const handleExportPdf = useCallback(() => {
     const el = document.querySelector(".ProseMirror") as HTMLElement | null;
-    if (el) exportAsPdf(el, activeDoc?.fileName ?? "untitled", locale);
+    if (el) void holdOffUpdate(() => exportAsPdf(el, activeDoc?.fileName ?? "untitled", locale));
   }, [activeDoc?.fileName, locale]);
 
   // Undo toast for note deletion: no confirm dialog (deleting stays one

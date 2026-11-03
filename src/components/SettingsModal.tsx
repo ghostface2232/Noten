@@ -471,7 +471,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
   const [tab, setTab] = useState<TabId>("general");
   const [appVersion, setAppVersion] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const updateAvailable = updaterState.status === "available" || updaterState.status === "downloading" || updaterState.status === "ready";
+  const updateAvailable = updaterState.status === "available" || updaterState.status === "downloading" || updaterState.status === "ready" || updaterState.status === "installing";
   // Highlights for the version being offered, carried in the updater manifest so
   // they render before the update is installed.
   const incomingChangelog = useMemo(() => parseChangelogNotes(updaterState.body), [updaterState.body]);
@@ -929,6 +929,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                   {(updaterState.status === "available" ||
                     updaterState.status === "downloading" ||
                     updaterState.status === "ready" ||
+                    updaterState.status === "installing" ||
                     updaterState.status === "error") && (
                   <div className={mergeClasses(settingItemClass(styles), styles.aboutItem, updaterState.status !== "available" && styles.aboutItemFixed)}>
                     {updaterState.status === "available" && (
@@ -955,15 +956,28 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                       </div>
                     )}
 
+                    {updaterState.status === "installing" && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <span style={{ fontSize: "13px", color: tokens.colorNeutralForeground3 }}>
+                          {i("about.installing")}
+                        </span>
+                        <ProgressBar />
+                      </div>
+                    )}
+
                     {updaterState.status === "ready" && (
                       <Button appearance="primary" size="medium" className={styles.primaryButton} onClick={onRestartApp}>
                         {i("about.restart")}
                       </Button>
                     )}
 
-                    {updaterState.status === "error" && (
+                    {(updaterState.status === "error" || (updaterState.status === "available" && updaterState.error)) && (
                       <span style={{ fontSize: "12px", color: tokens.colorPaletteRedForeground1 }}>
-                        {i("about.error")}
+                        {i(
+                          updaterState.error === "install_blocked" ? "about.installBlocked"
+                          : updaterState.error === "install_failed" ? "about.installError"
+                          : "about.error",
+                        )}
                       </span>
                     )}
                   </div>

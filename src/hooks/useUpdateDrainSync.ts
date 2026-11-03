@@ -11,6 +11,8 @@ import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 interface UpdateDrainRequest {
   sourceWindow: string;
   drainId: string;
+  /** Hold input from before the drain until released: the install's last step. */
+  holdInput?: boolean;
 }
 
 interface UpdateDrainAck {
@@ -19,16 +21,35 @@ interface UpdateDrainAck {
   ok: boolean;
 }
 
+interface UpdateDrainRelease {
+  drainId: string;
+}
+
 const WINDOW_LABEL = getCurrentWindow().label;
 export const PEER_DRAIN_TIMEOUT_MS = 15_000;
+// A held window lets go on its own this long after it answered, in case the
+// requester never releases it (its webview reloaded, say). The requester's
+// remaining work after the answers is one idle check and the install call.
+export const PEER_HOLD_EXPIRY_MS = 60_000;
 
-/**
- * Resolves true only when every other window confirmed its edits are on disk or
- * journalled. A window that cannot answer, including one still starting up, is
- * not confirmed. Events do not cross processes, so a second Noten process is
- * not covered.
- */
-export async function drainPeerWindows(timeoutMs = PEER_DRAIN_TIMEOUT_MS): Promise<boolean> {
+export interface PeerHold {
+  ok: boolean;
+  release: () => Promise<void>;
+}
+
+async function requestPeers(timeoutMs: number, holdInput: boolean): Promise<PeerHold> {
+  const drainId = crypto.randomUUID();
+  // Sent even when the request itself failed partway: a window may have
+  // received it and be holding its input.
+  const release = async () => {
+    if (!holdInput) return;
+    await emit("update-drain-release", { drainId } satisfies UpdateDrainRelease).catch(() => {});
+  };
+  const failed = async () => {
+    await release();
+    return { ok: false, release };
+  };
+
   let pending: Set<string>;
   try {
     pending = new Set(
@@ -37,11 +58,10 @@ export async function drainPeerWindows(timeoutMs = PEER_DRAIN_TIMEOUT_MS): Promi
         .filter((label) => label !== WINDOW_LABEL),
     );
   } catch {
-    return false;
+    return { ok: false, release };
   }
-  if (pending.size === 0) return true;
+  if (pending.size === 0) return { ok: true, release };
 
-  const drainId = crypto.randomUUID();
   let allOk = true;
   let settle: () => void = () => {};
   const answered = new Promise<void>((resolve) => { settle = resolve; });
@@ -55,28 +75,50 @@ export async function drainPeerWindows(timeoutMs = PEER_DRAIN_TIMEOUT_MS): Promi
       if (pending.size === 0) settle();
     });
   } catch {
-    return false;
+    return { ok: false, release };
   }
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await emit("update-drain-request", { sourceWindow: WINDOW_LABEL, drainId } satisfies UpdateDrainRequest);
+    await emit("update-drain-request", { sourceWindow: WINDOW_LABEL, drainId, holdInput } satisfies UpdateDrainRequest);
     await Promise.race([
       answered,
       new Promise<void>((resolve) => { timer = setTimeout(resolve, timeoutMs); }),
     ]);
   } catch {
-    return false;
+    return failed();
   } finally {
     clearTimeout(timer);
     unlisten();
   }
-  return allOk && pending.size === 0;
+  if (!allOk || pending.size > 0) return failed();
+  return { ok: true, release };
+}
+
+/**
+ * Resolves true only when every other window confirmed its edits are on disk or
+ * journalled. A window that cannot answer, including one still starting up, is
+ * not confirmed. Events do not cross processes; the single-instance lock in
+ * release builds is what keeps every window in this one.
+ */
+export async function drainPeerWindows(timeoutMs = PEER_DRAIN_TIMEOUT_MS): Promise<boolean> {
+  return (await requestPeers(timeoutMs, false)).ok;
+}
+
+/**
+ * The drain for the install's last step: every other window holds its input
+ * first, then drains, and stays held until `release` or its expiry. When `ok`
+ * is false the windows have already been released.
+ */
+export function holdAndDrainPeerWindows(timeoutMs = PEER_DRAIN_TIMEOUT_MS): Promise<PeerHold> {
+  return requestPeers(timeoutMs, true);
 }
 
 export interface UpdateDrainSyncParams {
   /** The same drain this window runs before its own install. */
   drainRef: React.RefObject<(() => Promise<boolean>) | null>;
+  /** Holds this window's input; null when it cannot be held right now. */
+  holdInputRef: React.RefObject<(() => (() => void) | null) | null>;
   /** False while this window is in a state a restart must not interrupt. */
   mayInstall: () => boolean;
 }
@@ -88,24 +130,63 @@ export function useUpdateDrainSync(params: UpdateDrainSyncParams) {
 
   useEffect(() => {
     let mounted = true;
-    let unlisten: (() => void) | undefined;
+    const unlisteners: (() => void)[] = [];
+    const held = new Map<string, () => void>();
+    const releaseHold = (drainId: string) => {
+      held.get(drainId)?.();
+      held.delete(drainId);
+    };
+    const track = (registration: Promise<() => void>) => {
+      registration.then((fn) => {
+        if (mounted) unlisteners.push(fn);
+        else fn();
+      }).catch(() => { /* no answer: the requesting window treats it as unconfirmed */ });
+    };
 
-    listen<UpdateDrainRequest>("update-drain-request", (event) => {
-      const { sourceWindow, drainId } = event.payload;
+    track(listen<UpdateDrainRequest>("update-drain-request", (event) => {
+      const { sourceWindow, drainId, holdInput } = event.payload;
       if (sourceWindow === WINDOW_LABEL) return;
       void (async () => {
-        const { drainRef, mayInstall } = paramsRef.current;
-        const ok = mayInstall() && (await drainRef.current?.().catch(() => false)) === true;
+        const { drainRef, holdInputRef, mayInstall } = paramsRef.current;
+        let ok = true;
+        if (holdInput) {
+          const release = holdInputRef.current?.() ?? null;
+          if (release) {
+            // Armed before the drain, and the drain is bounded here as well:
+            // the requester's timeout and release die with its webview, so
+            // nothing outside this window may be what ends the hold.
+            let expiry = setTimeout(() => releaseHold(drainId), PEER_DRAIN_TIMEOUT_MS + PEER_HOLD_EXPIRY_MS);
+            held.set(drainId, () => { clearTimeout(expiry); release(); });
+            let drainTimer: ReturnType<typeof setTimeout> | undefined;
+            ok = mayInstall() && (await Promise.race([
+              drainRef.current?.().catch(() => false) ?? Promise.resolve(false),
+              new Promise<boolean>((resolve) => { drainTimer = setTimeout(() => resolve(false), PEER_DRAIN_TIMEOUT_MS); }),
+            ]).finally(() => clearTimeout(drainTimer))) === true;
+            if (ok && held.has(drainId)) {
+              // Restarted at the answer; see PEER_HOLD_EXPIRY_MS.
+              clearTimeout(expiry);
+              expiry = setTimeout(() => releaseHold(drainId), PEER_HOLD_EXPIRY_MS);
+            } else {
+              releaseHold(drainId);
+            }
+          } else {
+            ok = false;
+          }
+        } else {
+          ok = mayInstall() && (await drainRef.current?.().catch(() => false)) === true;
+        }
         await emit("update-drain-ack", { sourceWindow: WINDOW_LABEL, drainId, ok } satisfies UpdateDrainAck).catch(() => {});
       })();
-    }).then((fn) => {
-      if (mounted) unlisten = fn;
-      else fn();
-    }).catch(() => { /* no answer: the requesting window treats it as unconfirmed */ });
+    }));
+
+    track(listen<UpdateDrainRelease>("update-drain-release", (event) => {
+      releaseHold(event.payload.drainId);
+    }));
 
     return () => {
       mounted = false;
-      unlisten?.();
+      for (const fn of unlisteners) fn();
+      for (const drainId of [...held.keys()]) releaseHold(drainId);
     };
   }, []);
 }

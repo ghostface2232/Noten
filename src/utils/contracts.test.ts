@@ -572,14 +572,19 @@ describe("contract: unsaved edits get a last chance before the process ends", ()
   it("useUpdater awaits a beforeInstall hook between the download and the install", () => {
     const src = read(resolve(SRC_ROOT, "hooks/useUpdater.ts"));
     const downloadIdx = src.indexOf("await download()");
-    const drainIdx = src.indexOf("await drainAllWindows()");
-    // The call, not the JSDoc above it that also names the method.
-    const installIdx = src.indexOf("update.install(");
+    const manualIdx = src.indexOf("runManualInstall({");
     expect(downloadIdx).toBeGreaterThan(-1);
-    expect(drainIdx).toBeGreaterThan(downloadIdx);
-    expect(installIdx).toBeGreaterThan(drainIdx);
+    expect(manualIdx).toBeGreaterThan(downloadIdx);
+    // Both install paths drain through the loops that refuse to install past a
+    // drain that did not confirm every window; a manual install that ignored a
+    // failed drain is what this replaced.
+    const manual = src.slice(manualIdx, manualIdx + 400);
+    expect(manual).toContain("drain: drainAllWindows");
+    expect(manual).toContain("update.install()");
+    expect(src.split("update.install(").length - 1).toBe(1);
+    expect(src.split("updateRef.current?.install(").length - 1).toBe(1);
     // The installer ends every window, not just the one that asked.
-    expect(src).toContain("beforeInstallRef?.current?.()");
+    expect(src).toContain("beforeInstallRef.current?.()");
     expect(src).toContain("drainPeerWindows()");
     expect(src).toContain("drain: drainAllWindows");
     // A combined call drains before the download, so everything typed while it
@@ -607,11 +612,16 @@ describe("contract: an automatic update waits for the user to stop", () => {
   it("the only automatic install is the one behind the idle gate", () => {
     const hook = read(resolve(SRC_ROOT, "hooks/useUpdater.ts"));
     expect(hook).toContain("runAutoUpdate({");
-    expect(hook).toContain('invoke<number>("auto_update_idle_ms")');
+    expect(hook).toContain('invoke<UpdateActivity>("update_activity")');
     expect(hook).toContain("isStillAllowed: readAutoUpdateAllowed");
     const app = read(resolve(SRC_ROOT, "App.tsx"));
     expect(app).not.toContain("updater.installUpdate()");
     expect(app).toContain("useUpdateDrainSync({");
+    // The last drain runs with input held in every window, so nothing typed
+    // between it and the process ending can be lost.
+    expect(app).toContain("holdUpdateInputRef.current =");
+    expect(hook).toContain("holdAndDrain: holdAndDrainAllWindows");
+    expect(hook.split("holdAndDrain: holdAndDrainAllWindows").length - 1).toBe(2);
   });
 });
 

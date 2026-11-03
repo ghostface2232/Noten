@@ -12,7 +12,14 @@ Noten's privacy posture is "your notes never leave the disk," and it should stay
 
 - The logon key is the token's logon id plus that session's logon time from `LsaGetLogonSessionData`; the id alone is unique only until a restart. An elevated launch has its own logon id, so it counts as a new logon.
 - A claim is a marker file made with `create_new` in `logon-update-claims/` under app data, because a second launch is a second process and in-memory state cannot arbitrate between them. The claim stays held until the frontend settles it, and `RunEvent::Exit` gives a held claim back, so closing the app before a pause retries on the next launch. The installer's `std::process::exit` skips that event, which is what keeps the relaunched app from checking again.
-- `auto_update_idle_ms` reads `GetLastInputInfo`, which covers the whole Windows session: every Noten window and process, and other apps, since restarting brings a window forward. It answers 0 during a PDF export, which can run for a minute with no input.
+- `update_activity` reads idle time, focus and export state in one call. Idle time comes from `GetLastInputInfo`, which covers the whole Windows session: every Noten window and other apps, since restarting brings a window forward. It answers 0 while a mouse button is held, because a drag that pauses in place reports no input. `foreground` compares the active window's process with this one, so Noten's own message boxes and file dialogs count. `exporting` is the `PdfExportGuard` count, since an export can run for a minute with no input.
+
+## Single Instance
+
+- Release builds register `tauri-plugin-single-instance` first, so a second launch exits before it opens a window and the running process opens one instead (`open_window_for_second_launch`, which mirrors `openNewWindow`). A second process was invisible to everything that coordinates windows: the update drain and input hold, cross-window sync, and the recovery journal, whose records are keyed by window label (both processes' first window is `main`, and each process's orphan sweep would treat the other's live records as its own). Keep it the first plugin.
+- The lock is a named mutex keyed by the identifier, so a bench build (`com.noten.bench`) runs beside the real app. Debug builds skip the plugin: they share `com.noten.app` with the installed app, and a dev run would only open a window in it.
+- Known gap: an elevated Noten and a normal one do not see each other. A normal launch beside an elevated instance cannot open its mutex (access denied, which the plugin does not treat as "already running") and runs as a second process; an elevated launch beside a normal one has its `WM_COPYDATA` dropped by UIPI and opens nothing. Running Noten elevated is not a supported setup, so this is documented rather than worked around.
+- The callback runs on the main thread inside a window message, and building a webview window there deadlocks on Windows, so the window is built from a spawned thread.
 
 ## PDF Export (print_to_pdf)
 
