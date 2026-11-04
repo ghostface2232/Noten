@@ -869,7 +869,10 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           : doc;
         return EditorState.create({
           doc: bodyDoc,
-          selection: bodyStart > 0 ? TextSelection.near(bodyDoc.resolve(bodyStart), 1) : undefined,
+          // Text only: a selected image or rule would be replaced by the first key.
+          selection: bodyStart > 0
+            ? Selection.findFrom(bodyDoc.resolve(bodyStart), 1, true) ?? TextSelection.near(bodyDoc.resolve(bodyStart), 1)
+            : undefined,
           plugins: editor.state.plugins,
         });
       } catch {

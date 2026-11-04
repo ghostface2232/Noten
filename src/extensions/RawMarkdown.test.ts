@@ -87,6 +87,9 @@ const KEPT: [string, string][] = [
   ["a lone tag before Korean text", "<b> 태그"],
   ["an unclosed link tag", 'a <a href="u"> c'],
   ["a lone closing tag", "a </b> c"],
+  ["a self-closed tag", "use the <b/> tag"],
+  ["an empty pair", "x <b></b> y"],
+  ["an image tag with no source", "the <img> tag"],
   ["an aligned image", '<img src="a.png" align="right">'],
   ["an entity", "&copy; 2026 &#169;"],
 ];
@@ -182,6 +185,8 @@ describe("what still reads as ordinary Markdown", () => {
     "---\nNote: a sentence\nand another line\n---",
     "---\nNote: a sentence\n\nand a paragraph\n\n---",
     "---\n# Title\n\nk: v\n---",
+    "---\nDate: x\n\n# Agenda\n- a\n\n# Actions\n- b: c\n---",
+    "---\nNote: x\n\n- a\n- b\n\n---",
   ])("does not read %j as front matter", (markdown) => {
     expect(JSON.stringify(load(markdown).getJSON())).not.toContain('"frontmatter"');
   });

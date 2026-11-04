@@ -161,6 +161,14 @@ describe("TiptapEditor: Markdown it has no model for", () => {
     expect(editor().getMarkdown().trimEnd()).toBe(markdown);
   });
 
+  it("does not select an image that follows front matter", async () => {
+    const { editor, open } = mountEditor();
+    await open("n", "---\nk: v\n---\n\n![i](z.png)\n\nbody");
+
+    expect(editor().state.selection.empty).toBe(true);
+    expect(editor().state.selection.$from.parent.textContent).toBe("body");
+  });
+
   it("opens past every leading block of source", async () => {
     const { editor, open } = mountEditor();
     await open("n", "---\nk: v\n---\n\n[r]: http://x.y\n\nbody");

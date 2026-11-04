@@ -67,6 +67,7 @@ const KEPT_ATTRIBUTES: Record<string, Set<string>> = {
   img: new Set(["src", "alt", "title", "width", "height"]),
 };
 const HTML_TAG = /<\s*\/?\s*([a-zA-Z][\w-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+const EMPTY_ELEMENT = /<\s*([a-zA-Z][\w-]*)[^>]*>\s*<\/\s*\1\s*>/;
 const HTML_ATTRIBUTE = /([a-zA-Z_:][\w:.-]*)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?/g;
 
 function isOnlyAComment(html: string): boolean {
@@ -83,7 +84,8 @@ function schemaKeepsHtml(html: string): boolean {
   for (const [tag, rawName, attributes] of html.matchAll(HTML_TAG)) {
     sawTag = true;
     const name = rawName.toLowerCase();
-    if (name !== "br" && name !== "img" && !tag.endsWith("/>")) open += /^<\s*\//.test(tag) ? -1 : 1;
+    if (name === "img" && !/\bsrc\s*=/i.test(attributes)) return false;
+    if (name !== "br" && name !== "img") open += /^<\s*\//.test(tag) ? -1 : tag.endsWith("/>") ? 2 : 1;
     if (name === "a") sawLink = true;
     if (name === "img") sawImage = true;
     const kept = KEPT_ATTRIBUTES[name];
@@ -92,9 +94,10 @@ function schemaKeepsHtml(html: string): boolean {
       if (!kept?.has(attribute.toLowerCase())) return false;
     }
   }
-  // A lone tag has nothing to apply to and would just be deleted, as in `the <b>
-  // tag`. And the image would survive where the link around it would not.
-  return sawTag && open === 0 && !(sawLink && sawImage);
+  // A tag with nothing to apply to would just be deleted, as in `the <b> tag`, so a
+  // lone one, a self-closed one or an empty pair stays. And the image would survive
+  // where the link around it would not.
+  return sawTag && open === 0 && !EMPTY_ELEMENT.test(html) && !(sawLink && sawImage);
 }
 
 type ParseResult = JSONContent | JSONContent[] | null;
