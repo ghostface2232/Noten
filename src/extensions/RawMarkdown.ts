@@ -28,26 +28,51 @@ function rawInline(text: string): JSONContent {
 }
 
 // Pandoc's rule, so prices stay text: no space just inside either `$`, and no
-// digit right after the closer (`$5 and $6`, `$5/$3`).
-const INLINE_MATH = String.raw`\$(?![\s$])(?:\\[^\n]|[^$\\\n])+?(?<!\s)\$(?!\d)`;
+// digit right after the closer (`$5 and $6`, `$5/$3`). `$$a$$` is the same inside
+// a line. The classes leave out what the next delimiter's search would also scan
+// (`[`, `(`), so a long run of unclosed openers stays linear.
+const INLINE_MATH = /\$\$[^$`\n]+\$\$(?!\d)|\$(?![\s$])(?:\\[^\n]|[^$\\\n`])+?(?<!\s)\$(?!\d)/.source;
 // A link or definition keeps its own reading: `[^1](x)`, `[!a][b]`, `[^1]:`.
-const FOOTNOTE_REFERENCE = String.raw`\[\^[^\]\s]+\](?![(\[:])`;
-const CALLOUT_MARKER = String.raw`\[![A-Za-z][\w-]*\][+-]?(?![(\[:])`;
+const FOOTNOTE_REFERENCE = /\[\^[^\][\s]+\](?![([:])/.source;
+const CALLOUT_MARKER = /\[![A-Za-z][\w-]*\][+-]?(?![([:])/.source;
 // The schema cannot hold a link on an image, so the link would be lost.
-const LINKED_IMAGE = String.raw`\[!\[[^\]\n]*\]\([^)\n]*\)\]\([^)\n]*\)`;
+const LINKED_IMAGE = /\[!\[[^\][\n]*\]\([^()[\n]*\)\]\([^()[\n]*\)/.source;
 
-const INLINE_MATH_AT_START = new RegExp(`^${INLINE_MATH}`);
+const INLINE_MATH_AT_START = new RegExp(`^(?:${INLINE_MATH})`);
 const BRACKET_SYNTAX_AT_START = new RegExp(`^(?:${FOOTNOTE_REFERENCE}|${CALLOUT_MARKER}|${LINKED_IMAGE})`);
 // What the same text would be read as if it were written unescaped. Typing these
 // in the editor must save them as written, or the reload would read `$a\_b$`.
 const SYNTAX_IN_PLAIN_TEXT = new RegExp(`${INLINE_MATH}|${FOOTNOTE_REFERENCE}|${CALLOUT_MARKER}`, "g");
 
+// `$` is also an ordinary character, and this tokenizer runs before the ones for
+// code spans, links and emphasis. A match that would cut across one of those is
+// not math: `$HOME and [a$](u)` and `$a **b$ c**` keep their link and bold.
+function readsAsMath(source: string): boolean {
+  if (!source.startsWith("$")) return true;
+  if (source.includes("**") || source.includes("__") || source.includes("~~") || source.includes("](")) return false;
+  let depth = 0;
+  for (const character of source) {
+    if (character === "[") depth += 1;
+    else if (character === "]" && --depth < 0) return false;
+  }
+  return depth === 0;
+}
+
 // Tags the schema reads and the serializer writes back, so converting them keeps
-// their meaning. Everything else stays as source. An attribute on one of the
-// plain formatting tags would be lost, so that stays as source too.
+// their meaning. Everything else stays as source, and so does a tag with an
+// attribute its mark or node has nowhere to hold.
 const FORMATTING_TAGS = new Set(["strong", "b", "em", "i", "u", "s", "del", "strike", "code", "br"]);
-const ATTRIBUTE_TOLERANT_TAGS = new Set(["a", "img"]);
-const HTML_TAG = /<\s*\/?\s*([a-zA-Z][\w-]*)([^>]*)>/g;
+const KEPT_ATTRIBUTES: Record<string, Set<string>> = {
+  a: new Set(["href", "title"]),
+  img: new Set(["src", "alt", "title", "width", "height"]),
+};
+const HTML_TAG = /<\s*\/?\s*([a-zA-Z][\w-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+const HTML_ATTRIBUTE = /([a-zA-Z_:][\w:.-]*)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?/g;
+
+function isOnlyAComment(html: string): boolean {
+  const source = html.trim();
+  return source.startsWith("<!--") && source.indexOf("-->") === source.length - 3;
+}
 
 function schemaKeepsHtml(html: string): boolean {
   if (html.includes("<!") || html.includes("<?")) return false;
@@ -59,9 +84,11 @@ function schemaKeepsHtml(html: string): boolean {
     const name = rawName.toLowerCase();
     if (name === "a") sawLink = true;
     if (name === "img") sawImage = true;
-    if (ATTRIBUTE_TOLERANT_TAGS.has(name)) continue;
-    if (!FORMATTING_TAGS.has(name)) return false;
-    if (attributes.replace("/", "").trim()) return false;
+    const kept = KEPT_ATTRIBUTES[name];
+    if (!kept && !FORMATTING_TAGS.has(name)) return false;
+    for (const [, attribute] of attributes.matchAll(HTML_ATTRIBUTE)) {
+      if (!kept?.has(attribute.toLowerCase())) return false;
+    }
   }
   // The image would survive and the link around it would not.
   return sawTag && !(sawLink && sawImage);
@@ -111,7 +138,7 @@ function patchManager(): void {
       return parseHTMLToken.call(this, token);
     }
     if (!token.block) return [rawInline(html)];
-    return [rawBlock(html.trimEnd(), html.trimStart().startsWith("<!--") ? "comment" : "html")];
+    return [rawBlock(html.trimEnd(), isOnlyAComment(html) ? "comment" : "html")];
   };
 
   proto.encodeTextForMarkdown = function (this: ManagerInternals, text, node, parentNode) {
@@ -127,6 +154,7 @@ function patchManager(): void {
     let output = "";
     let cursor = 0;
     for (const match of text.matchAll(SYNTAX_IN_PLAIN_TEXT)) {
+      if (!readsAsMath(match[0])) continue;
       output += encodePlain(text.slice(cursor, match.index)) + match[0];
       cursor = match.index + match[0].length;
     }
@@ -137,8 +165,7 @@ function patchManager(): void {
 patchManager();
 
 const FENCED_MATH_OPEN = /^ {0,3}\$\$/;
-const SINGLE_LINE_MATH = /^ {0,3}\$\$[^\n]*\S[^\n]*\$\$[ \t]*(?:\n|$)/;
-const FOOTNOTE_DEFINITION = /^ {0,3}\[\^[^\]\s]+\]:/;
+const FOOTNOTE_DEFINITION = /^ {0,3}\[\^[^\][\s]+\]:/;
 
 function lineEnd(src: string, start: number): number {
   const newline = src.indexOf("\n", start);
@@ -147,9 +174,9 @@ function lineEnd(src: string, start: number): number {
 
 // A blank line ends the search, so an unclosed `$$` costs one paragraph's scan.
 function fencedMathLength(src: string): number {
-  const single = SINGLE_LINE_MATH.exec(src);
-  if (single) return single[0].length;
   let cursor = lineEnd(src, 0);
+  const firstLine = src.slice(0, cursor).trim();
+  if (firstLine.endsWith("$$") && firstLine.slice(2, -2).trim()) return cursor;
   while (cursor < src.length) {
     const end = lineEnd(src, cursor);
     const line = src.slice(cursor, end).trimEnd();
@@ -250,7 +277,7 @@ export const RawInline = Mark.create({
     start: firstIndexOf("$"),
     tokenize: (src: string) => {
       const match = INLINE_MATH_AT_START.exec(src);
-      return match ? { type: RAW_INLINE, raw: match[0], text: match[0] } : undefined;
+      return match && readsAsMath(match[0]) ? { type: RAW_INLINE, raw: match[0], text: match[0] } : undefined;
     },
   },
 

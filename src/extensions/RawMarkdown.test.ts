@@ -76,6 +76,9 @@ const KEPT: [string, string][] = [
   ["inline math with a backslash", "so $\\frac{a_1}{b}$ here"],
   ["block math", "$$\n\\frac{a_1}{b}\n$$"],
   ["single-line block math", "$$a_1$$"],
+  ["display math inside a line", "text $$ a_b $$ more"],
+  ["an anchor with an id", '<a id="foo"></a>'],
+  ["an aligned image", '<img src="a.png" align="right">'],
   ["an entity", "&copy; 2026 &#169;"],
 ];
 
@@ -128,6 +131,41 @@ describe("what still reads as ordinary Markdown", () => {
   ])("does not read %s as math", (_, markdown) => {
     expect(JSON.stringify(load(markdown).getJSON())).not.toContain('"rawInline"');
   });
+
+  it.each([
+    ["a code span holding a dollar", "set $HOME and `$PATH` here"],
+    ["a link holding a dollar", "cost $5 and [link$](http://x.y) ok"],
+    ["bold crossing a dollar", "$a **b$ c** d"],
+    ["strike crossing a dollar", "$a ~~b$ c~~ d"],
+  ])("keeps %s, not math", (_, markdown) => {
+    let saved = markdown;
+    for (let round = 0; round < 2; round += 1) {
+      saved = load(saved).getMarkdown();
+      expect(saved).toBe(markdown);
+    }
+    expect(JSON.stringify(load(markdown).getJSON())).not.toContain('"rawInline"');
+  });
+
+  it.each([
+    ["$$ opener", "$$", "a"],
+    ["footnote openers", "[^", ""],
+    ["linked image openers", "[![a](", ""],
+    ["callout openers", "[!", ""],
+    ["dollars", "$a ", ""],
+  ])("stays linear on a long line of %s", (_, repeated, tail) => {
+    const measure = (count: number) => {
+      const text = `${repeated.repeat(count)}${tail.repeat(count)}`;
+      const start = performance.now();
+      const editor = load(text);
+      editor.getMarkdown();
+      return performance.now() - start;
+    };
+    measure(200);
+    const small = measure(4_000);
+    const large = measure(32_000);
+    // Eight times the text; quadratic would be 64.
+    expect(large / small).toBeLessThan(25);
+  }, 120_000);
 
   it.each([
     ["<u>x</u> y", "underline"],
@@ -219,6 +257,12 @@ describe("how kept source is shown", () => {
     ["[^1]: note", "footnote"],
   ])("marks %j as %s", (markdown, kind) => {
     expect(load(markdown).view.dom.querySelector(`pre[data-raw-kind="${kind}"]`)).not.toBeNull();
+  });
+
+  it("does not call a comment followed by text a comment", () => {
+    const editor = load("<!-- todo --> **Important** text");
+    expect(editor.view.dom.querySelector('pre[data-raw-kind="comment"]')).toBeNull();
+    expect(editor.view.dom.querySelector('pre[data-raw-kind="html"]')).not.toBeNull();
   });
 
   it("copies between editors as the same node", () => {
