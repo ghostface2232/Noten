@@ -67,6 +67,15 @@ describe("removeExternalReferences", () => {
     expect(el.querySelector("style")).toBeNull();
   });
 
+  it("drops a load hidden behind something that looks like a marker reference", () => {
+    const el = editorWith("<span></span>");
+    el.querySelector("span")!.setAttribute("style", "/*url(#35;*/background:url(//host/x.png)");
+
+    removeExternalReferences(el);
+
+    expect(el.innerHTML).not.toContain("host");
+  });
+
   it("drops loading elements and attributes, and leaves links alone", () => {
     const el = editorWith(`
       <link rel="stylesheet" href="//host/a.css"><iframe src="//host/b"></iframe><base href="//host/">
@@ -93,6 +102,11 @@ describe("withoutExternalCss", () => {
     ['.a { background: image-set("//host/a" 1x) }', ".a { background: none }"],
     ['.a { background: -webkit-image-set(url("//host/a") 1x) }', ".a { background: none }"],
     ['@import url("//host/a.css"); .a { color: red }', " .a { color: red }"],
+    [".a { background: url(#x;*/background:url(//host/a) }", ".a { background: none }"],
+    ['.a { --b: "url(#"; background-image: url(//host/a) }', '.a { --b: "none }'],
+    [".a { background: url(data:image/x;*/background:url(//host/a) }", ".a { background: none }"],
+    [".a { background: URL(//host/a) }", ".a { background: none }"],
+    [".a { --b: u\\72l(//host/a); background: var(--b) }", ""],
   ])("removes the load from %s", (css, expected) => {
     expect(withoutExternalCss(css)).toBe(expected);
   });
@@ -101,6 +115,9 @@ describe("withoutExternalCss", () => {
     ".a { color: red }",
     ".a { marker-end: url(#arrow) }",
     '.a { background: url("data:image/png;base64,AAAA") }',
+    '.a { background: url("data:image/svg+xml,%3Csvg xmlns=%27a%27 /%3E") }',
+    ".a { background: url(data:image/png;base64,AAAA) }",
+    '.a { content: "\\201C" }',
   ])("keeps %s", (css) => {
     expect(withoutExternalCss(css)).toBe(css);
   });

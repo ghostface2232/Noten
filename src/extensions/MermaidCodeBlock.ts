@@ -89,9 +89,19 @@ async function getMermaid() {
     mermaidApi.initialize({
       startOnLoad: false,
       securityLevel: "strict",
-      // Mermaid's own list, plus the directive that puts any CSS a note likes into
-      // the diagram's stylesheet, where it can load from a remote host.
-      secure: ["secure", "securityLevel", "startOnLoad", "maxTextSize", "suppressErrorRendering", "maxEdges", "themeCSS"],
+      // Mermaid's own list, plus the directives that put text from a note into the
+      // diagram's stylesheet unescaped, where it can load from a remote host.
+      secure: [
+        "secure",
+        "securityLevel",
+        "startOnLoad",
+        "maxTextSize",
+        "suppressErrorRendering",
+        "maxEdges",
+        "themeCSS",
+        "fontFamily",
+        "altFontFamily",
+      ],
       theme: "neutral",
       suppressErrorRendering: true,
       fontFamily: MERMAID_FONT_FAMILY,

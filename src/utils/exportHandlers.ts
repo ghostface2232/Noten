@@ -88,13 +88,23 @@ const CSS_IMAGE_SET = /(?:-webkit-)?image-set\((?:[^()]|\([^()]*\))*\)/gi;
 const CSS_IMPORT = /@import[^;]*;?/gi;
 
 const isInertUrl = (url: string) => url.startsWith("#") || /^data:image\//i.test(url);
+// An unquoted match runs to the first `)`, so it can have swallowed more than a
+// target: `url(#35;*/background:url(//host/x.png)`, whose start looks like a marker
+// reference. Only the whole shape of one counts.
+const isInertBareCssUrl = (url: string) => /^#[\w.:-]*$/.test(url) || /^data:image\/[^\s()'"]*$/i.test(url);
+// A custom property keeps its tokens unparsed, so `--a: u\72l(//host)` still reads as
+// a url wherever `var(--a)` lands, and it serializes that way too.
+const ESCAPE_IN_CUSTOM_PROPERTY = /--[\w-]+\s*:[\s\S]*\\/;
 
 /** CSS with everything removed that could load from outside the page. */
 export function withoutExternalCss(css: string): string {
+  if (ESCAPE_IN_CUSTOM_PROPERTY.test(css)) return "";
   return css
     .replace(CSS_IMPORT, "")
     .replace(CSS_IMAGE_SET, "none")
-    .replace(CSS_URL, (whole, double, single, bare) => (isInertUrl(double ?? single ?? bare ?? "") ? whole : "none"));
+    .replace(CSS_URL, (whole, double, single, bare) => (
+      (bare === undefined ? isInertUrl(double ?? single) : isInertBareCssUrl(bare)) ? whole : "none"
+    ));
 }
 
 /**
