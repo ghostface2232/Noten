@@ -50,10 +50,10 @@ const INLINE_TYPES = new Set(["text", "hardBreak"]);
 // item and orderedListTokenizer.ts's for an ordered one. An ordered list is
 // not among them (Tiptap keeps `- 1. a` as text, and so does the ordered
 // reading), and a rule only in an ordered item: `- ---` is a rule itself.
-const MARKER_LINE_BLOCKS = new Set(["bulletList", "taskList", "blockquote", "heading", "codeBlock"]);
+const MARKER_LINE_BLOCKS = new Set(["bulletList", "taskList", "blockquote", "heading", "codeBlock", "image"]);
 // The block's first line as rendered must still open it there: an empty
 // nested item (`- - `, `- - [ ] `) reads back as text.
-const MARKER_LINE_HEAD = /^(?:[-+*] +\[[ xX]\] +\S|[-+*] +(?!\[[ xX]\])\S|#{1,6} +\S|>|```|~~~|---$)/;
+const MARKER_LINE_HEAD = /^(?:[-+*] +\[[ xX]\] +\S|[-+*] +(?!\[[ xX]\])\S|#{1,6} +\S|>|```|~~~|---$|!\[|<img\b)/;
 
 function isEmptyParagraph(node: JSONContent | undefined): boolean {
   return node?.type === "paragraph" && (node.content ?? []).length === 0;

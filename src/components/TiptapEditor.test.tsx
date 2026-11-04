@@ -71,6 +71,44 @@ function mountEditor() {
   return { editor: () => ref.current!.getEditor() as Editor, onDirtyChange, open };
 }
 
+describe("TiptapEditor: an image beside text", () => {
+  it("renders inside its paragraph, and survives an edit next to it", async () => {
+    const { editor, open } = mountEditor();
+    await open("n", "before ![i](z.png) after");
+
+    const dom = editor().view.dom.querySelector(".tiptap-image-node");
+    expect(dom?.tagName).toBe("SPAN");
+    expect(dom?.closest("p")).not.toBeNull();
+
+    await act(async () => {
+      const e = editor();
+      e.view.dispatch(e.state.tr.insertText("x", 1));
+    });
+
+    expect(() => editor().state.doc.check()).not.toThrow();
+    expect(editor().getMarkdown()).toBe("xbefore ![i](z.png) after");
+  });
+
+  it("selects and resizes through its own node type", async () => {
+    const { editor, open } = mountEditor();
+    await open("n", "before ![i](z.png) after");
+
+    await act(async () => {
+      editor().chain().setNodeSelection(8).updateAttributes("inlineImage", { width: 100, height: 50 }).run();
+    });
+
+    expect(editor().getMarkdown()).toContain('width="100"');
+    expect(editor().view.dom.querySelector(".tiptap-image-node img")?.getAttribute("style")).toContain("width: 100px");
+  });
+
+  it("keeps a standalone image a block", async () => {
+    const { editor, open } = mountEditor();
+    await open("n", "![i](z.png)");
+
+    expect(editor().view.dom.querySelector(".tiptap-image-node")?.tagName).toBe("DIV");
+  });
+});
+
 // Notes that do not end in a paragraph, where TrailingNode has something to add.
 const TAILS = ["# heading", "para\n\n- item", "para\n\n```\ncode\n```", "para\n\n> quote", "| a |\n|---|\n| 1 |", "para\n\n- [ ] task"];
 

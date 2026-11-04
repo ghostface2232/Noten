@@ -49,7 +49,8 @@ import FocusMode, { syncFocusModeState } from "../extensions/FocusMode";
 import { announceDocumentSwap } from "../extensions/documentSwap";
 import OffscreenBlocks from "../extensions/OffscreenBlocks";
 import IncrementalMarkdown from "../extensions/IncrementalMarkdown";
-import { NotenImage } from "../extensions/NotenImage";
+import { NotenImage, NotenInlineImage } from "../extensions/NotenImage";
+import { isImageNodeName } from "../utils/imageNode";
 import { NotenTable } from "../extensions/NotenTable";
 import { createNotenTaskItem } from "../extensions/NotenTaskItem";
 import NotenTaskList from "../extensions/NotenTaskList";
@@ -182,7 +183,7 @@ function getSelectionRect(editor: Editor, range: TextRange): DOMRect {
 
 
 function isImageNodeSelection(selection: unknown): selection is NodeSelection {
-  return selection instanceof NodeSelection && selection.node.type.name === "image";
+  return selection instanceof NodeSelection && isImageNodeName(selection.node.type.name);
 }
 
 function createSelectionAfterImage(editor: Editor, imageAfterPos: number): Selection {
@@ -213,7 +214,7 @@ function clearAllImageOutlines(editor: Editor): void {
   const view = editor.view;
   if (!view) return;
   view.state.doc.descendants((node, pos) => {
-    if (node.type.name !== "image") return true;
+    if (!isImageNodeName(node.type.name)) return true;
     const dom = view.nodeDOM(pos) as HTMLElement | null;
     if (dom) {
       dom.style.outline = "none";
@@ -523,7 +524,7 @@ const ImageFocusGuard = Extension.create({
             blur: (view) => {
               const { selection } = view.state;
               if (!(selection instanceof NodeSelection)) return false;
-              if (selection.node.type.name !== "image") return false;
+              if (!isImageNodeName(selection.node.type.name)) return false;
               const afterPos = Math.min(
                 selection.from + selection.node.nodeSize,
                 view.state.doc.content.size,
@@ -758,6 +759,15 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         NotenImage.extend({
           addNodeView() {
             return createImageNodeView(this.editor);
+          },
+          addExtensions() {
+            return [
+              NotenInlineImage.extend({
+                addNodeView() {
+                  return createImageNodeView(this.editor);
+                },
+              }),
+            ];
           },
         }),
         Placeholder.configure({ placeholder: () => t("placeholder", localeRef.current) }),

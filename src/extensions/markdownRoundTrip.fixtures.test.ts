@@ -210,7 +210,7 @@ describe("Markdown fixture round-trip compatibility", () => {
   it("keeps table cells, sized images, and escaped image metadata round-trippable", () => {
     const editor = trackedEditor(readFixture("images-and-tables.md"));
     const doc = editor.getJSON();
-    const images = descendants(doc).filter((node) => node.type === "image");
+    const images = descendants(doc).filter((node) => node.type === "image" || node.type === "inlineImage");
     const markdown = stableMarkdown(editor);
 
     expect(countNodes(doc, "table")).toBe(1);
