@@ -11,25 +11,34 @@ afterEach(() => settleSavesWithoutPending(() => false));
 
 describe("saveFailures", () => {
   it("stays failing until every failed note has settled", () => {
-    markSaveFailed("a");
-    markSaveFailed("b");
-    markSaveSettled("a");
+    markSaveFailed("a", 1);
+    markSaveFailed("b", 1);
+    markSaveSettled("a", 1);
     expect(isSaveFailing()).toBe(true);
 
-    markSaveSettled("b");
+    markSaveSettled("b", 1);
     expect(isSaveFailing()).toBe(false);
   });
 
   it("is not settled by a save of another note", () => {
-    markSaveFailed("a");
-    markSaveSettled("other");
+    markSaveFailed("a", 1);
+    markSaveSettled("other", 1);
 
     expect(isSaveFailing()).toBe(true);
   });
 
+  it("is not settled by a slower save of an older edit", () => {
+    markSaveFailed("a", 2);
+    markSaveSettled("a", 1);
+    expect(isSaveFailing()).toBe(true);
+
+    markSaveSettled("a", 2);
+    expect(isSaveFailing()).toBe(false);
+  });
+
   it("forgets a note with nothing left pending", () => {
-    markSaveFailed("kept");
-    markSaveFailed("deleted");
+    markSaveFailed("kept", 1);
+    markSaveFailed("deleted", 1);
 
     settleSavesWithoutPending((id) => id === "kept");
     expect(isSaveFailing()).toBe(true);
@@ -42,16 +51,16 @@ describe("saveFailures", () => {
     const listener = vi.fn();
     const unsubscribe = subscribeSaveFailures(listener);
 
-    markSaveFailed("a");
-    markSaveFailed("b");
+    markSaveFailed("a", 1);
+    markSaveFailed("b", 1);
     expect(listener).toHaveBeenCalledTimes(1);
 
-    markSaveSettled("a");
-    markSaveSettled("b");
+    markSaveSettled("a", 1);
+    markSaveSettled("b", 1);
     expect(listener).toHaveBeenCalledTimes(2);
 
     unsubscribe();
-    markSaveFailed("c");
+    markSaveFailed("c", 1);
     expect(listener).toHaveBeenCalledTimes(2);
   });
 });

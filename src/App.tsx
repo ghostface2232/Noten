@@ -584,7 +584,7 @@ function App() {
     commitLibraryForGeneration,
   );
 
-  const { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, journalPendingEdits, forgetRecoveryRecord, runExclusiveBodyWrite, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc } = useAutoSave(
+  const { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, flushDocSave, flushPendingSnapshots, retryFailedSaves, journalPendingEdits, forgetRecoveryRecord, runExclusiveBodyWrite, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc } = useAutoSave(
     state,
     tiptapRef,
     docs,
@@ -1248,7 +1248,7 @@ function App() {
     const lastShownAtByCode = new Map<NotenErrorCode, number>();
     registerFatalHandler((error) => {
       // The standing notice below already says so.
-      if (error.code === "SAVE_FAILED" && isSaveFailing()) return;
+      if ((error.code === "SAVE_FAILED" || error.code === "BACKUP_FAILED") && isSaveFailing()) return;
       const now = Date.now();
       const lastShownAt = lastShownAtByCode.get(error.code);
       if (
@@ -1268,10 +1268,10 @@ function App() {
   useEffect(() => {
     if (!saveFailing) return;
     const timer = window.setInterval(() => {
-      void flushPendingSnapshots().catch(() => {});
+      void retryFailedSaves().catch(() => {});
     }, FAILED_SAVE_RETRY_MS);
     return () => window.clearInterval(timer);
-  }, [flushPendingSnapshots, saveFailing]);
+  }, [retryFailedSaves, saveFailing]);
 
   // Replay edits a previous run could not get onto disk. Runs once the initial
   // load settled, because deciding whether a record is safe to apply needs the

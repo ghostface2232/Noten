@@ -382,6 +382,7 @@ export function useAutoSave(
         // next autosave debounce retries, and a transient cloud-sync failure
         // self-heals. A permanent failure repeatedly logs and surfaces via
         // the dirty indicator instead of silently corrupting on disk.
+        markSaveFailed(snapshot.docId, snapshot.editSerial);
         void logNotenError(err instanceof NotenError
           ? err
           : new NotenError(
@@ -633,11 +634,11 @@ export function useAutoSave(
       if (editorStillMatches) {
         commitState.state.setIsDirty(false);
       }
-      markSaveSettled(snapshot.docId);
+      markSaveSettled(snapshot.docId, snapshot.editSerial);
       return true;
     } catch (err) {
       if (import.meta.env.DEV) console.warn("[SAVE_FAILED]", err);
-      markSaveFailed(snapshot.docId);
+      markSaveFailed(snapshot.docId, snapshot.editSerial);
       void logNotenError(new NotenError(
         "SAVE_FAILED",
         "fatal",
@@ -1006,6 +1007,25 @@ export function useAutoSave(
     refreshHasPendingChanges();
   }, [clearPendingSnapshotIfCurrent, doSave, refreshHasPendingChanges, snapshotIsCurrent, trackInFlight]);
 
+  // A failed save arms no timer, so this is what tries again while a window sits
+  // open. Not flushPendingSnapshots, which runs when the window is about to lose its
+  // chance: it clears a snapshot typing has overtaken, and that forgets the recovery
+  // record, the only durable copy until the next debounce lands. A note with a save
+  // still in flight is left alone, or a hung share stacks one per interval.
+  const retryFailedSaves = useCallback(async (): Promise<void> => {
+    for (const snapshot of Array.from(pendingSnapshotsRef.current.values())) {
+      if (!snapshotIsCurrent(snapshot)) continue;
+      if ((inFlightSavesByDocRef.current.get(snapshot.docId)?.size ?? 0) > 0) continue;
+      if (!stateRef.current.docs.some((doc) => doc.id === snapshot.docId)) {
+        markSaveSettled(snapshot.docId, snapshot.editSerial);
+        continue;
+      }
+      const saved = await trackInFlight(snapshot, doSave(snapshot)).catch(() => false);
+      if (saved) clearPendingSnapshotIfCurrent(snapshot);
+    }
+    refreshHasPendingChanges();
+  }, [clearPendingSnapshotIfCurrent, doSave, refreshHasPendingChanges, snapshotIsCurrent, trackInFlight]);
+
   // Fire-and-forget variant of flushAutoSave: captures the snapshot
   // synchronously (so the editor can be repointed at a different doc
   // immediately afterwards without poisoning the snapshot) and lets doSave run
@@ -1231,5 +1251,5 @@ export function useAutoSave(
     return settlement;
   }, [awaitDocSave, forgetRecoveryRecord, hasPendingForDoc, refreshHasPendingChanges]);
 
-  return { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, awaitDocSave, flushDocSave, flushPendingSnapshots, journalPendingEdits, forgetRecoveryRecord, runExclusiveBodyWrite, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc };
+  return { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, awaitDocSave, flushDocSave, flushPendingSnapshots, retryFailedSaves, journalPendingEdits, forgetRecoveryRecord, runExclusiveBodyWrite, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc };
 }

@@ -153,7 +153,8 @@ vi.mock("../utils/documentTitle", () => ({
 
 // Imports must come AFTER vi.mock() registrations.
 import { useAutoSave, type FlushResult } from "./useAutoSave";
-import { isSaveFailing } from "../utils/saveFailures";
+import { isSaveFailing, settleSavesWithoutPending } from "../utils/saveFailures";
+import { clearRecoveryRecord, writeRecoveryRecord } from "../utils/recoveryJournal";
 import * as useNotesLoaderModule from "./useNotesLoader";
 import * as useFileSystemModule from "./useFileSystem";
 import * as conflictBackupModule from "../utils/conflictBackup";
@@ -266,6 +267,8 @@ afterEach(() => {
 });
 
 describe("useAutoSave — a save that keeps failing", () => {
+  afterEach(() => settleSavesWithoutPending(() => false));
+
   it("stays failing until a retry succeeds", async () => {
     refs.writeShouldThrow = new Error("EPERM: read-only folder");
     const { result } = renderAutoSave({
@@ -276,11 +279,80 @@ describe("useAutoSave — a save that keeps failing", () => {
     act(() => result.current.captureAndQueueSave());
     await waitFor(() => expect(isSaveFailing()).toBe(true));
 
-    await act(async () => { await result.current.flushPendingSnapshots(); });
+    await act(async () => { await result.current.retryFailedSaves(); });
     expect(isSaveFailing()).toBe(true);
 
     refs.writeShouldThrow = null;
-    await act(async () => { await result.current.flushPendingSnapshots(); });
+    await act(async () => { await result.current.retryFailedSaves(); });
+    expect(isSaveFailing()).toBe(false);
+  });
+
+  it("keeps the record of an overtaken edit while the outage lasts", async () => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+    await waitFor(() => expect(vi.mocked(writeRecoveryRecord)).toHaveBeenCalled());
+    vi.mocked(clearRecoveryRecord).mockClear();
+
+    act(() => result.current.scheduleAutoSave());
+    await act(async () => { await result.current.retryFailedSaves(); });
+
+    expect(vi.mocked(clearRecoveryRecord)).not.toHaveBeenCalled();
+    expect(isSaveFailing()).toBe(true);
+  });
+
+  it("does not start a second save while one is in flight", async () => {
+    let release!: () => void;
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+
+    refs.writeShouldThrow = null;
+    writeMock.mockClear();
+    writeMock.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
+    void act(() => { void result.current.retryFailedSaves(); });
+    await waitFor(() => expect(writeMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => { await result.current.retryFailedSaves(); });
+    expect(writeMock).toHaveBeenCalledTimes(1);
+
+    release();
+    writeMock.mockReset();
+  });
+
+  it("shows a backup that cannot run as a failing save", async () => {
+    refs.backupShouldThrow = new Error("placeholder not hydrated");
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+
+    act(() => result.current.captureAndQueueSave());
+
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+  });
+
+  it("stops failing when the note left the library", async () => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    const { result, rerenderWith } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+
+    rerenderWith({ docs: [] });
+    await act(async () => { await result.current.retryFailedSaves(); });
+
     expect(isSaveFailing()).toBe(false);
   });
 
