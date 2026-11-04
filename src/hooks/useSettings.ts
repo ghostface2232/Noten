@@ -3,7 +3,7 @@ import { appDataDir } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { mkdir, readTextFile } from "@tauri-apps/plugin-fs";
-import { t } from "../i18n";
+import { detectSystemLocale, t } from "../i18n";
 import { atomicWriteText } from "../utils/atomicWrite";
 import { logNotenError } from "../utils/crashLog";
 import { tauriFileSystem } from "../utils/fs";
@@ -72,13 +72,8 @@ const DEFAULTS: Settings = {
 // browser language. Never applied to an existing file — a file whose locale
 // field is missing or corrupt still falls back to DEFAULTS.locale ("ko") in
 // parseSettings, exactly as before.
-function detectFirstRunLocale(): Locale {
-  const lang = typeof navigator !== "undefined" ? navigator.language ?? "" : "";
-  return lang.toLowerCase().startsWith("ko") ? "ko" : "en";
-}
-
 function firstRunDefaults(): Settings {
-  return { ...DEFAULTS, locale: detectFirstRunLocale() };
+  return { ...DEFAULTS, locale: detectSystemLocale() };
 }
 
 let settingsPathPromise: Promise<string> | null = null;
@@ -212,7 +207,7 @@ async function loadSettingsRetrying(): Promise<Settings | null> {
  * path reads the file again. Null if it could not ask.
  */
 async function askToStartOnDefaults(): Promise<boolean | null> {
-  const locale = detectFirstRunLocale();
+  const locale = detectSystemLocale();
   try {
     // A window stays hidden until its note has loaded, which is waiting on this.
     await getCurrentWindow().show().catch(() => {});

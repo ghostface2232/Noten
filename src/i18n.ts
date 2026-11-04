@@ -468,6 +468,12 @@ const dict = {
 
 export type I18nKey = keyof typeof dict;
 
+/** The OS or browser language, for when no saved setting can answer. */
+export function detectSystemLocale(): Locale {
+  const lang = typeof navigator !== "undefined" ? navigator.language ?? "" : "";
+  return lang.toLowerCase().startsWith("ko") ? "ko" : "en";
+}
+
 export function t(key: I18nKey, locale: Locale): string {
   return dict[key]?.[locale] ?? key;
 }
