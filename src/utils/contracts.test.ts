@@ -155,6 +155,25 @@ describe("contract: crashLog line caps remain in place", () => {
   });
 });
 
+describe("contract: a failed lifecycle action is reported", () => {
+  // Regression class: delete, restore and purge keep a failed note in place and
+  // return quietly, so a caller that does not check reports nothing at all.
+  const APP = resolve(SRC_ROOT, "App.tsx");
+
+  it("App reaches them only through the handlers that check", () => {
+    const text = read(APP);
+    for (const [action, prop] of [
+      ["restoreNote", "onRestoreNote"],
+      ["permanentlyDeleteNote", "onPermanentlyDeleteNote"],
+      ["emptyTrash", "onEmptyTrash"],
+    ]) {
+      expect(text).not.toContain(`${prop}={fs.${action}}`);
+      expect(text).toMatch(new RegExp(`${prop}=\\{handle`));
+    }
+    expect(text.match(/fs\.(?:deleteNote|deleteNotes)\([^)]*\)\.then\(showDeleteUndoToast\)/)).toBeNull();
+  });
+});
+
 describe("contract: settings read failures are not default settings", () => {
   // Regression class: transient settings.json read/parse failures must not be
   // collapsed into DEFAULTS and then written back over the user's settings.

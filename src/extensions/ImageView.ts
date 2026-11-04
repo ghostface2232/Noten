@@ -10,6 +10,7 @@ import {
   type DocumentImageContext,
   persistBinaryAsAsset,
   readImageBinary,
+  reportImageFailure,
   resolveRenderableImageSource,
 } from "../utils/imageAssetUtils";
 import { closeContextMenu, createMenuShell, createMenuItem } from "../utils/contextMenuRegistry";
@@ -142,7 +143,7 @@ function showContextMenu(
   const iconReplace = '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M12.15 3.15c.2-.2.5-.2.7 0l3 3c.2.2.2.5 0 .7l-3 3a.5.5 0 0 1-.7-.7L14.29 7H4.5a.5.5 0 0 1 0-1h9.8l-2.15-2.15a.5.5 0 0 1 0-.7Zm-4.3 7c.2.2.2.5 0 .7L5.71 13h9.79a.5.5 0 0 1 0 1H5.7l2.15 2.15a.5.5 0 0 1-.7.7l-3-3a.5.5 0 0 1 0-.7l3-3c.2-.2.5-.2.7 0Z"/></svg>';
   const iconDelete = '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M8.5 4h3a1.5 1.5 0 0 0-3 0Zm-1 0a2.5 2.5 0 0 1 5 0h5a.5.5 0 0 1 0 1h-1.05l-1.2 10.34A3 3 0 0 1 12.27 18H7.73a3 3 0 0 1-2.98-2.66L3.55 5H2.5a.5.5 0 0 1 0-1h5ZM5.74 15.23A2 2 0 0 0 7.73 17h4.54a2 2 0 0 0 1.99-1.77L15.44 5H4.56l1.18 10.23ZM8.5 7.5c.28 0 .5.22.5.5v6a.5.5 0 0 1-1 0V8c0-.28.22-.5.5-.5ZM12 8a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V8Z"/></svg>';
 
-  const items: { label: string; icon: string; danger?: boolean; action: () => void }[] = [
+  const items: { label: string; icon: string; danger?: boolean; action: () => void | Promise<void> }[] = [
     {
       label: i("image.save"), icon: iconSave,
       action: async () => {
@@ -169,12 +170,10 @@ function showContextMenu(
       label: i("image.copy"), icon: iconCopy,
       action: async () => {
         closeContextMenu();
-        try {
-          const payload = await readImageBinary(src, context);
-          if (!payload) return;
-          const blob = new Blob([payload.bytes], { type: payload.mime });
-          await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-        } catch { /* ignore */ }
+        const payload = await readImageBinary(src, context);
+        if (!payload) return;
+        const blob = new Blob([payload.bytes], { type: payload.mime });
+        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
       },
     },
     {
@@ -207,7 +206,11 @@ function showContextMenu(
 
   items.forEach((item) => {
     const btn = createMenuItem(item.label, null, { danger: item.danger, icon: item.icon, isDark });
-    btn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); item.action(); });
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void (async () => item.action())().catch((error) => reportImageFailure(item.label, error));
+    });
     menu.appendChild(btn);
   });
 }

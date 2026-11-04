@@ -16,6 +16,11 @@ export type NotenErrorCode =
   | "AUTO_UPDATE_FAILED"
   | "SETTINGS_READ_FAILED"
   | "SETTINGS_WRITE_FAILED"
+  | "DELETE_FAILED"
+  | "RESTORE_FAILED"
+  | "IMPORT_FAILED"
+  | "IMAGE_FAILED"
+  | "DIAGRAM_EXPORT_FAILED"
   | "UNCAUGHT";
 
 export interface NotenErrorContext {

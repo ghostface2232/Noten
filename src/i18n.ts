@@ -329,6 +329,34 @@ const dict = {
     en: "Could not save to the notes folder. Your changes are still open here.",
     ko: "노트 폴더에 저장하지 못했습니다. 변경 사항은 아직 창에 남아 있습니다.",
   },
+  "error.saveFailing": {
+    en: "Your latest changes are not saved. Noten keeps trying and they stay open here. Check that the notes folder is writable and that its sync client is running.",
+    ko: "최근 변경 사항이 저장되지 않았습니다. 계속 다시 시도하며 내용은 창에 남아 있습니다. 노트 폴더에 쓸 수 있는지, 동기화 프로그램이 실행 중인지 확인해 주세요.",
+  },
+  "error.deleteFailed": {
+    en: "Some notes could not be moved to the trash, so they are still in your list. Try again.",
+    ko: "일부 노트를 휴지통으로 옮기지 못해 목록에 그대로 있습니다. 다시 시도해 주세요.",
+  },
+  "error.restoreFailed": {
+    en: "The note could not be restored and is still in the trash. Try again.",
+    ko: "노트를 복원하지 못해 휴지통에 그대로 있습니다. 다시 시도해 주세요.",
+  },
+  "error.purgeFailed": {
+    en: "Some notes could not be permanently deleted and are still in the trash. Another program may be using them. Try again.",
+    ko: "일부 노트를 완전히 삭제하지 못해 휴지통에 그대로 있습니다. 다른 프로그램이 사용 중일 수 있으니 다시 시도해 주세요.",
+  },
+  "error.importFailed": {
+    en: "Some files could not be read and were not imported.",
+    ko: "일부 파일을 읽지 못해 가져오지 못했습니다.",
+  },
+  "error.imageFailed": {
+    en: "That image action did not complete. The note was not changed.",
+    ko: "이미지 작업을 끝내지 못했습니다. 노트는 바뀌지 않았습니다.",
+  },
+  "error.diagramExportFailed": {
+    en: "The diagram could not be exported.",
+    ko: "다이어그램을 내보내지 못했습니다.",
+  },
   "error.readFailed": {
     en: "Could not read the notes folder. Some notes may be missing until it responds.",
     ko: "노트 폴더를 읽지 못했습니다. 폴더가 응답할 때까지 일부 노트가 보이지 않을 수 있습니다.",

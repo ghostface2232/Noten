@@ -320,3 +320,13 @@ export function fileUrlForPath(path: string): string {
   if (unix.startsWith("//")) return `file://${encode(unix.slice(2))}`;
   return `file:///${encode(unix.replace(/^\/+/, ""))}`;
 }
+
+/** For an image action the user asked for, whose failure would otherwise pass in silence. */
+export function reportImageFailure(stage: string, error: unknown): void {
+  void logNotenError(new NotenError(
+    "IMAGE_FAILED",
+    "fatal",
+    error instanceof Error ? error.message : String(error),
+    { context: { stage }, cause: error },
+  ));
+}

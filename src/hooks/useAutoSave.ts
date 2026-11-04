@@ -20,6 +20,7 @@ import { markdownEqual } from "../utils/markdownEqual";
 import { normalizeSep } from "../utils/pathUtils";
 import { libraryStore } from "../utils/libraryStore";
 import { isNoteLifecycleBlocked } from "./noteLifecycleGate";
+import { markSaveFailed, markSaveSettled, settleSavesWithoutPending } from "../utils/saveFailures";
 
 const DEBOUNCE_MS = 1000;
 // Failed provisioning of a pathless doc retries on later edits, but at most
@@ -198,6 +199,7 @@ export function useAutoSave(
 
   const refreshHasPendingChanges = useCallback(() => {
     hasPendingChangesRef.current = pendingTargetsRef.current.size > 0 || pendingSnapshotsRef.current.size > 0;
+    settleSavesWithoutPending((docId) => pendingTargetsRef.current.has(docId) || pendingSnapshotsRef.current.has(docId));
   }, []);
 
   const markActiveDocEdited = useCallback((): PendingSaveTarget | null => {
@@ -631,9 +633,11 @@ export function useAutoSave(
       if (editorStillMatches) {
         commitState.state.setIsDirty(false);
       }
+      markSaveSettled(snapshot.docId);
       return true;
     } catch (err) {
       if (import.meta.env.DEV) console.warn("[SAVE_FAILED]", err);
+      markSaveFailed(snapshot.docId);
       void logNotenError(new NotenError(
         "SAVE_FAILED",
         "fatal",

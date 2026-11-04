@@ -496,6 +496,7 @@ export function useFileSystem(
 
     const existingNames = new Set(baseDocs.map((d) => d.fileName));
     const importedDocs: NoteDoc[] = [];
+    let skippedFiles = 0;
 
     for (const sourcePath of sourcePaths) {
       let content: string;
@@ -515,6 +516,7 @@ export function useFileSystem(
             cause: error,
           },
         ));
+        skippedFiles += 1;
         continue;
       }
       const rawName = getFileName(sourcePath).replace(/\.(md|markdown|mdx|txt)$/i, "");
@@ -533,7 +535,10 @@ export function useFileSystem(
       // Skip rather than pushing a ghost doc that points at a nonexistent
       // file. The source file is still on disk so the user can retry.
       const { filePath, ok } = await provisionNoteFile(id, content, "importFiles", { sourcePath, finalName });
-      if (!ok) continue;
+      if (!ok) {
+        skippedFiles += 1;
+        continue;
+      }
 
       existingNames.add(finalName);
       importedDocs.push({
@@ -548,6 +553,9 @@ export function useFileSystem(
       });
     }
 
+    if (skippedFiles > 0) {
+      void logNotenError(new NotenError("IMPORT_FAILED", "fatal", `${skippedFiles} of ${sourcePaths.length} files were not imported`));
+    }
     if (importedDocs.length === 0) return;
 
     const lastImported = importedDocs[importedDocs.length - 1];
@@ -1108,7 +1116,12 @@ export function useFileSystem(
             });
             deletedIds.add(doc.id);
           } catch (error) {
-            if (import.meta.env.DEV) console.warn("Failed to move note to trash:", error);
+            void logNotenError(new NotenError(
+              "PERSIST_FAILED",
+              "recoverable",
+              error instanceof Error ? error.message : String(error),
+              { context: { stage: "deleteNotes", noteId: doc.id }, cause: error },
+            ));
           }
         }
 
@@ -1234,7 +1247,13 @@ export function useFileSystem(
         emitDocCreated(replacement.doc);
       }
       return Array.from(deletedSet);
-    } catch {
+    } catch (error) {
+      void logNotenError(new NotenError(
+        "PERSIST_FAILED",
+        "recoverable",
+        error instanceof Error ? error.message : String(error),
+        { context: { stage: "deleteNotes" }, cause: error },
+      ));
       return [];
     } finally {
       for (const id of committedDeletedIds) cancelDocSaveRef?.current?.(id);
@@ -1687,7 +1706,12 @@ export function useFileSystem(
             assertCurrent();
           } catch (error) {
             await rollbackMeta();
-            if (import.meta.env.DEV) console.warn("Failed to restore note from trash:", error);
+            void logNotenError(new NotenError(
+              "PERSIST_FAILED",
+              "recoverable",
+              error instanceof Error ? error.message : String(error),
+              { context: { stage: "restoreNote", noteId: trashedNoteId }, cause: error },
+            ));
             return failed;
           }
 

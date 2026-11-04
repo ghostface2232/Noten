@@ -153,6 +153,7 @@ vi.mock("../utils/documentTitle", () => ({
 
 // Imports must come AFTER vi.mock() registrations.
 import { useAutoSave, type FlushResult } from "./useAutoSave";
+import { isSaveFailing } from "../utils/saveFailures";
 import * as useNotesLoaderModule from "./useNotesLoader";
 import * as useFileSystemModule from "./useFileSystem";
 import * as conflictBackupModule from "../utils/conflictBackup";
@@ -262,6 +263,40 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
+});
+
+describe("useAutoSave — a save that keeps failing", () => {
+  it("stays failing until a retry succeeds", async () => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+
+    await act(async () => { await result.current.flushPendingSnapshots(); });
+    expect(isSaveFailing()).toBe(true);
+
+    refs.writeShouldThrow = null;
+    await act(async () => { await result.current.flushPendingSnapshots(); });
+    expect(isSaveFailing()).toBe(false);
+  });
+
+  it("stops failing when the note's pending edit is abandoned", async () => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+
+    act(() => result.current.cancelDocSave("a"));
+    expect(isSaveFailing()).toBe(false);
+  });
 });
 
 describe("useAutoSave — remote deletion race", () => {

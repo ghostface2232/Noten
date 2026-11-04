@@ -11,6 +11,7 @@ import {
   type DocumentImageContext,
   persistBinaryAsAsset,
   readImageBinary,
+  reportImageFailure,
 } from "../utils/imageAssetUtils";
 import { extractMermaidSourceFromSvg } from "./mermaidSourceMetadata";
 
@@ -174,8 +175,8 @@ const ImageDrop = Extension.create({
                   if (!payload) return;
                   const blob = new Blob([payload.bytes], { type: payload.mime });
                   await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-                } catch {
-                  /* ignore */
+                } catch (error) {
+                  reportImageFailure("copy", error);
                 }
               })();
               return true;
@@ -203,7 +204,7 @@ const ImageDrop = Extension.create({
                 const chain = editor.chain().focus();
                 if (pos) chain.setTextSelection(pos.pos);
                 chain.insertContent(node).run();
-              })();
+              })().catch((error) => reportImageFailure("drop", error));
             });
 
             return true;
@@ -229,7 +230,7 @@ const ImageDrop = Extension.create({
                 const mime = file.type || mimeFromExt(file.name.split(".").pop() ?? "png");
                 const node = await buildNodeFromBinary(editor, bytes, mime, file.name);
                 editor.chain().focus().insertContent(node).run();
-              })();
+              })().catch((error) => reportImageFailure("paste", error));
             });
 
             return true;

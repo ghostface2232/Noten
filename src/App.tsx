@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo, useSyncExternalStore } from "react";
 import {
   FluentProvider,
   webLightTheme,
@@ -51,6 +51,7 @@ const EDITOR_NOTICE_MS = 1100;
 // cannot flood the notice.
 const FATAL_NOTICE_MS = 6000;
 const FATAL_NOTICE_THROTTLE_MS = 30_000;
+const FAILED_SAVE_RETRY_MS = 15_000;
 
 /** Which notice a fatal error shows. Grouped by what the user can act on —
  *  the code and the cause go to crash.log, not to a transient notice. */
@@ -69,10 +70,35 @@ function fatalNoticeKey(code: NotenErrorCode): I18nKey {
       return "error.readFailed";
     case "SETTINGS_WRITE_FAILED":
       return "error.settingsFailed";
+    case "DELETE_FAILED":
+      return "error.deleteFailed";
+    case "RESTORE_FAILED":
+      return "error.restoreFailed";
+    case "TRASH_PURGE_FAILED":
+      return "error.purgeFailed";
+    case "IMPORT_FAILED":
+      return "error.importFailed";
+    case "IMAGE_FAILED":
+      return "error.imageFailed";
+    case "DIAGRAM_EXPORT_FAILED":
+      return "error.diagramExportFailed";
     default:
       return "error.generic";
   }
 }
+
+// Each of these answers something the user just did, so the throttle that keeps a
+// retrying autosave from flooding the notice would make a second attempt look like
+// it worked.
+const USER_ACTION_ERRORS: ReadonlySet<NotenErrorCode> = new Set<NotenErrorCode>([
+  "SETTINGS_WRITE_FAILED",
+  "DELETE_FAILED",
+  "RESTORE_FAILED",
+  "TRASH_PURGE_FAILED",
+  "IMPORT_FAILED",
+  "IMAGE_FAILED",
+  "DIAGRAM_EXPORT_FAILED",
+]);
 import { SettingsModal } from "./components/SettingsModal";
 import { NO_FOCUS_REQUEST, SearchBar, type DocSearchFocusRequest } from "./components/SearchBar";
 import { GoToLineBar } from "./components/GoToLineBar";
@@ -80,6 +106,8 @@ import { searchPluginKey, type SearchPluginState } from "./extensions/SearchHigh
 import { refreshWikiLinkDecorations } from "./extensions/WikiLink";
 import { t, type I18nKey } from "./i18n";
 import { registerFatalHandler, type NotenErrorCode } from "./utils/notenError";
+import { isSaveFailing, subscribeSaveFailures } from "./utils/saveFailures";
+import { reportNoteNotRestored, reportNotesNotDeleted, reportNotesNotPurged } from "./utils/lifecycleReports";
 import { recoverJournalledEdits } from "./hooks/editRecovery";
 import type { RecoveryRecord } from "./utils/recoveryJournal";
 import { tauriFileSystem } from "./utils/fs";
@@ -834,19 +862,42 @@ function App() {
     if (deleteUndoTimerRef.current) clearTimeout(deleteUndoTimerRef.current);
   }, []);
 
+  const handleRestoreNote = useCallback(async (noteId: string) => {
+    await fs.restoreNote(noteId);
+    reportNoteNotRestored(noteId);
+  }, [fs.restoreNote]);
+
+  const handlePermanentlyDeleteNote = useCallback(async (noteId: string) => {
+    await fs.permanentlyDeleteNote(noteId);
+    reportNotesNotPurged([noteId]);
+  }, [fs.permanentlyDeleteNote]);
+
+  const handleEmptyTrash = useCallback(async () => {
+    const noteIds = libraryStore.getSnapshot().trashedNotes.map((note) => note.id);
+    await fs.emptyTrash();
+    reportNotesNotPurged(noteIds);
+  }, [fs.emptyTrash]);
+
   const handleUndoDelete = useCallback(async (ids: string[]) => {
     dismissDeleteUndoToast();
     // Sequential: each restore commits the doc list before the next runs, and
     // the last restored note ends up active.
-    for (const id of ids) await fs.restoreNote(id);
-  }, [dismissDeleteUndoToast, fs.restoreNote]);
+    for (const id of ids) await handleRestoreNote(id);
+  }, [dismissDeleteUndoToast, handleRestoreNote]);
 
   const handleDeleteNote = useCallback((index: number) => {
-    void fs.deleteNote(index).then(showDeleteUndoToast);
-  }, [fs.deleteNote, showDeleteUndoToast]);
+    const noteId = docs[index]?.id;
+    void fs.deleteNote(index).then((deletedIds) => {
+      if (noteId) reportNotesNotDeleted([noteId], deletedIds);
+      showDeleteUndoToast(deletedIds);
+    });
+  }, [docs, fs.deleteNote, showDeleteUndoToast]);
 
   const handleDeleteNotes = useCallback((noteIds: string[]) => {
-    void fs.deleteNotes(noteIds).then(showDeleteUndoToast);
+    void fs.deleteNotes(noteIds).then((deletedIds) => {
+      reportNotesNotDeleted(noteIds, deletedIds);
+      showDeleteUndoToast(deletedIds);
+    });
   }, [fs.deleteNotes, showDeleteUndoToast]);
 
   const getSidebarDocumentContent = useCallback((index: number) => {
@@ -1193,14 +1244,31 @@ function App() {
   useEffect(() => {
     const lastShownAtByCode = new Map<NotenErrorCode, number>();
     registerFatalHandler((error) => {
+      // The standing notice below already says so.
+      if (error.code === "SAVE_FAILED" && isSaveFailing()) return;
       const now = Date.now();
       const lastShownAt = lastShownAtByCode.get(error.code);
-      if (lastShownAt != null && now - lastShownAt < FATAL_NOTICE_THROTTLE_MS) return;
+      if (
+        !USER_ACTION_ERRORS.has(error.code) &&
+        lastShownAt != null &&
+        now - lastShownAt < FATAL_NOTICE_THROTTLE_MS
+      ) return;
       lastShownAtByCode.set(error.code, now);
       showEditorNotice(t(fatalNoticeKey(error.code), localeRef.current), FATAL_NOTICE_MS);
     });
     return () => registerFatalHandler(null);
   }, [showEditorNotice]);
+
+  // A failed save is otherwise retried only by the next edit or by closing, so the
+  // folder coming back would leave this notice up and the edit unsaved.
+  const saveFailing = useSyncExternalStore(subscribeSaveFailures, isSaveFailing);
+  useEffect(() => {
+    if (!saveFailing) return;
+    const timer = window.setInterval(() => {
+      void flushPendingSnapshots().catch(() => {});
+    }, FAILED_SAVE_RETRY_MS);
+    return () => window.clearInterval(timer);
+  }, [flushPendingSnapshots, saveFailing]);
 
   // Replay edits a previous run could not get onto disk. Runs once the initial
   // load settled, because deciding whether a record is safe to apply needs the
@@ -1922,11 +1990,13 @@ function App() {
             <div
               className={mergeClasses(
                 styles.editorNotice,
-                editorNoticeVisible && styles.editorNoticeVisible,
+                (editorNoticeVisible || saveFailing) && styles.editorNoticeVisible,
               )}
-              aria-live="polite"
+              aria-live={saveFailing ? "assertive" : "polite"}
             >
-              {editorNoticeText}
+              {saveFailing
+                ? [t("error.saveFailing", locale), editorNoticeVisible ? editorNoticeText : ""].join(" ").trim()
+                : editorNoticeText}
             </div>
           </div>
         </div>
@@ -2037,9 +2107,9 @@ function App() {
         onChangeNotesDir={handleChangeNotesDir}
         onResetNotesDir={handleResetNotesDir}
         trashedNotes={trashedNotes}
-        onRestoreNote={fs.restoreNote}
-        onPermanentlyDeleteNote={fs.permanentlyDeleteNote}
-        onEmptyTrash={fs.emptyTrash}
+        onRestoreNote={handleRestoreNote}
+        onPermanentlyDeleteNote={handlePermanentlyDeleteNote}
+        onEmptyTrash={handleEmptyTrash}
         updaterState={updater.state}
         onCheckForUpdate={updater.checkForUpdate}
         onInstallUpdate={updater.installUpdate}
