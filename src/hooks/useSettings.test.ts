@@ -13,7 +13,7 @@ const refs = vi.hoisted(() => ({
   readError: null as string | null,
   renameError: false,
   showWindow: (async () => {}) as () => Promise<void>,
-  ask: (async () => true) as (...args: unknown[]) => Promise<boolean>,
+  ask: (async () => false) as (...args: unknown[]) => Promise<boolean>,
   logged: (async () => {}) as (...args: unknown[]) => Promise<void>,
 }));
 
@@ -71,6 +71,11 @@ import { readAutoUpdateAllowed, useSettings } from "./useSettings";
 
 const SETTINGS_PATH = "/test-appdata/settings.json";
 
+// "Start with defaults" on the first dialog, then confirmed on the second.
+function startOnDefaults() {
+  return vi.fn(async (_message: unknown, options: unknown) => (options as { title: string }).title.includes("?"));
+}
+
 beforeEach(() => {
   refs.files = new Map();
   refs.writeGate = null;
@@ -78,7 +83,7 @@ beforeEach(() => {
   refs.readError = null;
   refs.renameError = false;
   refs.showWindow = vi.fn(async () => {});
-  refs.ask = vi.fn(async () => true);
+  refs.ask = startOnDefaults();
   refs.logged = vi.fn(async () => {});
 });
 
@@ -166,7 +171,7 @@ describe("useSettings — a settings file that cannot be read", () => {
 
   it("does not load on defaults while the user has not chosen", async () => {
     refs.files.set(SETTINGS_PATH, "{ not json");
-    let answer!: (retry: boolean) => void;
+    let answer!: (yes: boolean) => void;
     refs.ask = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve; }));
     const { result } = renderHook(() => useSettings());
 
@@ -175,6 +180,9 @@ describe("useSettings — a settings file that cannot be read", () => {
     expect(result.current.isLoaded).toBe(false);
     expect(refs.files.get(SETTINGS_PATH)).toBe("{ not json");
 
+    await act(async () => { answer(false); });
+    await waitFor(() => expect(refs.ask).toHaveBeenCalledTimes(2));
+    expect(result.current.isLoaded).toBe(false);
     await act(async () => { answer(true); });
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
   });
@@ -182,16 +190,31 @@ describe("useSettings — a settings file that cannot be read", () => {
   it("loads the file after a retry", async () => {
     refs.readError = "The process cannot access the file (os error 32)";
     refs.files.set(SETTINGS_PATH, SAVED);
-    // Esc and the X answer as this button does.
     refs.ask = vi.fn(async () => {
       refs.readError = null;
-      return false;
+      return true;
     });
 
     const result = await mount();
 
     expect(result.current.settings.notesDirectory).toBe("D:/내 노트");
     expect(refs.files.get(SETTINGS_PATH)).toBe(SAVED);
+    expect(asideFiles()).toEqual([]);
+  });
+
+  it("reads the file again when the user backs out of defaults", async () => {
+    refs.readError = "The process cannot access the file (os error 32)";
+    refs.files.set(SETTINGS_PATH, SAVED);
+    // Esc and the X answer false on both dialogs.
+    refs.ask = vi.fn(async () => {
+      if (vi.mocked(refs.ask).mock.calls.length === 2) refs.readError = null;
+      return false;
+    });
+
+    const result = await mount();
+
+    expect(refs.ask).toHaveBeenCalledTimes(2);
+    expect(result.current.settings.notesDirectory).toBe("D:/내 노트");
     expect(asideFiles()).toEqual([]);
   });
 

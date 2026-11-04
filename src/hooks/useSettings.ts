@@ -206,20 +206,28 @@ async function loadSettingsRetrying(): Promise<Settings | null> {
 }
 
 /**
- * Asks what to do about a file that stays unreadable: true starts on defaults. Esc
- * and the X both answer as the second button, so that has to be the one that changes
- * nothing. Null if it could not ask.
+ * Asks what to do about a file that stays unreadable: true starts on defaults. Enter
+ * answers as a dialog's first button, Esc and the X as its second, and either alone
+ * could be a reflex, so defaults take two different answers in a row and every other
+ * path reads the file again. Null if it could not ask.
  */
 async function askToStartOnDefaults(): Promise<boolean | null> {
   const locale = detectFirstRunLocale();
   try {
     // A window stays hidden until its note has loaded, which is waiting on this.
     await getCurrentWindow().show().catch(() => {});
-    return await ask(t("settings.unreadable", locale), {
+    const retry = await ask(t("settings.unreadable", locale), {
       title: t("settings.unreadableTitle", locale),
       kind: "warning",
+      okLabel: t("settings.unreadableRetry", locale),
+      cancelLabel: t("settings.unreadableDefaults", locale),
+    });
+    if (retry) return false;
+    return await ask(t("settings.unreadableConfirm", locale), {
+      title: t("settings.unreadableConfirmTitle", locale),
+      kind: "warning",
       okLabel: t("settings.unreadableDefaults", locale),
-      cancelLabel: t("settings.unreadableRetry", locale),
+      cancelLabel: t("settings.unreadableBack", locale),
     });
   } catch {
     return null;

@@ -380,9 +380,18 @@ const dict = {
     ko: "설정을 읽을 수 없습니다",
   },
   "settings.unreadable": {
-    en: "settings.json could not be read. If another program is holding it, try again in a moment.\n\nStarting with default settings keeps the file beside the new one. Your notes are not touched, but if you chose your own notes folder, you will need to choose it again in Settings. Pick \"Use Selected Folder Only\" there, because \"Replace with Current Notes\" deletes what the folder holds.",
-    ko: "settings.json을 읽지 못했습니다. 다른 프로그램이 파일을 사용 중이면 잠시 후 다시 시도해 주세요.\n\n기본 설정으로 시작해도 이 파일은 새 파일 옆에 보관됩니다. 노트는 그대로 있지만, 노트 폴더를 직접 지정해 두었다면 설정에서 다시 선택해야 합니다. 이때 \"선택한 폴더만 사용\"을 고르세요. \"현재 노트로 대체\"는 폴더의 노트를 지웁니다.",
+    en: "settings.json could not be read. If another program is holding it, try again in a moment.",
+    ko: "settings.json을 읽지 못했습니다. 다른 프로그램이 파일을 사용 중이면 잠시 후 다시 시도해 주세요.",
   },
+  "settings.unreadableConfirmTitle": {
+    en: "Start with default settings?",
+    ko: "기본 설정으로 시작할까요?",
+  },
+  "settings.unreadableConfirm": {
+    en: "The file is kept beside the new one, and your notes are not touched. If you chose your own notes folder, you will need to choose it again in Settings. Pick \"Use Selected Folder Only\" there, because \"Replace with Current Notes\" deletes what the folder holds.",
+    ko: "이 파일은 새 파일 옆에 보관되고 노트는 그대로 있습니다. 노트 폴더를 직접 지정해 두었다면 설정에서 다시 선택해야 합니다. 이때 \"선택한 폴더만 사용\"을 고르세요. \"현재 노트로 대체\"는 폴더의 노트를 지웁니다.",
+  },
+  "settings.unreadableBack": { en: "Back", ko: "돌아가기" },
   "settings.unreadableRetry": { en: "Try again", ko: "다시 시도" },
   "settings.unreadableDefaults": { en: "Start with defaults", ko: "기본 설정으로 시작" },
   "close.unsaveableDiscard": {
