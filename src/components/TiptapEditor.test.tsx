@@ -71,6 +71,21 @@ function mountEditor() {
   return { editor: () => ref.current!.getEditor() as Editor, onDirtyChange, open };
 }
 
+describe("TiptapEditor: a note that fails to open", () => {
+  it("stays on the note it was showing, and says so to autosave", async () => {
+    const { editor, open } = mountEditor();
+    await open("a", "text of a");
+    vi.spyOn(editor().markdown!, "parse").mockImplementation(() => {
+      throw new RangeError("Maximum call stack size exceeded");
+    });
+
+    await expect(open("bad", "unparseable")).rejects.toThrow(RangeError);
+
+    expect(editor().storage.documentContext.noteId).toBe("a");
+    expect(editor().state.doc.textContent).toBe("text of a");
+  });
+});
+
 describe("TiptapEditor: an image beside text", () => {
   it("renders inside its paragraph, and survives an edit next to it", async () => {
     const { editor, open } = mountEditor();

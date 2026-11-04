@@ -918,7 +918,11 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       const currentKey = currentSessionKeyRef.current;
       const sameSession = !!nextKey && nextKey === currentKey;
 
-      // Image NodeViews need document context before content replacement.
+      // Image NodeViews need document context before content replacement. A note
+      // that fails to open (a parse can overflow the stack) leaves the editor on
+      // the note it was showing, so the context must go back with it: autosave
+      // trusts the context to know whose text the editor holds.
+      const previousContext = { ...editor.storage.documentContext };
       editor.storage.documentContext.noteId = noteId;
       editor.storage.documentContext.filePath = filePath;
 
@@ -961,11 +965,17 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       if (!applied) {
         const wasReadonly = editor.storage.readonlyGuard.readonly;
         editor.storage.readonlyGuard.readonly = false;
-        editor.commands.setContent(markdown, {
-          emitUpdate: false,
-          contentType: "markdown",
-        });
-        editor.storage.readonlyGuard.readonly = wasReadonly;
+        try {
+          editor.commands.setContent(markdown, {
+            emitUpdate: false,
+            contentType: "markdown",
+          });
+        } catch (error) {
+          Object.assign(editor.storage.documentContext, previousContext);
+          throw error;
+        } finally {
+          editor.storage.readonlyGuard.readonly = wasReadonly;
+        }
       }
 
       // `updateState()` can preserve an existing NodeView when the Markdown is
