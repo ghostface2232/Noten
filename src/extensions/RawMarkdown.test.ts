@@ -53,6 +53,10 @@ const FRONT_MATTER = "---\ntitle: My note\ntags: [a, b]\n---";
 
 const KEPT: [string, string][] = [
   ["front matter with a list and an indented value", "---\ntags:\n  - a\n- b\nk: v\n---\n\nbody"],
+  ["front matter with Korean keys", "---\n제목: 회의록\n날짜: x\n---\n\nbody"],
+  ["front matter with special keys", "---\n$schema: x\n@type: y\n---\n\nbody"],
+  ["front matter with a block scalar", "---\nnote: |\n  one\n\n  two\nk: v\n---\n\nbody"],
+  ["front matter with spaced-out keys", "---\na: 1\n\nb: 2\n---\n\nbody"],
   ["front matter and a body", `${FRONT_MATTER}\n\n본문`],
   ["a note that is only front matter", FRONT_MATTER],
   ["front matter with a comment line", "---\n# generated\nk: v\n---\n\nbody"],
@@ -150,6 +154,8 @@ describe("what still reads as ordinary Markdown", () => {
     "---\n# Title\n\nbody **x**\n\n- a\n\n---\nafter",
     "---\n# only a comment\n---",
     "---\nNote: a sentence\nand another line\n---",
+    "---\nNote: a sentence\n\nand a paragraph\n\n---",
+    "---\n# Title\n\nk: v\n---",
   ])("does not read %j as front matter", (markdown) => {
     expect(JSON.stringify(load(markdown).getJSON())).not.toContain('"frontmatter"');
   });

@@ -1,6 +1,6 @@
 const OPENING_FENCE = /^---[ \t]*\r?$/;
 const CLOSING_FENCE = /^(?:---|\.\.\.)[ \t]*\r?$/;
-const KEY_LINE = /^[\w"'.-][^:\r\n]*:(?:[ \t]|\r?$)/;
+const KEY_LINE = /^[\p{L}\p{N}_"'.$@-][^:\r\n]*:(?:[ \t]|\r?$)/u;
 // A comment, an indented continuation, or a list item under a key.
 const OTHER_YAML_LINE = /^(?:#|[ \t]+\S|- )/;
 
@@ -10,8 +10,9 @@ const OTHER_YAML_LINE = /^(?:#|[ \t]+\S|- )/;
  *
  * Two rules around ordinary text look the same from the outside, and reading them
  * as front matter would show a whole section of the note as source. So every line
- * has to look like YAML, at least one has to be a key, and a blank line ends the
- * attempt. A note whose front matter holds a blank line reads as ordinary Markdown.
+ * has to look like YAML and at least one has to be a key. A blank line is allowed
+ * only under a first line that is itself a key: a heading then a blank line is a
+ * note, and a block scalar or spaced-out keys are YAML.
  */
 export function frontMatterEnd(markdown: string): number {
   const start = markdown.charCodeAt(0) === 0xfeff ? 1 : 0;
@@ -19,6 +20,8 @@ export function frontMatterEnd(markdown: string): number {
   let lineStart = markdown.indexOf("\n", start) + 1;
   if (lineStart === 0 || !OPENING_FENCE.test(markdown.slice(start, lineStart - 1))) return 0;
   let sawKey = false;
+  let opensWithKey = false;
+  let first = true;
   while (lineStart < markdown.length) {
     const newline = markdown.indexOf("\n", lineStart);
     const line = markdown.slice(lineStart, newline === -1 ? markdown.length : newline);
@@ -26,8 +29,15 @@ export function frontMatterEnd(markdown: string): number {
       if (!sawKey) return 0;
       return newline === -1 ? markdown.length : newline + 1;
     }
-    if (KEY_LINE.test(line)) sawKey = true;
-    else if (!OTHER_YAML_LINE.test(line)) return 0;
+    if (KEY_LINE.test(line)) {
+      sawKey = true;
+      if (first) opensWithKey = true;
+    } else if (!line.trim()) {
+      if (!opensWithKey) return 0;
+    } else if (!OTHER_YAML_LINE.test(line)) {
+      return 0;
+    }
+    first = false;
     if (newline === -1) return 0;
     lineStart = newline + 1;
   }
