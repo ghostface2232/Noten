@@ -1013,12 +1013,24 @@ export function useAutoSave(
   // record, the only durable copy until the next debounce lands. A note with a save
   // still in flight is left alone, or a hung share stacks one per interval.
   const retryFailedSaves = useCallback(async (): Promise<void> => {
-    for (const snapshot of Array.from(pendingSnapshotsRef.current.values())) {
-      if (!snapshotIsCurrent(snapshot)) continue;
-      if ((inFlightSavesByDocRef.current.get(snapshot.docId)?.size ?? 0) > 0) continue;
-      if (!stateRef.current.docs.some((doc) => doc.id === snapshot.docId)) {
-        markSaveSettled(snapshot.docId, snapshot.editSerial);
+    for (const pending of Array.from(pendingSnapshotsRef.current.values())) {
+      const { docId } = pending;
+      if ((inFlightSavesByDocRef.current.get(docId)?.size ?? 0) > 0) continue;
+      if (!stateRef.current.docs.some((doc) => doc.id === docId)) {
+        markSaveSettled(docId, pending.editSerial);
         continue;
+      }
+      let snapshot = pending;
+      if (!snapshotIsCurrent(pending)) {
+        if (pendingTargetsRef.current.has(docId)) continue;
+        // The edit that overtook it lost its target when the user left the note, so
+        // nothing newer is coming and this is the latest text that can be saved. As
+        // it was, it could never pass doSave's check: unsaved for good under a notice
+        // saying this keeps trying, and dropped by the close drain.
+        const revision = (latestRevisionByDocRef.current.get(docId) ?? 0) + 1;
+        latestRevisionByDocRef.current.set(docId, revision);
+        snapshot = { ...pending, revision, editSerial: latestEditSerialByDocRef.current.get(docId) ?? pending.editSerial };
+        pendingSnapshotsRef.current.set(docId, snapshot);
       }
       const saved = await trackInFlight(snapshot, doSave(snapshot)).catch(() => false);
       if (saved) clearPendingSnapshotIfCurrent(snapshot);

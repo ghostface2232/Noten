@@ -306,6 +306,32 @@ describe("useAutoSave — a save that keeps failing", () => {
     expect(isSaveFailing()).toBe(true);
   });
 
+  it("saves the latest text it has when the edit that overtook it lost its target", async () => {
+    vi.useFakeTimers();
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    refs.editorContent = "typed before the outage";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true }), makeDoc("b")],
+      state: makeState({ isDirty: true }),
+    });
+    act(() => result.current.captureAndQueueSave());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(isSaveFailing()).toBe(true);
+
+    // A keystroke while a new note is being made, then the editor moves on.
+    act(() => result.current.scheduleAutoSave());
+    act(() => result.current.notifyActiveDoc("b", "/notes/b.md"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+
+    refs.writeShouldThrow = null;
+    writeMock.mockClear();
+    await act(async () => { await result.current.retryFailedSaves(); });
+
+    expect(writeMock).toHaveBeenCalledWith("/notes/a.md", "typed before the outage");
+    expect(isSaveFailing()).toBe(false);
+    expect(result.current.hasUnsavedChanges()).toBe(false);
+  });
+
   it("does not start a second save while one is in flight", async () => {
     let release!: () => void;
     refs.writeShouldThrow = new Error("EPERM: read-only folder");
