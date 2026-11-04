@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { cloneEditorContentForExport, pointAssetImagesAtFiles } from "./exportHandlers";
+import {
+  cloneEditorContentForExport,
+  pointAssetImagesAtFiles,
+  removeExternalReferences,
+  withoutExternalCss,
+} from "./exportHandlers";
 
 const invokeMock = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
@@ -16,6 +21,90 @@ function editorWith(html: string): HTMLElement {
   el.innerHTML = html;
   return el;
 }
+
+describe("removeExternalReferences", () => {
+  it.each([
+    "//host/share/a.png",
+    "\\\\host\\share\\a.png",
+    "file://host/share/a.png",
+    "file:///C:/Users/me/secret.png",
+    "https://host/a.png",
+    "/\\host/a.png",
+    "relative/a.png",
+  ])("drops an image at %s", (src) => {
+    const el = editorWith("<p><img></p>");
+    el.querySelector("img")!.setAttribute("src", src);
+
+    expect(removeExternalReferences(el)).toBe(1);
+    expect(el.querySelector("img")!.hasAttribute("src")).toBe(false);
+  });
+
+  it("keeps inline images and leaves asset images to the gate", () => {
+    const asset = "http://noten-asset.localhost/C%3A%2Fn%2F.assets%2Fa.png";
+    const el = editorWith(`<img src="data:image/gif;base64,R0lG"><img src="${asset}">`);
+
+    expect(removeExternalReferences(el)).toBe(0);
+    expect(el.querySelectorAll("img")[0].getAttribute("src")).toBe("data:image/gif;base64,R0lG");
+    expect(el.querySelectorAll("img")[1].getAttribute("src")).toBe(asset);
+  });
+
+  it("drops what an SVG would load, and keeps its own references", () => {
+    const el = editorWith(`<svg xmlns="http://www.w3.org/2000/svg">
+      <image href="//host/a.png"></image>
+      <image xlink:href="//host/b.png"></image>
+      <use href="//host/c.svg#x"></use>
+      <use href="#local"></use>
+      <path fill="url(//host/d)" marker-end="url(#arrow)"></path>
+      <rect filter="u\\72l(//host/e)"></rect>
+      <style>@import "//host/f.css"; .a { fill: url(//host/g) }</style>
+    </svg>`);
+
+    expect(removeExternalReferences(el)).toBe(2);
+    expect(el.innerHTML).not.toContain("host");
+    expect(el.querySelector("use")).not.toBeNull();
+    expect(el.querySelectorAll("use")[1].getAttribute("href")).toBe("#local");
+    expect(el.querySelector("path")!.getAttribute("marker-end")).toBe("url(#arrow)");
+    expect(el.querySelector("style")).toBeNull();
+  });
+
+  it("drops loading elements and attributes, and leaves links alone", () => {
+    const el = editorWith(`
+      <link rel="stylesheet" href="//host/a.css"><iframe src="//host/b"></iframe><base href="//host/">
+      <img src="data:image/gif;base64,R0lG" srcset="//host/c 1x">
+      <video poster="//host/d"></video>
+      <div style="background: url(//host/e); color: red"></div>
+      <span style="background: u\\72l(//host/f)"></span>
+      <a href="https://example.com/page">link</a>`);
+
+    removeExternalReferences(el);
+
+    expect(el.innerHTML).not.toContain("host");
+    expect(el.querySelector("div")!.getAttribute("style")).toContain("color: red");
+    expect(el.querySelector("a")!.getAttribute("href")).toBe("https://example.com/page");
+  });
+});
+
+describe("withoutExternalCss", () => {
+  it.each([
+    ['.a { background: url("//host/a") }', ".a { background: none }"],
+    [".a { background: url(file://host/a) }", ".a { background: none }"],
+    [".a { background: url( '\\\\host\\a' ) }", ".a { background: none }"],
+    ['.a { background: url("\\2f\\2fhost") }', ".a { background: none }"],
+    ['.a { background: image-set("//host/a" 1x) }', ".a { background: none }"],
+    ['.a { background: -webkit-image-set(url("//host/a") 1x) }', ".a { background: none }"],
+    ['@import url("//host/a.css"); .a { color: red }', " .a { color: red }"],
+  ])("removes the load from %s", (css, expected) => {
+    expect(withoutExternalCss(css)).toBe(expected);
+  });
+
+  it.each([
+    ".a { color: red }",
+    ".a { marker-end: url(#arrow) }",
+    '.a { background: url("data:image/png;base64,AAAA") }',
+  ])("keeps %s", (css) => {
+    expect(withoutExternalCss(css)).toBe(css);
+  });
+});
 
 describe("cloneEditorContentForExport", () => {
   it("unwraps search-match decorations but keeps their text", () => {
