@@ -1367,7 +1367,7 @@ export function useFileSystem(
     // Compute proposed rewrites without mutating memory yet; we only commit a
     // rewrite to the in-memory doc once its disk write lands, so memory stays
     // in sync with disk if a write fails.
-    interface ProposedRewrite { docId: string; updated: string; filePath: string | null; isActive: boolean; }
+    interface ProposedRewrite { docId: string; updated: string; filePath: string | null; }
     const proposed: ProposedRewrite[] = [];
     for (const entry of candidates) {
       // A failed flush means this doc has unsaved content we could not land;
@@ -1395,78 +1395,91 @@ export function useFileSystem(
         docId: entry.id,
         updated,
         filePath: entry.filePath || null,
-        isActive,
       });
     }
 
     const committed = new Set<string>();
 
-    // The flushes and reads above can take seconds on a cloud folder, so what
-    // the editor shows is decided here, not from before them. A note the user
-    // left is an ordinary file now; a note they opened has to go through the
-    // editor, whose next save would otherwise put the old link back.
-    const activeNowId = libraryStore.getSnapshot().activeNoteId;
+    // The flushes, reads and writes here can take seconds on a cloud folder, and
+    // the user keeps working through them, so whether a note is on screen is asked
+    // again right before anything reads the editor. Reading it for a note that is
+    // no longer shown would write another note's text over this one.
     const editorShows = (id: string) => {
       const shown = tiptapRef.current?.getEditor()?.storage?.documentContext?.noteId;
       return libraryStore.getSnapshot().activeNoteId === id && (!shown || shown === id);
     };
-    for (const rw of proposed) {
-      rw.isActive = rw.docId === activeNowId && editorShows(rw.docId);
-    }
 
-    await Promise.all(proposed.map(async (rw) => {
-      if (rw.isActive) return; // active doc handled below
+    const rewriteInBackground = async (rw: ProposedRewrite, leftTheEditor: boolean) => {
       if (!rw.filePath) {
         // Memory-only doc — no disk to diverge from, safe to commit.
         committed.add(rw.docId);
         return;
       }
+      if (leftTheEditor) {
+        // Its rewrite was computed while it was on screen, and leaving it saved
+        // what was typed since. Disk is the truth now, once that save has landed.
+        if (await flushDocSaveRef?.current?.(rw.docId) === false) return;
+        let disk: string;
+        try {
+          disk = await readTextFile(rw.filePath);
+        } catch {
+          return;
+        }
+        rw.updated = disk.replace(rewritePattern, replacement);
+        if (rw.updated === disk) return;
+      }
       if (await rewriteNoteFile(rw.filePath, rw.updated, "renameNote.rewrite", rw.docId)) {
         committed.add(rw.docId);
       }
-    }));
+    };
 
-    const activeRewrite = proposed.find((rw) => rw.isActive) ?? null;
-    if (activeRewrite) {
-      const activeDoc = libraryStore.getSnapshot().docs.find((entry) => entry.id === activeRewrite.docId);
+    const onScreen = proposed.find((rw) => editorShows(rw.docId)) ?? null;
+    await Promise.all(proposed.map((rw) => (
+      rw === onScreen ? undefined : rewriteInBackground(rw, rw.docId === activeDocId)
+    )));
+
+    let editorBeforeWrite: string | null = null;
+    if (onScreen && !editorShows(onScreen.docId)) {
+      await rewriteInBackground(onScreen, true);
+    } else if (onScreen) {
       // The rewrite was computed before those awaits. Built from what the editor
       // holds now if that differs, or text typed meanwhile would be replaced. A
       // note opened meanwhile was read from disk, and the editor is newer.
-      const editorBeforeWrite = getCurrentMarkdown(tiptapRef);
-      if (activeRewrite.docId !== activeDocId || editorBeforeWrite !== editorAtStart) {
-        activeRewrite.updated = editorBeforeWrite.replace(rewritePattern, replacement);
+      editorBeforeWrite = getCurrentMarkdown(tiptapRef);
+      if (onScreen.docId !== activeDocId || editorBeforeWrite !== editorAtStart) {
+        onScreen.updated = editorBeforeWrite.replace(rewritePattern, replacement);
       }
-      let activeWriteOk = true;
-      if (activeDoc?.filePath) {
-        activeWriteOk = await rewriteNoteFile(
-          activeDoc.filePath,
-          activeRewrite.updated,
-          "renameNote.rewrite.active",
-          activeDoc.id,
-        );
-      }
-      if (activeWriteOk) committed.add(activeRewrite.docId);
+      const filePath = libraryStore.getSnapshot().docs.find((entry) => entry.id === onScreen.docId)?.filePath;
+      // No file path on the active doc — memory only.
+      const landed = filePath
+        ? await rewriteNoteFile(filePath, onScreen.updated, "renameNote.rewrite.active", onScreen.docId)
+        : true;
+      if (landed) committed.add(onScreen.docId);
+    }
 
-      // Flip the editor only if the active doc's rewrite actually landed on
-      // disk. Clearing isDirty when the write failed would mask the loss; an
-      // unchanged editor + dirty flag lets autosave retry. A switch during the
-      // write leaves the editor on another note, and a keystroke during it has
-      // its own pending save, which needs the link rewritten too.
-      if (activeWriteOk && editorShows(activeRewrite.docId)) {
-        const editorAfterWrite = getCurrentMarkdown(tiptapRef);
-        const typedDuringWrite = editorAfterWrite !== editorBeforeWrite;
-        const markdown = typedDuringWrite
-          ? editorAfterWrite.replace(rewritePattern, replacement)
-          : activeRewrite.updated;
+    // Whatever note is on screen now, even one opened during its own background
+    // rewrite: the editor holds the old link, and its next save would put it back.
+    // Only if the rewrite landed: clearing isDirty when the write failed would mask
+    // the loss, while an unchanged editor + dirty flag lets autosave retry.
+    const shownRewrite = proposed.find((rw) => committed.has(rw.docId) && editorShows(rw.docId));
+    if (shownRewrite) {
+      const shownDoc = libraryStore.getSnapshot().docs.find((entry) => entry.id === shownRewrite.docId);
+      const editorNow = getCurrentMarkdown(tiptapRef);
+      // Text typed during the write has its own pending save, which needs the
+      // link rewritten too.
+      const markdown = shownRewrite === onScreen && editorNow === editorBeforeWrite
+        ? shownRewrite.updated
+        : editorNow.replace(rewritePattern, replacement);
+      if (markdown !== editorNow) {
         tiptapRef.current?.openDocument?.({
-          noteId: activeDoc?.id ?? null,
-          filePath: activeDoc?.filePath ?? null,
+          noteId: shownDoc?.id ?? null,
+          filePath: shownDoc?.filePath ?? null,
           markdown,
           reason: "file-watch",
         });
         state.primeMarkdown(markdown);
-        if (!typedDuringWrite) state.setIsDirty(false);
       }
+      if (markdown === shownRewrite.updated) state.setIsDirty(false);
     }
 
     const proposedById = new Map(proposed.map((rw) => [rw.docId, rw]));

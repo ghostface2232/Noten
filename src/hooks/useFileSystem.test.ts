@@ -140,12 +140,16 @@ vi.mock("../utils/fs", () => ({
 // atomicWriteText (temp+rename). Delegate to the plugin-fs writeTextFile mock
 // so the existing writeMock assertions and per-path fault injection still
 // observe body writes on their final paths.
-vi.mock("../utils/atomicWrite", () => ({
-  atomicWriteText: vi.fn(async (_fs: unknown, path: string, content: string) => {
-    const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-    await writeTextFile(path, content);
-  }),
-}));
+vi.mock("../utils/atomicWrite", async () => {
+  // Resolved once here: an import made later, during a write, can bypass the mock
+  // and reach the real plugin.
+  const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+  return {
+    atomicWriteText: vi.fn(async (_fs: unknown, path: string, content: string) => {
+      await writeTextFile(path, content);
+    }),
+  };
+});
 
 vi.mock("../utils/documentTitle", () => ({
   getDefaultDocumentTitle: vi.fn(() => "Untitled"),
@@ -1954,6 +1958,113 @@ describe("useFileSystem — renameNote when the editor moved during it", () => {
 
     expect(writeMock).toHaveBeenCalledWith("/notes/active.md", "see [[New]] typed");
     expect(openDocument).toHaveBeenCalledWith(expect.objectContaining({ noteId: "active", markdown: "see [[New]] typed" }));
+  });
+
+  it("does not write the note switched to over the one left during another note's write", async () => {
+    const renamed = makeDoc("renamed", { fileName: "Old", customName: true });
+    const active = makeDoc("active", { content: "A body [[Old]]" });
+    const other = makeDoc("other", { content: OLD });
+    const third = makeDoc("third", { content: "THIRD NOTE" });
+    refs.editorContent = "A body [[Old]]";
+    readMock.mockImplementation(async (path: string) => (path === "/notes/active.md" ? "A body [[Old]]" : OLD));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let started!: () => void;
+    const writing = new Promise<void>((resolve) => { started = resolve; });
+    const writes: [string, string][] = [];
+    writeMock.mockImplementation(async (path: string, content: string) => {
+      writes.push([path, content]);
+      if (path === "/notes/other.md") {
+        started();
+        await gate;
+      }
+    });
+    const { result, openDocument } = renderFs({ docs: [active, renamed, other, third], activeIndex: 0 });
+
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = result.current.renameNote(1, "New");
+      await writing;
+    });
+    libraryStore.commit({ activeNoteId: "third" }, "local");
+    refs.editorContent = "THIRD NOTE";
+    await act(async () => {
+      release();
+      await pending;
+    });
+    writeMock.mockReset();
+
+    expect(writes).toContainEqual(["/notes/active.md", "A body [[New]]"]);
+    expect(writes.some(([, content]) => content === "THIRD NOTE")).toBe(false);
+    expect(libraryStore.getSnapshot().docs.find((d) => d.id === "active")?.content).toBe("A body [[New]]");
+    expect(openDocument).not.toHaveBeenCalled();
+  });
+
+  it("rewrites what leaving the note saved, not what it held at the start", async () => {
+    const renamed = makeDoc("renamed", { fileName: "Old", customName: true });
+    const active = makeDoc("active", { content: "A [[Old]]" });
+    const third = makeDoc("third", { content: "third" });
+    refs.editorContent = "A [[Old]]";
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let started!: () => void;
+    const flushing = new Promise<void>((resolve) => { started = resolve; });
+    const flushDocSave = vi.fn()
+      .mockImplementationOnce(async () => {
+        started();
+        await gate;
+        return true;
+      })
+      .mockResolvedValue(true);
+    readMock.mockImplementation(async () => "A [[Old]] typed");
+    const { result } = renderFs({ docs: [active, renamed, third], activeIndex: 0, flushDocSave });
+
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = result.current.renameNote(1, "New");
+      await flushing;
+    });
+    libraryStore.commit({ activeNoteId: "third" }, "local");
+    refs.editorContent = "third";
+    await act(async () => {
+      release();
+      await pending;
+    });
+
+    expect(writeMock).toHaveBeenCalledWith("/notes/active.md", "A [[New]] typed");
+    expect(writeMock).not.toHaveBeenCalledWith("/notes/active.md", "A [[New]]");
+  });
+
+  it("repoints the editor at a note opened during its own background write", async () => {
+    const renamed = makeDoc("renamed", { fileName: "Old", customName: true });
+    const open = makeDoc("open", { content: "other" });
+    const opened = makeDoc("opened", { content: OLD });
+    refs.editorContent = "other";
+    readMock.mockImplementation(async () => OLD);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let started!: () => void;
+    const writing = new Promise<void>((resolve) => { started = resolve; });
+    writeMock.mockImplementation(async () => {
+      started();
+      await gate;
+    });
+    const { result, openDocument } = renderFs({ docs: [open, renamed, opened], activeIndex: 0 });
+
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = result.current.renameNote(1, "New");
+      await writing;
+    });
+    libraryStore.commit({ activeNoteId: "opened" }, "local");
+    refs.editorContent = OLD;
+    await act(async () => {
+      release();
+      await pending;
+    });
+    writeMock.mockReset();
+
+    expect(openDocument).toHaveBeenCalledWith(expect.objectContaining({ noteId: "opened", markdown: "see [[New]]" }));
   });
 
   it("keeps the note's own bytes when nothing was typed", async () => {
