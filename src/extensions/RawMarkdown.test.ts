@@ -72,6 +72,9 @@ const KEPT: [string, string][] = [
   ["sub and mark", "H<sub>2</sub>O <mark>m</mark>"],
   ["a styled strong", 'a <strong style="color:red">b</strong> c'],
   ["an unused reference definition", "para\n\n[unused]: http://x.y"],
+  ["two definitions of one label", "[a]: http://b\n\n[a]: http://c"],
+  ["a label repeated in another case", "[a]: http://b\n\n[A]: http://c"],
+  ["a label repeated three times", "[a]: http://b\n\n[a]: http://c\n\n[a]: http://d"],
   ["a linked image", "[![a](b.png)](http://x.y)"],
   ["a linked image in a sentence", "see [![a](b.png)](http://x.y) here"],
   ["a footnote reference and definition", "Text[^1] more\n\n[^1]: The note"],
@@ -233,6 +236,11 @@ describe("what still reads as ordinary Markdown", () => {
     // Eight times the text; quadratic would be 64.
     expect(large / small).toBeLessThan(25);
   }, 120_000);
+
+  it("reads a repeated label as its first definition, and keeps both", () => {
+    const saved = load("see [a]\n\n[a]: http://b\n\n[a]: http://c").getMarkdown();
+    expect(saved).toBe("see [a](http://b)\n\n[a]: http://b\n\n[a]: http://c");
+  });
 
   it.each([
     ["an unclosed dollar then escaped ones", "$", "\\$", "x"],
