@@ -165,9 +165,17 @@ describe("contract: settings read failures are not default settings", () => {
     const fnMatch = text.match(/async function loadSettingsFromFile[\s\S]*?\n\}/);
     expect(fnMatch, "loadSettingsFromFile not found").not.toBeNull();
     const body = fnMatch![0];
-    expect(body).toMatch(/exists\(path\)/);
-    expect(body).toMatch(/return null/);
-    expect(body).not.toMatch(/\bcatch\b/);
+    // `exists` answers false when it cannot tell, so it cannot prove a first run.
+    expect(body).not.toMatch(/\bexists\(/);
+    expect(body).toMatch(/if \(MISSING_FILE_ERROR\.test\(String\(err\)\)\) return null;\s*throw err;/);
+  });
+
+  it("nothing starts on defaults until an unreadable file is settled", () => {
+    const text = read(SETTINGS);
+    const effect = text.match(/for \(;;\) \{[\s\S]*?\n {6}\}\n/);
+    expect(effect, "settings read loop not found").not.toBeNull();
+    expect(effect![0]).toMatch(/askToRetrySettingsRead/);
+    expect(effect![0]).not.toMatch(/setIsLoaded/);
   });
 
   it("readMergeWriteSetting does not merge updates onto DEFAULTS after read failure", () => {

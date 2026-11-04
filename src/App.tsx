@@ -67,6 +67,8 @@ function fatalNoticeKey(code: NotenErrorCode): I18nKey {
     case "BODY_READ_FAILED":
     case "CONFLICT_SCAN_FAILED":
       return "error.readFailed";
+    case "SETTINGS_WRITE_FAILED":
+      return "error.settingsFailed";
     default:
       return "error.generic";
   }

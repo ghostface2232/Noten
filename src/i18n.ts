@@ -337,6 +337,20 @@ const dict = {
     en: "Something went wrong. Details were written to the crash log.",
     ko: "문제가 발생했습니다. 자세한 내용은 크래시 로그에 기록했습니다.",
   },
+  "error.settingsFailed": {
+    en: "Could not save this setting. It will go back to its saved value next time.",
+    ko: "이 설정을 저장하지 못했습니다. 다음 실행 때 저장된 값으로 돌아갑니다.",
+  },
+  "settings.unreadableTitle": {
+    en: "Noten can't read its settings",
+    ko: "설정을 읽을 수 없습니다",
+  },
+  "settings.unreadable": {
+    en: "settings.json could not be read. If another program is holding it, try again in a moment.\n\nStarting with default settings keeps the file beside the new one. Your notes are not touched, but if you chose your own notes folder, you will need to choose it again in Settings. Pick \"Use Selected Folder Only\" there, because \"Replace with Current Notes\" deletes what the folder holds.",
+    ko: "settings.json을 읽지 못했습니다. 다른 프로그램이 파일을 사용 중이면 잠시 후 다시 시도해 주세요.\n\n기본 설정으로 시작해도 이 파일은 새 파일 옆에 보관됩니다. 노트는 그대로 있지만, 노트 폴더를 직접 지정해 두었다면 설정에서 다시 선택해야 합니다. 이때 \"선택한 폴더만 사용\"을 고르세요. \"현재 노트로 대체\"는 폴더의 노트를 지웁니다.",
+  },
+  "settings.unreadableRetry": { en: "Try again", ko: "다시 시도" },
+  "settings.unreadableDefaults": { en: "Start with defaults", ko: "기본 설정으로 시작" },
   "close.unsaveableDiscard": {
     en: "Changes to this note could not be saved because the notes folder is unavailable. Close anyway and discard them?",
     ko: "노트 폴더를 사용할 수 없어 이 노트의 변경 사항을 저장하지 못했습니다. 그래도 창을 닫고 변경 사항을 버리시겠습니까?",

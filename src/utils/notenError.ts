@@ -14,6 +14,8 @@ export type NotenErrorCode =
   | "WATCH_SETUP_FAILED"
   | "MIGRATION_FAILED"
   | "AUTO_UPDATE_FAILED"
+  | "SETTINGS_READ_FAILED"
+  | "SETTINGS_WRITE_FAILED"
   | "UNCAUGHT";
 
 export interface NotenErrorContext {

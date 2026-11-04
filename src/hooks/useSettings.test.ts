@@ -10,18 +10,37 @@ const refs = vi.hoisted(() => ({
   // Optional gate: if set, every writeTextFile awaits it before committing.
   writeGate: null as Promise<void> | null,
   writeCalls: 0,
+  readError: null as string | null,
+  renameError: false,
+  showWindow: (async () => {}) as () => Promise<void>,
+  ask: (async () => false) as (...args: unknown[]) => Promise<boolean>,
+  logged: (async () => {}) as (...args: unknown[]) => Promise<void>,
 }));
 
 vi.mock("@tauri-apps/api/path", () => ({
   appDataDir: vi.fn(async () => "/test-appdata"),
 }));
 
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({ show: refs.showWindow }),
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  ask: (...args: unknown[]) => refs.ask(...args),
+}));
+
+vi.mock("../utils/crashLog", () => ({
+  logNotenError: (...args: unknown[]) => refs.logged(...args),
+}));
+
 vi.mock("@tauri-apps/plugin-fs", () => ({
   mkdir: vi.fn(async () => {}),
-  exists: vi.fn(async (p: string) => refs.files.has(p)),
+  // Says false when it cannot tell, as the real command does.
+  exists: vi.fn(async (p: string) => refs.files.has(p) && !refs.readError),
   readTextFile: vi.fn(async (p: string) => {
+    if (refs.readError) throw new Error(refs.readError);
     const v = refs.files.get(p);
-    if (v === undefined) throw new Error(`ENOENT: ${p}`);
+    if (v === undefined) throw new Error(`failed to open file at path: ${p} with error: not found (os error 2)`);
     return v;
   }),
 }));
@@ -38,6 +57,7 @@ vi.mock("../utils/fs", () => ({
       refs.files.set(p, c);
     }),
     rename: vi.fn(async (from: string, to: string) => {
+      if (refs.renameError) throw new Error("locked");
       const v = refs.files.get(from);
       if (v === undefined) throw new Error(`ENOENT: ${from}`);
       refs.files.set(to, v);
@@ -55,6 +75,11 @@ beforeEach(() => {
   refs.files = new Map();
   refs.writeGate = null;
   refs.writeCalls = 0;
+  refs.readError = null;
+  refs.renameError = false;
+  refs.showWindow = vi.fn(async () => {});
+  refs.ask = vi.fn(async () => false);
+  refs.logged = vi.fn(async () => {});
 });
 
 afterEach(() => {
@@ -127,6 +152,109 @@ describe("readAutoUpdateAllowed", () => {
 
     refs.files.set(SETTINGS_PATH, "{ not json");
     expect(await readAutoUpdateAllowed()).toBe(false);
+  });
+});
+
+describe("useSettings — a settings file that cannot be read", () => {
+  const SAVED = JSON.stringify({ locale: "ko", notesDirectory: "D:/내 노트" });
+  const mount = async () => {
+    const { result } = renderHook(() => useSettings());
+    await waitFor(() => expect(result.current.isLoaded).toBe(true), { timeout: 4000 });
+    return result;
+  };
+  const asideFiles = () => Array.from(refs.files.keys()).filter((p) => p.includes(".unreadable-"));
+
+  it("does not load on defaults while the user has not chosen", async () => {
+    refs.files.set(SETTINGS_PATH, "{ not json");
+    let answer!: (retry: boolean) => void;
+    refs.ask = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve; }));
+    const { result } = renderHook(() => useSettings());
+
+    await waitFor(() => expect(refs.ask).toHaveBeenCalled(), { timeout: 4000 });
+    expect(refs.showWindow).toHaveBeenCalled();
+    expect(result.current.isLoaded).toBe(false);
+    expect(refs.files.get(SETTINGS_PATH)).toBe("{ not json");
+
+    await act(async () => { answer(false); });
+    await waitFor(() => expect(result.current.isLoaded).toBe(true));
+  });
+
+  it("loads the file after a retry", async () => {
+    refs.readError = "The process cannot access the file (os error 32)";
+    refs.files.set(SETTINGS_PATH, SAVED);
+    refs.ask = vi.fn(async () => {
+      refs.readError = null;
+      return true;
+    });
+
+    const result = await mount();
+
+    expect(result.current.settings.notesDirectory).toBe("D:/내 노트");
+    expect(refs.files.get(SETTINGS_PATH)).toBe(SAVED);
+    expect(asideFiles()).toEqual([]);
+  });
+
+  it("gets past a brief lock without asking", async () => {
+    refs.readError = "The process cannot access the file (os error 32)";
+    refs.files.set(SETTINGS_PATH, SAVED);
+    setTimeout(() => { refs.readError = null; }, 100);
+
+    const result = await mount();
+
+    expect(refs.ask).not.toHaveBeenCalled();
+    expect(result.current.settings.notesDirectory).toBe("D:/내 노트");
+  });
+
+  it("keeps the file aside when the user starts with defaults", async () => {
+    refs.files.set(SETTINGS_PATH, "{ not json");
+
+    const result = await mount();
+
+    expect(result.current.settings.notesDirectory).not.toBe("D:/내 노트");
+    expect(asideFiles().map((p) => refs.files.get(p))).toEqual(["{ not json"]);
+    expect(JSON.parse(refs.files.get(SETTINGS_PATH)!).locale).toBeDefined();
+  });
+
+  it("does not write over a file it could not move aside", async () => {
+    refs.files.set(SETTINGS_PATH, "{ not json");
+    refs.renameError = true;
+
+    await mount();
+
+    expect(refs.files.get(SETTINGS_PATH)).toBe("{ not json");
+  });
+
+  it("does not write over the file when it could not ask", async () => {
+    refs.files.set(SETTINGS_PATH, "{ not json");
+    refs.ask = vi.fn(async () => { throw new Error("no dialog"); });
+
+    await mount();
+
+    expect(refs.files.get(SETTINGS_PATH)).toBe("{ not json");
+    expect(asideFiles()).toEqual([]);
+  });
+
+  it("does not take a failed existence check for a first run", async () => {
+    refs.readError = "Access is denied. (os error 5)";
+    refs.files.set(SETTINGS_PATH, SAVED);
+    refs.ask = vi.fn(async () => { throw new Error("no dialog"); });
+
+    await mount();
+
+    expect(refs.files.get(SETTINGS_PATH)).toBe(SAVED);
+  });
+
+  it("reports a setting it could not save, and writes nothing over the file", async () => {
+    refs.files.set(SETTINGS_PATH, SAVED);
+    const result = await mount();
+    refs.files.set(SETTINGS_PATH, "{ not json");
+
+    let saved: boolean | undefined;
+    await act(async () => { saved = await result.current.update("autoUpdate", false); });
+
+    expect(saved).toBe(false);
+    expect(refs.files.get(SETTINGS_PATH)).toBe("{ not json");
+    expect(refs.logged).toHaveBeenCalledWith(expect.objectContaining({ code: "SETTINGS_WRITE_FAILED", severity: "fatal" }));
   });
 });
 
