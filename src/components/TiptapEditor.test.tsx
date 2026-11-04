@@ -68,7 +68,7 @@ function mountEditor() {
   const open = (noteId: string, markdown: string) => act(async () => {
     ref.current!.openDocument({ noteId, filePath: `/notes/${noteId}.md`, markdown, reason: "switch" });
   });
-  return { editor: () => ref.current!.getEditor() as Editor, onDirtyChange, open };
+  return { editor: () => ref.current!.getEditor() as Editor, handle: () => ref.current!, onDirtyChange, open };
 }
 
 describe("TiptapEditor: a note that fails to open", () => {
@@ -227,6 +227,18 @@ describe("TiptapEditor: opening a note is not an edit", () => {
 
     expect(editor().state.doc.childCount).toBe(2);
     expect(editor().state.doc.firstChild?.textContent).toBe("heading");
+  });
+
+  it("reports an edit when the caller says the text is not on disk", async () => {
+    const { handle, onDirtyChange, open } = mountEditor();
+    await open("n", "a");
+    expect(onDirtyChange).not.toHaveBeenCalled();
+
+    await act(async () => {
+      handle().openDocument({ noteId: "n", filePath: "/notes/n.md", markdown: "b", reason: "file-watch", markEdited: true });
+    });
+
+    expect(onDirtyChange).toHaveBeenCalledWith(true);
   });
 
   it("still reports a real edit", async () => {

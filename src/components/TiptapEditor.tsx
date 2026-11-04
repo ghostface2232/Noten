@@ -559,6 +559,7 @@ export interface TiptapEditorHandle {
     filePath: string | null;
     markdown: string;
     reason?: "init" | "switch" | "window-sync" | "file-watch";
+    markEdited?: boolean;
   }) => void;
   invalidateDocumentSession: (noteId: string | null, filePath: string | null) => void;
   setEditable: (editable: boolean) => void;
@@ -907,6 +908,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       filePath: string | null;
       markdown: string;
       reason?: "init" | "switch" | "window-sync" | "file-watch";
+      markEdited?: boolean;
     }) => {
       if (!editor) return;
       closeLinkPopover();
@@ -995,7 +997,9 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       syncFocusModeState(editor, focusMode);
       announceDocumentSwap(editor);
 
-      dirtyRef.current = false;
+      // The caller put text in the editor that the disk does not hold.
+      dirtyRef.current = params.markEdited === true;
+      if (params.markEdited) onDirtyChange(true);
 
       const resolvedKey = nextKey ?? buildDocumentSessionKey(noteId, filePath);
       currentSessionKeyRef.current = resolvedKey;
@@ -1016,6 +1020,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       closeLinkPopover,
       editor,
       focusMode,
+      onDirtyChange,
       parseMarkdownToState,
       replaceCurrentDocumentContent,
       scheduleSpellcheckRefresh,

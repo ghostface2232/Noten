@@ -2067,6 +2067,84 @@ describe("useFileSystem — renameNote when the editor moved during it", () => {
     expect(openDocument).toHaveBeenCalledWith(expect.objectContaining({ noteId: "opened", markdown: "see [[New]]" }));
   });
 
+  it("rewrites what a background note holds at write time, not at its first read", async () => {
+    const renamed = makeDoc("renamed", { fileName: "Old", customName: true });
+    const open = makeDoc("open", { content: "other" });
+    const peer = makeDoc("peer", { content: OLD });
+    let reads = 0;
+    readMock.mockImplementation(async () => {
+      reads += 1;
+      return reads === 1 ? OLD : "see [[Old]] from a peer";
+    });
+    const { result } = renderFs({ docs: [open, renamed, peer], activeIndex: 0 });
+
+    await act(async () => {
+      await result.current.renameNote(1, "New");
+    });
+
+    expect(writeMock).toHaveBeenCalledWith("/notes/peer.md", "see [[New]] from a peer");
+    expect(libraryStore.getSnapshot().docs.find((d) => d.id === "peer")?.content).toBe("see [[New]] from a peer");
+  });
+
+  it("does not recreate a note deleted during the rename", async () => {
+    const renamed = makeDoc("renamed", { fileName: "Old", customName: true });
+    const open = makeDoc("open", { content: "other" });
+    const gone = makeDoc("gone", { content: OLD });
+    const { reading, release } = gatedRead();
+    const { result } = renderFs({ docs: [open, renamed, gone], activeIndex: 0 });
+
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = result.current.renameNote(1, "New");
+      await reading;
+    });
+    libraryStore.commit((snapshot) => ({ docs: snapshot.docs.filter((d) => d.id !== "gone") }), "local");
+    await act(async () => {
+      release();
+      await pending;
+    });
+
+    expect(writeMock).not.toHaveBeenCalledWith("/notes/gone.md", expect.anything());
+  });
+
+  it("counts text typed during the write as an edit", async () => {
+    const renamed = makeDoc("renamed", { fileName: "Old", customName: true });
+    const active = makeDoc("active", { content: OLD });
+    refs.editorContent = OLD;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let started!: () => void;
+    const writing = new Promise<void>((resolve) => { started = resolve; });
+    writeMock.mockImplementation(async () => {
+      started();
+      await gate;
+    });
+    const setIsDirty = vi.fn();
+    const { result, openDocument } = renderFs({
+      docs: [active, renamed],
+      activeIndex: 0,
+      state: makeState({ isDirty: false, setIsDirty }),
+    });
+
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = result.current.renameNote(1, "New");
+      await writing;
+    });
+    refs.editorContent = "see [[Old]] typed";
+    await act(async () => {
+      release();
+      await pending;
+    });
+    writeMock.mockReset();
+
+    expect(openDocument).toHaveBeenCalledWith(expect.objectContaining({
+      markdown: "see [[New]] typed",
+      markEdited: true,
+    }));
+    expect(setIsDirty).not.toHaveBeenCalledWith(false);
+  });
+
   it("keeps the note's own bytes when nothing was typed", async () => {
     const renamed = makeDoc("renamed", { fileName: "Old", customName: true });
     const active = makeDoc("active", { content: OLD });
