@@ -138,6 +138,10 @@ function maskCjkAfterDelimiters(masked: string): string {
     const end = match.index + match[0].length;
     const after = masked.codePointAt(end);
     if (after === undefined || !CJK_CHARACTER.test(String.fromCodePoint(after))) continue;
+    // A run right after that character needs it visible, to close: masking the
+    // 저 of `(**저**는)` left the closer after punctuation, before a letter.
+    const following = masked[end + (after > 0xffff ? 2 : 1)];
+    if (following === "*" || following === "~") continue;
     (parts ??= []).push(masked.slice(cursor, end), ".");
     cursor = end + 1;
   }

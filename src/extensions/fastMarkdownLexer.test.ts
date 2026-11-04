@@ -412,6 +412,11 @@ describe("emphasis next to CJK text", () => {
     ["**「あ」**は", "strong"],
     ['***"인용"***은', "em"],
     ["**😀**가", "strong"],
+    ["(**저**는)", "strong"],
+    ['"**나**는', "strong"],
+    ["`c`**한**글", "strong"],
+    ['"*한*글', "em"],
+    ['"~~한~~글', "del"],
     ["**a😀**가", "strong"],
   ])("reads %j as %s", (markdown, type) => {
     expect(inlineTypes(markdown)).toContain(type);
