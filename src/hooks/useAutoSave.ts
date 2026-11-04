@@ -235,6 +235,10 @@ export function useAutoSave(
     if (activeDocRef.current?.id !== docId) {
       return null;
     }
+    // Gone after a crash unmounts the app: `getCurrentMarkdown` then answers "", and
+    // saving that would empty the note, with no backup since the disk still matches
+    // its baseline, and carry the empty body to every other window.
+    if (!latestEditorRef.current) return null;
 
     const content = getCurrentMarkdown(latestEditorRef);
     latestState.primeMarkdown(content);
@@ -294,7 +298,9 @@ export function useAutoSave(
         docId: snapshot.docId,
         filePath: snapshot.filePath,
         content: snapshot.content,
-        baseContent: getKnownDiskContent(snapshot.filePath) ?? null,
+        // What the edit was made against. A body landing after a failed save moves the
+        // baseline, and recording that one would let the next start apply this over it.
+        baseContent: (snapshot.failedAgainst ? snapshot.failedAgainst.knownDisk : getKnownDiskContent(snapshot.filePath)) ?? null,
         editSerial: snapshot.editSerial,
         updatedAt: Date.now(),
       });
@@ -366,6 +372,38 @@ export function useAutoSave(
     if (migrationInProgress) return false;
     if (remoteDeletedDocsRef.current.has(snapshot.docId)) return false;
     if (isNoteLifecycleBlocked(snapshot.docId)) return false;
+
+    // Another window's body landed since this save failed, and it moved the baseline
+    // with it, so the backup check below would see no conflict and overwrite that body
+    // with no copy. A retry and every flush reach here. This window's own write leaves
+    // the baseline equal to this text, which is not a conflict.
+    const knownDisk = getKnownDiskContent(snapshot.filePath);
+    if (
+      snapshot.failedAgainst
+      && knownDisk !== undefined
+      && knownDisk !== snapshot.failedAgainst.knownDisk
+      && knownDisk !== snapshot.content
+    ) {
+      try {
+        await backupLocalDeletionVersion(tauriFileSystem, await getNotesDir(), snapshot.docId, snapshot.content);
+      } catch (err) {
+        void logNotenError(new NotenError(
+          "BACKUP_FAILED",
+          "fatal",
+          err instanceof Error ? err.message : String(err),
+          { context: { noteId: snapshot.docId, filePath: snapshot.filePath }, cause: err },
+        ));
+        return false;
+      }
+      markSaveSettled(snapshot.docId, snapshot.editSerial);
+      void logNotenError(new NotenError(
+        "SAVE_KEPT_AS_CONFLICT",
+        "fatal",
+        "An edit that could not be saved lost to a newer body from another window",
+        { context: { noteId: snapshot.docId, filePath: snapshot.filePath } },
+      ));
+      return true;
+    }
 
     const {
       locale: latestLocale,
@@ -1023,13 +1061,6 @@ export function useAutoSave(
       if (pendingSnapshotsRef.current.get(docId) !== pending) continue;
       if ((inFlightSavesByDocRef.current.get(docId)?.size ?? 0) > 0) continue;
       if (!stateRef.current.docs.some((doc) => doc.id === docId)) {
-        markSaveSettled(docId, pending.editSerial);
-        continue;
-      }
-      // Another window's body landed since. Its write moved the baseline with it, so
-      // the save's own check would see no conflict and overwrite that body with no
-      // backup. The record stays, and the next start keeps this text in `.conflicts`.
-      if (pending.failedAgainst && pending.failedAgainst.knownDisk !== getKnownDiskContent(pending.filePath)) {
         markSaveSettled(docId, pending.editSerial);
         continue;
       }

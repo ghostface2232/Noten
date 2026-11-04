@@ -82,6 +82,8 @@ function fatalNoticeKey(code: NotenErrorCode): I18nKey {
       return "error.imageFailed";
     case "DIAGRAM_EXPORT_FAILED":
       return "error.diagramExportFailed";
+    case "SAVE_KEPT_AS_CONFLICT":
+      return "error.saveKeptAsConflict";
     default:
       return "error.generic";
   }
@@ -98,6 +100,7 @@ const USER_ACTION_ERRORS: ReadonlySet<NotenErrorCode> = new Set<NotenErrorCode>(
   "IMPORT_FAILED",
   "IMAGE_FAILED",
   "DIAGRAM_EXPORT_FAILED",
+  "SAVE_KEPT_AS_CONFLICT",
 ]);
 import { SettingsModal } from "./components/SettingsModal";
 import { NO_FOCUS_REQUEST, SearchBar, type DocSearchFocusRequest } from "./components/SearchBar";
@@ -106,7 +109,7 @@ import { searchPluginKey, type SearchPluginState } from "./extensions/SearchHigh
 import { refreshWikiLinkDecorations } from "./extensions/WikiLink";
 import { t, type I18nKey } from "./i18n";
 import { registerFatalHandler, type NotenErrorCode } from "./utils/notenError";
-import { isSaveFailing, subscribeSaveFailures } from "./utils/saveFailures";
+import { isNoteSaveFailing, isSaveFailing, subscribeSaveFailures } from "./utils/saveFailures";
 import { reportNoteNotRestored, reportNotesNotDeleted, reportNotesNotPurged } from "./utils/lifecycleReports";
 import { recoverJournalledEdits } from "./hooks/editRecovery";
 import type { RecoveryRecord } from "./utils/recoveryJournal";
@@ -1247,8 +1250,14 @@ function App() {
   useEffect(() => {
     const lastShownAtByCode = new Map<NotenErrorCode, number>();
     registerFatalHandler((error) => {
-      // The standing notice below already says so.
-      if ((error.code === "SAVE_FAILED" || error.code === "BACKUP_FAILED") && isSaveFailing()) return;
+      // The standing notice below already says so, for the notes it covers. Another
+      // note's failure must not swallow the only report of this one.
+      const noteId = error.context?.noteId;
+      if (
+        (error.code === "SAVE_FAILED" || error.code === "BACKUP_FAILED")
+        && typeof noteId === "string"
+        && isNoteSaveFailing(noteId)
+      ) return;
       const now = Date.now();
       const lastShownAt = lastShownAtByCode.get(error.code);
       if (

@@ -37,6 +37,10 @@ export function settleSavesWithoutPending(hasPending: (docId: string) => boolean
   publish();
 }
 
+export function isNoteSaveFailing(docId: string): boolean {
+  return failing.has(docId);
+}
+
 export function isSaveFailing(): boolean {
   return anyFailing;
 }

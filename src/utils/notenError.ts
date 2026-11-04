@@ -21,6 +21,7 @@ export type NotenErrorCode =
   | "IMPORT_FAILED"
   | "IMAGE_FAILED"
   | "DIAGRAM_EXPORT_FAILED"
+  | "SAVE_KEPT_AS_CONFLICT"
   | "UNCAUGHT";
 
 export interface NotenErrorContext {

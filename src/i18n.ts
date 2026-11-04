@@ -333,6 +333,10 @@ const dict = {
     en: "Your latest changes are not saved. Noten keeps trying and they stay open here. Check that the notes folder is writable and that its sync client is running.",
     ko: "최근 변경 사항이 저장되지 않았습니다. 계속 다시 시도하며 내용은 창에 남아 있습니다. 노트 폴더에 쓸 수 있는지, 동기화 프로그램이 실행 중인지 확인해 주세요.",
   },
+  "error.saveKeptAsConflict": {
+    en: "A newer version of this note arrived from another window while your edit could not be saved. Your edit was kept in the .conflicts folder.",
+    ko: "편집을 저장하지 못하는 사이 다른 창에서 이 노트의 새 버전이 도착했습니다. 편집한 내용은 .conflicts 폴더에 보관했습니다.",
+  },
   "error.deleteFailed": {
     en: "Some notes could not be moved to the trash, so they are still in your list. Try again.",
     ko: "일부 노트를 휴지통으로 옮기지 못해 목록에 그대로 있습니다. 다시 시도해 주세요.",
