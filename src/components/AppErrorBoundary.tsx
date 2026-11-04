@@ -49,7 +49,11 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, { faile
         }}
       >
         <p style={{ margin: 0, maxWidth: 480 }}>{t("error.appCrashed", locale)}</p>
-        <button type="button" onClick={() => location.reload()}>{t("error.reload", locale)}</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" onClick={() => location.reload()}>{t("error.reload", locale)}</button>
+          {/* The window has no frame of its own, and the title bar is gone with the app. */}
+          <button type="button" onClick={() => void getCurrentWindow().close()}>{t("error.closeWindow", locale)}</button>
+        </div>
       </div>
     );
   }

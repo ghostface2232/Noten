@@ -33,7 +33,7 @@ describe("AppErrorBoundary", () => {
     render(<AppErrorBoundary><Throws /></AppErrorBoundary>);
 
     expect(screen.getByRole("alert")).toBeTruthy();
-    expect(screen.getByRole("button")).toBeTruthy();
+    expect(screen.getAllByRole("button")).toHaveLength(2);
     expect(refs.show).toHaveBeenCalled();
     expect(refs.logged).toHaveBeenCalledWith(
       expect.objectContaining({ code: "UNCAUGHT", severity: "fatal", message: "render failed" }),
