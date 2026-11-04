@@ -222,35 +222,6 @@ function fencedMathLength(src: string): number {
   return 0;
 }
 
-const BARE_MATH_FENCE = /^ {0,3}\$\$\s*$/;
-// A blank line or one that opens a block, as far as this can tell: a rule, a table
-// delimiter or a setext underline, then a heading, quote, fence, list marker or tag.
-const ENDS_A_PARAGRAPH =
-  /^ {0,3}(?:[-=_*:|\s]*$|#{1,6}(?:\s|$)|>|`{3}|~{3}|(?:[*+-]|[a-zA-Z\d]+[.)])(?:\s|$)|<[a-zA-Z/!?])/;
-const BLOCK_ON_ITS_FIRST_LINE = /^(?: {4}| {0,3}\t| {0,3}\[[^\]\n]*\]:)/;
-
-/**
- * The paragraph above a `$$` line, when that line ends it. Only a bare fence with
- * its closer does: a `$$a$$` line stays inline math, so saving does not split its
- * paragraph. Unsure lines stop the search, which leaves the paragraph whole, and
- * they keep a note without blank lines linear: a paragraph that is not cut here is
- * taken whole by the lexer, so each line is read once.
- */
-function paragraphBeforeMath(src: string): string | undefined {
-  if (FENCED_MATH_OPEN.test(src)) return undefined;
-  let cursor = lineEnd(src, 0);
-  const firstLine = src.slice(0, cursor);
-  if (ENDS_A_PARAGRAPH.test(firstLine.trimEnd()) || BLOCK_ON_ITS_FIRST_LINE.test(firstLine)) return undefined;
-  while (cursor < src.length) {
-    const end = lineEnd(src, cursor);
-    const line = src.slice(cursor, end);
-    if (BARE_MATH_FENCE.test(line)) return fencedMathLength(src.slice(cursor)) > 0 ? src.slice(0, cursor) : undefined;
-    if (ENDS_A_PARAGRAPH.test(line.trimEnd())) return undefined;
-    cursor = end;
-  }
-  return undefined;
-}
-
 // The definition's line, then every indented line, across blank lines.
 function footnoteDefinitionLength(src: string): number {
   let length = lineEnd(src, 0);
@@ -385,33 +356,6 @@ const RawBracketSyntax = Extension.create({
   },
 });
 
-const PARAGRAPH_BEFORE_MATH = "paragraphBeforeMath";
-
-/**
- * Math is often written right under a line of text, where its lines read as text
- * and gain backslashes. This takes the paragraph above it, so the next block starts
- * at the `$$`. Cutting the paragraph through a tokenizer's `start` instead leaves
- * marked's setext rule reading the rest of a note without blank lines at each cut.
- * The inline text is lexed at parse time, when every reference definition is known.
- */
-const ParagraphBeforeMath = Extension.create({
-  name: PARAGRAPH_BEFORE_MATH,
-  markdownTokenName: PARAGRAPH_BEFORE_MATH,
-  markdownTokenizer: {
-    name: PARAGRAPH_BEFORE_MATH,
-    level: "block" as const,
-    start: () => -1,
-    tokenize: (src: string) => {
-      const raw = paragraphBeforeMath(src);
-      return raw ? { type: PARAGRAPH_BEFORE_MATH, raw, text: raw.slice(0, -1) } : undefined;
-    },
-  },
-  parseMarkdown(token: MarkdownToken, helpers) {
-    const text = String(token.text ?? "");
-    return helpers.parseChildren([{ type: "paragraph", raw: token.raw, text, tokens: helpers.tokenizeInline?.(text) ?? [] }]);
-  },
-});
-
 /** `[ref]: url`, which marked reads as a `def` token and the stock parser drops. */
 const RawLinkDefinition = Extension.create({
   name: "rawLinkDefinition",
@@ -424,6 +368,6 @@ const RawLinkDefinition = Extension.create({
 export const RawMarkdown = Extension.create({
   name: "rawMarkdown",
   addExtensions() {
-    return [RawBlock, RawInline, RawBracketSyntax, ParagraphBeforeMath, RawLinkDefinition];
+    return [RawBlock, RawInline, RawBracketSyntax, RawLinkDefinition];
   },
 });
