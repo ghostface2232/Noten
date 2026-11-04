@@ -84,27 +84,38 @@ const CSS_ATTRIBUTES = new Set([
   "cursor",
 ]);
 const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)/gi;
-const CSS_IMAGE_SET = /(?:-webkit-)?image-set\((?:[^()]|\([^()]*\))*\)/gi;
 const CSS_IMPORT = /@import[^;]*;?/gi;
-
-const isInertUrl = (url: string) => url.startsWith("#") || /^data:image\//i.test(url);
-// An unquoted match runs to the first `)`, so it can have swallowed more than a
-// target: `url(#35;*/background:url(//host/x.png)`, whose start looks like a marker
-// reference. Only the whole shape of one counts.
-const isInertBareCssUrl = (url: string) => /^#[\w.:-]*$/.test(url) || /^data:image\/[^\s()'"]*$/i.test(url);
+const CSS_LOADING_FUNCTION = /(?:image(?:-set)?|cross-fade|src)\(/i;
 // A custom property keeps its tokens unparsed, so `--a: u\72l(//host)` still reads as
 // a url wherever `var(--a)` lands, and it serializes that way too.
 const ESCAPE_IN_CUSTOM_PROPERTY = /--[\w-]+\s*:[\s\S]*\\/;
+const FRAGMENT_URL = /^#[\w.:-]*$/;
+// An attribute has not been parsed, so a comment or string can hide a load from any
+// pattern for one: `/*url("#*/background:url(//host/x.png);/*")*/`. Only a whole
+// reference inside the page may remain, and anything else costs the attribute.
+const FRAGMENT_URL_CALL = /url\(\s*(?:"#[\w.:-]*"|'#[\w.:-]*'|#[\w.:-]*)\s*\)/gi;
+const LOADING_CSS_ATTRIBUTE = /\\|@import|url\(|(?:image(?:-set)?|cross-fade|src)\(/i;
 
-/** CSS with everything removed that could load from outside the page. */
+const isInertUrl = (url: string) => url.startsWith("#") || /^data:image\//i.test(url);
+const isInertCssAttribute = (value: string) => !LOADING_CSS_ATTRIBUTE.test(value.replace(FRAGMENT_URL_CALL, ""));
+
+/**
+ * A stylesheet rule as the browser serialized it, with everything removed that could
+ * load from outside the page. Empty if it holds a form this does not take apart. For
+ * text the browser has parsed: a comment or an unparsed string would defeat it.
+ */
 export function withoutExternalCss(css: string): string {
-  if (ESCAPE_IN_CUSTOM_PROPERTY.test(css)) return "";
+  if (ESCAPE_IN_CUSTOM_PROPERTY.test(css) || CSS_LOADING_FUNCTION.test(css)) return "";
   return css
     .replace(CSS_IMPORT, "")
-    .replace(CSS_IMAGE_SET, "none")
-    .replace(CSS_URL, (whole, double, single, bare) => (
-      (bare === undefined ? isInertUrl(double ?? single) : isInertBareCssUrl(bare)) ? whole : "none"
-    ));
+    .replace(CSS_URL, (whole, double, single, bare) => {
+      const quoted = double ?? single;
+      const inert = quoted === undefined
+        // An unquoted match runs to the first `)`, so it can hold more than a target.
+        ? FRAGMENT_URL.test(bare) || /^data:image\/[^\s()'"]*$/i.test(bare)
+        : FRAGMENT_URL.test(quoted) || /^data:image\//i.test(quoted);
+      return inert ? whole : "none";
+    });
 }
 
 /**
@@ -123,9 +134,7 @@ export function removeExternalReferences(root: HTMLElement): number {
       if (LOADING_ATTRIBUTES.has(name)) {
         element.removeAttribute(rawName);
       } else if (CSS_ATTRIBUTES.has(name)) {
-        // An attribute is CSS the browser has not parsed yet, where `u\72l(` is a url.
-        if (value.includes("\\")) element.removeAttribute(rawName);
-        else if (withoutExternalCss(value) !== value) element.setAttribute(rawName, withoutExternalCss(value));
+        if (!isInertCssAttribute(value)) element.removeAttribute(rawName);
       } else if (name === "src") {
         if (isInertUrl(value) || value.startsWith(NOTE_ASSET_ORIGIN)) continue;
         element.removeAttribute(rawName);

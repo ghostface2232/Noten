@@ -67,13 +67,32 @@ describe("removeExternalReferences", () => {
     expect(el.querySelector("style")).toBeNull();
   });
 
-  it("drops a load hidden behind something that looks like a marker reference", () => {
+  it.each([
+    "/*url(#35;*/background:url(//host/x.png)",
+    '/*url("#35;*/background:url(//host/x.png);/*")*/',
+    "/*url('#35;*/background:url(//host/x.png);/*')*/",
+    '/*url("data:image/x*/background:url(//host/x.png);/*")*/',
+    'background-image:image-set("//host/x.png" 1x,linear-gradient(red calc((1%)),blue) 2x)',
+    'background-image:-webkit-image-set("//host/x.png" 1x,linear-gradient(red calc((1%)),blue) 2x)',
+    'background-image:src("//host/x.png")',
+    "background:url(#a) url(//host/x.png)",
+    "background:UR\\L(//host/x.png)",
+  ])("drops a style that may load: %s", (style) => {
     const el = editorWith("<span></span>");
-    el.querySelector("span")!.setAttribute("style", "/*url(#35;*/background:url(//host/x.png)");
+    el.querySelector("span")!.setAttribute("style", style);
 
     removeExternalReferences(el);
 
-    expect(el.innerHTML).not.toContain("host");
+    expect(el.querySelector("span")!.hasAttribute("style")).toBe(false);
+  });
+
+  it("keeps a style with nothing to load, or only a reference inside the page", () => {
+    const el = editorWith('<span style="color: red"></span><i style="fill: url(#a); stroke: url(&quot;#b&quot;)"></i>');
+
+    removeExternalReferences(el);
+
+    expect(el.querySelector("span")!.getAttribute("style")).toBe("color: red");
+    expect(el.querySelector("i")!.getAttribute("style")).toContain("url(#a)");
   });
 
   it("drops loading elements and attributes, and leaves links alone", () => {
@@ -88,7 +107,7 @@ describe("removeExternalReferences", () => {
     removeExternalReferences(el);
 
     expect(el.innerHTML).not.toContain("host");
-    expect(el.querySelector("div")!.getAttribute("style")).toContain("color: red");
+    expect(el.querySelector("div")!.hasAttribute("style")).toBe(false);
     expect(el.querySelector("a")!.getAttribute("href")).toBe("https://example.com/page");
   });
 });
@@ -99,8 +118,12 @@ describe("withoutExternalCss", () => {
     [".a { background: url(file://host/a) }", ".a { background: none }"],
     [".a { background: url( '\\\\host\\a' ) }", ".a { background: none }"],
     ['.a { background: url("\\2f\\2fhost") }', ".a { background: none }"],
-    ['.a { background: image-set("//host/a" 1x) }', ".a { background: none }"],
-    ['.a { background: -webkit-image-set(url("//host/a") 1x) }', ".a { background: none }"],
+    ['.a { background: image-set("//host/a" 1x) }', ""],
+    ['.a { background: -webkit-image-set(url("//host/a") 1x) }', ""],
+    ['.a { background: image-set("//host/a" 1x, linear-gradient(red calc((1%)), blue) 2x) }', ""],
+    ['.a { background: image("//host/a") }', ""],
+    ['.a { background: cross-fade("//host/a", red) }', ""],
+    ['.a { background: url("#x;*/background:url(//host/a);/*") }', ".a { background: none }"],
     ['@import url("//host/a.css"); .a { color: red }', " .a { color: red }"],
     [".a { background: url(#x;*/background:url(//host/a) }", ".a { background: none }"],
     ['.a { --b: "url(#"; background-image: url(//host/a) }', '.a { --b: "none }'],
