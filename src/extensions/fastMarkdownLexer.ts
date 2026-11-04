@@ -1,4 +1,4 @@
-import { marked, Lexer, Marked, Tokenizer } from "marked";
+import { marked, Lexer, Marked } from "marked";
 import type { Token, Tokens } from "marked";
 import Underline from "@tiptap/extension-underline";
 import { boundBlockExtension, MAYBE_ORDERED_ITEM } from "./boundedBlockTokenizers";
@@ -377,7 +377,6 @@ export function fastLex(src: string, options?: any): Token[] {
 // optimization left out.
 export function createFastMarked({ boundBlockTokenizers = true, rememberInlineStarts = true } = {}): typeof marked {
   const instance = new Marked();
-  let duplicateDefinitions = 0;
   class BoundFastLexer extends FastLexer {
     constructor(options?: any) {
       super(options ?? (instance as any).defaults);
@@ -410,18 +409,25 @@ export function createFastMarked({ boundBlockTokenizers = true, rememberInlineSt
   // included, has already declined the same input, so the fallback declines
   // too and the built-in result is unchanged.
   instance.use({
+    // The lexer discards a definition whose label is taken, and the save then loses
+    // its line. Taking it first keeps the token, while the first definition still
+    // wins for references, as in CommonMark, and the link table does not grow, which
+    // every paragraph's reference search reads. After a paragraph the stock path
+    // folds the line into that paragraph, and keeps it that way.
+    extensions: [{
+      name: "repeatedDefinition",
+      level: "block",
+      tokenizer(this: { lexer: any }, src: string, tokens: Token[]) {
+        if (!DEFINITION_OPENER.test(src)) return undefined;
+        const previous = tokens[tokens.length - 1]?.type;
+        if (previous === "paragraph" || previous === "text") return undefined;
+        const token = this.lexer.tokenizer.def(src);
+        return token && this.lexer.tokens.links[token.tag] ? token : undefined;
+      },
+    }],
     tokenizer: {
       fences(src: string) {
         return commonMarkFence(src, this as unknown as FenceTokenizer);
-      },
-      // The lexer discards a definition whose label is taken, and the save then
-      // loses its line. The first still wins for references, as in CommonMark: a
-      // key holding NUL is one no reference can name, so this one is only kept.
-      def(src: string) {
-        const token = Tokenizer.prototype.def.call(this as unknown as Tokenizer, src);
-        const links = (this as any).lexer.tokens.links as Record<string, unknown>;
-        if (token && links[token.tag]) token.tag = `${token.tag}\0${(duplicateDefinitions += 1)}`;
-        return token ?? false;
       },
       list(src: string) {
         if (!orderedListTokenizer || (this as any).rules.block.list.test(src) || !MAYBE_ORDERED_ITEM.test(src)) {
@@ -433,6 +439,8 @@ export function createFastMarked({ boundBlockTokenizers = true, rememberInlineSt
   });
   return instance as unknown as typeof marked;
 }
+
+const DEFINITION_OPENER = /^ {0,3}\[/;
 
 interface FenceTokenizer {
   rules: { block: { fences: RegExp }; inline: { anyPunctuation: RegExp } };

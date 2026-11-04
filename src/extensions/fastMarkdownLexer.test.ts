@@ -149,6 +149,27 @@ describe("FastLexer performance", () => {
 });
 
 describe("createFastMarked", () => {
+  it("keeps a repeated definition's token without growing the link table", () => {
+    const tokens = createFastMarked().lexer("[a]: http://b\n\n[A]: http://c\n\n[a]: http://d\n\n[e]: http://f");
+
+    expect(tokens.filter((token) => token.type === "def").map((token) => token.raw.trim())).toEqual([
+      "[a]: http://b",
+      "[A]: http://c",
+      "[a]: http://d",
+      "[e]: http://f",
+    ]);
+    expect(Object.keys(tokens.links)).toEqual(["a", "e"]);
+    expect(tokens.links.a.href).toBe("http://b");
+  });
+
+  it("reads a repeated definition under a paragraph as the stock lexer does", () => {
+    const markdown = "[a]: http://b\n\ntext\n[a]: http://c";
+
+    expect(createFastMarked().lexer(markdown).map((token) => token.type)).toEqual(
+      marked.lexer(markdown).map((token) => token.type),
+    );
+  });
+
   it("exposes a FastLexer-derived instance Lexer and routes lexer()", () => {
     const instance = createFastMarked();
     // The instance Lexer is a FastLexer subclass bound to instance.defaults, so
