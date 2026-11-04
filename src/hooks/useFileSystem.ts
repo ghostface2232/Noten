@@ -1314,7 +1314,7 @@ export function useFileSystem(
   }, [activeIndex, docs, locale, tiptapRef]);
 
   const renameNote = useCallback(async (index: number, newName: string): Promise<RenameNoteResult> => {
-    const { docs: liveDocs, activeDocId, activeIndex: currentActiveIndex } = getLiveDocsSnapshot();
+    const { docs: liveDocs, activeDocId } = getLiveDocsSnapshot();
     const doc = liveDocs[index];
     if (!doc) return { renamed: false, linkRewriteSkipped: false };
 
@@ -1353,6 +1353,10 @@ export function useFileSystem(
     const candidates = oldTitleIsAmbiguous ? [] : liveDocs.filter(
       (entry) => entry.id !== doc.id && entry.content.includes("[["),
     );
+    // Compared after the awaits below, to tell whether the user typed meanwhile.
+    const editorAtStart = candidates.some((entry) => entry.id === activeDocId)
+      ? getCurrentMarkdown(tiptapRef)
+      : null;
     const flushFailed = new Set<string>();
     for (const entry of candidates) {
       if (entry.id === activeDocId) captureAndQueueSaveRef?.current?.();
@@ -1397,6 +1401,19 @@ export function useFileSystem(
 
     const committed = new Set<string>();
 
+    // The flushes and reads above can take seconds on a cloud folder, so what
+    // the editor shows is decided here, not from before them. A note the user
+    // left is an ordinary file now; a note they opened has to go through the
+    // editor, whose next save would otherwise put the old link back.
+    const activeNowId = libraryStore.getSnapshot().activeNoteId;
+    const editorShows = (id: string) => {
+      const shown = tiptapRef.current?.getEditor()?.storage?.documentContext?.noteId;
+      return libraryStore.getSnapshot().activeNoteId === id && (!shown || shown === id);
+    };
+    for (const rw of proposed) {
+      rw.isActive = rw.docId === activeNowId && editorShows(rw.docId);
+    }
+
     await Promise.all(proposed.map(async (rw) => {
       if (rw.isActive) return; // active doc handled below
       if (!rw.filePath) {
@@ -1410,9 +1427,16 @@ export function useFileSystem(
     }));
 
     const activeRewrite = proposed.find((rw) => rw.isActive) ?? null;
-    let activeWriteOk = false;
     if (activeRewrite) {
-      const activeDoc = liveDocs[currentActiveIndex];
+      const activeDoc = libraryStore.getSnapshot().docs.find((entry) => entry.id === activeRewrite.docId);
+      // The rewrite was computed before those awaits. Built from what the editor
+      // holds now if that differs, or text typed meanwhile would be replaced. A
+      // note opened meanwhile was read from disk, and the editor is newer.
+      const editorBeforeWrite = getCurrentMarkdown(tiptapRef);
+      if (activeRewrite.docId !== activeDocId || editorBeforeWrite !== editorAtStart) {
+        activeRewrite.updated = editorBeforeWrite.replace(rewritePattern, replacement);
+      }
+      let activeWriteOk = true;
       if (activeDoc?.filePath) {
         activeWriteOk = await rewriteNoteFile(
           activeDoc.filePath,
@@ -1420,29 +1444,32 @@ export function useFileSystem(
           "renameNote.rewrite.active",
           activeDoc.id,
         );
-      } else {
-        // No file path on the active doc — memory only.
-        activeWriteOk = true;
       }
       if (activeWriteOk) committed.add(activeRewrite.docId);
+
+      // Flip the editor only if the active doc's rewrite actually landed on
+      // disk. Clearing isDirty when the write failed would mask the loss; an
+      // unchanged editor + dirty flag lets autosave retry. A switch during the
+      // write leaves the editor on another note, and a keystroke during it has
+      // its own pending save, which needs the link rewritten too.
+      if (activeWriteOk && editorShows(activeRewrite.docId)) {
+        const editorAfterWrite = getCurrentMarkdown(tiptapRef);
+        const typedDuringWrite = editorAfterWrite !== editorBeforeWrite;
+        const markdown = typedDuringWrite
+          ? editorAfterWrite.replace(rewritePattern, replacement)
+          : activeRewrite.updated;
+        tiptapRef.current?.openDocument?.({
+          noteId: activeDoc?.id ?? null,
+          filePath: activeDoc?.filePath ?? null,
+          markdown,
+          reason: "file-watch",
+        });
+        state.primeMarkdown(markdown);
+        if (!typedDuringWrite) state.setIsDirty(false);
+      }
     }
 
     const proposedById = new Map(proposed.map((rw) => [rw.docId, rw]));
-
-    // Flip the editor only if the active doc's rewrite actually landed on
-    // disk. Clearing isDirty when the write failed would mask the loss; an
-    // unchanged editor + dirty flag lets autosave retry.
-    if (activeRewrite && activeWriteOk) {
-      const activeDoc = liveDocs[currentActiveIndex];
-      tiptapRef.current?.openDocument?.({
-        noteId: activeDoc?.id ?? null,
-        filePath: activeDoc?.filePath ?? null,
-        markdown: activeRewrite.updated,
-        reason: "file-watch",
-      });
-      state.primeMarkdown(activeRewrite.updated);
-      state.setIsDirty(false);
-    }
 
     markNoteTitleChanged(doc.id);
     // Renaming a note does not open it. Passing the renamed id here made it the

@@ -1868,6 +1868,108 @@ describe("useFileSystem — renameNote keeps the active note", () => {
   });
 });
 
+describe("useFileSystem — renameNote when the editor moved during it", () => {
+  const OLD = "see [[Old]]";
+
+  function gatedRead() {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let started!: () => void;
+    const reading = new Promise<void>((resolve) => { started = resolve; });
+    readMock.mockImplementation(async () => {
+      started();
+      await gate;
+      return OLD;
+    });
+    return { reading, release: () => release() };
+  }
+
+  it("leaves the editor alone when the note holding the link was left", async () => {
+    const renamed = makeDoc("renamed", { fileName: "Old", customName: true });
+    const left = makeDoc("left", { content: OLD });
+    const elsewhere = makeDoc("elsewhere", { content: "other" });
+    const linker = makeDoc("linker", { content: OLD });
+    const { reading, release } = gatedRead();
+    const { result, openDocument } = renderFs({ docs: [left, renamed, elsewhere, linker], activeIndex: 0 });
+
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = result.current.renameNote(1, "New");
+      await reading;
+    });
+    libraryStore.commit({ activeNoteId: "elsewhere" }, "local");
+    await act(async () => {
+      release();
+      await pending;
+    });
+
+    expect(openDocument).not.toHaveBeenCalled();
+    expect(writeMock).toHaveBeenCalledWith("/notes/left.md", "see [[New]]");
+    expect(libraryStore.getSnapshot().activeNoteId).toBe("elsewhere");
+  });
+
+  it("goes through the editor for a note opened meanwhile", async () => {
+    const renamed = makeDoc("renamed", { fileName: "Old", customName: true });
+    const open = makeDoc("open", { content: "other" });
+    const opened = makeDoc("opened", { content: OLD });
+    const { reading, release } = gatedRead();
+    const { result, openDocument } = renderFs({ docs: [open, renamed, opened], activeIndex: 0 });
+
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = result.current.renameNote(1, "New");
+      await reading;
+    });
+    libraryStore.commit({ activeNoteId: "opened" }, "local");
+    refs.editorContent = "see [[Old]] typed";
+    await act(async () => {
+      release();
+      await pending;
+    });
+
+    expect(openDocument).toHaveBeenCalledWith(expect.objectContaining({
+      noteId: "opened",
+      markdown: "see [[New]] typed",
+    }));
+  });
+
+  it("keeps text typed in the active note while the rename was waiting", async () => {
+    const renamed = makeDoc("renamed", { fileName: "Old", customName: true });
+    const active = makeDoc("active", { content: OLD });
+    const other = makeDoc("other", { content: OLD });
+    refs.editorContent = OLD;
+    const { reading, release } = gatedRead();
+    const { result, openDocument } = renderFs({ docs: [active, renamed, other], activeIndex: 0 });
+
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = result.current.renameNote(1, "New");
+      await reading;
+    });
+    refs.editorContent = "see [[Old]] typed";
+    await act(async () => {
+      release();
+      await pending;
+    });
+
+    expect(writeMock).toHaveBeenCalledWith("/notes/active.md", "see [[New]] typed");
+    expect(openDocument).toHaveBeenCalledWith(expect.objectContaining({ noteId: "active", markdown: "see [[New]] typed" }));
+  });
+
+  it("keeps the note's own bytes when nothing was typed", async () => {
+    const renamed = makeDoc("renamed", { fileName: "Old", customName: true });
+    const active = makeDoc("active", { content: OLD });
+    refs.editorContent = `${OLD}\n\n`;
+    const { result } = renderFs({ docs: [active, renamed], activeIndex: 0 });
+
+    await act(async () => {
+      await result.current.renameNote(1, "New");
+    });
+
+    expect(writeMock).toHaveBeenCalledWith("/notes/active.md", "see [[New]]");
+  });
+});
+
 describe("useFileSystem — renameNote partial-failure", () => {
   it("when one back-link rewrite fails, only the successful docs' bodies update in memory", async () => {
     const target = makeDoc("target", { fileName: "Old", customName: true });
