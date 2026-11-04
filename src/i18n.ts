@@ -337,6 +337,11 @@ const dict = {
     en: "Something went wrong. Details were written to the crash log.",
     ko: "문제가 발생했습니다. 자세한 내용은 크래시 로그에 기록했습니다.",
   },
+  "error.appCrashed": {
+    en: "Noten hit an error it could not recover from. Reload to continue. Edits that had not been saved come back on reload if they were recorded, and the details are in the crash log.",
+    ko: "Noten에 복구할 수 없는 오류가 발생했습니다. 다시 불러와 계속해 주세요. 저장되지 않은 편집은 기록된 경우 다시 불러올 때 복원되며, 자세한 내용은 크래시 로그에 있습니다.",
+  },
+  "error.reload": { en: "Reload", ko: "다시 불러오기" },
   "error.settingsFailed": {
     en: "Could not save this setting. It will go back to its saved value next time.",
     ko: "이 설정을 저장하지 못했습니다. 다음 실행 때 저장된 값으로 돌아갑니다.",

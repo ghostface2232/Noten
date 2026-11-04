@@ -136,6 +136,7 @@ export function logNotenError(error: NotenError): Promise<void> {
 }
 
 function extractUncaughtMessage(value: unknown, fallback: string): string {
+  if (value == null) return fallback;
   if (value instanceof Error) return value.message || fallback;
   if (typeof value === "string") return value;
   try {
@@ -143,6 +144,23 @@ function extractUncaughtMessage(value: unknown, fallback: string): string {
   } catch {
     return String(value);
   }
+}
+
+// The browser's own report that a layout settled a frame late. It reaches `error`
+// with no error object, and it filled one user's crash.log: 317 of 374 lines.
+const HARMLESS_ERROR_EVENT = /^ResizeObserver loop/;
+
+/** Logs what was thrown and says so on screen, or it would be seen only in the log. */
+function reportUncaught(thrown: unknown, fallback: string): void {
+  if (isNotenError(thrown)) {
+    void logNotenError(thrown);
+    return;
+  }
+  const message = extractUncaughtMessage(thrown, fallback);
+  const stack = thrown instanceof Error ? thrown.stack : undefined;
+  void enqueue(formatLine("fatal", "UNCAUGHT", message, undefined, stack));
+  // With nothing thrown there is nothing that went wrong to tell the user about.
+  if (thrown != null) notifyFatal(new NotenError("UNCAUGHT", "fatal", message));
 }
 
 export function initCrashLog(): void {
@@ -153,24 +171,12 @@ export function initCrashLog(): void {
   w[INSTALLED_SENTINEL] = true;
 
   window.addEventListener("error", (event) => {
-    const err = (event as ErrorEvent).error;
-    if (isNotenError(err)) {
-      void logNotenError(err);
-      return;
-    }
-    const message = extractUncaughtMessage(err, (event as ErrorEvent).message || "Unknown error");
-    const stack = err instanceof Error ? err.stack : undefined;
-    void enqueue(formatLine("fatal", "UNCAUGHT", message, undefined, stack));
+    const { error, message } = event as ErrorEvent;
+    if (error == null && HARMLESS_ERROR_EVENT.test(message ?? "")) return;
+    reportUncaught(error, message || "Unknown error");
   });
 
   window.addEventListener("unhandledrejection", (event) => {
-    const reason = (event as PromiseRejectionEvent).reason;
-    if (isNotenError(reason)) {
-      void logNotenError(reason);
-      return;
-    }
-    const message = extractUncaughtMessage(reason, "Unhandled rejection");
-    const stack = reason instanceof Error ? reason.stack : undefined;
-    void enqueue(formatLine("fatal", "UNCAUGHT", message, undefined, stack));
+    reportUncaught((event as PromiseRejectionEvent).reason, "Unhandled rejection");
   });
 }
