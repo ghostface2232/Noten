@@ -13,7 +13,7 @@ const refs = vi.hoisted(() => ({
   readError: null as string | null,
   renameError: false,
   showWindow: (async () => {}) as () => Promise<void>,
-  ask: (async () => false) as (...args: unknown[]) => Promise<boolean>,
+  ask: (async () => true) as (...args: unknown[]) => Promise<boolean>,
   logged: (async () => {}) as (...args: unknown[]) => Promise<void>,
 }));
 
@@ -78,7 +78,7 @@ beforeEach(() => {
   refs.readError = null;
   refs.renameError = false;
   refs.showWindow = vi.fn(async () => {});
-  refs.ask = vi.fn(async () => false);
+  refs.ask = vi.fn(async () => true);
   refs.logged = vi.fn(async () => {});
 });
 
@@ -175,16 +175,17 @@ describe("useSettings — a settings file that cannot be read", () => {
     expect(result.current.isLoaded).toBe(false);
     expect(refs.files.get(SETTINGS_PATH)).toBe("{ not json");
 
-    await act(async () => { answer(false); });
+    await act(async () => { answer(true); });
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
   });
 
   it("loads the file after a retry", async () => {
     refs.readError = "The process cannot access the file (os error 32)";
     refs.files.set(SETTINGS_PATH, SAVED);
+    // Esc and the X answer as this button does.
     refs.ask = vi.fn(async () => {
       refs.readError = null;
-      return true;
+      return false;
     });
 
     const result = await mount();

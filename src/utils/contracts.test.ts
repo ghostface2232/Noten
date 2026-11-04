@@ -217,7 +217,7 @@ describe("contract: settings read failures are not default settings", () => {
     const text = read(SETTINGS);
     const effect = text.match(/for \(;;\) \{[\s\S]*?\n {6}\}\n/);
     expect(effect, "settings read loop not found").not.toBeNull();
-    expect(effect![0]).toMatch(/askToRetrySettingsRead/);
+    expect(effect![0]).toMatch(/askToStartOnDefaults/);
     expect(effect![0]).not.toMatch(/setIsLoaded/);
   });
 

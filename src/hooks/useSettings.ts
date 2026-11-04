@@ -158,11 +158,20 @@ async function readMergeWriteSetting<K extends keyof Settings>(
   key: K,
   value: Settings[K],
 ): Promise<Settings> {
-  const existing = await loadSettingsFromFile();
-  const onDisk = existing === null ? firstRunDefaults() : existing;
-  const merged = { ...onDisk, [key]: value };
-  await persistSettings(merged);
-  return merged;
+  const attempt = async () => {
+    const existing = await loadSettingsFromFile();
+    const onDisk = existing === null ? firstRunDefaults() : existing;
+    const merged = { ...onDisk, [key]: value };
+    await persistSettings(merged);
+    return merged;
+  };
+  try {
+    return await attempt();
+  } catch {
+    // Two windows writing at once share a temp file, and the write is fail-closed.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return attempt();
+  }
 }
 
 // Windows' "file not found" and "path not found". `exists` cannot answer this: it
@@ -196,8 +205,12 @@ async function loadSettingsRetrying(): Promise<Settings | null> {
   return loadSettingsFromFile();
 }
 
-/** Asks what to do about a file that stays unreadable. Null if it could not ask. */
-async function askToRetrySettingsRead(): Promise<boolean | null> {
+/**
+ * Asks what to do about a file that stays unreadable: true starts on defaults. Esc
+ * and the X both answer as the second button, so that has to be the one that changes
+ * nothing. Null if it could not ask.
+ */
+async function askToStartOnDefaults(): Promise<boolean | null> {
   const locale = detectFirstRunLocale();
   try {
     // A window stays hidden until its note has loaded, which is waiting on this.
@@ -205,8 +218,8 @@ async function askToRetrySettingsRead(): Promise<boolean | null> {
     return await ask(t("settings.unreadable", locale), {
       title: t("settings.unreadableTitle", locale),
       kind: "warning",
-      okLabel: t("settings.unreadableRetry", locale),
-      cancelLabel: t("settings.unreadableDefaults", locale),
+      okLabel: t("settings.unreadableDefaults", locale),
+      cancelLabel: t("settings.unreadableRetry", locale),
     });
   } catch {
     return null;
@@ -214,8 +227,8 @@ async function askToRetrySettingsRead(): Promise<boolean | null> {
 }
 
 async function setAsideUnreadableSettings(): Promise<boolean> {
-  const path = await getSettingsPath();
   try {
+    const path = await getSettingsPath();
     await tauriFileSystem.rename(path, path.replace(/\.json$/, `.unreadable-${Date.now()}.json`));
     return true;
   } catch {
@@ -268,9 +281,9 @@ export function useSettings() {
             { cause: err },
           ));
           if (cancelled) return;
-          const retry = await askToRetrySettingsRead();
-          if (retry) continue;
-          mayWriteDefaults = retry === false && await setAsideUnreadableSettings();
+          const startOnDefaults = await askToStartOnDefaults();
+          if (startOnDefaults === false) continue;
+          mayWriteDefaults = startOnDefaults === true && await setAsideUnreadableSettings();
           break;
         }
       }
