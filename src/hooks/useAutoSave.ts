@@ -20,6 +20,7 @@ import { markdownEqual } from "../utils/markdownEqual";
 import { normalizeSep } from "../utils/pathUtils";
 import { libraryStore } from "../utils/libraryStore";
 import { isNoteLifecycleBlocked } from "./noteLifecycleGate";
+import { markSaveFailed, markSaveSettled, settleSavesWithoutPending } from "../utils/saveFailures";
 
 const DEBOUNCE_MS = 1000;
 // Failed provisioning of a pathless doc retries on later edits, but at most
@@ -79,6 +80,8 @@ interface SaveSnapshot {
   content: string;
   editSerial: number;
   revision: number;
+  /** What this window knew of the file when this save failed. */
+  failedAgainst?: { knownDisk: string | undefined };
 }
 
 interface PendingSaveTarget {
@@ -198,6 +201,7 @@ export function useAutoSave(
 
   const refreshHasPendingChanges = useCallback(() => {
     hasPendingChangesRef.current = pendingTargetsRef.current.size > 0 || pendingSnapshotsRef.current.size > 0;
+    settleSavesWithoutPending((docId) => pendingTargetsRef.current.has(docId) || pendingSnapshotsRef.current.has(docId));
   }, []);
 
   const markActiveDocEdited = useCallback((): PendingSaveTarget | null => {
@@ -236,6 +240,10 @@ export function useAutoSave(
     if (!target?.filePath) return null;
     const docId = "docId" in target ? target.docId : target.id;
     if (remoteDeletedDocsRef.current.has(docId)) return null;
+    // Gone after a crash unmounts the app: `getCurrentMarkdown` then answers "", and
+    // saving that would empty the note, with no backup since the disk still matches
+    // its baseline, and carry the empty body to every other window.
+    if (!latestEditorRef.current) return null;
     if (activeDocRef.current?.id !== docId) {
       return null;
     }
@@ -312,7 +320,9 @@ export function useAutoSave(
         docId: snapshot.docId,
         filePath: snapshot.filePath,
         content: snapshot.content,
-        baseContent: getKnownDiskContent(snapshot.filePath) ?? null,
+        // What the edit was made against. A body landing after a failed save moves the
+        // baseline, and recording that one would let the next start apply this over it.
+        baseContent: (snapshot.failedAgainst ? snapshot.failedAgainst.knownDisk : getKnownDiskContent(snapshot.filePath)) ?? null,
         editSerial: snapshot.editSerial,
         updatedAt: Date.now(),
       });
@@ -385,6 +395,38 @@ export function useAutoSave(
     if (remoteDeletedDocsRef.current.has(snapshot.docId)) return false;
     if (isNoteLifecycleBlocked(snapshot.docId)) return false;
 
+    // Another window's body landed since this save failed, and it moved the baseline
+    // with it, so the backup check below would see no conflict and overwrite that body
+    // with no copy. A retry and every flush reach here. This window's own write leaves
+    // the baseline equal to this text, which is not a conflict.
+    const knownDisk = getKnownDiskContent(snapshot.filePath);
+    if (
+      snapshot.failedAgainst
+      && knownDisk !== undefined
+      && knownDisk !== snapshot.failedAgainst.knownDisk
+      && knownDisk !== snapshot.content
+    ) {
+      try {
+        await backupLocalDeletionVersion(tauriFileSystem, await getNotesDir(), snapshot.docId, snapshot.content);
+      } catch (err) {
+        void logNotenError(new NotenError(
+          "BACKUP_FAILED",
+          "fatal",
+          err instanceof Error ? err.message : String(err),
+          { context: { noteId: snapshot.docId, filePath: snapshot.filePath }, cause: err },
+        ));
+        return false;
+      }
+      markSaveSettled(snapshot.docId, snapshot.editSerial);
+      void logNotenError(new NotenError(
+        "SAVE_KEPT_AS_CONFLICT",
+        "fatal",
+        "An edit that could not be saved lost to a newer body from another window",
+        { context: { noteId: snapshot.docId, filePath: snapshot.filePath } },
+      ));
+      return true;
+    }
+
     const {
       locale: latestLocale,
       notesSortOrder: latestSortOrder,
@@ -402,6 +444,8 @@ export function useAutoSave(
         // next autosave debounce retries, and a transient cloud-sync failure
         // self-heals. A permanent failure repeatedly logs and surfaces via
         // the dirty indicator instead of silently corrupting on disk.
+        markSaveFailed(snapshot.docId, snapshot.editSerial);
+        snapshot.failedAgainst = { knownDisk: getKnownDiskContent(snapshot.filePath) };
         void logNotenError(err instanceof NotenError
           ? err
           : new NotenError(
@@ -653,9 +697,12 @@ export function useAutoSave(
       if (editorStillMatches) {
         commitState.state.setIsDirty(false);
       }
+      markSaveSettled(snapshot.docId, snapshot.editSerial);
       return true;
     } catch (err) {
       if (import.meta.env.DEV) console.warn("[SAVE_FAILED]", err);
+      markSaveFailed(snapshot.docId, snapshot.editSerial);
+      snapshot.failedAgainst = { knownDisk: getKnownDiskContent(snapshot.filePath) };
       void logNotenError(new NotenError(
         "SAVE_FAILED",
         "fatal",
@@ -1026,6 +1073,39 @@ export function useAutoSave(
     refreshHasPendingChanges();
   }, [clearPendingSnapshotIfCurrent, doSave, refreshHasPendingChanges, snapshotIsCurrent, trackInFlight]);
 
+  // A failed save arms no timer, so this is what tries again while a window sits
+  // open. Not flushPendingSnapshots, which runs when the window is about to lose its
+  // chance: it clears a snapshot typing has overtaken, and that forgets the recovery
+  // record, the only durable copy until the next debounce lands. A note with a save
+  // still in flight is left alone, or a hung share stacks one per interval.
+  const retryFailedSaves = useCallback(async (): Promise<void> => {
+    for (const pending of Array.from(pendingSnapshotsRef.current.values())) {
+      const { docId } = pending;
+      // This list predates the awaits below: the note may have saved newer text since.
+      if (pendingSnapshotsRef.current.get(docId) !== pending) continue;
+      if ((inFlightSavesByDocRef.current.get(docId)?.size ?? 0) > 0) continue;
+      if (!stateRef.current.docs.some((doc) => doc.id === docId)) {
+        markSaveSettled(docId, pending.editSerial);
+        continue;
+      }
+      let snapshot = pending;
+      if (!snapshotIsCurrent(pending)) {
+        if (pendingTargetsRef.current.has(docId)) continue;
+        // The edit that overtook it lost its target when the user left the note, so
+        // nothing newer is coming and this is the latest text that can be saved. As
+        // it was, it could never pass doSave's check: unsaved for good under a notice
+        // saying this keeps trying, and dropped by the close drain.
+        const revision = (latestRevisionByDocRef.current.get(docId) ?? 0) + 1;
+        latestRevisionByDocRef.current.set(docId, revision);
+        snapshot = { ...pending, revision, editSerial: latestEditSerialByDocRef.current.get(docId) ?? pending.editSerial };
+        pendingSnapshotsRef.current.set(docId, snapshot);
+      }
+      const saved = await trackInFlight(snapshot, doSave(snapshot)).catch(() => false);
+      if (saved) clearPendingSnapshotIfCurrent(snapshot);
+    }
+    refreshHasPendingChanges();
+  }, [clearPendingSnapshotIfCurrent, doSave, refreshHasPendingChanges, snapshotIsCurrent, trackInFlight]);
+
   // Fire-and-forget variant of flushAutoSave: captures the snapshot
   // synchronously (so the editor can be repointed at a different doc
   // immediately afterwards without poisoning the snapshot) and lets doSave run
@@ -1255,5 +1335,5 @@ export function useAutoSave(
     return settlement;
   }, [awaitDocSave, forgetRecoveryRecord, hasPendingForDoc, refreshHasPendingChanges]);
 
-  return { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, awaitDocSave, flushDocSave, flushPendingSnapshots, journalPendingEdits, forgetRecoveryRecord, runExclusiveBodyWrite, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc };
+  return { scheduleAutoSave, flushAutoSave, hasUnsavedChanges, hasUnsaveableChanges, captureAndQueueSave, awaitInFlightSaves, awaitDocSave, flushDocSave, flushPendingSnapshots, retryFailedSaves, journalPendingEdits, forgetRecoveryRecord, runExclusiveBodyWrite, notifyActiveDoc, cancelDocSave, settleRemoteDeletedDoc };
 }

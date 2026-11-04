@@ -1,8 +1,13 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { appDataDir } from "@tauri-apps/api/path";
-import { exists, mkdir, readTextFile } from "@tauri-apps/plugin-fs";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { mkdir, readTextFile } from "@tauri-apps/plugin-fs";
+import { detectSystemLocale, t } from "../i18n";
 import { atomicWriteText } from "../utils/atomicWrite";
+import { logNotenError } from "../utils/crashLog";
 import { tauriFileSystem } from "../utils/fs";
+import { NotenError } from "../utils/notenError";
 import { isNoteColorId, type NoteColorId } from "../utils/noteColors";
 
 export type Locale = "en" | "ko";
@@ -67,13 +72,8 @@ const DEFAULTS: Settings = {
 // browser language. Never applied to an existing file — a file whose locale
 // field is missing or corrupt still falls back to DEFAULTS.locale ("ko") in
 // parseSettings, exactly as before.
-function detectFirstRunLocale(): Locale {
-  const lang = typeof navigator !== "undefined" ? navigator.language ?? "" : "";
-  return lang.toLowerCase().startsWith("ko") ? "ko" : "en";
-}
-
 function firstRunDefaults(): Settings {
-  return { ...DEFAULTS, locale: detectFirstRunLocale() };
+  return { ...DEFAULTS, locale: detectSystemLocale() };
 }
 
 let settingsPathPromise: Promise<string> | null = null;
@@ -140,7 +140,9 @@ function parseSettings(raw: string): Settings {
 async function persistSettings(settings: Settings) {
   await ensureSettingsDir();
   const path = await getSettingsPath();
-  await atomicWriteText(tauriFileSystem, path, JSON.stringify(settings, null, 2));
+  // Fail closed: a torn file reads as unreadable, and its notes folder is the only
+  // record of where the user's library is. Callers treat a rejection as retryable.
+  await atomicWriteText(tauriFileSystem, path, JSON.stringify(settings, null, 2), { failClosed: true });
 }
 
 // Re-read settings.json, apply a single key change on top of whatever is on
@@ -151,18 +153,90 @@ async function readMergeWriteSetting<K extends keyof Settings>(
   key: K,
   value: Settings[K],
 ): Promise<Settings> {
-  const existing = await loadSettingsFromFile();
-  const onDisk = existing === null ? firstRunDefaults() : existing;
-  const merged = { ...onDisk, [key]: value };
-  await persistSettings(merged);
-  return merged;
+  const attempt = async () => {
+    const existing = await loadSettingsFromFile();
+    const onDisk = existing === null ? firstRunDefaults() : existing;
+    const merged = { ...onDisk, [key]: value };
+    await persistSettings(merged);
+    return merged;
+  };
+  try {
+    return await attempt();
+  } catch {
+    // Two windows writing at once share a temp file, and the write is fail-closed.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return attempt();
+  }
 }
+
+// Windows' "file not found" and "path not found". `exists` cannot answer this: it
+// says false when it cannot tell, and first-run defaults would then be written over
+// a file nobody read.
+const MISSING_FILE_ERROR = /\(os error [23]\)/;
 
 async function loadSettingsFromFile(): Promise<Settings | null> {
   const path = await getSettingsPath();
-  if (!(await exists(path))) return null;
-  const raw = await readTextFile(path);
+  let raw: string;
+  try {
+    raw = await readTextFile(path);
+  } catch (err) {
+    if (MISSING_FILE_ERROR.test(String(err))) return null;
+    throw err;
+  }
   return parseSettings(raw);
+}
+
+// An antivirus or sync client holding the file is usually gone in a moment.
+const READ_RETRY_DELAYS_MS = [200, 800];
+
+async function loadSettingsRetrying(): Promise<Settings | null> {
+  for (const delay of READ_RETRY_DELAYS_MS) {
+    try {
+      return await loadSettingsFromFile();
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  return loadSettingsFromFile();
+}
+
+/**
+ * Asks what to do about a file that stays unreadable: true starts on defaults. Enter
+ * answers as a dialog's first button, Esc and the X as its second, and either alone
+ * could be a reflex, so defaults take two different answers in a row and every other
+ * path reads the file again. Null if it could not ask.
+ */
+async function askToStartOnDefaults(): Promise<boolean | null> {
+  const locale = detectSystemLocale();
+  try {
+    // A window stays hidden until its note has loaded, which is waiting on this.
+    await getCurrentWindow().show().catch(() => {});
+    const retry = await ask(t("settings.unreadable", locale), {
+      title: t("settings.unreadableTitle", locale),
+      kind: "warning",
+      okLabel: t("settings.unreadableRetry", locale),
+      cancelLabel: t("settings.unreadableDefaults", locale),
+    });
+    if (retry) return false;
+    return await ask(t("settings.unreadableConfirm", locale), {
+      title: t("settings.unreadableConfirmTitle", locale),
+      kind: "warning",
+      okLabel: t("settings.unreadableDefaults", locale),
+      cancelLabel: t("settings.unreadableBack", locale),
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function setAsideUnreadableSettings(): Promise<boolean> {
+  try {
+    const path = await getSettingsPath();
+    await tauriFileSystem.rename(path, path.replace(/\.json$/, `.unreadable-${Date.now()}.json`));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -192,15 +266,29 @@ export function useSettings() {
     let cancelled = false;
 
     (async () => {
+      // Loading on defaults is not neutral: it points the app at the default notes
+      // folder, where recovery and a folder change act on the wrong library, and a
+      // user with their own folder sees every note gone. So nothing proceeds until
+      // this is settled. Only the user's choice replaces the file, and it is kept.
       let fileSettings: Settings | null = null;
-      try {
-        fileSettings = await loadSettingsFromFile();
-      } catch (err) {
-        if (import.meta.env.DEV) {
-          console.warn("Failed to load settings:", err);
+      let mayWriteDefaults = true;
+      for (;;) {
+        try {
+          fileSettings = await loadSettingsRetrying();
+          break;
+        } catch (err) {
+          void logNotenError(new NotenError(
+            "SETTINGS_READ_FAILED",
+            "recoverable",
+            err instanceof Error ? err.message : String(err),
+            { cause: err },
+          ));
+          if (cancelled) return;
+          const startOnDefaults = await askToStartOnDefaults();
+          if (startOnDefaults === false) continue;
+          mayWriteDefaults = startOnDefaults === true && await setAsideUnreadableSettings();
+          break;
         }
-        if (!cancelled) setIsLoaded(true);
-        return;
       }
       if (fileSettings) {
         const shouldResetFilter =
@@ -227,11 +315,13 @@ export function useSettings() {
         settingsRef.current = seeded;
         setSettingsRaw(seeded);
       }
-      try {
-        await persistSettings(seeded);
-      } catch {
-        if (import.meta.env.DEV) {
-          console.warn("Failed to persist default settings:", seeded);
+      if (mayWriteDefaults) {
+        try {
+          await persistSettings(seeded);
+        } catch {
+          if (import.meta.env.DEV) {
+            console.warn("Failed to persist default settings:", seeded);
+          }
         }
       }
       if (!cancelled) setIsLoaded(true);
@@ -253,10 +343,13 @@ export function useSettings() {
       settingsRef.current = merged;
       setSettingsRaw(merged);
       return true;
-    } catch {
-      if (import.meta.env.DEV) {
-        console.warn("Failed to persist settings update:", key);
-      }
+    } catch (err) {
+      void logNotenError(new NotenError(
+        "SETTINGS_WRITE_FAILED",
+        "fatal",
+        err instanceof Error ? err.message : String(err),
+        { context: { key }, cause: err },
+      ));
       return false;
     }
   }, []);

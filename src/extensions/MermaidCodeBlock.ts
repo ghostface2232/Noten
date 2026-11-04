@@ -9,6 +9,8 @@ import { t } from "../i18n";
 import type { Locale } from "../hooks/useSettings";
 import { createMenuShell, createMenuItem, closeContextMenu } from "../utils/contextMenuRegistry";
 import { buildExportFileName, exportMermaidPng, exportMermaidSvg } from "./mermaidExport";
+import { logNotenError } from "../utils/crashLog";
+import { NotenError } from "../utils/notenError";
 
 const MERMAID_LANGUAGE = "mermaid";
 const MERMAID_RENDER_DELAY_MS = 120;
@@ -87,6 +89,19 @@ async function getMermaid() {
     mermaidApi.initialize({
       startOnLoad: false,
       securityLevel: "strict",
+      // Mermaid's own list, plus the directives that put text from a note into the
+      // diagram's stylesheet unescaped, where it can load from a remote host.
+      secure: [
+        "secure",
+        "securityLevel",
+        "startOnLoad",
+        "maxTextSize",
+        "suppressErrorRendering",
+        "maxEdges",
+        "themeCSS",
+        "fontFamily",
+        "altFontFamily",
+      ],
       theme: "neutral",
       suppressErrorRendering: true,
       fontFamily: MERMAID_FONT_FAMILY,
@@ -361,10 +376,14 @@ class MermaidCodeBlockView implements NodeView {
           this.showExportSuccessFeedback();
         }
       } catch (error) {
-        // Export failures are logged for diagnostics but intentionally do
-        // not surface in the UI — they'd clobber the Mermaid render-error
-        // element, which is reserved for actual diagram-syntax problems.
-        console.error("[mermaid-export] Export failed:", error);
+        // Reported through the app's notice, not the Mermaid render-error element,
+        // which is reserved for actual diagram-syntax problems.
+        void logNotenError(new NotenError(
+          "DIAGRAM_EXPORT_FAILED",
+          "fatal",
+          error instanceof Error ? error.message : String(error),
+          { context: { format }, cause: error },
+        ));
       }
     };
 

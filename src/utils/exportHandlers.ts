@@ -70,6 +70,102 @@ export function cloneEditorContentForExport(editorEl: HTMLElement): HTMLElement 
 
 const NOTE_ASSET_ORIGIN = "http://noten-asset.localhost/";
 
+// The PDF is printed from a `file:` page, where `//host/x` and `\\host\x` open an
+// SMB connection and offer the user's NTLM credentials. A note received from
+// someone else can ask for that through a Mermaid label, an `@{img:}` shape or a
+// `style` statement. The print page's CSP cannot narrow `file:` by host, so the
+// references go. A diagram's `<style>` goes with them: its rules reach the page
+// through `document.styleSheets`, parsed, where a CSS escape cannot hide a `url(`.
+const LOADING_ELEMENTS = "link, iframe, object, embed, script, video, audio, source, track, base, meta, style";
+const LOADING_ATTRIBUTES = new Set(["srcset", "lowsrc", "poster", "background", "data", "ping"]);
+const CSS_ATTRIBUTES = new Set([
+  "style",
+  "fill",
+  "stroke",
+  "filter",
+  "mask",
+  "clip-path",
+  "marker-start",
+  "marker-mid",
+  "marker-end",
+  "cursor",
+]);
+const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)/gi;
+const CSS_IMPORT = /@import[^;]*;?/gi;
+const CSS_LOADING_FUNCTION = /(?:image(?:-set)?|cross-fade|src)\(/i;
+// A custom property and a `var()` fallback keep their tokens unparsed even once the
+// browser has read the rule, so a quote in one can make the patterns below read a real
+// load as a data URL. Such a rule is held to the same standard as an attribute. A
+// property's name can be any letters, so this is any `--` at all, BEM selectors too.
+const UNPARSED_TOKENS = /--|var\(/i;
+const FRAGMENT_URL = /^#[\w.:-]*$/;
+// An attribute has not been parsed, so a comment or string can hide a load from any
+// pattern for one: `/*url("#*/background:url(//host/x.png);/*")*/`. Only a whole
+// reference inside the page may remain, and anything else costs the attribute.
+const FRAGMENT_URL_CALL = /url\(\s*(?:"#[\w.:-]*"|'#[\w.:-]*'|#[\w.:-]*)\s*\)/gi;
+const LOADING_CSS_ATTRIBUTE = /\\|@import|url\(|(?:image(?:-set)?|cross-fade|src)\(/i;
+
+const isInertUrl = (url: string) => url.startsWith("#") || /^data:image\//i.test(url);
+const isInertCssAttribute = (value: string) => !LOADING_CSS_ATTRIBUTE.test(value.replace(FRAGMENT_URL_CALL, ""));
+
+/**
+ * A stylesheet rule as the browser serialized it, with everything removed that could
+ * load from outside the page. Empty if it holds a form this does not take apart. For
+ * text the browser has parsed: a comment or an unparsed string would defeat it.
+ */
+export function withoutExternalCss(css: string): string {
+  // `u\72l(` is a url wherever tokens stay unparsed. No stylesheet here uses an escape,
+  // so nothing is lost by not telling those places from the others.
+  if (css.includes("\\") || CSS_LOADING_FUNCTION.test(css)) return "";
+  if (UNPARSED_TOKENS.test(css) && !isInertCssAttribute(css)) return "";
+  return css
+    .replace(CSS_IMPORT, "")
+    .replace(CSS_URL, (whole, double, single, bare) => {
+      const quoted = double ?? single;
+      const inert = quoted === undefined
+        // An unquoted match runs to the first `)`, so it can hold more than a target.
+        ? FRAGMENT_URL.test(bare) || /^data:image\/[^\s()'"]*$/i.test(bare)
+        : FRAGMENT_URL.test(quoted) || /^data:image\//i.test(quoted);
+      return inert ? whole : "none";
+    });
+}
+
+/**
+ * Removes every reference in the export copy that the print page would load,
+ * except inline data and noten-asset images, which `pointAssetImagesAtFiles` then
+ * judges. The editor refuses these same references (app CSP, `noten-asset`'s gate),
+ * so the PDF loses nothing the note showed. Returns how many images were dropped.
+ */
+export function removeExternalReferences(root: HTMLElement): number {
+  for (const element of Array.from(root.querySelectorAll(LOADING_ELEMENTS))) element.remove();
+  let dropped = 0;
+  for (const element of Array.from(root.querySelectorAll("*"))) {
+    const tag = element.localName.toLowerCase();
+    for (const { name: rawName, value } of Array.from(element.attributes)) {
+      const name = rawName.toLowerCase();
+      if (LOADING_ATTRIBUTES.has(name)) {
+        element.removeAttribute(rawName);
+      } else if (CSS_ATTRIBUTES.has(name)) {
+        if (!isInertCssAttribute(value)) element.removeAttribute(rawName);
+      } else if (name === "src") {
+        if (isInertUrl(value) || value.startsWith(NOTE_ASSET_ORIGIN)) continue;
+        element.removeAttribute(rawName);
+        if (tag === "img") dropped += 1;
+      } else if (name === "href" || name === "xlink:href") {
+        // A link is not loaded to print it.
+        if (tag === "a" || tag === "area" || isInertUrl(value)) continue;
+        element.removeAttribute(rawName);
+        if (tag === "image") dropped += 1;
+      }
+    }
+  }
+  return dropped;
+}
+
+// A second layer for whatever the above does not know about. `file:` is what asset
+// images need, and is the one scheme this cannot narrow further.
+const PRINT_PAGE_CSP = "default-src 'none'; img-src data: file:; style-src 'unsafe-inline'; font-src data:";
+
 /**
  * Editor images load their asset through the app's noten-asset scheme, which
  * the headless browser that prints the PDF cannot reach. Point the export
@@ -138,7 +234,7 @@ export async function exportAsPdf(editorEl: HTMLElement, defaultName: string, lo
       for (const rule of sheet.cssRules) {
         // Skip @font-face rules (we embed fonts separately with base64)
         if (rule instanceof CSSFontFaceRule) continue;
-        inlineStyles.push(rule.cssText);
+        inlineStyles.push(withoutExternalCss(rule.cssText));
       }
     } catch {
       // Skip cross-origin sheets
@@ -147,10 +243,12 @@ export async function exportAsPdf(editorEl: HTMLElement, defaultName: string, lo
 
   const fontFaces = await buildFontFaces();
   const exportRoot = cloneEditorContentForExport(editorEl);
-  const droppedImages = await pointAssetImagesAtFiles(exportRoot);
+  const droppedExternal = removeExternalReferences(exportRoot);
+  const droppedImages = droppedExternal + (await pointAssetImagesAtFiles(exportRoot));
 
   const htmlContent = `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="${PRINT_PAGE_CSP}">
 <style>${fontFaces}</style>
 <style>${inlineStyles.join("\n")}</style>
 <style>

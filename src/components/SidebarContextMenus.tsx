@@ -800,6 +800,7 @@ export function SidebarContextMenus({
                 <Button
                   appearance="primary"
                   size="small"
+                  className="noten-filled-button noten-danger-button"
                   style={{ backgroundColor: tokens.colorPaletteRedBackground3, color: "#fff" }}
                   onClick={() => {
                     const gid = confirmDeleteGroupId;

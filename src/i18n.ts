@@ -329,6 +329,38 @@ const dict = {
     en: "Could not save to the notes folder. Your changes are still open here.",
     ko: "노트 폴더에 저장하지 못했습니다. 변경 사항은 아직 창에 남아 있습니다.",
   },
+  "error.saveFailing": {
+    en: "Your latest changes are not saved. Noten keeps trying and they stay open here. Check that the notes folder is writable and that its sync client is running.",
+    ko: "최근 변경 사항이 저장되지 않았습니다. 계속 다시 시도하며 내용은 창에 남아 있습니다. 노트 폴더에 쓸 수 있는지, 동기화 프로그램이 실행 중인지 확인해 주세요.",
+  },
+  "error.saveKeptAsConflict": {
+    en: "A newer version of this note arrived from another window while your edit could not be saved. Your edit was kept in the .conflicts folder.",
+    ko: "편집을 저장하지 못하는 사이 다른 창에서 이 노트의 새 버전이 도착했습니다. 편집한 내용은 .conflicts 폴더에 보관했습니다.",
+  },
+  "error.deleteFailed": {
+    en: "Some notes could not be moved to the trash, so they are still in your list. Try again.",
+    ko: "일부 노트를 휴지통으로 옮기지 못해 목록에 그대로 있습니다. 다시 시도해 주세요.",
+  },
+  "error.restoreFailed": {
+    en: "The note could not be restored and is still in the trash. Try again.",
+    ko: "노트를 복원하지 못해 휴지통에 그대로 있습니다. 다시 시도해 주세요.",
+  },
+  "error.purgeFailed": {
+    en: "Some notes could not be permanently deleted and are still in the trash. Another program may be using them. Try again.",
+    ko: "일부 노트를 완전히 삭제하지 못해 휴지통에 그대로 있습니다. 다른 프로그램이 사용 중일 수 있으니 다시 시도해 주세요.",
+  },
+  "error.importFailed": {
+    en: "Some files could not be read and were not imported.",
+    ko: "일부 파일을 읽지 못해 가져오지 못했습니다.",
+  },
+  "error.imageFailed": {
+    en: "That image action did not complete. The note was not changed.",
+    ko: "이미지 작업을 끝내지 못했습니다. 노트는 바뀌지 않았습니다.",
+  },
+  "error.diagramExportFailed": {
+    en: "The diagram could not be exported.",
+    ko: "다이어그램을 내보내지 못했습니다.",
+  },
   "error.readFailed": {
     en: "Could not read the notes folder. Some notes may be missing until it responds.",
     ko: "노트 폴더를 읽지 못했습니다. 폴더가 응답할 때까지 일부 노트가 보이지 않을 수 있습니다.",
@@ -337,6 +369,35 @@ const dict = {
     en: "Something went wrong. Details were written to the crash log.",
     ko: "문제가 발생했습니다. 자세한 내용은 크래시 로그에 기록했습니다.",
   },
+  "error.appCrashed": {
+    en: "Noten hit an error it could not recover from. Reload to continue. Edits that had not been saved come back on reload if they were recorded, and the details are in the crash log.",
+    ko: "Noten에 복구할 수 없는 오류가 발생했습니다. 다시 불러와 계속해 주세요. 저장되지 않은 편집은 기록된 경우 다시 불러올 때 복원되며, 자세한 내용은 크래시 로그에 있습니다.",
+  },
+  "error.reload": { en: "Reload", ko: "다시 불러오기" },
+  "error.closeWindow": { en: "Close window", ko: "창 닫기" },
+  "error.settingsFailed": {
+    en: "Could not save this setting. It will go back to its saved value next time.",
+    ko: "이 설정을 저장하지 못했습니다. 다음 실행 때 저장된 값으로 돌아갑니다.",
+  },
+  "settings.unreadableTitle": {
+    en: "Noten can't read its settings",
+    ko: "설정을 읽을 수 없습니다",
+  },
+  "settings.unreadable": {
+    en: "settings.json could not be read. If another program is holding it, try again in a moment.",
+    ko: "settings.json을 읽지 못했습니다. 다른 프로그램이 파일을 사용 중이면 잠시 후 다시 시도해 주세요.",
+  },
+  "settings.unreadableConfirmTitle": {
+    en: "Start with default settings?",
+    ko: "기본 설정으로 시작할까요?",
+  },
+  "settings.unreadableConfirm": {
+    en: "The file is kept beside the new one, and your notes are not touched. If you chose your own notes folder, you will need to choose it again in Settings. Pick \"Use Selected Folder Only\" there, because \"Replace with Current Notes\" deletes what the folder holds.",
+    ko: "이 파일은 새 파일 옆에 보관되고 노트는 그대로 있습니다. 노트 폴더를 직접 지정해 두었다면 설정에서 다시 선택해야 합니다. 이때 \"선택한 폴더만 사용\"을 고르세요. \"현재 노트로 대체\"는 폴더의 노트를 지웁니다.",
+  },
+  "settings.unreadableBack": { en: "Back", ko: "돌아가기" },
+  "settings.unreadableRetry": { en: "Try again", ko: "다시 시도" },
+  "settings.unreadableDefaults": { en: "Start with defaults", ko: "기본 설정으로 시작" },
   "close.unsaveableDiscard": {
     en: "Changes to this note could not be saved because the notes folder is unavailable. Close anyway and discard them?",
     ko: "노트 폴더를 사용할 수 없어 이 노트의 변경 사항을 저장하지 못했습니다. 그래도 창을 닫고 변경 사항을 버리시겠습니까?",
@@ -410,6 +471,12 @@ const dict = {
 } as const;
 
 export type I18nKey = keyof typeof dict;
+
+/** The OS or browser language, for when no saved setting can answer. */
+export function detectSystemLocale(): Locale {
+  const lang = typeof navigator !== "undefined" ? navigator.language ?? "" : "";
+  return lang.toLowerCase().startsWith("ko") ? "ko" : "en";
+}
 
 export function t(key: I18nKey, locale: Locale): string {
   return dict[key]?.[locale] ?? key;

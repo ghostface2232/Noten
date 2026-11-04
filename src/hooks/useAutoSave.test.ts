@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { renderHook, act, waitFor, cleanup } from "@testing-library/react";
 import type { NoteDoc, NoteGroup } from "../utils/noteTypes";
 import type { MarkdownState } from "./useMarkdownState";
 import type { TiptapEditorHandle } from "../components/TiptapEditor";
@@ -153,6 +153,8 @@ vi.mock("../utils/documentTitle", () => ({
 
 // Imports must come AFTER vi.mock() registrations.
 import { useAutoSave, type FlushResult } from "./useAutoSave";
+import { isSaveFailing, settleSavesWithoutPending } from "../utils/saveFailures";
+import { clearRecoveryRecord, writeRecoveryRecord } from "../utils/recoveryJournal";
 import * as useNotesLoaderModule from "./useNotesLoader";
 import * as useFileSystemModule from "./useFileSystem";
 import * as conflictBackupModule from "../utils/conflictBackup";
@@ -262,6 +264,285 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
+});
+
+describe("useAutoSave — a save that keeps failing", () => {
+  afterEach(() => settleSavesWithoutPending(() => false));
+
+  it("stays failing until a retry succeeds", async () => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+
+    await act(async () => { await result.current.retryFailedSaves(); });
+    expect(isSaveFailing()).toBe(true);
+
+    refs.writeShouldThrow = null;
+    await act(async () => { await result.current.retryFailedSaves(); });
+    expect(isSaveFailing()).toBe(false);
+  });
+
+  it("keeps the record of an overtaken edit while the outage lasts", async () => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+    await waitFor(() => expect(vi.mocked(writeRecoveryRecord)).toHaveBeenCalled());
+    vi.mocked(clearRecoveryRecord).mockClear();
+
+    act(() => result.current.scheduleAutoSave());
+    await act(async () => { await result.current.retryFailedSaves(); });
+
+    expect(vi.mocked(clearRecoveryRecord)).not.toHaveBeenCalled();
+    expect(isSaveFailing()).toBe(true);
+
+    // Its debounce would otherwise fire during a later test.
+    act(() => result.current.cancelDocSave("a"));
+  });
+
+  it("saves the latest text it has when the edit that overtook it lost its target", async () => {
+    vi.useFakeTimers();
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    refs.editorContent = "typed before the outage";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true }), makeDoc("b")],
+      state: makeState({ isDirty: true }),
+    });
+    act(() => result.current.captureAndQueueSave());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(isSaveFailing()).toBe(true);
+
+    // A keystroke while a new note is being made, then the editor moves on.
+    act(() => result.current.scheduleAutoSave());
+    act(() => result.current.notifyActiveDoc("b", "/notes/b.md"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+
+    refs.writeShouldThrow = null;
+    writeMock.mockClear();
+    await act(async () => { await result.current.retryFailedSaves(); });
+
+    expect(writeMock).toHaveBeenCalledWith("/notes/a.md", "typed before the outage");
+    expect(isSaveFailing()).toBe(false);
+    expect(result.current.hasUnsavedChanges()).toBe(false);
+  });
+
+  it("does not write a note's old snapshot after a newer save landed during the retry", async () => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    refs.editorContent = "a text";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true }), makeDoc("b", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+    act(() => result.current.notifyActiveDoc("b", "/notes/b.md"));
+    refs.editorContent = "b older";
+    logMock.mockClear();
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(logMock).toHaveBeenCalled());
+
+    refs.writeShouldThrow = null;
+    writeMock.mockClear();
+    let releaseA!: () => void;
+    writeMock.mockImplementationOnce(() => new Promise<void>((resolve) => { releaseA = resolve; }));
+    let retry!: Promise<void>;
+    act(() => { retry = result.current.retryFailedSaves(); });
+    await waitFor(() => expect(writeMock).toHaveBeenCalledWith("/notes/a.md", "a text"));
+
+    refs.editorContent = "b newer";
+    act(() => result.current.scheduleAutoSave());
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(writeMock).toHaveBeenCalledWith("/notes/b.md", "b newer"));
+    await act(async () => { await result.current.awaitDocSave("b"); });
+
+    releaseA();
+    await act(async () => { await retry; });
+
+    expect(writeMock).not.toHaveBeenCalledWith("/notes/b.md", "b older");
+
+    act(() => result.current.cancelDocSave("a"));
+    act(() => result.current.cancelDocSave("b"));
+  });
+
+  it.each([
+    ["the retry", "retryFailedSaves"],
+    ["a flush at close", "flushPendingSnapshots"],
+  ] as const)("keeps the edit in .conflicts when another window's body landed, on %s", async (_, method) => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    refs.knownDiskContent.set("/notes/a.md", "base");
+    refs.editorContent = "local edit";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+
+    refs.knownDiskContent.set("/notes/a.md", "peer body");
+    refs.writeShouldThrow = null;
+    writeMock.mockClear();
+    logMock.mockClear();
+    await act(async () => { await result.current[method](); });
+
+    expect(writeMock).not.toHaveBeenCalled();
+    expect(localDeletionBackupMock).toHaveBeenCalledWith(expect.anything(), expect.anything(), "a", "local edit");
+    expect(logMock).toHaveBeenCalledWith(expect.objectContaining({ code: "SAVE_KEPT_AS_CONFLICT", severity: "fatal" }));
+    expect(isSaveFailing()).toBe(false);
+    expect(result.current.hasUnsavedChanges()).toBe(false);
+  });
+
+  it("keeps trying while the .conflicts copy cannot be written either", async () => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    refs.knownDiskContent.set("/notes/a.md", "base");
+    refs.editorContent = "local edit";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+
+    refs.knownDiskContent.set("/notes/a.md", "peer body");
+    refs.remoteBackupShouldThrow = new Error("EPERM: read-only folder");
+    await act(async () => { await result.current.retryFailedSaves(); });
+
+    expect(isSaveFailing()).toBe(true);
+    expect(result.current.hasUnsavedChanges()).toBe(true);
+  });
+
+  it("records the base the edit failed against, not a body that landed since", async () => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    refs.knownDiskContent.set("/notes/a.md", "base");
+    refs.editorContent = "local edit";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+
+    refs.knownDiskContent.set("/notes/a.md", "peer body");
+    vi.mocked(writeRecoveryRecord).mockClear();
+    await act(async () => { await result.current.journalPendingEdits(); });
+
+    expect(vi.mocked(writeRecoveryRecord)).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ baseContent: "base" }),
+    );
+  });
+
+  it("does not take its own write for another window's body", async () => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    refs.knownDiskContent.set("/notes/a.md", "base");
+    refs.editorContent = "local edit";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+
+    // The body landed on an earlier retry and only its metadata failed.
+    refs.knownDiskContent.set("/notes/a.md", "local edit");
+    refs.writeShouldThrow = null;
+    writeMock.mockClear();
+    await act(async () => { await result.current.retryFailedSaves(); });
+
+    expect(localDeletionBackupMock).not.toHaveBeenCalled();
+    expect(writeMock).toHaveBeenCalledWith("/notes/a.md", "local edit");
+    expect(isSaveFailing()).toBe(false);
+  });
+
+  it("does not save an empty body when a crash has taken the editor away", async () => {
+    refs.editorContent = "";
+    const { result, tiptapRef } = renderAutoSave({
+      docs: [makeDoc("a", { content: "the note", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+    act(() => result.current.scheduleAutoSave());
+
+    (tiptapRef as { current: unknown }).current = null;
+    cleanup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Only this one: an earlier test's unmount can still be finishing its own save.
+    expect(writeMock).not.toHaveBeenCalledWith("/notes/a.md", "");
+  });
+
+  it("does not start a second save while one is in flight", async () => {
+    let release!: () => void;
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+
+    refs.writeShouldThrow = null;
+    writeMock.mockClear();
+    writeMock.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
+    void act(() => { void result.current.retryFailedSaves(); });
+    await waitFor(() => expect(writeMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => { await result.current.retryFailedSaves(); });
+    expect(writeMock).toHaveBeenCalledTimes(1);
+
+    release();
+    writeMock.mockReset();
+  });
+
+  it("shows a backup that cannot run as a failing save", async () => {
+    refs.backupShouldThrow = new Error("placeholder not hydrated");
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+
+    act(() => result.current.captureAndQueueSave());
+
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+  });
+
+  it("stops failing when the note left the library", async () => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    const { result, rerenderWith } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+
+    rerenderWith({ docs: [] });
+    await act(async () => { await result.current.retryFailedSaves(); });
+
+    expect(isSaveFailing()).toBe(false);
+  });
+
+  it("stops failing when the note's pending edit is abandoned", async () => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+
+    act(() => result.current.cancelDocSave("a"));
+    expect(isSaveFailing()).toBe(false);
+  });
 });
 
 describe("useAutoSave — remote deletion race", () => {

@@ -457,6 +457,23 @@ fn note_image_roots<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
     .collect()
 }
 
+/// Every spelling of those roots a path from the app can start with. `note_image_roots`
+/// holds the canonical ones, and a profile on a DFS share canonicalizes to whichever
+/// server backs it, which is not how a path written from the app spells it.
+fn note_image_root_spellings<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
+    let mut roots = note_image_roots(app);
+    roots.extend(
+        [
+            app.path().home_dir(),
+            app.path().app_data_dir(),
+            app.path().app_local_data_dir(),
+        ]
+        .into_iter()
+        .flatten(),
+    );
+    roots
+}
+
 /// The files PDF export may point headless Edge at, one per requested image
 /// path: its canonical path when the `noten-asset` scheme would serve it and
 /// it is a file, else `None`. The export must not reach anything the editor
@@ -468,14 +485,57 @@ async fn note_image_files<R: Runtime>(
     paths: Vec<String>,
 ) -> Vec<Option<String>> {
     let roots = note_image_roots(&app);
+    let spellings = note_image_root_spellings(&app);
     paths
         .iter()
-        .map(|raw| servable_note_image_file(raw, &roots))
+        .map(|raw| servable_note_image_file(raw, &roots, &spellings))
         .collect()
 }
 
+/// Whether `raw` can be touched without reaching a host it names. Opening a UNC
+/// path connects to that host and offers the user's NTLM credentials, and
+/// `canonicalize` opens the path before any rule can judge where it lands. A
+/// Mermaid label in a note received from someone else can ask for any path here
+/// on open, so this is decided from the text alone. A drive path is local as far
+/// as a note can steer it. Anything else must lie under a root, which is how a
+/// profile redirected to a share keeps working: that host is the user's own.
+fn stays_off_foreign_hosts(raw: &str, roots: &[PathBuf]) -> bool {
+    let bytes = raw.as_bytes();
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
+    {
+        return true;
+    }
+    let path = comparable_share_path(raw);
+    // Windows drops trailing dots and spaces, so `.. ` climbs as `..` does.
+    let climbs = path.split('\\').any(|part| {
+        part.len() >= 2 && part.starts_with("..") && part.trim_end_matches(['.', ' ']).is_empty()
+    });
+    !climbs
+        && roots.iter().any(|root| {
+            let root = comparable_share_path(&root.to_string_lossy());
+            root.starts_with(r"\\")
+                && !root.starts_with(r"\\?\")
+                && path.strip_prefix(&root).is_some_and(|rest| rest.starts_with('\\'))
+        })
+}
+
+/// One spelling for a share path: `\\?\UNC\host\share` is `\\host\share`.
+fn comparable_share_path(raw: &str) -> String {
+    let path = raw.replace('/', r"\").to_lowercase();
+    match path.strip_prefix(r"\\?\unc\") {
+        Some(rest) => format!(r"\\{rest}"),
+        None => path,
+    }
+}
+
 /// `raw`'s canonical path if it is a file the `noten-asset` scheme would serve.
-fn servable_note_image_file(raw: &str, roots: &[PathBuf]) -> Option<String> {
+fn servable_note_image_file(raw: &str, roots: &[PathBuf], spellings: &[PathBuf]) -> Option<String> {
+    if !stays_off_foreign_hosts(raw, spellings) {
+        return None;
+    }
     let path = fs::canonicalize(raw).ok()?;
     (path.is_file() && is_servable_note_image(&path, roots))
         .then(|| path.to_string_lossy().into_owned())
@@ -512,6 +572,9 @@ fn note_asset_response<R: Runtime>(
     let raw = percent_encoding::percent_decode(encoded.get(1..).unwrap_or_default())
         .decode_utf8_lossy()
         .into_owned();
+    if !stays_off_foreign_hosts(&raw, &note_image_root_spellings(app)) {
+        return status(403);
+    }
     let Ok(path) = fs::canonicalize(&raw) else {
         return status(404);
     };
@@ -614,7 +677,8 @@ pub fn run() {
 mod tests {
     use super::{
         failure_reason, is_servable_note_image, note_image_mime, print_temp_stem,
-        remove_dir_when_released, servable_note_image_file, wait_for_written_file, wide_null,
+        remove_dir_when_released, servable_note_image_file, stays_off_foreign_hosts,
+        wait_for_written_file, wide_null,
     };
     use std::io::Write;
     use std::path::{Path, PathBuf};
@@ -658,7 +722,7 @@ mod tests {
         std::fs::write(assets.join("note.md"), b"md").unwrap();
         std::fs::write(root.join("notes").join("outside.png"), b"png").unwrap();
         let roots = vec![std::fs::canonicalize(&root).unwrap()];
-        let file = |p: PathBuf| servable_note_image_file(&p.to_string_lossy(), &roots);
+        let file = |p: PathBuf| servable_note_image_file(&p.to_string_lossy(), &roots, &roots);
 
         let served = file(assets.join("a.png")).expect("an image inside .assets is served");
         let canonical = std::fs::canonicalize(assets.join("a.png")).unwrap();
@@ -671,7 +735,7 @@ mod tests {
         assert_eq!(file(assets.join("note.md")), None);
         assert_eq!(file(assets.join("dir.png")), None);
         assert_eq!(file(assets.join("missing.png")), None);
-        assert_eq!(servable_note_image_file("", &roots), None);
+        assert_eq!(servable_note_image_file("", &roots, &roots), None);
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -724,6 +788,59 @@ mod tests {
         assert!(!ok(r"C:\Users\u\.assets.png"));
         assert!(!ok(r"D:\notes\.assets\n1\a.png"));
         assert!(!ok(r"C:\Users\uu\notes\.assets\a.png"));
+    }
+
+    #[test]
+    fn judges_a_path_that_names_a_host_from_its_text() {
+        let local = vec![PathBuf::from(r"\\?\C:\Users\u")];
+        let ok = |p: &str| stays_off_foreign_hosts(p, &local);
+        assert!(ok(r"C:\Users\u\notes\.assets\n\a.png"));
+        assert!(ok("C:/Users/u/notes/.assets/n/a.png"));
+        assert!(ok(r"D:\notes\.assets\a.png"));
+        for path in [
+            r"\\host\share\.assets\a.png",
+            "//host/share/.assets/a.png",
+            r"\/host\share\a.png",
+            r"\\?\UNC\host\share\a.png",
+            r"\\.\UNC\host\share\a.png",
+            r"\??\UNC\host\share\a.png",
+            r"\\host@SSL@443\share\a.png",
+            r"\\?\C:\Users\u\a.png",
+            r"\Users\u\a.png",
+            "C:relative.png",
+            "relative.png",
+            "",
+        ] {
+            assert!(!ok(path), "{path}");
+        }
+    }
+
+    #[test]
+    fn keeps_a_profile_redirected_to_a_share_and_nothing_beside_it() {
+        let roots = vec![PathBuf::from(r"\\?\UNC\nas\Users\u")];
+        let ok = |p: &str| stays_off_foreign_hosts(p, &roots);
+        assert!(ok(r"\\nas\users\u\notes\.assets\a.png"));
+        assert!(ok("//NAS/Users/u/notes/.assets/a.png"));
+        assert!(ok(r"\\?\UNC\nas\Users\u\a.png"));
+        for path in [
+            r"\\host\users\u\a.png",
+            r"\\nas\users\uu\a.png",
+            r"\\nas\users\u",
+            r"\\nas\users\u\..\..\..\..\host\s\a.png",
+            r"\\nas\users\u\.. \a.png",
+            r"\\nas\users\u\...\a.png",
+        ] {
+            assert!(!ok(path), "{path}");
+        }
+    }
+
+    // TEST-NET-1 never answers, so reaching for it would hold this past the bound.
+    #[test]
+    fn refuses_a_share_without_touching_the_network() {
+        let roots = vec![PathBuf::from(r"C:\Users\u")];
+        let start = Instant::now();
+        assert_eq!(servable_note_image_file(r"\\192.0.2.1\s\.assets\a.png", &roots, &roots), None);
+        assert!(start.elapsed() < Duration::from_secs(2));
     }
 
     #[test]
