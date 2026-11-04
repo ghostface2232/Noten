@@ -251,8 +251,15 @@ export const RawBlock = Node.create({
     return rawBlock(String(token.text ?? ""), (token.kind as RawBlockKind | undefined) ?? "html");
   },
 
-  renderMarkdown(node: JSONContent) {
-    return (node.content ?? []).map((child) => child.text ?? "").join("");
+  renderMarkdown(node: JSONContent, _helpers, context) {
+    const source = (node.content ?? []).map((child) => child.text ?? "").join("");
+    // A list item writes its later blocks on the next line, and only a paragraph
+    // gets a blank line first. Without one this source is read as part of the
+    // paragraph above: the line stops being indented on the next save and is
+    // escaped on the one after. Written as a line of the block, so it is indented
+    // with the rest of it.
+    const inItem = context?.parentType === "listItem" || context?.parentType === "taskItem";
+    return inItem && context?.index > 0 ? `\n${source}` : source;
   },
 });
 

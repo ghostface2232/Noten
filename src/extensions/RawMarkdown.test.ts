@@ -114,6 +114,26 @@ describe("Markdown without a model is saved as written", () => {
   });
 });
 
+describe("kept source inside a list item", () => {
+  it.each([
+    ["a comment", "1. a\n\n   <!-- c_d -->\n2. b"],
+    ["a multi-line comment", "1. a\n\n   <!-- x\n\n   y -->\n2. b"],
+    ["a bullet's definition", "- a\n\n  [r]: http://x_y"],
+    ["math on the marker line", "- $$\n  x_y\n  $$\n- b"],
+    ["a footnote on the marker line", "- [^1]: a"],
+    ["a comment on the marker line", "- <!-- c_d -->"],
+    ["a comment in a task item", "- [ ] a\n\n  <!-- c_d -->"],
+  ])("does not change %s across saves", (_, markdown) => {
+    const normal = (text: string) => text.replace(/^[ \t]+$/gm, "").trimEnd();
+    let saved = markdown;
+    for (let round = 0; round < 4; round += 1) {
+      saved = load(saved).getMarkdown();
+      expect(normal(saved)).toBe(markdown);
+    }
+    expect(JSON.stringify(load(saved).getJSON())).toContain('"rawBlock"');
+  });
+});
+
 describe("what still reads as ordinary Markdown", () => {
   it.each([
     "---\n\ntext\n\n---",
