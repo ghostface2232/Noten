@@ -264,7 +264,16 @@ describe("what still reads as ordinary Markdown", () => {
     expect(large / small).toBeLessThan(25);
   }, 120_000);
 
+  it("saves a line of several megabytes after a dollar", () => {
+    const editor = load("x");
+    const text = `costs $5 ${"lorem ipsum ".repeat(1_200_000)}`;
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+
+    expect(editor.getMarkdown()).toBe(text);
+  }, 120_000);
+
   it.each([
+    ["display math right after an escaped dollar", "$a\\$$1_b $$", "$a\\\\$$1_b $$"],
     ["a closer after an escaped dollar", "$a \\$ b_c$", "$a \\$ b_c$"],
     ["math after a lone backslash", "\\$a_b$", "\\\\$a_b$"],
     ["math after an opener that cannot open", "$ a \\$b_c$", "$ a \\\\$b_c$"],

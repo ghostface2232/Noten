@@ -42,12 +42,32 @@ const INLINE_MATH_AT_START = new RegExp(`^(?:${INLINE_MATH})`);
 const BRACKET_SYNTAX_AT_START = new RegExp(`^(?:${FOOTNOTE_REFERENCE}|${CALLOUT_MARKER}|${LINKED_IMAGE})`);
 const INLINE_MATH_HERE = new RegExp(INLINE_MATH, "y");
 const BRACKET_SYNTAX_HERE = new RegExp(`${FOOTNOTE_REFERENCE}|${CALLOUT_MARKER}`, "y");
-// How far a math attempt reads before it needs its closer.
-const INLINE_MATH_BODY_HERE = /\$(?![\s$])(?:\\[^\n]|[^$\\\n`])*/y;
 
 function readHere(pattern: RegExp, text: string, index: number): string | undefined {
   pattern.lastIndex = index;
   return pattern.exec(text)?.[0];
+}
+
+/**
+ * Where INLINE_MATH's body stops reading for a closer, for the `$` at `opener`. A
+ * loop because a regex for this overflows the stack on a line of several megabytes.
+ */
+function mathBodyEnd(text: string, opener: number): number {
+  const first = text[opener + 1];
+  if (first === undefined || first === "$" || /\s/.test(first)) return opener;
+  let index = opener + 1;
+  while (index < text.length) {
+    const character = text[index];
+    if (character === "$" || character === "\n" || character === "`") break;
+    if (character !== "\\") {
+      index += 1;
+    } else if (index + 1 < text.length && text[index + 1] !== "\n") {
+      index += 2;
+    } else {
+      break;
+    }
+  }
+  return index;
 }
 
 /**
@@ -56,19 +76,21 @@ function readHere(pattern: RegExp, text: string, index: number): string | undefi
  *
  * Every `$` an attempt reads past is the second half of a `\$` pair. Starting from
  * one reaches the same stopping point and fails there the same way, so those are
- * skipped, or a line of `\$` after an unclosed `$` costs a scan per pair.
+ * skipped, or a line of `\$` after an unclosed `$` costs a scan per pair. One right
+ * before another `$` is not skipped: together they can open `$$`, which reads on
+ * differently, and only the last one read past can be there.
  */
 function* syntaxInPlainText(text: string): Generator<[index: number, source: string]> {
   let attemptedUntil = 0;
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index];
-    if (character !== "[" && (character !== "$" || index < attemptedUntil)) continue;
+    if (character !== "[" && (character !== "$" || (index < attemptedUntil && text[index + 1] !== "$"))) continue;
     const source = readHere(character === "$" ? INLINE_MATH_HERE : BRACKET_SYNTAX_HERE, text, index);
     if (source) {
       yield [index, source];
       index += source.length - 1;
     } else if (character === "$") {
-      attemptedUntil = index + (readHere(INLINE_MATH_BODY_HERE, text, index)?.length ?? 0);
+      attemptedUntil = Math.max(attemptedUntil, mathBodyEnd(text, index));
     }
   }
 }
