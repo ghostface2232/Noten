@@ -411,6 +411,8 @@ describe("emphasis next to CJK text", () => {
     ['**"引用"**是', "strong"],
     ["**「あ」**は", "strong"],
     ['***"인용"***은', "em"],
+    ["**😀**가", "strong"],
+    ["**a😀**가", "strong"],
   ])("reads %j as %s", (markdown, type) => {
     expect(inlineTypes(markdown)).toContain(type);
   });
@@ -428,6 +430,13 @@ describe("emphasis next to CJK text", () => {
     expect(types).not.toContain("strong");
     expect(types).not.toContain("em");
   });
+
+  it.each(["서울(월)~부산(화)~대구(수)", "월~(화)~수", "1)~가 2)~나", "2024.1.~가 2025.1.~나"])(
+    "does not widen a single tilde to strike %j",
+    (markdown) => {
+      expect(inlineTypes(markdown)).not.toContain("del");
+    },
+  );
 
   it.each(["**인용**은", "앞**인용**뒤", "**a** 은", "**인용** 뒤"])("still reads %j as bold", (markdown) => {
     expect(inlineTypes(markdown)).toContain("strong");

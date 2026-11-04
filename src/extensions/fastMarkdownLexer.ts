@@ -116,7 +116,10 @@ function buildInlineMask(
 // no CJK character lexes exactly as before, so `2*(3+4)*5` stays literal.
 const CJK_CHARACTER = /[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}]/u;
 const FLANKING_PUNCTUATION = /[\p{P}\p{S}]/u;
-const DELIMITER_RUN = /[*~]+/g;
+// A single `~` is a range in Korean (`서울(월)~부산(화)~대구(수)`), so only `~~` gets
+// this. marked also reads a single tilde as strike, and saving that rewrites it
+// as `~~`, so widening it would damage text that reads fine today.
+const DELIMITER_RUN = /\*+|~~+/g;
 
 // Closing is decided by marked's right-delimiter rules, which read the masked
 // source. Showing them punctuation in place of the CJK character after such a run
@@ -127,8 +130,11 @@ function maskCjkAfterDelimiters(masked: string): string {
   let parts: string[] | null = null;
   let cursor = 0;
   for (const match of masked.matchAll(DELIMITER_RUN)) {
-    const before = masked[match.index - 1];
-    if (before === undefined || !FLANKING_PUNCTUATION.test(before)) continue;
+    if (match.index === 0) continue;
+    // The whole character: an emoji before the run is two code units.
+    const lowHalf = match.index >= 2 && masked.charCodeAt(match.index - 1) >= 0xdc00 && masked.charCodeAt(match.index - 1) <= 0xdfff;
+    const before = String.fromCodePoint(masked.codePointAt(match.index - (lowHalf ? 2 : 1))!);
+    if (!FLANKING_PUNCTUATION.test(before)) continue;
     const end = match.index + match[0].length;
     const after = masked.codePointAt(end);
     if (after === undefined || !CJK_CHARACTER.test(String.fromCodePoint(after))) continue;
@@ -143,7 +149,7 @@ function maskCjkAfterDelimiters(masked: string): string {
 // Opening is decided from the previous character: an empty one always allows it.
 // `_` keeps its own rule, since it must not open inside a word in any script.
 function prevCharForFlanking(prevChar: string, src: string): string {
-  return (src[0] === "*" || src[0] === "~") && CJK_CHARACTER.test(prevChar) ? "" : prevChar;
+  return (src[0] === "*" || src.startsWith("~~")) && CJK_CHARACTER.test(prevChar) ? "" : prevChar;
 }
 
 // Inline `start` callbacks known to return the first index of a fixed string
