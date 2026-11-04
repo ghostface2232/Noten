@@ -14,6 +14,7 @@ import {
   resolveRenderableImageSource,
 } from "../utils/imageAssetUtils";
 import { closeContextMenu, createMenuShell, createMenuItem } from "../utils/contextMenuRegistry";
+import { isImageNodeName } from "../utils/imageNode";
 
 const HANDLE_SIZE = 10;
 const HANDLE_HIT = 32;
@@ -35,7 +36,7 @@ const imageSourceSyncByEditor = new WeakMap<Editor, Set<() => void>>();
 
 function selectedImagePos(editor: Editor): number | null {
   const { selection } = editor.state;
-  if (selection instanceof NodeSelection && selection.node.type.name === "image") {
+  if (selection instanceof NodeSelection && isImageNodeName(selection.node.type.name)) {
     return selection.from;
   }
   return null;
@@ -133,6 +134,7 @@ function showContextMenu(
   src: string,
   context: DocumentImageContext,
   locale: Locale,
+  nodeName: string,
 ) {
   const i = (key: Parameters<typeof t>[0]) => t(key, locale);
   const { menu, isDark } = createMenuShell(pos, 160);
@@ -191,7 +193,7 @@ function showContextMenu(
         const mime = mimeFromExt(ext);
         const relativeSrc = await persistBinaryAsAsset({ bytes: fileBytes, mime }, context);
         const fallbackDataUrl = bytesToDataUrl(fileBytes, mime);
-        editor.chain().focus().setNodeSelection(nodePos).updateAttributes("image", { src: relativeSrc ?? fallbackDataUrl }).run();
+        editor.chain().focus().setNodeSelection(nodePos).updateAttributes(nodeName, { src: relativeSrc ?? fallbackDataUrl }).run();
       },
     },
     {
@@ -223,7 +225,8 @@ export function createImageNodeView(editor: Editor) {
     let currentNode = node;
     let activeDragCleanup: (() => void) | null = null;
 
-    const dom = document.createElement("div");
+    // A div cannot sit inside the paragraph an inline image lives in.
+    const dom = document.createElement(node.isInline ? "span" : "div");
     dom.className = "tiptap-image-node";
     // border-radius / outline-offset are set up-front so a session-restored
     // NodeSelection (which only triggers selectNode, not selectionUpdate) still
@@ -296,8 +299,9 @@ export function createImageNodeView(editor: Editor) {
 
     const isReadonly = () => !!editor.storage.readonlyGuard?.readonly;
 
+    // Reordering moves a block between blocks; an inline image stays in its line.
     const syncDragState = () => {
-      img.style.cursor = isReadonly() ? "default" : "move";
+      img.style.cursor = isReadonly() || node.isInline ? "default" : "move";
     };
 
     const showHandles = () => {
@@ -339,7 +343,7 @@ export function createImageNodeView(editor: Editor) {
       if (e.button !== 0) return;
       e.preventDefault();
       selectImageNode();
-      if (isReadonly()) return;
+      if (isReadonly() || node.isInline) return;
 
       const startPos = getPos();
       if (startPos === undefined) return;
@@ -402,7 +406,7 @@ export function createImageNodeView(editor: Editor) {
           if (pos !== undefined) {
             editor.chain()
               .setNodeSelection(pos)
-              .updateAttributes("image", { width: finalW, height: Math.round(finalW * aspectRatio) })
+              .updateAttributes(node.type.name, { width: finalW, height: Math.round(finalW * aspectRatio) })
               .run();
           }
         };
@@ -419,7 +423,7 @@ export function createImageNodeView(editor: Editor) {
       const pos = getPos();
       if (pos === undefined) return;
       const locale = (editor.storage.slashCommands?.locale ?? "en") as Locale;
-      showContextMenu({ x: e.clientX, y: e.clientY }, editor, pos, currentSrc, getContext(), locale);
+      showContextMenu({ x: e.clientX, y: e.clientY }, editor, pos, currentSrc, getContext(), locale, node.type.name);
     });
 
     // Selection re-sync is driven by a single shared transaction subscription
@@ -431,7 +435,7 @@ export function createImageNodeView(editor: Editor) {
     return {
       dom,
       update: (updatedNode: any) => {
-        if (updatedNode.type.name !== "image") return false;
+        if (updatedNode.type !== node.type) return false;
         currentNode = updatedNode;
         refreshImageSource();
         if (updatedNode.attrs.alt) img.alt = updatedNode.attrs.alt;

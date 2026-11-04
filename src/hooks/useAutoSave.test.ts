@@ -1966,6 +1966,108 @@ describe("useAutoSave — post-switch save uses activeDocRef (stale stateRef gua
   });
 });
 
+describe("useAutoSave — the editor must be showing the note it saves", () => {
+  function showNote(tiptapRef: React.RefObject<TiptapEditorHandle | null>, noteId: string) {
+    tiptapRef.current = {
+      getEditor: () => ({
+        getMarkdown: () => refs.editorContent,
+        storage: { documentContext: { noteId, filePath: `/notes/${noteId}.md` } },
+      }),
+    } as unknown as TiptapEditorHandle;
+  }
+
+  it("refuses to write the shown note's text into the active note's file", async () => {
+    refs.editorContent = "text of note a";
+    const { result, tiptapRef } = renderAutoSave({
+      docs: [makeDoc("a"), makeDoc("b")],
+      activeIndex: 1,
+    });
+    showNote(tiptapRef, "a");
+
+    await act(async () => {
+      result.current.scheduleAutoSave();
+      await result.current.flushAutoSave();
+    });
+
+    expect(writeMock).not.toHaveBeenCalledWith("/notes/b.md", expect.anything());
+    const refused = logMock.mock.calls.find((call) => (call[0] as NotenError).code === "SAVE_FAILED");
+    expect((refused?.[0] as NotenError | undefined)?.severity).toBe("fatal");
+  });
+
+  it("reports a refused flush as failed and keeps the edit for the close gate", async () => {
+    refs.editorContent = "text of note a";
+    const { result, tiptapRef } = renderAutoSave({
+      docs: [makeDoc("a"), makeDoc("b")],
+      activeIndex: 1,
+    });
+    showNote(tiptapRef, "a");
+
+    let flushed: Awaited<ReturnType<typeof result.current.flushAutoSave>> | undefined;
+    await act(async () => {
+      result.current.scheduleAutoSave();
+      flushed = await result.current.flushAutoSave();
+    });
+
+    expect(flushed).toEqual({ status: "failed", reason: "save-failed" });
+    expect(result.current.hasUnsavedChanges()).toBe(true);
+    await expect(result.current.journalPendingEdits()).resolves.toBe(false);
+  });
+
+  it("keeps the edit when the debounce timer is the one refused", async () => {
+    vi.useFakeTimers();
+    try {
+      refs.editorContent = "text of note a";
+      const { result, tiptapRef } = renderAutoSave({
+        docs: [makeDoc("a"), makeDoc("b")],
+        activeIndex: 1,
+      });
+      showNote(tiptapRef, "a");
+
+      act(() => result.current.scheduleAutoSave());
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+
+      expect(writeMock).not.toHaveBeenCalled();
+      expect(result.current.hasUnsavedChanges()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not keep a target for a note the user has left", async () => {
+    vi.useFakeTimers();
+    try {
+      refs.editorContent = "text";
+      const { result, tiptapRef } = renderAutoSave({ docs: [makeDoc("a"), makeDoc("b")] });
+      showNote(tiptapRef, "a");
+
+      act(() => result.current.scheduleAutoSave());
+      showNote(tiptapRef, "b");
+      act(() => result.current.notifyActiveDoc("b", "/notes/b.md"));
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+
+      expect(result.current.hasUnsavedChanges()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("saves when the editor is showing the active note", async () => {
+    refs.editorContent = "text of note b";
+    const { result, tiptapRef } = renderAutoSave({
+      docs: [makeDoc("a"), makeDoc("b")],
+      activeIndex: 1,
+    });
+    showNote(tiptapRef, "b");
+
+    await act(async () => {
+      result.current.scheduleAutoSave();
+      await result.current.flushAutoSave();
+    });
+
+    expect(writeMock).toHaveBeenCalledWith("/notes/b.md", "text of note b");
+  });
+});
+
 describe("useAutoSave — notifyActiveDoc", () => {
   // INVARIANT: this test relies on the hook NOT re-rendering between
   // notifyActiveDoc and flushAutoSave. Re-render reapplies the

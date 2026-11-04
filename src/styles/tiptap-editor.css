@@ -153,6 +153,19 @@
   margin-bottom: 0;
 }
 
+/* Markdown kept as source (RawMarkdown.ts): readable, and plainly not rendered. */
+.ProseMirror pre.noten-raw-block {
+  padding: 8px 12px;
+  color: var(--editor-color-text-secondary);
+  background-color: var(--editor-color-bg-subtle);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ProseMirror .noten-raw-inline {
+  color: var(--editor-color-text-secondary);
+}
+
 .ProseMirror pre {
   position: relative;
   background-color: var(--editor-color-code-bg);

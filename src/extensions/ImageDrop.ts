@@ -13,6 +13,7 @@ import {
   readImageBinary,
   reportImageFailure,
 } from "../utils/imageAssetUtils";
+import { isImageNodeName } from "../utils/imageNode";
 import { extractMermaidSourceFromSvg } from "./mermaidSourceMetadata";
 
 const IMAGE_MIME = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
@@ -165,7 +166,7 @@ const ImageDrop = Extension.create({
               const { selection } = view.state;
               if (!(selection instanceof NodeSelection)) return false;
               const node = selection.node;
-              if (node.type.name !== "image") return false;
+              if (!isImageNodeName(node.type.name)) return false;
 
               const src = node.attrs.src as string;
               event.preventDefault();

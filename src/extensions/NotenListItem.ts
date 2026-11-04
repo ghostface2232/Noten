@@ -50,10 +50,10 @@ const INLINE_TYPES = new Set(["text", "hardBreak"]);
 // item and orderedListTokenizer.ts's for an ordered one. An ordered list is
 // not among them (Tiptap keeps `- 1. a` as text, and so does the ordered
 // reading), and a rule only in an ordered item: `- ---` is a rule itself.
-const MARKER_LINE_BLOCKS = new Set(["bulletList", "taskList", "blockquote", "heading", "codeBlock"]);
+const MARKER_LINE_BLOCKS = new Set(["bulletList", "taskList", "blockquote", "heading", "codeBlock", "image", "rawBlock"]);
 // The block's first line as rendered must still open it there: an empty
 // nested item (`- - `, `- - [ ] `) reads back as text.
-const MARKER_LINE_HEAD = /^(?:[-+*] +\[[ xX]\] +\S|[-+*] +(?!\[[ xX]\])\S|#{1,6} +\S|>|```|~~~|---$)/;
+const MARKER_LINE_HEAD = /^(?:[-+*] +\[[ xX]\] +\S|[-+*] +(?!\[[ xX]\])\S|#{1,6} +\S|>|```|~~~|---$|!\[|<|\$\$|\[)/;
 
 function isEmptyParagraph(node: JSONContent | undefined): boolean {
   return node?.type === "paragraph" && (node.content ?? []).length === 0;
@@ -140,7 +140,11 @@ export const renderListItemMarkdown: RenderListItem = function (this: unknown, n
   const leadRendered = h.renderChildren([content[lead]]);
   const [head, ...rest] = leadRendered.split("\n");
   const onMarkerLine =
-    (MARKER_LINE_BLOCKS.has(content[lead].type ?? "") || (ordered && content[lead].type === "horizontalRule")) &&
+    (ordered
+      // The ordered reading takes the marker line's text as a paragraph, so `1. $$`
+      // would not read back; kept source stays on the lines below.
+      ? content[lead].type !== "rawBlock" && (MARKER_LINE_BLOCKS.has(content[lead].type ?? "") || content[lead].type === "horizontalRule")
+      : MARKER_LINE_BLOCKS.has(content[lead].type ?? "")) &&
     MARKER_LINE_HEAD.test(head);
   let output: string;
   let from: number;

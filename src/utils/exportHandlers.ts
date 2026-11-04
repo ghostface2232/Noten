@@ -44,6 +44,9 @@ const PDF_FILTERS = [{ name: "PDF", extensions: ["pdf"] }];
 // document. Exporting `.ProseMirror`'s innerHTML verbatim baked them into the
 // PDF — an open find bar printed every match in highlighter yellow.
 const DECORATION_SELECTOR = ".search-match, .search-match-active";
+// Source kept for the file's sake, which a reader of the printed note never wrote
+// to be read. Footnotes, math and HTML are the note's content, so they print.
+const UNPRINTED_SOURCE_SELECTOR = '[data-raw-kind="frontmatter"], [data-raw-kind="comment"], [data-raw-kind="definition"]';
 
 /**
  * Copy of the editor DOM with decoration wrappers unwrapped, so the exported
@@ -57,6 +60,10 @@ export function cloneEditorContentForExport(editorEl: HTMLElement): HTMLElement 
   for (const node of decorations) {
     node.replaceWith(...Array.from(node.childNodes));
   }
+  clone.querySelectorAll(UNPRINTED_SOURCE_SELECTOR).forEach((node) => node.remove());
+  clone.querySelectorAll("[data-raw-inline]").forEach((node) => {
+    if (node.textContent?.startsWith("<!--")) node.remove();
+  });
   clone.normalize();
   return clone;
 }

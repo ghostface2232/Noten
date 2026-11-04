@@ -6,7 +6,7 @@ import { Node as PMNodeClass } from "@tiptap/pm/model";
 import type { Node as PMNode, Mark as PMMark } from "@tiptap/pm/model";
 import type { NoteDoc } from "../hooks/useNotesLoader";
 import { createFastMarked } from "./fastMarkdownLexer";
-import WikiLink, { findDocByTitle, findDocsByTitle, refreshWikiLinkDecorations } from "./WikiLink";
+import WikiLink, { findDocByTitle, findDocsByTitle, refreshWikiLinkDecorations, undoSavedEscaping } from "./WikiLink";
 
 function doc(fileName: string): NoteDoc {
   return { id: fileName, fileName } as unknown as NoteDoc;
@@ -181,6 +181,60 @@ describe("markdown serialization", () => {
     expect(wikiMarkedText(editor.state.doc, "한글 노트")).toBe("한글 노트");
     expect(editor.getMarkdown()).toContain("[[Alpha]]");
     expect(editor.getMarkdown()).toContain("[[한글 노트]]");
+  });
+
+  function markdownEditor(content: string): Editor {
+    const editor = new Editor({
+      extensions: [StarterKit, Markdown.configure({ marked: createFastMarked() }), WikiLink],
+      content,
+      contentType: "markdown",
+    } as ConstructorParameters<typeof Editor>[0]);
+    active = editor;
+    return editor;
+  }
+
+  it.each([
+    "my_note",
+    "a*b*c",
+    "R&D 계획",
+    "x < y > z",
+    "`tick` and ~tilde~",
+    "back\\slash",
+  ])("keeps %j unchanged across repeated saves", (title) => {
+    let markdown = `See [[${title}]] here`;
+    for (let save = 0; save < 3; save += 1) {
+      const editor = markdownEditor(markdown);
+      markdown = editor.getMarkdown();
+      editor.destroy();
+      active = null;
+      expect(markdown).toBe(`See [[${title}]] here`);
+    }
+  });
+
+  it("keeps the text around a wiki link escaped", () => {
+    const editor = markdownEditor("a\\_b [[my_note]] c\\_d");
+    expect(editor.getMarkdown()).toBe("a\\_b [[my_note]] c\\_d");
+  });
+
+  it.each([
+    ["my\\_note", "my_note"],
+    ["my\\\\\\_note", "my_note"],
+    ["my\\\\\\\\\\\\\\_note", "my_note"],
+    ["R&amp;D", "R&D"],
+    ["R&amp;amp;amp;D", "R&D"],
+    ["a &lt; b", "a < b"],
+  ])("repairs %j, which an older save escaped", (saved, title) => {
+    const editor = markdownEditor(`[[${saved}]]`);
+    expect(wikiMarkedText(editor.state.doc, title)).toBe(title);
+    expect(editor.getMarkdown()).toBe(`[[${title}]]`);
+  });
+});
+
+describe("undoSavedEscaping", () => {
+  it("leaves an ordinary title alone", () => {
+    expect(undoSavedEscaping("회의 노트 2026")).toBe("회의 노트 2026");
+    expect(undoSavedEscaping("C:\\temp")).toBe("C:\\temp");
+    expect(undoSavedEscaping("AT&T")).toBe("AT&T");
   });
 });
 

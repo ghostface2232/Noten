@@ -49,7 +49,9 @@ import FocusMode, { syncFocusModeState } from "../extensions/FocusMode";
 import { announceDocumentSwap } from "../extensions/documentSwap";
 import OffscreenBlocks from "../extensions/OffscreenBlocks";
 import IncrementalMarkdown from "../extensions/IncrementalMarkdown";
-import { NotenImage } from "../extensions/NotenImage";
+import { NotenImage, NotenInlineImage } from "../extensions/NotenImage";
+import { RawMarkdown } from "../extensions/RawMarkdown";
+import { isImageNodeName } from "../utils/imageNode";
 import { NotenTable } from "../extensions/NotenTable";
 import { createNotenTaskItem } from "../extensions/NotenTaskItem";
 import NotenTaskList from "../extensions/NotenTaskList";
@@ -182,7 +184,7 @@ function getSelectionRect(editor: Editor, range: TextRange): DOMRect {
 
 
 function isImageNodeSelection(selection: unknown): selection is NodeSelection {
-  return selection instanceof NodeSelection && selection.node.type.name === "image";
+  return selection instanceof NodeSelection && isImageNodeName(selection.node.type.name);
 }
 
 function createSelectionAfterImage(editor: Editor, imageAfterPos: number): Selection {
@@ -213,7 +215,7 @@ function clearAllImageOutlines(editor: Editor): void {
   const view = editor.view;
   if (!view) return;
   view.state.doc.descendants((node, pos) => {
-    if (node.type.name !== "image") return true;
+    if (!isImageNodeName(node.type.name)) return true;
     const dom = view.nodeDOM(pos) as HTMLElement | null;
     if (dom) {
       dom.style.outline = "none";
@@ -523,7 +525,7 @@ const ImageFocusGuard = Extension.create({
             blur: (view) => {
               const { selection } = view.state;
               if (!(selection instanceof NodeSelection)) return false;
-              if (selection.node.type.name !== "image") return false;
+              if (!isImageNodeName(selection.node.type.name)) return false;
               const afterPos = Math.min(
                 selection.from + selection.node.nodeSize,
                 view.state.doc.content.size,
@@ -557,6 +559,7 @@ export interface TiptapEditorHandle {
     filePath: string | null;
     markdown: string;
     reason?: "init" | "switch" | "window-sync" | "file-watch";
+    markEdited?: boolean;
   }) => void;
   invalidateDocumentSession: (noteId: string | null, filePath: string | null) => void;
   setEditable: (editable: boolean) => void;
@@ -759,6 +762,15 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           addNodeView() {
             return createImageNodeView(this.editor);
           },
+          addExtensions() {
+            return [
+              NotenInlineImage.extend({
+                addNodeView() {
+                  return createImageNodeView(this.editor);
+                },
+              }),
+            ];
+          },
         }),
         Placeholder.configure({ placeholder: () => t("placeholder", localeRef.current) }),
         Typography,
@@ -789,6 +801,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         AnchorLink,
         ImageDrop,
         ImageFocusGuard,
+        RawMarkdown,
         TextContextMenu,
         SearchHighlight,
         FocusMode,
@@ -800,6 +813,10 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       editable: true,
       immediatelyRender: true,
       onUpdate: ({ editor: currentEditor, transaction }) => {
+        // Tiptap also emits `update` when only an appended transaction changed
+        // the document: a plugin normalizing it after a click or a focus
+        // change, which is not an edit and must not rewrite the file.
+        if (!transaction.docChanged) return;
         const isPaste = transaction.getMeta("paste") === true || transaction.getMeta("uiEvent") === "paste";
         handleUpdate(currentEditor, isPaste);
       },
@@ -840,8 +857,22 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           parsed.content = [{ type: "paragraph" }];
         }
         const doc = editor.schema.nodeFromJSON(parsed);
+        // A note opens with the caret in its first line of text, not in kept
+        // source such as front matter, where the first keystrokes would land. A
+        // note holding nothing else gets the line TrailingNode would add anyway.
+        let bodyStart = 0;
+        for (let index = 0; index < doc.childCount && doc.child(index).type.name === "rawBlock"; index += 1) {
+          bodyStart += doc.child(index).nodeSize;
+        }
+        const bodyDoc = bodyStart > 0 && bodyStart === doc.content.size
+          ? doc.copy(doc.content.addToEnd(editor.schema.nodes.paragraph.create()))
+          : doc;
         return EditorState.create({
-          doc,
+          doc: bodyDoc,
+          // Text only: a selected image or rule would be replaced by the first key.
+          selection: bodyStart > 0
+            ? Selection.findFrom(bodyDoc.resolve(bodyStart), 1, true) ?? TextSelection.near(bodyDoc.resolve(bodyStart), 1)
+            : undefined,
           plugins: editor.state.plugins,
         });
       } catch {
@@ -880,6 +911,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       filePath: string | null;
       markdown: string;
       reason?: "init" | "switch" | "window-sync" | "file-watch";
+      markEdited?: boolean;
     }) => {
       if (!editor) return;
       closeLinkPopover();
@@ -895,7 +927,11 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       const currentKey = currentSessionKeyRef.current;
       const sameSession = !!nextKey && nextKey === currentKey;
 
-      // Image NodeViews need document context before content replacement.
+      // Image NodeViews need document context before content replacement. A note
+      // that fails to open (a parse can overflow the stack) leaves the editor on
+      // the note it was showing, so the context must go back with it: autosave
+      // trusts the context to know whose text the editor holds.
+      const previousContext = { ...editor.storage.documentContext };
       editor.storage.documentContext.noteId = noteId;
       editor.storage.documentContext.filePath = filePath;
 
@@ -938,11 +974,17 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       if (!applied) {
         const wasReadonly = editor.storage.readonlyGuard.readonly;
         editor.storage.readonlyGuard.readonly = false;
-        editor.commands.setContent(markdown, {
-          emitUpdate: false,
-          contentType: "markdown",
-        });
-        editor.storage.readonlyGuard.readonly = wasReadonly;
+        try {
+          editor.commands.setContent(markdown, {
+            emitUpdate: false,
+            contentType: "markdown",
+          });
+        } catch (error) {
+          Object.assign(editor.storage.documentContext, previousContext);
+          throw error;
+        } finally {
+          editor.storage.readonlyGuard.readonly = wasReadonly;
+        }
       }
 
       // `updateState()` can preserve an existing NodeView when the Markdown is
@@ -958,7 +1000,9 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       syncFocusModeState(editor, focusMode);
       announceDocumentSwap(editor);
 
-      dirtyRef.current = false;
+      // The caller put text in the editor that the disk does not hold.
+      dirtyRef.current = params.markEdited === true;
+      if (params.markEdited) onDirtyChange(true);
 
       const resolvedKey = nextKey ?? buildDocumentSessionKey(noteId, filePath);
       currentSessionKeyRef.current = resolvedKey;
@@ -979,6 +1023,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       closeLinkPopover,
       editor,
       focusMode,
+      onDirtyChange,
       parseMarkdownToState,
       replaceCurrentDocumentContent,
       scheduleSpellcheckRefresh,
