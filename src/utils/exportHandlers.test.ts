@@ -112,12 +112,22 @@ describe("removeExternalReferences", () => {
   });
 });
 
+describe("withoutExternalCss, what it gives up", () => {
+  it.each([
+    '.a { content: "\\201C" }',
+    ".block--wide:hover { background: url(data:image/png;base64,AAAA) }",
+  ])("drops %s rather than tell it from a load", (css) => {
+    expect(withoutExternalCss(css)).toBe("");
+  });
+});
+
 describe("withoutExternalCss", () => {
   it.each([
     ['.a { background: url("//host/a") }', ".a { background: none }"],
     [".a { background: url(file://host/a) }", ".a { background: none }"],
-    [".a { background: url( '\\\\host\\a' ) }", ".a { background: none }"],
-    ['.a { background: url("\\2f\\2fhost") }', ".a { background: none }"],
+    [".a { background: url( '//host/a' ) }", ".a { background: none }"],
+    [".a { background: url( '\\\\host\\a' ) }", ""],
+    ['.a { background: url("\\2f\\2fhost") }', ""],
     ['.a { background: image-set("//host/a" 1x) }', ""],
     ['.a { background: -webkit-image-set(url("//host/a") 1x) }', ""],
     ['.a { background: image-set("//host/a" 1x, linear-gradient(red calc((1%)), blue) 2x) }', ""],
@@ -132,6 +142,10 @@ describe("withoutExternalCss", () => {
     [".a { --b: u\\72l(//host/a); background: var(--b) }", ""],
     [`.a { --z: 'url("data:image/', --b: url(//host/x.png), --y: '")'; background: var(--b) }`, ""],
     ["#m .a { background: var(--b); --b: url(//host/x.png) }", ""],
+    [".a { --é: u\\72l(//host/x); fill: var(--é) }", ""],
+    [".a { --é: url(//host/x); fill: var(--é) }", ""],
+    [".a { background: var(--x, u\\72l(//host/x)) }", ""],
+    [".a { background: VAR(--x, url(//host/x)) }", ""],
   ])("removes the load from %s", (css, expected) => {
     expect(withoutExternalCss(css)).toBe(expected);
   });
@@ -142,9 +156,8 @@ describe("withoutExternalCss", () => {
     '.a { background: url("data:image/png;base64,AAAA") }',
     '.a { background: url("data:image/svg+xml,%3Csvg xmlns=%27a%27 /%3E") }',
     ".a { background: url(data:image/png;base64,AAAA) }",
-    '.a { content: "\\201C" }',
     ".a { --b: 1px; fill: url(#arrow) }",
-    ".block--wide:hover { background: url(data:image/png;base64,AAAA) }",
+    ".a { color: var(--b); fill: url(#arrow) }",
   ])("keeps %s", (css) => {
     expect(withoutExternalCss(css)).toBe(css);
   });
