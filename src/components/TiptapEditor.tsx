@@ -800,6 +800,10 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
       editable: true,
       immediatelyRender: true,
       onUpdate: ({ editor: currentEditor, transaction }) => {
+        // Tiptap also emits `update` when only an appended transaction changed
+        // the document: a plugin normalizing it after a click or a focus
+        // change, which is not an edit and must not rewrite the file.
+        if (!transaction.docChanged) return;
         const isPaste = transaction.getMeta("paste") === true || transaction.getMeta("uiEvent") === "paste";
         handleUpdate(currentEditor, isPaste);
       },
