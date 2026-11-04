@@ -1713,6 +1713,45 @@ describe("useAutoSave — the editor must be showing the note it saves", () => {
     expect((refused?.[0] as NotenError | undefined)?.severity).toBe("fatal");
   });
 
+  it("reports a refused flush as failed and keeps the edit for the close gate", async () => {
+    refs.editorContent = "text of note a";
+    const { result, tiptapRef } = renderAutoSave({
+      docs: [makeDoc("a"), makeDoc("b")],
+      activeIndex: 1,
+    });
+    showNote(tiptapRef, "a");
+
+    let flushed: Awaited<ReturnType<typeof result.current.flushAutoSave>> | undefined;
+    await act(async () => {
+      result.current.scheduleAutoSave();
+      flushed = await result.current.flushAutoSave();
+    });
+
+    expect(flushed).toEqual({ status: "failed", reason: "save-failed" });
+    expect(result.current.hasUnsavedChanges()).toBe(true);
+    await expect(result.current.journalPendingEdits()).resolves.toBe(false);
+  });
+
+  it("keeps the edit when the debounce timer is the one refused", async () => {
+    vi.useFakeTimers();
+    try {
+      refs.editorContent = "text of note a";
+      const { result, tiptapRef } = renderAutoSave({
+        docs: [makeDoc("a"), makeDoc("b")],
+        activeIndex: 1,
+      });
+      showNote(tiptapRef, "a");
+
+      act(() => result.current.scheduleAutoSave());
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+
+      expect(writeMock).not.toHaveBeenCalled();
+      expect(result.current.hasUnsavedChanges()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("saves when the editor is showing the active note", async () => {
     refs.editorContent = "text of note b";
     const { result, tiptapRef } = renderAutoSave({
