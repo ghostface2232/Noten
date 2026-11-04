@@ -304,6 +304,9 @@ describe("useAutoSave — a save that keeps failing", () => {
 
     expect(vi.mocked(clearRecoveryRecord)).not.toHaveBeenCalled();
     expect(isSaveFailing()).toBe(true);
+
+    // Its debounce would otherwise fire during a later test.
+    act(() => result.current.cancelDocSave("a"));
   });
 
   it("saves the latest text it has when the edit that overtook it lost its target", async () => {
@@ -330,6 +333,66 @@ describe("useAutoSave — a save that keeps failing", () => {
     expect(writeMock).toHaveBeenCalledWith("/notes/a.md", "typed before the outage");
     expect(isSaveFailing()).toBe(false);
     expect(result.current.hasUnsavedChanges()).toBe(false);
+  });
+
+  it("does not write a note's old snapshot after a newer save landed during the retry", async () => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    refs.editorContent = "a text";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true }), makeDoc("b", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+    act(() => result.current.notifyActiveDoc("b", "/notes/b.md"));
+    refs.editorContent = "b older";
+    logMock.mockClear();
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(logMock).toHaveBeenCalled());
+
+    refs.writeShouldThrow = null;
+    writeMock.mockClear();
+    let releaseA!: () => void;
+    writeMock.mockImplementationOnce(() => new Promise<void>((resolve) => { releaseA = resolve; }));
+    let retry!: Promise<void>;
+    act(() => { retry = result.current.retryFailedSaves(); });
+    await waitFor(() => expect(writeMock).toHaveBeenCalledWith("/notes/a.md", "a text"));
+
+    refs.editorContent = "b newer";
+    act(() => result.current.scheduleAutoSave());
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(writeMock).toHaveBeenCalledWith("/notes/b.md", "b newer"));
+    await act(async () => { await result.current.awaitDocSave("b"); });
+
+    releaseA();
+    await act(async () => { await retry; });
+
+    expect(writeMock).not.toHaveBeenCalledWith("/notes/b.md", "b older");
+
+    act(() => result.current.cancelDocSave("a"));
+    act(() => result.current.cancelDocSave("b"));
+  });
+
+  it("does not write over a body another window landed since the failure", async () => {
+    refs.writeShouldThrow = new Error("EPERM: read-only folder");
+    refs.knownDiskContent.set("/notes/a.md", "base");
+    refs.editorContent = "local edit";
+    const { result } = renderAutoSave({
+      docs: [makeDoc("a", { content: "base", isDirty: true })],
+      state: makeState({ isDirty: true }),
+    });
+    act(() => result.current.captureAndQueueSave());
+    await waitFor(() => expect(isSaveFailing()).toBe(true));
+
+    refs.knownDiskContent.set("/notes/a.md", "peer body");
+    refs.writeShouldThrow = null;
+    writeMock.mockClear();
+    vi.mocked(clearRecoveryRecord).mockClear();
+    await act(async () => { await result.current.retryFailedSaves(); });
+
+    expect(writeMock).not.toHaveBeenCalled();
+    expect(isSaveFailing()).toBe(false);
+    expect(vi.mocked(clearRecoveryRecord)).not.toHaveBeenCalled();
   });
 
   it("does not start a second save while one is in flight", async () => {

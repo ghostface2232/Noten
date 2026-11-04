@@ -80,6 +80,8 @@ interface SaveSnapshot {
   content: string;
   editSerial: number;
   revision: number;
+  /** What this window knew of the file when this save failed. */
+  failedAgainst?: { knownDisk: string | undefined };
 }
 
 interface PendingSaveTarget {
@@ -383,6 +385,7 @@ export function useAutoSave(
         // self-heals. A permanent failure repeatedly logs and surfaces via
         // the dirty indicator instead of silently corrupting on disk.
         markSaveFailed(snapshot.docId, snapshot.editSerial);
+        snapshot.failedAgainst = { knownDisk: getKnownDiskContent(snapshot.filePath) };
         void logNotenError(err instanceof NotenError
           ? err
           : new NotenError(
@@ -639,6 +642,7 @@ export function useAutoSave(
     } catch (err) {
       if (import.meta.env.DEV) console.warn("[SAVE_FAILED]", err);
       markSaveFailed(snapshot.docId, snapshot.editSerial);
+      snapshot.failedAgainst = { knownDisk: getKnownDiskContent(snapshot.filePath) };
       void logNotenError(new NotenError(
         "SAVE_FAILED",
         "fatal",
@@ -1015,8 +1019,17 @@ export function useAutoSave(
   const retryFailedSaves = useCallback(async (): Promise<void> => {
     for (const pending of Array.from(pendingSnapshotsRef.current.values())) {
       const { docId } = pending;
+      // This list predates the awaits below: the note may have saved newer text since.
+      if (pendingSnapshotsRef.current.get(docId) !== pending) continue;
       if ((inFlightSavesByDocRef.current.get(docId)?.size ?? 0) > 0) continue;
       if (!stateRef.current.docs.some((doc) => doc.id === docId)) {
+        markSaveSettled(docId, pending.editSerial);
+        continue;
+      }
+      // Another window's body landed since. Its write moved the baseline with it, so
+      // the save's own check would see no conflict and overwrite that body with no
+      // backup. The record stays, and the next start keeps this text in `.conflicts`.
+      if (pending.failedAgainst && pending.failedAgainst.knownDisk !== getKnownDiskContent(pending.filePath)) {
         markSaveSettled(docId, pending.editSerial);
         continue;
       }
