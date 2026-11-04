@@ -40,9 +40,38 @@ const LINKED_IMAGE = /\[!\[[^\][\n]*\]\([^()[\n]*\)\]\([^()[\n]*\)/.source;
 
 const INLINE_MATH_AT_START = new RegExp(`^(?:${INLINE_MATH})`);
 const BRACKET_SYNTAX_AT_START = new RegExp(`^(?:${FOOTNOTE_REFERENCE}|${CALLOUT_MARKER}|${LINKED_IMAGE})`);
-// What the same text would be read as if it were written unescaped. Typing these
-// in the editor must save them as written, or the reload would read `$a\_b$`.
-const SYNTAX_IN_PLAIN_TEXT = new RegExp(`${INLINE_MATH}|${FOOTNOTE_REFERENCE}|${CALLOUT_MARKER}`, "g");
+const INLINE_MATH_HERE = new RegExp(INLINE_MATH, "y");
+const BRACKET_SYNTAX_HERE = new RegExp(`${FOOTNOTE_REFERENCE}|${CALLOUT_MARKER}`, "y");
+// How far a math attempt reads before it needs its closer.
+const INLINE_MATH_BODY_HERE = /\$(?![\s$])(?:\\[^\n]|[^$\\\n`])*/y;
+
+function readHere(pattern: RegExp, text: string, index: number): string | undefined {
+  pattern.lastIndex = index;
+  return pattern.exec(text)?.[0];
+}
+
+/**
+ * What the same text would be read as if it were written unescaped. Typing these
+ * in the editor must save them as written, or the reload would read `$a\_b$`.
+ *
+ * Every `$` an attempt reads past is the second half of a `\$` pair. Starting from
+ * one reaches the same stopping point and fails there the same way, so those are
+ * skipped, or a line of `\$` after an unclosed `$` costs a scan per pair.
+ */
+function* syntaxInPlainText(text: string): Generator<[index: number, source: string]> {
+  let attemptedUntil = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character !== "[" && (character !== "$" || index < attemptedUntil)) continue;
+    const source = readHere(character === "$" ? INLINE_MATH_HERE : BRACKET_SYNTAX_HERE, text, index);
+    if (source) {
+      yield [index, source];
+      index += source.length - 1;
+    } else if (character === "$") {
+      attemptedUntil = index + (readHere(INLINE_MATH_BODY_HERE, text, index)?.length ?? 0);
+    }
+  }
+}
 
 // `$` is also an ordinary character, and this tokenizer runs before the ones for
 // code spans, links and emphasis. A match that would cut across one of those is
@@ -159,10 +188,10 @@ function patchManager(): void {
     if (!text.includes("$") && !text.includes("[")) return encodePlain(text);
     let output = "";
     let cursor = 0;
-    for (const match of text.matchAll(SYNTAX_IN_PLAIN_TEXT)) {
-      if (!readsAsMath(match[0])) continue;
-      output += encodePlain(text.slice(cursor, match.index)) + match[0];
-      cursor = match.index + match[0].length;
+    for (const [index, source] of syntaxInPlainText(text)) {
+      if (!readsAsMath(source)) continue;
+      output += encodePlain(text.slice(cursor, index)) + source;
+      cursor = index + source.length;
     }
     return output + encodePlain(text.slice(cursor));
   };

@@ -235,6 +235,39 @@ describe("what still reads as ordinary Markdown", () => {
   }, 120_000);
 
   it.each([
+    ["an unclosed dollar then escaped ones", "$", "\\$", "x"],
+    ["escaped dollars between words", "$a", " \\$b", ""],
+    ["escaped dollars before brackets", "$", "\\$[", ""],
+  ])("saves typed text linearly: %s", (_, head, repeated, tail) => {
+    const editor = load("x");
+    const measure = (count: number) => {
+      editor.commands.setContent({
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: `${head}${repeated.repeat(count)}${tail}` }] }],
+      });
+      const start = performance.now();
+      editor.getMarkdown();
+      return performance.now() - start;
+    };
+    measure(200);
+    const small = measure(8_000);
+    const large = measure(64_000);
+    // Eight times the text; quadratic would be 64.
+    expect(large / small).toBeLessThan(25);
+  }, 120_000);
+
+  it.each([
+    ["a closer after an escaped dollar", "$a \\$ b_c$", "$a \\$ b_c$"],
+    ["math after a lone backslash", "\\$a_b$", "\\\\$a_b$"],
+    ["math after an opener that cannot open", "$ a \\$b_c$", "$ a \\\\$b_c$"],
+    ["a footnote after an unclosed dollar", "$a \\$ [^1] b_c", "$a \\\\$ [^1] b\\_c"],
+  ])("still finds typed syntax around escaped dollars: %s", (_, text, saved) => {
+    const editor = load("x");
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+    expect(editor.getMarkdown()).toBe(saved);
+  });
+
+  it.each([
     ["<u>x</u> y", "underline"],
     ["<strong>x</strong> y", "bold"],
     ["<em>x</em> y", "italic"],
