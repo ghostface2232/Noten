@@ -1,16 +1,22 @@
 {
   "ko": [
-    "자동 업데이트를 추가했습니다. Windows 로그온 후 Noten을 처음 열 때 한 번 확인하고, 키보드와 마우스를 30초 이상 쓰지 않을 때 설치한 뒤 다시 시작합니다. 설정의 정보 탭에서 끌 수 있습니다.",
-    "업데이트를 설치하기 전에 열려 있는 모든 창의 편집 내용을 저장합니다. 다운로드 중에 입력한 내용이 사라질 수 있던 문제도 고쳤습니다.",
-    "노트를 열 때 상태 표시줄의 글자 수와 단어 수가 늦게 바뀌던 문제를 고쳤습니다.",
-    "창이 포커스를 잃을 때 복구 기록 저장이 겹치면서 저장 실패 오류가 잘못 기록될 수 있던 문제를 고쳤습니다.",
-    "Mermaid와 앱의 기반 구성 요소를 최신 버전으로 업데이트했습니다."
+    "다른 노트의 이름을 바꾼 뒤 입력하면 열려 있던 노트의 내용이 그 노트의 파일을 덮어쓰던 문제를 고쳤습니다.",
+    "노트를 열기만 해도 파일이 다시 쓰이던 문제를 고쳤습니다.",
+    "프런트매터, 주석, HTML, 각주, 수식처럼 편집기가 직접 다루지 않는 Markdown을 저장할 때 잃거나 바꾸지 않습니다. 이런 내용은 렌더링하지 않고 원문 그대로 보여 줍니다.",
+    "위키 링크에 저장할 때마다 역슬래시가 늘어나던 문제, 한글 옆의 굵게가 다시 열면 풀리던 문제, 글자 옆의 이미지가 입력 중 사라지던 문제를 고쳤습니다.",
+    "다른 사람에게 받은 노트의 Mermaid 다이어그램이나 PDF 내보내기가 외부 서버에 연결을 시도할 수 있던 보안 문제를 고쳤습니다. 이 과정에서 Mermaid의 themeCSS와 fontFamily 지시문은 적용되지 않게 바뀌었습니다.",
+    "설정 파일을 읽지 못하면 기본 설정으로 넘어가지 않고 어떻게 할지 묻습니다. 노트 폴더를 직접 지정한 경우 노트가 사라진 것처럼 보이던 문제입니다.",
+    "저장이 실패하면 저장될 때까지 알림을 표시하고 계속 다시 시도합니다. 삭제, 복원, 가져오기, 이미지 작업의 실패와 예기치 않은 오류도 화면에 알립니다.",
+    "기본 버튼에 마우스를 올리면 글자가 보이지 않던 문제와 다크 모드 대화상자의 테마를 고쳤습니다. 자동 업데이트는 Noten을 보고 있을 때 60초 동안 입력이 없어야 설치합니다."
   ],
   "en": [
-    "Noten now updates itself. It checks once the first time it opens after you sign in to Windows, and installs and restarts once the keyboard and mouse have been idle for 30 seconds. Turn it off in the About tab of Settings.",
-    "Before an update installs, edits in every open window are saved. Text typed while an update was downloading could be lost; that is fixed.",
-    "The status bar's character and word counts no longer lag behind when a note opens.",
-    "Overlapping recovery writes when a window lost focus could log a false save failure. Fixed.",
-    "Mermaid and the app's underlying components are updated to their latest versions."
+    "Renaming another note and then typing could overwrite that note's file with the open note's text. Fixed.",
+    "Opening a note no longer rewrites its file.",
+    "Markdown the editor does not model, such as front matter, comments, HTML, footnotes and math, is no longer lost or changed on save. It shows as source text instead of being rendered.",
+    "Wiki links no longer gain backslashes on each save, bold next to Korean text stays bold on reopening, and an image beside text no longer disappears as you type.",
+    "A Mermaid diagram or PDF export from a note you received could try to connect to an outside server. That security issue is fixed, and Mermaid's themeCSS and fontFamily directives no longer apply as part of it.",
+    "If the settings file cannot be read, Noten now asks what to do instead of starting on defaults, which made notes in a custom folder look lost.",
+    "A failed save now shows a notice until it succeeds and keeps retrying. Failures to delete, restore, import or handle images, and unexpected errors, now appear on screen too.",
+    "Primary buttons stay readable on hover, and dialogs follow dark mode. Automatic updates now wait for 60 seconds without input while you are looking at Noten."
   ]
 }
