@@ -11,4 +11,4 @@ The status bar's line count, its caret row, and Go to Line all use the *logical 
 ## Note Export
 
 - Markdown export writes `editor.getMarkdown()`; PDF export serializes the live editor DOM through headless Edge (`print_to_pdf`).
-- The editor DOM also carries transient decorations, so PDF export must go through `cloneEditorContentForExport` (`src/utils/exportHandlers.ts`), which unwraps `.search-match` / `.search-match-active` spans on a *clone*. Without it an open find bar prints its highlights into the PDF. Add any future decoration class to `DECORATION_SELECTOR`.
+- The editor DOM also carries transient decorations, so PDF export must go through `cloneEditorContentForExport` (`src/utils/exportHandlers.ts`), which unwraps `.search-match` / `.search-match-active` spans on a *clone*. Without it an open find bar prints its highlights into the PDF. Add any future decoration class to `DECORATION_SELECTOR`. It also drops source kept only for the file's sake (front matter, comments, link definitions; see `RawMarkdown.ts`), which the note's reader never wrote to be read.

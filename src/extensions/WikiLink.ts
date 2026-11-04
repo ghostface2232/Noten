@@ -229,6 +229,26 @@ function findCompleteWikiLinkBeforeOrInside(
   return null;
 }
 
+const SAVED_ENTITIES: Record<string, string> = { "&amp;": "&", "&lt;": "<", "&gt;": ">" };
+
+/**
+ * Notes saved before wiki links were written raw hold targets like
+ * `my\\\_note` or `R&amp;amp;D`, one layer of escaping per save. Peel them back
+ * so those links find their notes again; the next save writes them clean. A
+ * title that really contains `\_` or `&amp;` loses it here, which is far rarer
+ * than the damage this repairs.
+ */
+export function undoSavedEscaping(target: string): string {
+  let current = target;
+  for (;;) {
+    const next = current
+      .replace(/\\([\\`*_~])/g, "$1")
+      .replace(/&(?:amp|lt|gt);/g, (entity) => SAVED_ENTITIES[entity]);
+    if (next === current) return current;
+    current = next;
+  }
+}
+
 const WikiLink = Mark.create<unknown, WikiLinkStorage>({
   name: "wikiLink",
 
@@ -236,6 +256,13 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
   inclusive: false,
   spanning: false,
   excludes: "_",
+
+  // A wiki link names its target literally: the tokenizer reads it raw, so
+  // the serializer must write it raw. `code` is what exempts a mark's text from
+  // Markdown escaping and entity encoding. Without it `[[my_note]]` was saved
+  // as `[[my\_note]]`, which read back with the backslash in the target, missed
+  // its note, and gained more backslashes on every save.
+  code: true,
 
   addAttributes() {
     return {
@@ -284,7 +311,7 @@ const WikiLink = Mark.create<unknown, WikiLinkStorage>({
     tokenize: (src: string) => {
       const match = /^\[\[([^\[\]\n]+)\]\]/.exec(src);
       if (!match) return undefined;
-      const target = match[1].trim();
+      const target = undoSavedEscaping(match[1].trim());
       if (!target) return undefined;
       return {
         type: "wikiLink",

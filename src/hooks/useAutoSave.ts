@@ -218,6 +218,14 @@ export function useAutoSave(
     return pending;
   }, [refreshHasPendingChanges]);
 
+  // The editor is showing some other note than `docId`. Its text is not that
+  // note's, so nothing may be saved under that id. This is not an abandoned edit
+  // either: the pending target stays, so the close gate still sees unsaved work.
+  const editorShowsAnotherNote = useCallback((docId: string): boolean => {
+    const shownNoteId = stateRef.current.tiptapRef.current?.getEditor()?.storage?.documentContext?.noteId;
+    return !!shownNoteId && shownNoteId !== docId;
+  }, []);
+
   const createSnapshot = useCallback((pendingTarget?: PendingSaveTarget): SaveSnapshot | null => {
     const {
       state: latestState,
@@ -229,6 +237,20 @@ export function useAutoSave(
     const docId = "docId" in target ? target.docId : target.id;
     if (remoteDeletedDocsRef.current.has(docId)) return null;
     if (activeDocRef.current?.id !== docId) {
+      return null;
+    }
+    // The body comes from the editor, so the editor has to be showing this
+    // note. If active identity and the editor ever disagree, saving would write
+    // one note's text over another's file with no .conflicts copy: the disk
+    // still matches the baseline. Refuse, and say so, since edits are not
+    // reaching the disk while this lasts.
+    if (editorShowsAnotherNote(docId)) {
+      void logNotenError(new NotenError(
+        "SAVE_FAILED",
+        "fatal",
+        "createSnapshot: the editor is showing a different note than the save target",
+        { context: { noteId: docId, filePath: target.filePath } },
+      ));
       return null;
     }
 
@@ -248,7 +270,7 @@ export function useAutoSave(
       editSerial,
       revision,
     };
-  }, []);
+  }, [editorShowsAnotherNote]);
 
   const clearPendingSnapshotIfCurrent = useCallback((snapshot: SaveSnapshot) => {
     const current = pendingSnapshotsRef.current.get(snapshot.docId);
@@ -866,6 +888,8 @@ export function useAutoSave(
 
     const freshSnapshot = createSnapshot();
     if (!freshSnapshot) {
+      const activeId = activeDocRef.current?.id;
+      if (activeId && editorShowsAnotherNote(activeId)) return { status: "failed", reason: "save-failed" };
       // A pathless active doc cannot snapshot. Provisioning writes the live
       // content itself; on success re-snapshot so edits that landed while the
       // provision was in flight are saved too. This reports "provisioned", not
@@ -885,7 +909,7 @@ export function useAutoSave(
     return await startBackgroundSave(freshSnapshot)
       ? { status: "saved" }
       : { status: "failed", reason: "save-failed" };
-  }, [createSnapshot, provisionPathlessActiveDoc, startBackgroundSave]);
+  }, [createSnapshot, editorShowsAnotherNote, provisionPathlessActiveDoc, startBackgroundSave]);
 
   // Synchronous "is anything still unsaved" probe for close/migration drain
   // gates. Reads only the synchronously-maintained pending refs (via
@@ -1018,6 +1042,7 @@ export function useAutoSave(
 
     const freshSnapshot = createSnapshot();
     if (!freshSnapshot) {
+      if (editorShowsAnotherNote(activeDocId)) return;
       // Pathless doc: provisioning captures the content synchronously, before
       // the caller repoints the editor at the next doc. Forced — the retry
       // throttle must not skip that capture, or a switch within the throttle
@@ -1027,7 +1052,7 @@ export function useAutoSave(
     }
 
     void startBackgroundSave(freshSnapshot);
-  }, [createSnapshot, hasPendingForDoc, provisionPathlessActiveDoc, startBackgroundSave]);
+  }, [createSnapshot, editorShowsAnotherNote, hasPendingForDoc, provisionPathlessActiveDoc, startBackgroundSave]);
 
   const scheduleAutoSave = useCallback(() => {
     if (migrationInProgress) return;
@@ -1049,7 +1074,10 @@ export function useAutoSave(
       if (pendingTarget) {
         const snapshot = createSnapshot(pendingTarget);
         if (!snapshot) {
-          discardPendingTarget(pending.docId);
+          // A note no longer in the editor cannot be snapshotted any more. Kept, its
+          // target would read as unsaved until the note was next visited.
+          const refused = activeDocRef.current?.id === pending.docId && editorShowsAnotherNote(pending.docId);
+          if (!refused) discardPendingTarget(pending.docId);
           return;
         }
         void startBackgroundSave(snapshot);
@@ -1057,7 +1085,7 @@ export function useAutoSave(
     }, DEBOUNCE_MS);
 
     timersRef.current.set(pending.docId, timer);
-  }, [createSnapshot, discardPendingTarget, markActiveDocEdited, provisionPathlessActiveDoc, startBackgroundSave]);
+  }, [createSnapshot, discardPendingTarget, editorShowsAnotherNote, markActiveDocEdited, provisionPathlessActiveDoc, startBackgroundSave]);
 
   useEffect(() => {
     return () => {

@@ -1314,7 +1314,7 @@ export function useFileSystem(
   }, [activeIndex, docs, locale, tiptapRef]);
 
   const renameNote = useCallback(async (index: number, newName: string): Promise<RenameNoteResult> => {
-    const { docs: liveDocs, activeDocId, activeIndex: currentActiveIndex } = getLiveDocsSnapshot();
+    const { docs: liveDocs, activeDocId } = getLiveDocsSnapshot();
     const doc = liveDocs[index];
     if (!doc) return { renamed: false, linkRewriteSkipped: false };
 
@@ -1353,6 +1353,10 @@ export function useFileSystem(
     const candidates = oldTitleIsAmbiguous ? [] : liveDocs.filter(
       (entry) => entry.id !== doc.id && entry.content.includes("[["),
     );
+    // Compared after the awaits below, to tell whether the user typed meanwhile.
+    const editorAtStart = candidates.some((entry) => entry.id === activeDocId)
+      ? getCurrentMarkdown(tiptapRef)
+      : null;
     const flushFailed = new Set<string>();
     for (const entry of candidates) {
       if (entry.id === activeDocId) captureAndQueueSaveRef?.current?.();
@@ -1363,7 +1367,7 @@ export function useFileSystem(
     // Compute proposed rewrites without mutating memory yet; we only commit a
     // rewrite to the in-memory doc once its disk write lands, so memory stays
     // in sync with disk if a write fails.
-    interface ProposedRewrite { docId: string; updated: string; filePath: string | null; isActive: boolean; }
+    interface ProposedRewrite { docId: string; updated: string; filePath: string | null; }
     const proposed: ProposedRewrite[] = [];
     for (const entry of candidates) {
       // A failed flush means this doc has unsaved content we could not land;
@@ -1391,60 +1395,104 @@ export function useFileSystem(
         docId: entry.id,
         updated,
         filePath: entry.filePath || null,
-        isActive,
       });
     }
 
     const committed = new Set<string>();
 
-    await Promise.all(proposed.map(async (rw) => {
-      if (rw.isActive) return; // active doc handled below
+    // The flushes, reads and writes here can take seconds on a cloud folder, and
+    // the user keeps working through them, so whether a note is on screen is asked
+    // again right before anything reads the editor. Reading it for a note that is
+    // no longer shown would write another note's text over this one.
+    const editorShows = (id: string) => {
+      const shown = tiptapRef.current?.getEditor()?.storage?.documentContext?.noteId;
+      return libraryStore.getSnapshot().activeNoteId === id && (!shown || shown === id);
+    };
+
+    const rewriteInBackground = async (rw: ProposedRewrite) => {
+      if (!libraryStore.getSnapshot().docs.some((entry) => entry.id === rw.docId)) return;
       if (!rw.filePath) {
         // Memory-only doc — no disk to diverge from, safe to commit.
         committed.add(rw.docId);
         return;
       }
+      // The rewrite was computed from a read that may be seconds old. Since then
+      // the note may have been open and typed in, or a peer may have saved it, so
+      // disk is read again once any save of it has landed.
+      if (await flushDocSaveRef?.current?.(rw.docId) === false) return;
+      let disk: string;
+      try {
+        disk = await readTextFile(rw.filePath);
+      } catch {
+        return;
+      }
+      rw.updated = disk.replace(rewritePattern, replacement);
+      if (rw.updated === disk) return;
       if (await rewriteNoteFile(rw.filePath, rw.updated, "renameNote.rewrite", rw.docId)) {
         committed.add(rw.docId);
       }
-    }));
+    };
 
-    const activeRewrite = proposed.find((rw) => rw.isActive) ?? null;
-    let activeWriteOk = false;
-    if (activeRewrite) {
-      const activeDoc = liveDocs[currentActiveIndex];
-      if (activeDoc?.filePath) {
-        activeWriteOk = await rewriteNoteFile(
-          activeDoc.filePath,
-          activeRewrite.updated,
-          "renameNote.rewrite.active",
-          activeDoc.id,
-        );
-      } else {
-        // No file path on the active doc — memory only.
-        activeWriteOk = true;
+    const onScreen = proposed.find((rw) => editorShows(rw.docId)) ?? null;
+    await Promise.all(proposed.map((rw) => (
+      rw === onScreen ? undefined : rewriteInBackground(rw)
+    )));
+
+    let editorBeforeWrite: string | null = null;
+    if (onScreen && !editorShows(onScreen.docId)) {
+      await rewriteInBackground(onScreen);
+    } else if (onScreen) {
+      // The rewrite was computed before those awaits. Built from what the editor
+      // holds now if that differs, or text typed meanwhile would be replaced. A
+      // note opened meanwhile was read from disk, and the editor is newer.
+      editorBeforeWrite = getCurrentMarkdown(tiptapRef);
+      if (onScreen.docId !== activeDocId || editorBeforeWrite !== editorAtStart) {
+        onScreen.updated = editorBeforeWrite.replace(rewritePattern, replacement);
       }
-      if (activeWriteOk) committed.add(activeRewrite.docId);
+      const filePath = libraryStore.getSnapshot().docs.find((entry) => entry.id === onScreen.docId)?.filePath;
+      // No file path on the active doc — memory only.
+      const landed = filePath
+        ? await rewriteNoteFile(filePath, onScreen.updated, "renameNote.rewrite.active", onScreen.docId)
+        : true;
+      if (landed) committed.add(onScreen.docId);
+    }
+
+    // Whatever note is on screen now, even one opened during its own background
+    // rewrite: the editor holds the old link, and its next save would put it back.
+    // Only if the rewrite landed: clearing isDirty when the write failed would mask
+    // the loss, while an unchanged editor + dirty flag lets autosave retry.
+    const shownRewrite = proposed.find((rw) => committed.has(rw.docId) && editorShows(rw.docId));
+    if (shownRewrite) {
+      const shownDoc = libraryStore.getSnapshot().docs.find((entry) => entry.id === shownRewrite.docId);
+      const editorNow = getCurrentMarkdown(tiptapRef);
+      // Text typed during the write needs the link rewritten too. It may already
+      // have been saved and overwritten by this write, so the editor now holds the
+      // only copy and has to count as edited, or leaving the note would drop it.
+      const markdown = shownRewrite === onScreen && editorNow === editorBeforeWrite
+        ? shownRewrite.updated
+        : editorNow.replace(rewritePattern, replacement);
+      const matchesDisk = markdown === shownRewrite.updated;
+      if (markdown !== editorNow) {
+        tiptapRef.current?.openDocument?.({
+          noteId: shownDoc?.id ?? null,
+          filePath: shownDoc?.filePath ?? null,
+          markdown,
+          reason: "file-watch",
+          markEdited: !matchesDisk,
+        });
+        state.primeMarkdown(markdown);
+      }
+      if (matchesDisk) state.setIsDirty(false);
     }
 
     const proposedById = new Map(proposed.map((rw) => [rw.docId, rw]));
 
-    // Flip the editor only if the active doc's rewrite actually landed on
-    // disk. Clearing isDirty when the write failed would mask the loss; an
-    // unchanged editor + dirty flag lets autosave retry.
-    if (activeRewrite && activeWriteOk) {
-      const activeDoc = liveDocs[currentActiveIndex];
-      tiptapRef.current?.openDocument?.({
-        noteId: activeDoc?.id ?? null,
-        filePath: activeDoc?.filePath ?? null,
-        markdown: activeRewrite.updated,
-        reason: "file-watch",
-      });
-      state.primeMarkdown(activeRewrite.updated);
-      state.setIsDirty(false);
-    }
-
     markNoteTitleChanged(doc.id);
+    // Renaming a note does not open it. Passing the renamed id here made it the
+    // active note while the editor still showed another one, and that editor's
+    // next save overwrote the renamed note's file. Read after the awaits above,
+    // from the store, so a switch made during the rename is not undone either.
+    const activeId = libraryStore.getSnapshot().activeNoteId;
     sortAndPersistDocs((prev) => prev.map((entry) => {
       if (entry.id === doc.id) {
         return { ...entry, fileName: trimmed, updatedAt: now, customName: true };
@@ -1456,7 +1504,7 @@ export function useFileSystem(
       // that conflict is resolved at the disk level (LWW + .conflicts backup),
       // not by preferring the in-memory peer copy over what was just written.
       return { ...entry, content: rw.updated, updatedAt: now };
-    }), doc.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
+    }), activeId, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
     emitDocRenamed(doc.id, doc.filePath, doc.filePath, trimmed, true);
     return { renamed: true, linkRewriteSkipped: oldTitleIsAmbiguous };
   }, [captureAndQueueSaveRef, flushDocSaveRef, getLiveDocsSnapshot, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);

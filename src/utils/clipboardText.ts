@@ -1,4 +1,5 @@
 import { Fragment, Slice, type Node as PMNode, type Schema } from "@tiptap/pm/model";
+import { isImageNodeName } from "./imageNode";
 
 /**
  * Text representation of inline leaf nodes for clipboard serialization.
@@ -7,7 +8,7 @@ import { Fragment, Slice, type Node as PMNode, type Schema } from "@tiptap/pm/mo
  */
 function leafText(node: PMNode): string {
   if (node.type.name === "hardBreak") return "\n";
-  if (node.type.name === "image") return node.attrs?.alt ?? "";
+  if (isImageNodeName(node.type.name)) return node.attrs?.alt ?? "";
   return "";
 }
 

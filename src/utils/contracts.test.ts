@@ -694,6 +694,7 @@ describe("contract: the editor parses Markdown through Noten's list and code-blo
     expect(text).toMatch(/^\s*NotenStarterKit\.configure\(/m);
     expect(text).not.toMatch(/from "@tiptap\/starter-kit"/);
     expect(text).toMatch(/^\s*MermaidCodeBlock\.configure\(/m);
+    expect(text).toMatch(/^\s*RawMarkdown,$/m);
   });
 
   it("NotenStarterKit swaps in the list item, ordered list and code block", () => {
