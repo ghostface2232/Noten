@@ -1752,6 +1752,24 @@ describe("useAutoSave — the editor must be showing the note it saves", () => {
     }
   });
 
+  it("does not keep a target for a note the user has left", async () => {
+    vi.useFakeTimers();
+    try {
+      refs.editorContent = "text";
+      const { result, tiptapRef } = renderAutoSave({ docs: [makeDoc("a"), makeDoc("b")] });
+      showNote(tiptapRef, "a");
+
+      act(() => result.current.scheduleAutoSave());
+      showNote(tiptapRef, "b");
+      act(() => result.current.notifyActiveDoc("b", "/notes/b.md"));
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+
+      expect(result.current.hasUnsavedChanges()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("saves when the editor is showing the active note", async () => {
     refs.editorContent = "text of note b";
     const { result, tiptapRef } = renderAutoSave({

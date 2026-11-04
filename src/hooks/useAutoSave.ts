@@ -1074,7 +1074,10 @@ export function useAutoSave(
       if (pendingTarget) {
         const snapshot = createSnapshot(pendingTarget);
         if (!snapshot) {
-          if (!editorShowsAnotherNote(pending.docId)) discardPendingTarget(pending.docId);
+          // A note the user has left is the ordinary case: its edit was captured
+          // on the way out. Kept, it would read as unsaved until revisited.
+          const refused = activeDocRef.current?.id === pending.docId && editorShowsAnotherNote(pending.docId);
+          if (!refused) discardPendingTarget(pending.docId);
           return;
         }
         void startBackgroundSave(snapshot);
