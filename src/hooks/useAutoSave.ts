@@ -232,13 +232,13 @@ export function useAutoSave(
     if (!target?.filePath) return null;
     const docId = "docId" in target ? target.docId : target.id;
     if (remoteDeletedDocsRef.current.has(docId)) return null;
-    if (activeDocRef.current?.id !== docId) {
-      return null;
-    }
     // Gone after a crash unmounts the app: `getCurrentMarkdown` then answers "", and
     // saving that would empty the note, with no backup since the disk still matches
     // its baseline, and carry the empty body to every other window.
     if (!latestEditorRef.current) return null;
+    if (activeDocRef.current?.id !== docId) {
+      return null;
+    }
 
     const content = getCurrentMarkdown(latestEditorRef);
     latestState.primeMarkdown(content);
