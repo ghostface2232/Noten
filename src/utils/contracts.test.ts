@@ -155,6 +155,30 @@ describe("contract: crashLog line caps remain in place", () => {
   });
 });
 
+describe("contract: filled buttons keep their fill on hover", () => {
+  // Regression class: the global quiet-button hover is a nearly clear fill with
+  // !important, and it left white text on nothing on primary buttons.
+  const css = () => read(resolve(SRC_ROOT, "App.css"));
+
+  it("the hover rule opts filled buttons out", () => {
+    expect(css()).not.toMatch(/\.fui-Button:(?:hover|active)\s*\{/);
+    expect(css()).toMatch(/\.fui-Button:where\(:not\(\.noten-filled-button\)\):hover/);
+    expect(css()).toMatch(/\.fui-Button:where\(:not\(\.noten-filled-button\)\):active/);
+  });
+
+  it("every primary button carries the opt-out", () => {
+    const seen: string[] = [];
+    for (const file of readdirSync(resolve(SRC_ROOT, "components")).filter((name) => name.endsWith(".tsx"))) {
+      const text = read(resolve(SRC_ROOT, "components", file));
+      for (const match of text.matchAll(/<Button\b(?:[^>"]|"[^"]*"|\{[^}]*\}|=>)*?appearance="primary"(?:[^>"]|"[^"]*"|=>)*?>/g)) {
+        seen.push(file);
+        expect(match[0], file).toContain("noten-filled-button");
+      }
+    }
+    expect(seen.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
 describe("contract: a failed lifecycle action is reported", () => {
   // Regression class: delete, restore and purge keep a failed note in place and
   // return quietly, so a caller that does not check reports nothing at all.

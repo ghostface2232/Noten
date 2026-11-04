@@ -89,17 +89,23 @@ body {
 }
 
 [data-theme="dark"] *:hover > ::-webkit-scrollbar-thumb,
-[data-theme="dark"] *:hover::-webkit-scrollbar-thumb {
+[data-theme="dark"] *:hover::-webkit-scrollbar-thumb,
+:root[data-noten-theme="dark"] [data-portal-node] *:hover > ::-webkit-scrollbar-thumb,
+:root[data-noten-theme="dark"] [data-portal-node] *:hover::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.12);
 }
 
 [data-theme="dark"] *:hover > ::-webkit-scrollbar-thumb:hover,
-[data-theme="dark"] *:hover::-webkit-scrollbar-thumb:hover {
+[data-theme="dark"] *:hover::-webkit-scrollbar-thumb:hover,
+:root[data-noten-theme="dark"] [data-portal-node] *:hover > ::-webkit-scrollbar-thumb:hover,
+:root[data-noten-theme="dark"] [data-portal-node] *:hover::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.25);
 }
 
 [data-theme="dark"] *:hover > ::-webkit-scrollbar-thumb:active,
-[data-theme="dark"] *:hover::-webkit-scrollbar-thumb:active {
+[data-theme="dark"] *:hover::-webkit-scrollbar-thumb:active,
+:root[data-noten-theme="dark"] [data-portal-node] *:hover > ::-webkit-scrollbar-thumb:active,
+:root[data-noten-theme="dark"] [data-portal-node] *:hover::-webkit-scrollbar-thumb:active {
   background: rgba(255, 255, 255, 0.35);
 }
 
@@ -202,14 +208,30 @@ body {
   transition: color var(--motion-slower) ease, background-color var(--motion-slower) ease;
 }
 
-.fui-Button:hover {
+/* Quiet buttons share one hover. A filled button opts out: this is a nearly clear
+   fill, and over white text it left the label unreadable (1.09:1 on the red delete
+   button). Fluent v9 has no class for its primary appearance, so the opt-out is ours.
+   :where keeps the specificity of a bare .fui-Button:hover, which the buttons with
+   their own !important hover (folder merge, window close) rely on to win. */
+.fui-Button:where(:not(.noten-filled-button)):hover {
   background-color: var(--ui-hover-bg) !important;
 }
-.fui-Button:active {
+.fui-Button:where(:not(.noten-filled-button)):active {
   background-color: var(--ui-pressed-bg) !important;
 }
+/* Its fill is inline, so Fluent's own hover colours cannot reach it. */
+.noten-danger-button:hover {
+  filter: brightness(0.9);
+}
+.noten-danger-button:active {
+  filter: brightness(0.8);
+}
 
-[data-theme="dark"] {
+/* Dialogs and menus mount in a portal under body, outside the provider that carries
+   data-theme. Not on the root itself: color-scheme there would touch the page canvas
+   under the transparent window. */
+[data-theme="dark"],
+:root[data-noten-theme="dark"] [data-portal-node] {
   color-scheme: dark;
   --ui-active-bg: rgba(255, 255, 255, 0.12);
   --ui-hover-bg: rgba(255, 255, 255, 0.06);

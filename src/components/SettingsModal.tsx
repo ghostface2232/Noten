@@ -901,7 +901,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                       </Button>
                     )}
                     {updaterState.status === "available" && (
-                      <Button appearance="primary" size="medium" className={styles.primaryButton} onClick={onInstallUpdate}>
+                      <Button appearance="primary" size="medium" className={mergeClasses(styles.primaryButton, "noten-filled-button")} onClick={onInstallUpdate}>
                         {i("about.install")}
                       </Button>
                     )}
@@ -966,7 +966,7 @@ export function SettingsModal({ open, onClose, settings, isDarkMode, onUpdate, c
                     )}
 
                     {updaterState.status === "ready" && (
-                      <Button appearance="primary" size="medium" className={styles.primaryButton} onClick={onRestartApp}>
+                      <Button appearance="primary" size="medium" className={mergeClasses(styles.primaryButton, "noten-filled-button")} onClick={onRestartApp}>
                         {i("about.restart")}
                       </Button>
                     )}

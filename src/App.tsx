@@ -336,6 +336,9 @@ function App() {
   const isDarkMode = settings.themeMode === "system"
     ? systemPrefersDark
     : settings.themeMode === "dark";
+  useLayoutEffect(() => {
+    document.documentElement.dataset.notenTheme = isDarkMode ? "dark" : "light";
+  }, [isDarkMode]);
   const locale = settings.locale;
   const state = useMarkdownState();
   const styles = useStyles();
