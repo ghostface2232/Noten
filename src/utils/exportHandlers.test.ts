@@ -18,6 +18,21 @@ function editorWith(html: string): HTMLElement {
 }
 
 describe("cloneEditorContentForExport", () => {
+  it("leaves out source the note's reader never wrote to be read", () => {
+    const el = editorWith(
+      '<pre data-raw-kind="frontmatter">---\nk: v\n---</pre>'
+      + '<pre data-raw-kind="comment">&lt;!-- c --&gt;</pre>'
+      + '<pre data-raw-kind="definition">[r]: u</pre>'
+      + '<p>a<span data-raw-inline="">&lt;!-- c --&gt;</span>b<span data-raw-inline="">$x$</span></p>'
+      + '<pre data-raw-kind="footnote">[^1]: n</pre>'
+      + '<pre data-raw-kind="math">$$x$$</pre>',
+    );
+    const clone = cloneEditorContentForExport(el);
+
+    expect(clone.textContent).toBe("ab$x$[^1]: n$$x$$");
+    expect(el.querySelector('[data-raw-kind="frontmatter"]')).not.toBeNull();
+  });
+
   it("unwraps search-match decorations but keeps their text", () => {
     const el = editorWith(
       '<p>find <span class="search-match">needle</span> and <span class="search-match-active">needle</span></p>',

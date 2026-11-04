@@ -109,6 +109,40 @@ describe("TiptapEditor: an image beside text", () => {
   });
 });
 
+describe("TiptapEditor: Markdown it has no model for", () => {
+  const NOTE = "---\ntitle: My note\n---\n\n<!-- c -->\n\nbody $a_b$[^1]\n\n[^1]: note";
+
+  it("opens without an edit and saves the file as it was after a real one", async () => {
+    const { editor, onDirtyChange, open } = mountEditor();
+    await open("n", NOTE);
+    expect(onDirtyChange).not.toHaveBeenCalled();
+
+    await act(async () => {
+      const e = editor();
+      e.view.dispatch(e.state.tr.insertText("x", e.state.selection.from));
+    });
+
+    expect(onDirtyChange).toHaveBeenCalledWith(true);
+    expect(editor().getMarkdown().trimEnd()).toBe(NOTE.replace("<!-- c -->", "x<!-- c -->"));
+  });
+
+  it("opens with the caret past the front matter", async () => {
+    const { editor, open } = mountEditor();
+    await open("n", "---\nk: v\n---\n\nbody");
+
+    expect(editor().state.selection.$from.parent.textContent).toBe("body");
+  });
+
+  it("does not render raw HTML", async () => {
+    const { editor, open } = mountEditor();
+    await open("n", "<div onclick=\"x()\">hi</div>\n\n<script>x()</script>");
+
+    const dom = editor().view.dom;
+    expect(dom.querySelector("div[onclick]")).toBeNull();
+    expect(dom.querySelector("script")).toBeNull();
+  });
+});
+
 // Notes that do not end in a paragraph, where TrailingNode has something to add.
 const TAILS = ["# heading", "para\n\n- item", "para\n\n```\ncode\n```", "para\n\n> quote", "| a |\n|---|\n| 1 |", "para\n\n- [ ] task"];
 

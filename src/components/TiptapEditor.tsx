@@ -50,6 +50,7 @@ import { announceDocumentSwap } from "../extensions/documentSwap";
 import OffscreenBlocks from "../extensions/OffscreenBlocks";
 import IncrementalMarkdown from "../extensions/IncrementalMarkdown";
 import { NotenImage, NotenInlineImage } from "../extensions/NotenImage";
+import { RawMarkdown } from "../extensions/RawMarkdown";
 import { isImageNodeName } from "../utils/imageNode";
 import { NotenTable } from "../extensions/NotenTable";
 import { createNotenTaskItem } from "../extensions/NotenTaskItem";
@@ -799,6 +800,7 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         AnchorLink,
         ImageDrop,
         ImageFocusGuard,
+        RawMarkdown,
         TextContextMenu,
         SearchHighlight,
         FocusMode,
@@ -854,8 +856,15 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           parsed.content = [{ type: "paragraph" }];
         }
         const doc = editor.schema.nodeFromJSON(parsed);
+        // A note opens with the caret in its first line of text, not in its
+        // front matter, where the first keystrokes would land in the YAML.
+        const first = doc.firstChild;
+        const selection = first?.attrs.kind === "frontmatter" && doc.childCount > 1
+          ? TextSelection.near(doc.resolve(first.nodeSize), 1)
+          : undefined;
         return EditorState.create({
           doc,
+          selection,
           plugins: editor.state.plugins,
         });
       } catch {

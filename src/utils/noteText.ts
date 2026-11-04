@@ -4,6 +4,8 @@
  * the useNotesLoader hook's React surface.
  */
 
+import { frontMatterEnd } from "./frontMatter";
+
 export function getFileBaseName(filePath: string): string {
   return filePath.replace(/\\/g, "/").split("/").pop() ?? "";
 }
@@ -40,14 +42,14 @@ function stripBlockMarkers(line: string): string {
 
 export function deriveTitle(content: string): string {
   if (!content) return "";
-  let lineStart = 0;
+  let lineStart = frontMatterEnd(content);
   while (lineStart <= content.length) {
     const newline = content.indexOf("\n", lineStart);
     const lineEnd = newline === -1 ? content.length : newline;
     const line = content.slice(lineStart, lineEnd).trim();
     lineStart = newline === -1 ? content.length + 1 : newline + 1;
     if (!line) continue;
-    if (line.startsWith("![") || line.startsWith("<img") || line.startsWith("```")) continue;
+    if (line.startsWith("![") || line.startsWith("<img") || line.startsWith("```") || line.startsWith("<!--")) continue;
     const heading = stripInlineMarkdown(stripBlockMarkers(line));
     if (heading) return heading.slice(0, 20);
   }

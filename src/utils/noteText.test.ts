@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { deriveTitle } from "./noteText";
 
 describe("deriveTitle", () => {
+  it("skips front matter and comments", () => {
+    expect(deriveTitle("---\ntitle: x\n---\n\n# Actual")).toBe("Actual");
+    expect(deriveTitle("<!-- note -->\n\nActual")).toBe("Actual");
+  });
+
   it("uses the first meaningful Markdown line", () => {
     expect(deriveTitle("\n  ![cover](cover.png)\n```mermaid\n# Actual **title**\n"))
       .toBe("Actual title");
