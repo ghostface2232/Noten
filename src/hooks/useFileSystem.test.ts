@@ -1823,6 +1823,51 @@ describe("useFileSystem — restoreNote meta-first ordering", () => {
 // disk write lands. A failed rewrite must leave that doc's content at the old
 // value so memory matches disk and autosave can retry from a coherent state.
 
+describe("useFileSystem — renameNote keeps the active note", () => {
+  it("does not make a renamed background note active", async () => {
+    const open = makeDoc("open", { fileName: "Open", updatedAt: 3000 });
+    const other = makeDoc("other", { fileName: "Other", updatedAt: 1000 });
+
+    const { result, setActiveIndex } = renderFs({ docs: [open, other], activeIndex: 0 });
+
+    await act(async () => {
+      await result.current.renameNote(1, "Renamed");
+    });
+
+    // The index must follow the note the editor is showing, wherever the
+    // rename sorted the two.
+    const committed = libraryStore.getSnapshot().docs;
+    expect(setActiveIndex).toHaveBeenLastCalledWith(committed.findIndex((d) => d.id === "open"));
+  });
+
+  it("keeps a switch made while the rename was reading back-links", async () => {
+    const open = makeDoc("open", { fileName: "Open", updatedAt: 3000 });
+    const renamed = makeDoc("renamed", { fileName: "Old", updatedAt: 2000 });
+    const linker = makeDoc("linker", { content: "see [[Old]]", updatedAt: 1000 });
+    let releaseRead!: () => void;
+    readMock.mockImplementation(async () => {
+      await new Promise<void>((resolve) => { releaseRead = resolve; });
+      return "see [[Old]]";
+    });
+
+    const { result, setActiveIndex } = renderFs({ docs: [open, renamed, linker], activeIndex: 0 });
+
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = result.current.renameNote(1, "New");
+      await vi.waitFor(() => expect(releaseRead).toBeDefined());
+    });
+    libraryStore.commit({ activeNoteId: "linker" }, "local");
+    await act(async () => {
+      releaseRead();
+      await pending;
+    });
+
+    const committed = libraryStore.getSnapshot().docs;
+    expect(setActiveIndex).toHaveBeenLastCalledWith(committed.findIndex((d) => d.id === "linker"));
+  });
+});
+
 describe("useFileSystem — renameNote partial-failure", () => {
   it("when one back-link rewrite fails, only the successful docs' bodies update in memory", async () => {
     const target = makeDoc("target", { fileName: "Old", customName: true });

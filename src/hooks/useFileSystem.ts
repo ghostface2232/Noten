@@ -1445,6 +1445,11 @@ export function useFileSystem(
     }
 
     markNoteTitleChanged(doc.id);
+    // Renaming a note does not open it. Passing the renamed id here made it the
+    // active note while the editor still showed another one, and that editor's
+    // next save overwrote the renamed note's file. Read after the awaits above,
+    // from the store, so a switch made during the rename is not undone either.
+    const activeId = libraryStore.getSnapshot().activeNoteId;
     sortAndPersistDocs((prev) => prev.map((entry) => {
       if (entry.id === doc.id) {
         return { ...entry, fileName: trimmed, updatedAt: now, customName: true };
@@ -1456,7 +1461,7 @@ export function useFileSystem(
       // that conflict is resolved at the disk level (LWW + .conflicts backup),
       // not by preferring the in-memory peer copy over what was just written.
       return { ...entry, content: rw.updated, updatedAt: now };
-    }), doc.id, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
+    }), activeId, notesSortOrder, locale, setDocs, setActiveIndex, groupsRef.current);
     emitDocRenamed(doc.id, doc.filePath, doc.filePath, trimmed, true);
     return { renamed: true, linkRewriteSkipped: oldTitleIsAmbiguous };
   }, [captureAndQueueSaveRef, flushDocSaveRef, getLiveDocsSnapshot, notesSortOrder, setActiveIndex, setDocs, state, tiptapRef]);

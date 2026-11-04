@@ -231,6 +231,21 @@ export function useAutoSave(
     if (activeDocRef.current?.id !== docId) {
       return null;
     }
+    // The body comes from the editor, so the editor has to be showing this
+    // note. If active identity and the editor ever disagree, saving would write
+    // one note's text over another's file with no .conflicts copy: the disk
+    // still matches the baseline. Refuse, and say so, since edits are not
+    // reaching the disk while this lasts.
+    const shownNoteId = latestEditorRef.current?.getEditor()?.storage?.documentContext?.noteId;
+    if (shownNoteId && shownNoteId !== docId) {
+      void logNotenError(new NotenError(
+        "SAVE_FAILED",
+        "fatal",
+        "createSnapshot: the editor is showing a different note than the save target",
+        { context: { noteId: docId, filePath: target.filePath, shownNoteId } },
+      ));
+      return null;
+    }
 
     const content = getCurrentMarkdown(latestEditorRef);
     latestState.primeMarkdown(content);

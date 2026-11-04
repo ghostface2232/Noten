@@ -1685,6 +1685,51 @@ describe("useAutoSave — post-switch save uses activeDocRef (stale stateRef gua
   });
 });
 
+describe("useAutoSave — the editor must be showing the note it saves", () => {
+  function showNote(tiptapRef: React.RefObject<TiptapEditorHandle | null>, noteId: string) {
+    tiptapRef.current = {
+      getEditor: () => ({
+        getMarkdown: () => refs.editorContent,
+        storage: { documentContext: { noteId, filePath: `/notes/${noteId}.md` } },
+      }),
+    } as unknown as TiptapEditorHandle;
+  }
+
+  it("refuses to write the shown note's text into the active note's file", async () => {
+    refs.editorContent = "text of note a";
+    const { result, tiptapRef } = renderAutoSave({
+      docs: [makeDoc("a"), makeDoc("b")],
+      activeIndex: 1,
+    });
+    showNote(tiptapRef, "a");
+
+    await act(async () => {
+      result.current.scheduleAutoSave();
+      await result.current.flushAutoSave();
+    });
+
+    expect(writeMock).not.toHaveBeenCalledWith("/notes/b.md", expect.anything());
+    const refused = logMock.mock.calls.find((call) => (call[0] as NotenError).code === "SAVE_FAILED");
+    expect((refused?.[0] as NotenError | undefined)?.severity).toBe("fatal");
+  });
+
+  it("saves when the editor is showing the active note", async () => {
+    refs.editorContent = "text of note b";
+    const { result, tiptapRef } = renderAutoSave({
+      docs: [makeDoc("a"), makeDoc("b")],
+      activeIndex: 1,
+    });
+    showNote(tiptapRef, "b");
+
+    await act(async () => {
+      result.current.scheduleAutoSave();
+      await result.current.flushAutoSave();
+    });
+
+    expect(writeMock).toHaveBeenCalledWith("/notes/b.md", "text of note b");
+  });
+});
+
 describe("useAutoSave — notifyActiveDoc", () => {
   // INVARIANT: this test relies on the hook NOT re-rendering between
   // notifyActiveDoc and flushAutoSave. Re-render reapplies the
