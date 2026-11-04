@@ -148,6 +148,13 @@ describe("TiptapEditor: Markdown it has no model for", () => {
     expect(editor().state.selection.$from.parent.textContent).toBe("body");
   });
 
+  it("opens with the caret past a leading comment", async () => {
+    const { editor, open } = mountEditor();
+    await open("n", "<!-- c -->\n\nbody");
+
+    expect(editor().state.selection.$from.parent.textContent).toBe("body");
+  });
+
   it("does not render raw HTML", async () => {
     const { editor, open } = mountEditor();
     await open("n", "<div onclick=\"x()\">hi</div>\n\n<script>x()</script>");

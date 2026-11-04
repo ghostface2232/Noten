@@ -856,10 +856,10 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
           parsed.content = [{ type: "paragraph" }];
         }
         const doc = editor.schema.nodeFromJSON(parsed);
-        // A note opens with the caret in its first line of text, not in its
-        // front matter, where the first keystrokes would land in the YAML.
+        // A note opens with the caret in its first line of text, not in kept
+        // source such as front matter, where the first keystrokes would land.
         const first = doc.firstChild;
-        const selection = first?.attrs.kind === "frontmatter" && doc.childCount > 1
+        const selection = first?.type.name === "rawBlock" && doc.childCount > 1
           ? TextSelection.near(doc.resolve(first.nodeSize), 1)
           : undefined;
         return EditorState.create({

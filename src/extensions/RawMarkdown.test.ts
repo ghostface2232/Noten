@@ -52,6 +52,7 @@ function load(markdown: string): Editor {
 const FRONT_MATTER = "---\ntitle: My note\ntags: [a, b]\n---";
 
 const KEPT: [string, string][] = [
+  ["front matter with a list and an indented value", "---\ntags:\n  - a\n- b\nk: v\n---\n\nbody"],
   ["front matter and a body", `${FRONT_MATTER}\n\n본문`],
   ["a note that is only front matter", FRONT_MATTER],
   ["front matter with a comment line", "---\n# generated\nk: v\n---\n\nbody"],
@@ -104,6 +105,12 @@ describe("Markdown without a model is saved as written", () => {
     }
   });
 
+  it("keeps front matter after a byte order mark", () => {
+    // Compared untrimmed: String.prototype.trim removes a byte order mark.
+    const markdown = "\uFEFF---\ntitle: x\n---\n\nbody";
+    expect(load(markdown).getMarkdown()).toBe(markdown);
+  });
+
   it("keeps a footnote reference in a table cell", () => {
     expect(load("| h |\n| --- |\n| x[^1] |").getMarkdown()).toContain("| x[^1] |");
   });
@@ -140,6 +147,9 @@ describe("what still reads as ordinary Markdown", () => {
     "---\nplain words\n---",
     "a\n\n---\nk: v\n---",
     "---",
+    "---\n# Title\n\nbody **x**\n\n- a\n\n---\nafter",
+    "---\n# only a comment\n---",
+    "---\nNote: a sentence\nand another line\n---",
   ])("does not read %j as front matter", (markdown) => {
     expect(JSON.stringify(load(markdown).getJSON())).not.toContain('"frontmatter"');
   });
@@ -256,6 +266,20 @@ describe("typing that syntax in the editor", () => {
     editor.commands.setTextSelection(1);
     editor.view.dispatch(editor.state.tr.insertText("%% ", 1));
     expect(editor.getMarkdown().trimEnd()).toBe("%% $$\nx\n$$");
+  });
+
+  it.each([
+    ["Backspace at the start of the paragraph below", "---\nk: v\n---\n\nbody", "body"],
+    ["Backspace at the start of the source", "para\n\n<!-- c_d -->\n\nend", "<!-- c_d -->"],
+  ])("does not join on %s", (_, markdown, line) => {
+    const editor = load(markdown);
+    let position = 0;
+    editor.state.doc.descendants((node, pos) => {
+      if (!position && node.isTextblock && node.textContent === line) position = pos + 1;
+    });
+    editor.commands.setTextSelection(position);
+    editor.commands.first(({ commands }) => [() => commands.joinBackward(), () => commands.selectNodeBackward()]);
+    expect(editor.getMarkdown().trimEnd()).toBe(markdown);
   });
 
   it("does not spread the inline mark onto text typed after it", () => {

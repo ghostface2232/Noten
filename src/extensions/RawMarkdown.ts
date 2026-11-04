@@ -218,6 +218,10 @@ export const RawBlock = Node.create({
   marks: "",
   code: true,
   defining: true,
+  // Backspace at the start of the paragraph below, where a note with front matter
+  // opens, would join it into the source: `---body`, which no longer closes the
+  // front matter. Delete at the source's end and Backspace at its start likewise.
+  isolating: true,
 
   addAttributes() {
     return {

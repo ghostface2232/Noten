@@ -49,7 +49,14 @@ export function deriveTitle(content: string): string {
     const line = content.slice(lineStart, lineEnd).trim();
     lineStart = newline === -1 ? content.length + 1 : newline + 1;
     if (!line) continue;
-    if (line.startsWith("![") || line.startsWith("<img") || line.startsWith("```") || line.startsWith("<!--")) continue;
+    if (line.startsWith("<!--")) {
+      const close = content.indexOf("-->", lineStart - line.length - 1);
+      if (close === -1) return "";
+      const after = content.indexOf("\n", close);
+      lineStart = after === -1 ? content.length + 1 : after + 1;
+      continue;
+    }
+    if (line.startsWith("![") || line.startsWith("<img") || line.startsWith("```")) continue;
     const heading = stripInlineMarkdown(stripBlockMarkers(line));
     if (heading) return heading.slice(0, 20);
   }

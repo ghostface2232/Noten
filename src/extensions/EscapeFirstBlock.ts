@@ -10,7 +10,9 @@ import { Extension, type Editor } from "@tiptap/core";
 // Tables and images are deliberately NOT handled here: they are block-selectable
 // and already escapable via gapcursor and TableNodeSelect. Only text-holding
 // blocks that trap the caret need this.
-const TRAPPING_FIRST_NODES = new Set(["codeBlock"]);
+// Kept Markdown source traps it as well, but a line above front matter would stop
+// it being front matter, so that one stays first.
+const TRAPPING_FIRST_NODES = new Set(["codeBlock", "rawBlock"]);
 
 /** Exported for unit testing; returns true when it handled the key. */
 export function escapeLeadingBlock(
@@ -22,6 +24,7 @@ export function escapeLeadingBlock(
 
   const firstChild = doc.firstChild;
   if (!firstChild || !TRAPPING_FIRST_NODES.has(firstChild.type.name)) return false;
+  if (firstChild.attrs.kind === "frontmatter") return false;
 
   const $from = selection.$from;
   // Cursor must sit inside the first top-level node.

@@ -1,7 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import { Markdown } from "@tiptap/markdown";
 import { EscapeFirstBlock, escapeLeadingBlock } from "./EscapeFirstBlock";
+import { createFastMarked } from "./fastMarkdownLexer";
+import { RawMarkdown } from "./RawMarkdown";
 
 let editor: Editor | null = null;
 afterEach(() => {
@@ -139,5 +142,29 @@ describe("Tiptap 3.29 code-block ArrowUp integration", () => {
     expect(pressKey(e, "ArrowUp").defaultPrevented).toBe(true);
     expect(e.state.doc.childCount).toBe(before + 1);
     expect(firstType(e)).toBe("paragraph");
+  });
+});
+
+describe("kept Markdown source as the first block", () => {
+  function withRawBlock(markdown: string): Editor {
+    editor = new Editor({
+      extensions: [StarterKit.configure({ gapcursor: false }), Markdown.configure({ marked: createFastMarked() }), RawMarkdown, EscapeFirstBlock],
+      content: markdown,
+      contentType: "markdown",
+    } as ConstructorParameters<typeof Editor>[0]);
+    editor.commands.setTextSelection(1);
+    return editor;
+  }
+
+  it("lets the caret out above a comment", () => {
+    const e = withRawBlock("<!-- c -->\n\nbody");
+    expect(escapeLeadingBlock(e, { requireBlockStart: true })).toBe(true);
+    expect(firstType(e)).toBe("paragraph");
+  });
+
+  it("keeps front matter first", () => {
+    const e = withRawBlock("---\nk: v\n---\n\nbody");
+    expect(escapeLeadingBlock(e, { requireBlockStart: true })).toBe(false);
+    expect(firstType(e)).toBe("rawBlock");
   });
 });
