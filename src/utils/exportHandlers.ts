@@ -86,9 +86,11 @@ const CSS_ATTRIBUTES = new Set([
 const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)/gi;
 const CSS_IMPORT = /@import[^;]*;?/gi;
 const CSS_LOADING_FUNCTION = /(?:image(?:-set)?|cross-fade|src)\(/i;
-// A custom property keeps its tokens unparsed, so `--a: u\72l(//host)` still reads as
-// a url wherever `var(--a)` lands, and it serializes that way too.
-const ESCAPE_IN_CUSTOM_PROPERTY = /--[\w-]+\s*:[\s\S]*\\/;
+// A custom property keeps its tokens unparsed even once the browser has read the rule,
+// so a quote in one can make the patterns below read a real load as a data URL, and
+// `--a: u\72l(//host)` is still a url wherever `var(--a)` lands. Such a rule is held
+// to the same standard as an attribute.
+const CUSTOM_PROPERTY = /(?:^|[{;\s])--[\w-]+\s*:/;
 const FRAGMENT_URL = /^#[\w.:-]*$/;
 // An attribute has not been parsed, so a comment or string can hide a load from any
 // pattern for one: `/*url("#*/background:url(//host/x.png);/*")*/`. Only a whole
@@ -105,7 +107,8 @@ const isInertCssAttribute = (value: string) => !LOADING_CSS_ATTRIBUTE.test(value
  * text the browser has parsed: a comment or an unparsed string would defeat it.
  */
 export function withoutExternalCss(css: string): string {
-  if (ESCAPE_IN_CUSTOM_PROPERTY.test(css) || CSS_LOADING_FUNCTION.test(css)) return "";
+  if (CSS_LOADING_FUNCTION.test(css)) return "";
+  if (CUSTOM_PROPERTY.test(css) && !isInertCssAttribute(css)) return "";
   return css
     .replace(CSS_IMPORT, "")
     .replace(CSS_URL, (whole, double, single, bare) => {

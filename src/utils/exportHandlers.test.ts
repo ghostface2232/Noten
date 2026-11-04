@@ -126,10 +126,12 @@ describe("withoutExternalCss", () => {
     ['.a { background: url("#x;*/background:url(//host/a);/*") }', ".a { background: none }"],
     ['@import url("//host/a.css"); .a { color: red }', " .a { color: red }"],
     [".a { background: url(#x;*/background:url(//host/a) }", ".a { background: none }"],
-    ['.a { --b: "url(#"; background-image: url(//host/a) }', '.a { --b: "none }'],
+    ['.a { --b: "url(#"; background-image: url(//host/a) }', ""],
     [".a { background: url(data:image/x;*/background:url(//host/a) }", ".a { background: none }"],
     [".a { background: URL(//host/a) }", ".a { background: none }"],
     [".a { --b: u\\72l(//host/a); background: var(--b) }", ""],
+    [`.a { --z: 'url("data:image/', --b: url(//host/x.png), --y: '")'; background: var(--b) }`, ""],
+    ["#m .a { background: var(--b); --b: url(//host/x.png) }", ""],
   ])("removes the load from %s", (css, expected) => {
     expect(withoutExternalCss(css)).toBe(expected);
   });
@@ -141,6 +143,8 @@ describe("withoutExternalCss", () => {
     '.a { background: url("data:image/svg+xml,%3Csvg xmlns=%27a%27 /%3E") }',
     ".a { background: url(data:image/png;base64,AAAA) }",
     '.a { content: "\\201C" }',
+    ".a { --b: 1px; fill: url(#arrow) }",
+    ".block--wide:hover { background: url(data:image/png;base64,AAAA) }",
   ])("keeps %s", (css) => {
     expect(withoutExternalCss(css)).toBe(css);
   });
