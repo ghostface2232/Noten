@@ -10,6 +10,6 @@ The status bar's line count, its caret row, and Go to Line all use the *logical 
 
 ## Note Export
 
+- The print page is `file:`, so anything in the export copy that loads can reach another host over SMB (see `src-tauri/AGENTS.md`). `removeExternalReferences` runs before `pointAssetImagesAtFiles`, and every copied stylesheet rule goes through `withoutExternalCss`. It removes a diagram's `<style>` from the copy because `document.styleSheets` already carries those rules, parsed, so a CSS escape cannot hide a `url(`. Keep both on any new path into the export HTML.
 - Markdown export writes `editor.getMarkdown()`; PDF export serializes the live editor DOM through headless Edge (`print_to_pdf`).
 - The editor DOM also carries transient decorations, so PDF export must go through `cloneEditorContentForExport` (`src/utils/exportHandlers.ts`), which unwraps `.search-match` / `.search-match-active` spans on a *clone*. Without it an open find bar prints its highlights into the PDF. Add any future decoration class to `DECORATION_SELECTOR`.
-- The print page is `file:`, so anything in the export copy that loads can reach another host over SMB (see `src-tauri/AGENTS.md`). `removeExternalReferences` runs before `pointAssetImagesAtFiles`, and every copied stylesheet rule goes through `withoutExternalCss`. It removes a diagram's `<style>` from the copy because `document.styleSheets` already carries those rules, parsed, so a CSS escape cannot hide a `url(`. Keep both on any new path into the export HTML.
