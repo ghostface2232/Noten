@@ -79,9 +79,11 @@ function schemaKeepsHtml(html: string): boolean {
   let sawTag = false;
   let sawLink = false;
   let sawImage = false;
-  for (const [, rawName, attributes] of html.matchAll(HTML_TAG)) {
+  let open = 0;
+  for (const [tag, rawName, attributes] of html.matchAll(HTML_TAG)) {
     sawTag = true;
     const name = rawName.toLowerCase();
+    if (name !== "br" && name !== "img" && !tag.endsWith("/>")) open += /^<\s*\//.test(tag) ? -1 : 1;
     if (name === "a") sawLink = true;
     if (name === "img") sawImage = true;
     const kept = KEPT_ATTRIBUTES[name];
@@ -90,8 +92,9 @@ function schemaKeepsHtml(html: string): boolean {
       if (!kept?.has(attribute.toLowerCase())) return false;
     }
   }
-  // The image would survive and the link around it would not.
-  return sawTag && !(sawLink && sawImage);
+  // A lone tag has nothing to apply to and would just be deleted, as in `the <b>
+  // tag`. And the image would survive where the link around it would not.
+  return sawTag && open === 0 && !(sawLink && sawImage);
 }
 
 type ParseResult = JSONContent | JSONContent[] | null;

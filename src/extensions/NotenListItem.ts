@@ -140,7 +140,11 @@ export const renderListItemMarkdown: RenderListItem = function (this: unknown, n
   const leadRendered = h.renderChildren([content[lead]]);
   const [head, ...rest] = leadRendered.split("\n");
   const onMarkerLine =
-    (MARKER_LINE_BLOCKS.has(content[lead].type ?? "") || (ordered && content[lead].type === "horizontalRule")) &&
+    (ordered
+      // The ordered reading takes the marker line's text as a paragraph, so `1. $$`
+      // would not read back; kept source stays on the lines below.
+      ? content[lead].type !== "rawBlock" && (MARKER_LINE_BLOCKS.has(content[lead].type ?? "") || content[lead].type === "horizontalRule")
+      : MARKER_LINE_BLOCKS.has(content[lead].type ?? "")) &&
     MARKER_LINE_HEAD.test(head);
   let output: string;
   let from: number;

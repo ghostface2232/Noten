@@ -83,6 +83,10 @@ const KEPT: [string, string][] = [
   ["single-line block math", "$$a_1$$"],
   ["display math inside a line", "text $$ a_b $$ more"],
   ["an anchor with an id", '<a id="foo"></a>'],
+  ["a tag named in prose", "use the <code> tag and <b> tag"],
+  ["a lone tag before Korean text", "<b> 태그"],
+  ["an unclosed link tag", 'a <a href="u"> c'],
+  ["a lone closing tag", "a </b> c"],
   ["an aligned image", '<img src="a.png" align="right">'],
   ["an entity", "&copy; 2026 &#169;"],
 ];
@@ -126,6 +130,28 @@ describe("Markdown without a model is saved as written", () => {
 });
 
 describe("kept source inside a list item", () => {
+  it.each([
+    ["math", "$$\na_b\n$$", "1. \n   $$\n   a_b\n   $$"],
+    ["a definition", "[a]: u", "1. \n   [a]: u"],
+    ["a footnote", "[^1]: a_b", "1. \n   [^1]: a_b"],
+    ["a multi-line div", "<div>\na\n</div>", "1. \n   <div>\n   a\n   </div>"],
+  ])("keeps %s under an ordered item's empty first line", (_, source, saved) => {
+    const editor = load("x");
+    editor.commands.setContent({
+      type: "doc",
+      content: [{
+        type: "orderedList",
+        content: [{
+          type: "listItem",
+          content: [{ type: "paragraph" }, { type: "rawBlock", content: [{ type: "text", text: source }] }],
+        }],
+      }],
+    });
+    const first = editor.getMarkdown().trimEnd();
+    expect(first).toBe(saved);
+    expect(load(first).getMarkdown().trimEnd()).toBe(saved);
+  });
+
   it.each([
     ["a comment", "1. a\n\n   <!-- c_d -->\n2. b"],
     ["a multi-line comment", "1. a\n\n   <!-- x\n\n   y -->\n2. b"],
