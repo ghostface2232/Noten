@@ -403,8 +403,10 @@ describe("remembered inline starts", () => {
       return performance.now() - t;
     };
     time(remembered);
-    const fast = time(remembered);
-    const slow = time(reference);
+    // Best of three: one sample fell to 2.7 on a busy CI runner, where 7 is usual.
+    const best = (marked: ReturnType<typeof createFastMarked>) => Math.min(time(marked), time(marked), time(marked));
+    const fast = best(remembered);
+    const slow = best(reference);
     // Rescanning is quadratic here; remembering keeps it linear. Relative,
     // so machine speed does not matter.
     expect(slow / fast).toBeGreaterThan(3);
