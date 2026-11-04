@@ -417,6 +417,7 @@ describe("emphasis next to CJK text", () => {
     ["`c`**한**글", "strong"],
     ['"*한*글', "em"],
     ['"~~한~~글', "del"],
+    ['**"서울"**은~부산', "strong"],
     ["**a😀**가", "strong"],
   ])("reads %j as %s", (markdown, type) => {
     expect(inlineTypes(markdown)).toContain(type);
@@ -434,6 +435,18 @@ describe("emphasis next to CJK text", () => {
     const types = inlineTypes(markdown);
     expect(types).not.toContain("strong");
     expect(types).not.toContain("em");
+  });
+
+  it("does not let a bold phrase run through the particle after it", () => {
+    const [paragraph] = instance.lexer('**"A"**와**"B"**') as { tokens?: { type: string; text?: string }[] }[];
+    const tokens = paragraph.tokens ?? [];
+    expect(tokens.map((token) => token.type)).toEqual(["strong", "text", "strong"]);
+    expect(tokens[1].text).toBe("와");
+  });
+
+  it("keeps a mixed run after a bold phrase apart", () => {
+    const [paragraph] = instance.lexer('**"A"**가*b*') as { tokens?: { type: string }[] }[];
+    expect((paragraph.tokens ?? []).map((token) => token.type)).toEqual(["strong", "text", "em"]);
   });
 
   it.each(["서울(월)~부산(화)~대구(수)", "월~(화)~수", "1)~가 2)~나", "2024.1.~가 2025.1.~나"])(

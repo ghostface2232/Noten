@@ -125,23 +125,33 @@ const DELIMITER_RUN = /\*+|~~+/g;
 // source. Showing them punctuation in place of the CJK character after such a run
 // lets it close as well as open. One code unit for one, as every mask here must
 // keep the length; the low half of an astral character stays and matches nothing.
+//
+// Only a run with something to close: the first run of `(**저**는)` is an opener,
+// and masking its 저 would leave the real closer after punctuation, before a letter.
 function maskCjkAfterDelimiters(masked: string): string {
   if (!CJK_CHARACTER.test(masked)) return masked;
   let parts: string[] | null = null;
   let cursor = 0;
+  const open = { "*": 0, "~": 0 };
   for (const match of masked.matchAll(DELIMITER_RUN)) {
-    if (match.index === 0) continue;
+    const delimiter = match[0][0] as "*" | "~";
+    const end = match.index + match[0].length;
+    const after = masked.codePointAt(end);
+    const opensSomething = after !== undefined && !/\s/u.test(String.fromCodePoint(after));
+    if (match.index === 0) {
+      if (opensSomething) open[delimiter] += 1;
+      continue;
+    }
     // The whole character: an emoji before the run is two code units.
     const lowHalf = match.index >= 2 && masked.charCodeAt(match.index - 1) >= 0xdc00 && masked.charCodeAt(match.index - 1) <= 0xdfff;
     const before = String.fromCodePoint(masked.codePointAt(match.index - (lowHalf ? 2 : 1))!);
+    if (/\s/u.test(before) || open[delimiter] === 0) {
+      if (opensSomething) open[delimiter] += 1;
+      continue;
+    }
+    open[delimiter] -= 1;
     if (!FLANKING_PUNCTUATION.test(before)) continue;
-    const end = match.index + match[0].length;
-    const after = masked.codePointAt(end);
     if (after === undefined || !CJK_CHARACTER.test(String.fromCodePoint(after))) continue;
-    // A run right after that character needs it visible, to close: masking the
-    // 저 of `(**저**는)` left the closer after punctuation, before a letter.
-    const following = masked[end + (after > 0xffff ? 2 : 1)];
-    if (following === "*" || following === "~") continue;
     (parts ??= []).push(masked.slice(cursor, end), ".");
     cursor = end + 1;
   }
