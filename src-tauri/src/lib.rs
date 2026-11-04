@@ -457,6 +457,23 @@ fn note_image_roots<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
     .collect()
 }
 
+/// Every spelling of those roots a path from the app can start with. `note_image_roots`
+/// holds the canonical ones, and a profile on a DFS share canonicalizes to whichever
+/// server backs it, which is not how a path written from the app spells it.
+fn note_image_root_spellings<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
+    let mut roots = note_image_roots(app);
+    roots.extend(
+        [
+            app.path().home_dir(),
+            app.path().app_data_dir(),
+            app.path().app_local_data_dir(),
+        ]
+        .into_iter()
+        .flatten(),
+    );
+    roots
+}
+
 /// The files PDF export may point headless Edge at, one per requested image
 /// path: its canonical path when the `noten-asset` scheme would serve it and
 /// it is a file, else `None`. The export must not reach anything the editor
@@ -468,9 +485,10 @@ async fn note_image_files<R: Runtime>(
     paths: Vec<String>,
 ) -> Vec<Option<String>> {
     let roots = note_image_roots(&app);
+    let spellings = note_image_root_spellings(&app);
     paths
         .iter()
-        .map(|raw| servable_note_image_file(raw, &roots))
+        .map(|raw| servable_note_image_file(raw, &roots, &spellings))
         .collect()
 }
 
@@ -514,8 +532,8 @@ fn comparable_share_path(raw: &str) -> String {
 }
 
 /// `raw`'s canonical path if it is a file the `noten-asset` scheme would serve.
-fn servable_note_image_file(raw: &str, roots: &[PathBuf]) -> Option<String> {
-    if !stays_off_foreign_hosts(raw, roots) {
+fn servable_note_image_file(raw: &str, roots: &[PathBuf], spellings: &[PathBuf]) -> Option<String> {
+    if !stays_off_foreign_hosts(raw, spellings) {
         return None;
     }
     let path = fs::canonicalize(raw).ok()?;
@@ -554,14 +572,13 @@ fn note_asset_response<R: Runtime>(
     let raw = percent_encoding::percent_decode(encoded.get(1..).unwrap_or_default())
         .decode_utf8_lossy()
         .into_owned();
-    let roots = note_image_roots(app);
-    if !stays_off_foreign_hosts(&raw, &roots) {
+    if !stays_off_foreign_hosts(&raw, &note_image_root_spellings(app)) {
         return status(403);
     }
     let Ok(path) = fs::canonicalize(&raw) else {
         return status(404);
     };
-    if !is_servable_note_image(&path, &roots) {
+    if !is_servable_note_image(&path, &note_image_roots(app)) {
         return status(403);
     }
     match fs::read(&path) {
@@ -705,7 +722,7 @@ mod tests {
         std::fs::write(assets.join("note.md"), b"md").unwrap();
         std::fs::write(root.join("notes").join("outside.png"), b"png").unwrap();
         let roots = vec![std::fs::canonicalize(&root).unwrap()];
-        let file = |p: PathBuf| servable_note_image_file(&p.to_string_lossy(), &roots);
+        let file = |p: PathBuf| servable_note_image_file(&p.to_string_lossy(), &roots, &roots);
 
         let served = file(assets.join("a.png")).expect("an image inside .assets is served");
         let canonical = std::fs::canonicalize(assets.join("a.png")).unwrap();
@@ -718,7 +735,7 @@ mod tests {
         assert_eq!(file(assets.join("note.md")), None);
         assert_eq!(file(assets.join("dir.png")), None);
         assert_eq!(file(assets.join("missing.png")), None);
-        assert_eq!(servable_note_image_file("", &roots), None);
+        assert_eq!(servable_note_image_file("", &roots, &roots), None);
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -822,7 +839,7 @@ mod tests {
     fn refuses_a_share_without_touching_the_network() {
         let roots = vec![PathBuf::from(r"C:\Users\u")];
         let start = Instant::now();
-        assert_eq!(servable_note_image_file(r"\\192.0.2.1\s\.assets\a.png", &roots), None);
+        assert_eq!(servable_note_image_file(r"\\192.0.2.1\s\.assets\a.png", &roots, &roots), None);
         assert!(start.elapsed() < Duration::from_secs(2));
     }
 
