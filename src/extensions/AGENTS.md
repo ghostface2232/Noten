@@ -43,6 +43,7 @@ Chromium's per-keystroke and per-IME-composition cost grows with the whole conte
 - `renameNote` skips back-link rewriting entirely when the OLD title was shared by another note: `[[Old]]` cannot be attributed to one target, and rewriting would re-point links belonging to the other note. It returns `RenameNoteResult.linkRewriteSkipped` and App.tsx surfaces the transient notice.
 - `normalizeNoteTitle` (`src/utils/noteText.ts`) is the single definition of "same title" for link resolution, duplicate detection, and rename.
 - `customName` on a document means the user manually renamed it; auto-title derivation is permanently disabled for that document.
+- A target is written exactly as it is read. The tokenizer takes it raw, so the mark sets `code: true`, which exempts its text from the serializer's escaping and entity encoding; rename's `[[Old]]` rewrite relies on the file holding the plain title. `undoSavedEscaping` repairs targets saved before this, which gained a layer of backslashes or `&amp;` per save.
 
 ## Images
 
