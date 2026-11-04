@@ -138,12 +138,32 @@ describe("TiptapEditor: Markdown it has no model for", () => {
     });
 
     expect(onDirtyChange).toHaveBeenCalledWith(true);
-    expect(editor().getMarkdown().trimEnd()).toBe(NOTE.replace("<!-- c -->", "x<!-- c -->"));
+    expect(editor().getMarkdown().trimEnd()).toBe(NOTE.replace("body", "xbody"));
   });
 
   it("opens with the caret past the front matter", async () => {
     const { editor, open } = mountEditor();
     await open("n", "---\nk: v\n---\n\nbody");
+
+    expect(editor().state.selection.$from.parent.textContent).toBe("body");
+  });
+
+  it.each([
+    ["only front matter", "---\nk: v\n---"],
+    ["only a comment", "<!-- c -->"],
+    ["front matter and a comment", "---\nk: v\n---\n\n<!-- c -->"],
+  ])("opens a note holding %s with the caret on a new line", async (_, markdown) => {
+    const { editor, onDirtyChange, open } = mountEditor();
+    await open("n", markdown);
+
+    expect(editor().state.selection.$from.parent.type.name).toBe("paragraph");
+    expect(onDirtyChange).not.toHaveBeenCalled();
+    expect(editor().getMarkdown().trimEnd()).toBe(markdown);
+  });
+
+  it("opens past every leading block of source", async () => {
+    const { editor, open } = mountEditor();
+    await open("n", "---\nk: v\n---\n\n[r]: http://x.y\n\nbody");
 
     expect(editor().state.selection.$from.parent.textContent).toBe("body");
   });

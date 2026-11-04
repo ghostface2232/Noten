@@ -857,14 +857,18 @@ const TiptapEditorBase = forwardRef<TiptapEditorHandle, TiptapEditorProps>(
         }
         const doc = editor.schema.nodeFromJSON(parsed);
         // A note opens with the caret in its first line of text, not in kept
-        // source such as front matter, where the first keystrokes would land.
-        const first = doc.firstChild;
-        const selection = first?.type.name === "rawBlock" && doc.childCount > 1
-          ? TextSelection.near(doc.resolve(first.nodeSize), 1)
-          : undefined;
+        // source such as front matter, where the first keystrokes would land. A
+        // note holding nothing else gets the line TrailingNode would add anyway.
+        let bodyStart = 0;
+        for (let index = 0; index < doc.childCount && doc.child(index).type.name === "rawBlock"; index += 1) {
+          bodyStart += doc.child(index).nodeSize;
+        }
+        const bodyDoc = bodyStart > 0 && bodyStart === doc.content.size
+          ? doc.copy(doc.content.addToEnd(editor.schema.nodes.paragraph.create()))
+          : doc;
         return EditorState.create({
-          doc,
-          selection,
+          doc: bodyDoc,
+          selection: bodyStart > 0 ? TextSelection.near(bodyDoc.resolve(bodyStart), 1) : undefined,
           plugins: editor.state.plugins,
         });
       } catch {
