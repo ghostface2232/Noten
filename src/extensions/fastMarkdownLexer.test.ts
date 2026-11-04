@@ -389,3 +389,86 @@ describe("remembered inline starts", () => {
     expect(slow / fast).toBeGreaterThan(3);
   }, 60_000);
 });
+
+// CommonMark's flanking rules read `**"인용"**은` as literal asterisks. Korean puts
+// particles straight after a word, and Noten's serializer writes exactly that, so
+// a bold phrase came back as text on reload and was escaped by the next save.
+describe("emphasis next to CJK text", () => {
+  const instance = createFastMarked();
+  const inlineTypes = (md: string): string[] => {
+    const [paragraph] = instance.lexer(md) as { tokens?: { type: string }[] }[];
+    return (paragraph.tokens ?? []).map((token) => token.type);
+  };
+
+  it.each([
+    ['**"인용"**은', "strong"],
+    ["앞**(a)**", "strong"],
+    ["앞**(a)**뒤", "strong"],
+    ['*"인용"*은', "em"],
+    ["앞*(a)*", "em"],
+    ["~~(a)~~은", "del"],
+    ["앞~~(a)~~", "del"],
+    ['**"引用"**是', "strong"],
+    ["**「あ」**は", "strong"],
+    ['***"인용"***은', "em"],
+  ])("reads %j as %s", (markdown, type) => {
+    expect(inlineTypes(markdown)).toContain(type);
+  });
+
+  it.each([
+    "2*(3+4)*5",
+    "a**(b)**c",
+    '**"quote"**word',
+    "한_글_자",
+    '"**은',
+    "**은 없음",
+    "가격 *은",
+  ])("leaves %j as CommonMark reads it", (markdown) => {
+    const types = inlineTypes(markdown);
+    expect(types).not.toContain("strong");
+    expect(types).not.toContain("em");
+  });
+
+  it.each(["**인용**은", "앞**인용**뒤", "**a** 은", "**인용** 뒤"])("still reads %j as bold", (markdown) => {
+    expect(inlineTypes(markdown)).toContain("strong");
+  });
+
+  it("leaves underscore emphasis to its own rule", () => {
+    expect(inlineTypes("앞_(a)_뒤")).not.toContain("em");
+  });
+
+  it.each([
+    ['"인용"', "은", "bold", '**"인용"**은'],
+    ["(a)", "은", "italic", "*(a)*은"],
+    ["(a)", "은", "strike", "~~(a)~~은"],
+  ])("keeps %j marked %s across a save and reload", (marked, after, mark, saved) => {
+    let markdown = saved;
+    for (let round = 0; round < 3; round += 1) {
+      const editor = new Editor({
+        extensions: [StarterKit, Markdown.configure({ marked: instance })],
+        content: markdown,
+        contentType: "markdown",
+      } as ConstructorParameters<typeof Editor>[0]);
+      const nodes: { text?: string; marks?: { type: string }[] }[] = editor.getJSON().content?.[0]?.content ?? [];
+      expect(nodes[0]?.text).toBe(marked);
+      expect(nodes[0]?.marks?.[0]?.type).toBe(mark);
+      expect(nodes[1]?.text).toBe(after);
+      markdown = editor.getMarkdown();
+      editor.destroy();
+      expect(markdown).toBe(saved);
+    }
+  });
+
+  it("stays linear on a long CJK paragraph full of delimiter runs", () => {
+    const lexOnce = (paragraph: string) => {
+      const start = performance.now();
+      instance.lexer(paragraph);
+      return performance.now() - start;
+    };
+    lexOnce('"**은 '.repeat(100));
+    const small = lexOnce('"**은 '.repeat(4_000));
+    const large = lexOnce('"**은 '.repeat(16_000));
+    // Four times the text, so about four times the work; quadratic would be 16.
+    expect(large / small).toBeLessThan(10);
+  }, 60_000);
+});

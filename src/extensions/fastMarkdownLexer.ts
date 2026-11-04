@@ -105,6 +105,47 @@ function buildInlineMask(
   return masked;
 }
 
+// Emphasis next to CJK text. CommonMark decides whether a `**` may open or close
+// from the characters around it: one that follows punctuation and precedes a
+// letter can only open, and one that follows a letter and precedes punctuation
+// can only close. That fits languages that put spaces between words. Korean
+// attaches particles straight after a word, so `**"인용"**은` and `앞**(a)**` read
+// as literal asterisks: Noten's own serializer wrote those, and the next save
+// escaped them for good. As the CommonMark CJK-friendly amendments do, a CJK
+// character on the far side of a delimiter run counts like punctuation. Text with
+// no CJK character lexes exactly as before, so `2*(3+4)*5` stays literal.
+const CJK_CHARACTER = /[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const FLANKING_PUNCTUATION = /[\p{P}\p{S}]/u;
+const DELIMITER_RUN = /[*~]+/g;
+
+// Closing is decided by marked's right-delimiter rules, which read the masked
+// source. Showing them punctuation in place of the CJK character after such a run
+// lets it close as well as open. One code unit for one, as every mask here must
+// keep the length; the low half of an astral character stays and matches nothing.
+function maskCjkAfterDelimiters(masked: string): string {
+  if (!CJK_CHARACTER.test(masked)) return masked;
+  let parts: string[] | null = null;
+  let cursor = 0;
+  for (const match of masked.matchAll(DELIMITER_RUN)) {
+    const before = masked[match.index - 1];
+    if (before === undefined || !FLANKING_PUNCTUATION.test(before)) continue;
+    const end = match.index + match[0].length;
+    const after = masked.codePointAt(end);
+    if (after === undefined || !CJK_CHARACTER.test(String.fromCodePoint(after))) continue;
+    (parts ??= []).push(masked.slice(cursor, end), ".");
+    cursor = end + 1;
+  }
+  if (parts === null) return masked;
+  parts.push(masked.slice(cursor));
+  return parts.join("");
+}
+
+// Opening is decided from the previous character: an empty one always allows it.
+// `_` keeps its own rule, since it must not open inside a word in any script.
+function prevCharForFlanking(prevChar: string, src: string): string {
+  return (src[0] === "*" || src[0] === "~") && CJK_CHARACTER.test(prevChar) ? "" : prevChar;
+}
+
 // Inline `start` callbacks known to return the first index of a fixed string
 // (see firstIndexOf).
 const FIRST_INDEX_STARTS = new WeakSet<(src: string) => number>();
@@ -131,15 +172,16 @@ class FastLexer extends Lexer {
   protected rememberInlineStarts = true;
 
   // Transcribed verbatim from marked 17's `Lexer.inlineTokens` main loop, with
-  // ONLY the leading mask-building replaced by the linear `buildInlineMask`.
+  // the leading mask-building replaced by the linear `buildInlineMask`, and the
+  // two CJK flanking adjustments, which do nothing to text without CJK characters.
   // Keep this in lockstep with the installed marked version; the fuzz test in
-  // fastMarkdownLexer.test.ts compares output against stock marked and fails if
-  // they ever diverge.
+  // fastMarkdownLexer.test.ts compares output against stock marked on such text
+  // and fails if they ever diverge.
   override inlineTokens(src: string, tokens: Token[] = []): Token[] {
     // marked internals are intentionally untyped on the public Lexer surface.
     const lexer = this as any;
 
-    let maskedSrc = buildInlineMask(lexer, src);
+    let maskedSrc = maskCjkAfterDelimiters(buildInlineMask(lexer, src));
     maskedSrc = lexer.options.hooks?.emStrongMask?.call({ lexer }, maskedSrc) ?? maskedSrc;
 
     // `keepPrevChar`/`prevChar` carry the character preceding the current span
@@ -196,7 +238,7 @@ class FastLexer extends Lexer {
         }
         continue;
       }
-      if ((token = lexer.tokenizer.emStrong(cutSrc, maskedSrc, prevChar))) {
+      if ((token = lexer.tokenizer.emStrong(cutSrc, maskedSrc, prevCharForFlanking(prevChar, cutSrc)))) {
         cutSrc = cutSrc.substring(token.raw.length);
         tokens.push(token);
         continue;
@@ -211,7 +253,7 @@ class FastLexer extends Lexer {
         tokens.push(token);
         continue;
       }
-      if ((token = lexer.tokenizer.del(cutSrc, maskedSrc, prevChar))) {
+      if ((token = lexer.tokenizer.del(cutSrc, maskedSrc, prevCharForFlanking(prevChar, cutSrc)))) {
         cutSrc = cutSrc.substring(token.raw.length);
         tokens.push(token);
         continue;
